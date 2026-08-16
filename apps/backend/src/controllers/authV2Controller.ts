@@ -244,6 +244,10 @@ export class AuthV2Controller {
     );
   }
 
+  private getGoogleAuthScopes(): string[] {
+    return ['openid', 'email', 'profile'];
+  }
+
   private detectPlatform(req: Request): 'web' | 'electron' | 'mobile' {
     const userAgent = req.headers['user-agent'] || '';
     const platform = req.headers['x-platform'] as string;
@@ -274,7 +278,7 @@ export class AuthV2Controller {
     const requestId = `LOGIN_${Date.now()}`;
 
     try {
-      logger.info(`[${requestId}] Initiating OAuth login`);
+      logger.info(`[${requestId}] Initiating Google OAuth login`);
 
       const platformQuery = req.query.platform as 'electron' | 'web' | 'mobile';
       const platform = platformQuery || this.detectPlatform(req);
@@ -291,7 +295,7 @@ export class AuthV2Controller {
       if (redirectToParam) {
         const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
           .split(',')
-          .map((o) => o.trim())
+          .map(origin => origin.trim())
           .filter(Boolean);
         try {
           const origin = new URL(redirectToParam).origin;
@@ -299,7 +303,7 @@ export class AuthV2Controller {
           if (allowedOrigins.includes(origin) || origin === frontendOrigin) {
             validatedRedirectTo = redirectToParam;
           }
-        } catch (_e) {
+        } catch (_error) {
           // Ignore malformed redirect targets; only configured origins are allowed.
         }
       }
@@ -311,7 +315,7 @@ export class AuthV2Controller {
         platform,
         codeChallenge,
         validatedRedirectTo,
-        undefined,
+        'google',
         isNy,
         invitationId,
         enterpriseLogin,
@@ -325,7 +329,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: this.getGoogleAuthScopes(),
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -333,7 +337,7 @@ export class AuthV2Controller {
         code_challenge_method: CodeChallengeMethod.S256,
       });
 
-      // sameSite=lax so the cookie survives Google's top-level callback redirect.
+      // The callback echoes this state back through the HttpOnly cookie.
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('oauth_state', state, {
         httpOnly: true,
@@ -346,10 +350,10 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Redirecting to Google OAuth`);
       res.redirect(authUrl);
     } catch (error) {
-      logger.error(`[${requestId}] Error initiating login:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`[${requestId}] Error initiating Google login: ${errorMessage}`);
 
       const frontendUrl = getFrontendUrl(req);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.redirect(
         `${frontendUrl}?error=oauth_init_failed&message=${encodeURIComponent(errorMessage)}`
       );
@@ -378,16 +382,6 @@ export class AuthV2Controller {
         const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=missing_params&message=${encodeURIComponent('Missing authorization code or state')}`
-        );
-        return;
-      }
-
-      const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code as string);
-      if (isCodeUsed) {
-        logger.error(`[${requestId}] Authorization code already used`);
-        const frontendUrl = getFrontendUrl(req);
-        res.redirect(
-          `${frontendUrl}?error=code_reused&message=${encodeURIComponent('Authorization code already used')}`
         );
         return;
       }
@@ -446,7 +440,15 @@ export class AuthV2Controller {
         return;
       }
 
-      await oauthStateServiceV2.markCodeAsUsed(code as string);
+      const codeClaimed = await oauthStateServiceV2.claimCode(code as string);
+      if (!codeClaimed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        const frontendUrl = getFrontendUrl(req);
+        res.redirect(
+          `${frontendUrl}?error=code_reused&message=${encodeURIComponent('Authorization code already used')}`
+        );
+        return;
+      }
 
       const redirectUri = this.getGoogleRedirectUri(req);
 
@@ -536,7 +538,9 @@ export class AuthV2Controller {
       // Prefer cookie (set by the browser invite redirect) but fall back to state (set by mobile/other flows).
       const pendingInvitationId = cookieInvitationId || stateInvitationId;
       
-      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+      const userExistsButRemoved = workspaces.length === 0
+        ? await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email)
+        : false;
 
       let domainConflict = null;
       let domainConflictError = null;
@@ -689,10 +693,10 @@ export class AuthV2Controller {
       res.redirect(`${frontendUrl}?${params.toString()}`);
       return;
     } catch (error) {
-      logger.error(`[${requestId}] Callback error:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`[${requestId}] Google OAuth callback failed: ${errorMessage}`);
 
       const frontendUrl = getFrontendUrl(req);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.redirect(
         `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`
       );
@@ -807,16 +811,6 @@ export class AuthV2Controller {
         return;
       }
 
-      const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code);
-      if (isCodeUsed) {
-        logger.error(`[${requestId}] Authorization code already used`);
-        res.status(409).json({
-          error: 'Code already used',
-          message: 'Authorization code has already been exchanged',
-        });
-        return;
-      }
-
       const stateData = await oauthStateServiceV2.validateState(state);
       if (!stateData) {
         logger.error(`[${requestId}] Invalid or expired state`);
@@ -846,7 +840,15 @@ export class AuthV2Controller {
         return;
       }
 
-      await oauthStateServiceV2.markCodeAsUsed(code);
+      const codeClaimed = await oauthStateServiceV2.claimCode(code);
+      if (!codeClaimed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        res.status(409).json({
+          error: 'Code already used',
+          message: 'Authorization code has already been exchanged',
+        });
+        return;
+      }
 
       const redirectUri = this.getGoogleRedirectUri(req);
 
@@ -922,7 +924,9 @@ export class AuthV2Controller {
         await this.userService.getWorkspacesByEmail(googleUserData.email),
         stateData.enterpriseLogin,
       );
-      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+      const userExistsButRemoved = workspaces.length === 0
+        ? await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email)
+        : false;
 
       const isProduction = process.env.NODE_ENV === 'production';
 
@@ -1120,13 +1124,6 @@ export class AuthV2Controller {
         return;
       }
 
-      const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code as string);
-      if (isCodeUsed) {
-        logger.error(`[${requestId}] Authorization code already used`);
-        sendError('code_reused', 'Authorization code already used');
-        return;
-      }
-
       // Native does PKCE inside the Google SDK, so only the web branch verifies it server-side.
       let codeVerifier: string | undefined;
       if (!isMobileNative) {
@@ -1151,7 +1148,12 @@ export class AuthV2Controller {
         }
       }
 
-      await oauthStateServiceV2.markCodeAsUsed(code as string);
+      const codeClaimed = await oauthStateServiceV2.claimCode(code as string);
+      if (!codeClaimed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        sendError('code_reused', 'Authorization code already used');
+        return;
+      }
 
       // For mobile native apps using serverAuthCode, use empty string as redirect_uri
       // For web OAuth flow, use the backend callback URL
@@ -1223,7 +1225,9 @@ export class AuthV2Controller {
       }
 
       const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
-      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+      const userExistsButRemoved = workspaces.length === 0
+        ? await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email)
+        : false;
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {

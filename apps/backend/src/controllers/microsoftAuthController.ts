@@ -25,8 +25,8 @@ import { randomUUID } from 'crypto';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
-  private userService: UserService | undefined;
-  private userSessionService: UserSessionService | undefined;
+  private userService: UserService;
+  private userSessionService: UserSessionService;
   private clientId: string | undefined;
   private tenantId: string = '';
   private msJwks!: ReturnType<typeof createRemoteJWKSet>;
@@ -50,6 +50,9 @@ export class MicrosoftAuthController {
   }
 
   constructor() {
+    this.userService = new UserService();
+    this.userSessionService = new UserSessionService();
+
     const clientId = process.env.MICROSOFT_CLIENT_ID;
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
     const tenantId = process.env.MICROSOFT_TENANT_ID || undefined;
@@ -88,8 +91,6 @@ export class MicrosoftAuthController {
 
     this.clientId = clientId;
     this.tenantId = tenantId ?? '';
-    this.userService = new UserService();
-    this.userSessionService = new UserSessionService();
     const jwksTenant = tenantId ?? 'common';
     this.msJwks = createRemoteJWKSet(
       new URL(`https://login.microsoftonline.com/${jwksTenant}/discovery/v2.0/keys`)
@@ -154,21 +155,49 @@ export class MicrosoftAuthController {
     return undefined;
   }
 
+  private detectPlatform(req: Request): 'web' | 'electron' | 'mobile' {
+    const userAgent = req.headers['user-agent'] || '';
+    const platform = req.headers['x-platform'] as string;
+
+    if (platform === 'electron' || userAgent.toLowerCase().includes('electron')) {
+      return 'electron';
+    }
+
+    if (platform === 'mobile' || userAgent.toLowerCase().includes('mobile')) {
+      return 'mobile';
+    }
+
+    return 'web';
+  }
+
+  private async verifyMicrosoftIdToken(idToken: string) {
+    const { payload } = await jwtVerify(idToken, this.msJwks, {
+      audience: this.clientId,
+      // issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`, unpinned for multi-tenet
+    });
+    return payload as {
+      email?: string;
+      name?: string;
+      preferred_username?: string;
+      xms_edov?: boolean;
+      oid?: string;
+      sub?: string;
+      tid?: string;
+    };
+  }
+
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_LOGIN_${Date.now()}`;
 
     try {
       if (this.oauthClient) {
-        // return an error that MS auth not setup
         logger.info(`[${requestId}] Initiating Microsoft OAuth login`);
 
-        const platformQuery = req.query.platform;
-        const platform: 'mobile' | 'electron' | 'web' =
-          platformQuery === 'mobile'
-            ? 'mobile'
-            : platformQuery === 'electron'
-              ? 'electron'
-              : 'web';
+        const platformQuery = req.query.platform as 'electron' | 'web' | 'mobile';
+        const platform = platformQuery || this.detectPlatform(req);
+        logger.info(`[${requestId}] Detected platform: ${platform}`);
+
+        const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
         const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
@@ -178,7 +207,7 @@ export class MicrosoftAuthController {
         if (redirectToParam) {
           const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
             .split(',')
-            .map((origin) => origin.trim())
+            .map(origin => origin.trim())
             .filter(Boolean);
           try {
             const origin = new URL(redirectToParam).origin;
@@ -187,14 +216,12 @@ export class MicrosoftAuthController {
               validatedRedirectTo = redirectToParam;
             }
           } catch (_error) {
-            // Ignore malformed redirect targets; only configured/current frontend origins are allowed.
+            // Ignore malformed redirect targets; only configured origins are allowed.
           }
         }
 
         // Get invitationId from query (for invitation flow)
         const invitationId = req.query.invitationId as string | undefined;
-
-        const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
         const state = await oauthStateServiceV2.generateState(
           platform,
@@ -208,18 +235,6 @@ export class MicrosoftAuthController {
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
 
-        // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
-        // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
-        // the web callback verifies it.
-        const isProduction = process.env.NODE_ENV === 'production';
-        res.cookie('oauth_state', state, {
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: 'lax' as const,
-          maxAge: 10 * 60 * 1000,
-          path: '/',
-        });
-
         const redirectUri = this.getMicrosoftRedirectUri(req);
 
         logger.info('[OAuth] Redirect URI:', redirectUri);
@@ -232,6 +247,16 @@ export class MicrosoftAuthController {
           code_challenge_method: 'S256',
           prompt: 'select_account',
         } as Record<string, string | string[]>);
+
+        // The callback echoes this state back through the HttpOnly cookie.
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('oauth_state', state, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          maxAge: 10 * 60 * 1000,
+          path: '/',
+        });
 
         logger.info(`[${requestId}] Redirecting to Microsoft OAuth`);
         res.redirect(authorizationUri);
@@ -253,64 +278,47 @@ export class MicrosoftAuthController {
     }
   };
 
-  private async verifyMicrosoftIdToken(idToken: string) {
-    const { payload } = await jwtVerify(idToken, this.msJwks, {
-      audience: this.clientId,
-      // issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`, unpinned for multi-tenet
-    });
-    return payload as {
-      email?: string;
-      name?: string;
-      preferred_username?: string;
-      xms_edov?: boolean;
-      oid?: string;
-      sub?: string;
-      tid?: string;
-    };
-  }
-
   handleCallback = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_CALLBACK_${Date.now()}`;
     let resolvedPlatform: string = 'web';
-    let peekedState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
+    let callbackState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
 
     try {
-      if (this.oauthClient && this.userService && this.userSessionService) {
+      if (this.oauthClient) {
         const { code, state, error } = req.query;
 
         logger.info(`[${requestId}] Microsoft OAuth callback received`);
 
-        // Peek at state early to determine platform for error redirects
-        if (state) {
-          peekedState = await oauthStateServiceV2.validateState(state as string, false);
-          if (peekedState) {
-            resolvedPlatform = peekedState.platform;
-          }
-        }
-        logger.info(`[${requestId}] STATE_PEEK: platform=${peekedState?.platform || 'NULL'}, provider=${peekedState?.provider || 'NULL'}, invitationId=${peekedState?.invitationId || 'NULL'}, stateFound=${!!peekedState}`);
-
         if (error) {
           logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
-          if (state) await oauthStateServiceV2.deleteState(state as string);
+          const frontendUrl = getFrontendUrl(req);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
-              error: 'oauth_error',
-              message: error as string,
-            })
+            `${frontendUrl}?error=oauth_error&message=${encodeURIComponent(error as string)}`
           );
           return;
         }
 
         if (!code || !state) {
           logger.error(`[${requestId}] Missing code or state`);
+          const frontendUrl = getFrontendUrl(req);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
-              error: 'missing_params',
-              message: 'Missing authorization code or state',
-            })
+            `${frontendUrl}?error=missing_params&message=${encodeURIComponent('Missing authorization code or state')}`
           );
           return;
         }
+
+        const stateData = await oauthStateServiceV2.validateState(state as string, false);
+        if (!stateData || stateData.provider !== 'microsoft') {
+          logger.error(`[${requestId}] Invalid, expired, or mismatched OAuth state`);
+          const frontendUrl = getFrontendUrl(req);
+          res.redirect(
+            `${frontendUrl}?error=invalid_state&message=${encodeURIComponent('Invalid or expired state')}`
+          );
+          return;
+        }
+
+        callbackState = stateData;
+        resolvedPlatform = stateData.platform;
 
         // Electron: defer the MS code exchange to the desktop app.
         // Redirect the browser to the launch page, which triggers the unified
@@ -320,16 +328,16 @@ export class MicrosoftAuthController {
         // record and routes Microsoft states to the Microsoft exchange handler.
         // State and PKCE verifier must remain intact until that exchange.
         if (resolvedPlatform === 'electron') {
-          const frontendUrl = getFrontendUrl(req);
+          const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
           const launchParams = new URLSearchParams({
             code: code as string,
             state: state as string,
           });
-          if (peekedState?.invitationId) {
-            launchParams.set('invitationId', peekedState.invitationId);
+          if (stateData.invitationId) {
+            launchParams.set('invitationId', stateData.invitationId);
           }
           const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
-          logger.info(`[${requestId}] ELECTRON_REDIRECT: invitationId_appended=${!!peekedState?.invitationId}, invitationId=${peekedState?.invitationId || 'NULL'}, launchUrl=${launchUrl}`);
+          logger.info(`[${requestId}] Redirecting to frontend launch page: ${launchUrl}`);
           res.redirect(launchUrl);
           return;
         }
@@ -366,6 +374,16 @@ export class MicrosoftAuthController {
               error: 'pkce_error',
               message: 'PKCE verification failed',
             })
+          );
+          return;
+        }
+
+        const codeClaimed = await oauthStateServiceV2.claimCode(code as string);
+        if (!codeClaimed) {
+          logger.error(`[${requestId}] Authorization code already used`);
+          const frontendUrl = getFrontendUrl(req);
+          res.redirect(
+            `${frontendUrl}?error=code_reused&message=${encodeURIComponent('Authorization code already used')}`
           );
           return;
         }
@@ -438,7 +456,7 @@ export class MicrosoftAuthController {
           authProvider: AuthProvider.MICROSOFT,
           providerUserId: microsoftUserData.providerUserId,
         });
-        
+
         // SECURITY: reject provider mismatch before issuing any pending-auth cookie
         // or touching workspace state. Account linking is intentionally NOT done here
         // (it enables account takeover). If an account already exists for this email
@@ -461,40 +479,71 @@ export class MicrosoftAuthController {
 
         const workspaces = this.getEnterpriseAwareWorkspaces(
           await this.userService.getWorkspacesByEmail(microsoftUserData.email),
-          peekedState?.enterpriseLogin,
+          stateData.enterpriseLogin,
         );
         logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
 
         const refreshToken = token.refresh_token as string | undefined;
         const isProduction = process.env.NODE_ENV === 'production';
-
-        // Keep Microsoft provider tokens in Redis; the cookie contains identity
-        // plus only the short-lived Redis lookup key.
         const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
-        const pendingInvitationId = cookieInvitationId || peekedState?.invitationId;
-        if (resolvedPlatform !== 'mobile' && pendingInvitationId) {
-          const tokenKey = await this.storePendingOAuthTokens(
-            refreshToken,
-            accessToken,
-            accessTokenExpiry,
-          );
-          res.cookie(
-            'google_access_token',
-            signMicrosoftInvitationPendingAuthToken(
-              microsoftUserData,
-              tokenKey,
-              process.env.JWT_SECRET!,
-            ),
-            {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: 'lax' as const,
-              path: '/',
-              maxAge: 10 * 60 * 1000,
-            },
-          );
+        const pendingInvitationId = cookieInvitationId || stateData.invitationId;
+        const userExistsButRemoved = workspaces.length === 0
+          ? await this.userService.userExistsButNoActiveWorkspaces(microsoftUserData.email)
+          : false;
 
-          const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
+        let domainConflict = null;
+        let domainConflictError = null;
+        let publicEmailError = null;
+
+        if (workspaces.length === 0 && !userExistsButRemoved) {
+          if (stateData.enterpriseLogin) {
+            try {
+              await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
+            } catch (error) {
+              if (error instanceof PublicEmailDomainError) {
+                publicEmailError = error;
+              } else if (error instanceof OrganizationDomainConflictError) {
+                domainConflictError = error;
+              }
+            }
+          }
+
+          if (!domainConflictError && !publicEmailError) {
+            domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(
+              microsoftUserData.email,
+            );
+            domainConflictError = domainConflict
+              ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+              : null;
+          }
+        }
+
+        // Keep provider tokens in Redis. The short-lived cookie contains only
+        // normalized identity and the Redis lookup key consumed by loginWorkspace.
+        const tokenKey = await this.storePendingOAuthTokens(
+          refreshToken,
+          accessToken,
+          accessTokenExpiry,
+        );
+        res.cookie(
+          'google_access_token',
+          signMicrosoftInvitationPendingAuthToken(
+            microsoftUserData,
+            tokenKey,
+            process.env.JWT_SECRET!,
+          ),
+          {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: 'strict' as const,
+            path: '/',
+            maxAge: 10 * 60 * 1000,
+          },
+        );
+
+        const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
+
+        if (pendingInvitationId) {
           logger.info(
             `[${requestId}] Pending invitation ${pendingInvitationId} found — redirecting to invite page for ${microsoftUserData.email}`,
           );
@@ -508,204 +557,6 @@ export class MicrosoftAuthController {
           return;
         }
 
-        if (resolvedPlatform !== 'mobile' && workspaces.length === 0) {
-          const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
-            microsoftUserData.email,
-          );
-
-
-          let domainConflict = null;
-          let domainConflictError = null;
-          let publicEmailError = null;
-
-          if (!userExistsButRemoved) {
-            if (peekedState?.enterpriseLogin) {
-              try {
-                await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
-              } catch (error) {
-                if (error instanceof PublicEmailDomainError) {
-                  publicEmailError = error;
-                } else if (error instanceof OrganizationDomainConflictError) {
-                  domainConflictError = error;
-                }
-              }
-            }
-
-            if (!domainConflictError && !publicEmailError) {
-              domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email);
-              domainConflictError = domainConflict
-                ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
-                : null;
-            }
-          }
-
-          const tokenKey = await this.storePendingOAuthTokens(
-            refreshToken,
-            accessToken,
-            accessTokenExpiry,
-          );
-          res.cookie('google_access_token', jwt.sign({
-            providerUserId: microsoftUserData.providerUserId,
-            email: microsoftUserData.email,
-            name: microsoftUserData.name,
-            picture: microsoftUserData.picture,
-            provider: AuthProvider.MICROSOFT,
-            tokenKey,
-          }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'lax' as const,
-            path: '/',
-            maxAge: 10 * 60 * 1000,
-          });
-
-          const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
-          const params = new URLSearchParams({
-            success: 'true',
-            email: microsoftUserData.email,
-            name: microsoftUserData.name,
-            picture: microsoftUserData.picture || '',
-            workspaces: JSON.stringify([]),
-            userExistsButRemoved: String(userExistsButRemoved),
-          });
-          if (domainConflictError && domainConflict) {
-            params.set('domainConflictError', domainConflictError.message);
-            params.set('enterpriseJoinOrgName', domainConflict.name);
-            params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
-          }
-          if (publicEmailError) {
-            params.set('publicEmailDomainError', publicEmailError.message);
-          }
-
-          logger.info(
-            `[${requestId}] No workspace found for ${microsoftUserData.email}; redirecting with pending auth for org creation`,
-          );
-          res.redirect(`${frontendUrl}?${params.toString()}`);
-          return;
-        }
-
-        logger.info(`[${requestId}] Finding/creating user: ${microsoftUserData.email}`);
-        const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
-          provider: AuthProvider.MICROSOFT,
-          providerUserId: microsoftUserData.providerUserId,
-          email: microsoftUserData.email,
-          name: microsoftUserData.name,
-          picture: microsoftUserData.picture,
-        }, workspaces[0]?.id ?? '');
-
-        // Ensure user presence entry exists
-        await this.userService.ensureUserPresence(user.id, user.workspaceId);
-
-        logger.info(
-          `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
-        );
-
-        // Generate custom JWT token
-        const customToken = jwtService.generateToken({
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture ?? undefined,
-          workspaceId: user.workspaceId ?? undefined,
-          memberId: user.orgMemberId ?? undefined,
-        });
-
-        // Create user session
-        let sessionId = null;
-
-        if (refreshToken) {
-          try {
-            logger.info(`[${requestId}] Creating user session with refresh token`);
-
-            const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-            const session = await this.userSessionService.createSession({
-              userId: user.id,
-              refreshToken: refreshToken,
-              refreshTokenExpiry,
-              accessToken: accessToken,
-              accessTokenExpiry,
-              deviceInfo: JSON.stringify({
-                userAgent: req.headers['user-agent'],
-                acceptLanguage: req.headers['accept-language'],
-                timestamp: new Date().toISOString(),
-              }),
-              ipAddress: req.ip || req.socket.remoteAddress || undefined,
-            });
-
-            sessionId = session.id;
-            logger.info(`[${requestId}] Session created`);
-          } catch (sessionError) {
-            logger.error(`[${requestId}] Error creating user session:`, sessionError);
-            // Continue without session creation - not critical for login
-          }
-        }
-
-        // Handle mobile platform: redirect to app deep link with token
-        if (resolvedPlatform === 'mobile') {
-          const mobileParams = new URLSearchParams({
-            success: 'true',
-            token: customToken,
-            user_id: user.id,
-            email: user.email,
-            name: user.name,
-          });
-
-          const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
-          logger.info(`[${requestId}] Redirecting to mobile app: xyne-spaces://auth/microsoft/callback`);
-          res.redirect(mobileRedirectUrl);
-          return;
-        }
-
-        const userExistsButRemoved = workspaces.length === 0
-          ? await this.userService.userExistsButNoActiveWorkspaces(microsoftUserData.email)
-          : false;
-
-        const cookieOptions = {
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: 'lax' as const,
-          path: '/',
-        };
-
-        // Keep provider identity in the signed cookie and provider tokens in Redis.
-        const tokenKey = await this.storePendingOAuthTokens(
-          refreshToken,
-          accessToken,
-          accessTokenExpiry,
-        );
-        res.cookie('google_access_token', jwt.sign({
-          providerUserId: microsoftUserData.providerUserId,
-          email: microsoftUserData.email,
-          name: microsoftUserData.name,
-          picture: microsoftUserData.picture,
-          provider: AuthProvider.MICROSOFT,
-          tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
-          ...cookieOptions,
-          maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
-        });
-
-        // Set session ID cookie
-        if (sessionId) {
-          res.cookie('user_session_id', sessionId, {
-            ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-          });
-        }
-
-        // Set new user cookie for onboarding
-        if (isNewUser) {
-          res.cookie('is_new_user', 'true', {
-            ...cookieOptions,
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
-          });
-        }
-
-        // Redirect to frontend with success
-        const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
-
         const params = new URLSearchParams({
           success: 'true',
           email: microsoftUserData.email,
@@ -717,35 +568,40 @@ export class MicrosoftAuthController {
         if (workspaces.length === 1) {
           params.set('autoLoginWorkspace', workspaces[0]!.id);
         }
+        if (domainConflictError && domainConflict) {
+          params.set('domainConflictError', domainConflictError.message);
+          params.set('enterpriseJoinOrgName', domainConflict.name);
+          params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+        }
+        if (publicEmailError) {
+          params.set('publicEmailDomainError', publicEmailError.message);
+        }
 
         res.redirect(`${frontendUrl}?${params.toString()}`);
+        return;
       } else {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
-          this.getRedirectUrl(req, resolvedPlatform, {
-            error: 'microsoft_not_configured',
-            message: 'Microsoft SSO is not configured',
-          })
+          `${frontendUrl}?error=microsoft_not_configured&message=${encodeURIComponent('Microsoft SSO is not configured')}`
         );
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`[${requestId}] Microsoft OAuth callback failed: ${errorMessage}`);
 
-      if (resolvedPlatform !== 'mobile' && peekedState?.redirectTo) {
+      if (resolvedPlatform !== 'mobile' && callbackState?.redirectTo) {
         const params = new URLSearchParams({
           error: 'auth_failed',
           message: errorMessage,
         });
-        res.redirect(`${peekedState.redirectTo}?${params.toString()}`);
+        res.redirect(`${callbackState.redirectTo}?${params.toString()}`);
         return;
       }
 
+      const frontendUrl = getFrontendUrl(req);
       res.redirect(
-        this.getRedirectUrl(req, resolvedPlatform, {
-          error: 'auth_failed',
-          message: errorMessage,
-        })
+        `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`
       );
     }
   };
@@ -764,7 +620,7 @@ export class MicrosoftAuthController {
     const requestId = `MS_EXCHANGE_ELECTRON_${Date.now()}`;
 
     try {
-      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+      if (!this.oauthClient) {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
         res.status(500).json({
           success: false,
@@ -786,17 +642,6 @@ export class MicrosoftAuthController {
           success: false,
           error: 'missing_params',
           message: 'code and state are required',
-        });
-        return;
-      }
-
-      const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code);
-      if (isCodeUsed) {
-        logger.error(`[${requestId}] Authorization code already used`);
-        res.status(409).json({
-          success: false,
-          error: 'code_already_used',
-          message: 'Authorization code has already been exchanged',
         });
         return;
       }
@@ -838,7 +683,16 @@ export class MicrosoftAuthController {
         return;
       }
 
-      await oauthStateServiceV2.markCodeAsUsed(code);
+      const codeClaimed = await oauthStateServiceV2.claimCode(code);
+      if (!codeClaimed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        res.status(409).json({
+          success: false,
+          error: 'code_already_used',
+          message: 'Authorization code has already been exchanged',
+        });
+        return;
+      }
 
       const redirectUri = this.getMicrosoftRedirectUri(req);
 
@@ -916,7 +770,9 @@ export class MicrosoftAuthController {
         await this.userService.getWorkspacesByEmail(email),
         stateData.enterpriseLogin,
       );
-      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
+      const userExistsButRemoved = workspaces.length === 0
+        ? await this.userService.userExistsButNoActiveWorkspaces(email)
+        : false;
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
       logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, verifiedOid=${idTokenClaims.oid ?? 'NULL'}, workspaceCount=${workspaces.length}`);
 
@@ -1258,7 +1114,7 @@ export class MicrosoftAuthController {
     const requestId = `MS_EXCHANGE_MOBILE_${Date.now()}`;
 
     try {
-      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+      if (!this.oauthClient) {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
         res.status(500).json({
           success: false,
@@ -1278,6 +1134,17 @@ export class MicrosoftAuthController {
           success: false,
           error: 'missing_params',
           message: 'code, code_verifier, and redirect_uri are required',
+        });
+        return;
+      }
+
+      const codeClaimed = await oauthStateServiceV2.claimCode(code);
+      if (!codeClaimed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        res.status(409).json({
+          success: false,
+          error: 'code_already_used',
+          message: 'Authorization code has already been exchanged',
         });
         return;
       }

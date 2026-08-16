@@ -86,25 +86,25 @@ class OAuthStateService {
     logger.info(`OAuth state deleted: ${state}`);
   }
 
-  async markCodeAsUsed(code: string): Promise<void> {
+  async claimCode(code: string): Promise<boolean> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
 
-    await client.setex(
+    const result = await client.set(
       `${this.CODE_PREFIX}${code}`,
+      'used',
+      'EX',
       this.CODE_TTL,
-      'used'
+      'NX',
     );
 
-    logger.info(`OAuth code marked as used: ${code.substring(0, 10)}...`);
-  }
-
-  async isCodeUsed(code: string): Promise<boolean> {
-    const { redisService } = await import('./redisService');
-    const client = redisService.getClient();
-
-    const exists = await client.exists(`${this.CODE_PREFIX}${code}`);
-    return exists === 1;
+    const claimed = result === 'OK';
+    if (claimed) {
+      logger.info(`OAuth code claimed: ${code.substring(0, 10)}...`);
+    } else {
+      logger.warn(`OAuth code already claimed by another request: ${code.substring(0, 10)}...`);
+    }
+    return claimed;
   }
 }
 

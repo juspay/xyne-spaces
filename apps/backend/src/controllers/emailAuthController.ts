@@ -4,7 +4,6 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
-import { jwtService } from '../services/jwtService';
 import {
   hashPassword,
   validatePasswordComplexity,
@@ -23,7 +22,6 @@ import {
 } from '@/services/organizationDomainService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 interface ResetCodePayload {
@@ -73,12 +71,47 @@ export class EmailAuthController {
     res.clearCookie('xyne_last_workspace', { path: '/' });
   }
 
+  private async setPendingAuthCookie(
+    res: Response,
+    email: string,
+    name: string,
+  ): Promise<void> {
+    const pendingAuthJwtId = crypto.randomUUID();
+    await redisService.set(`pendingauth:jwtid:${pendingAuthJwtId}`, email, 10 * 60);
+
+    res.cookie(
+      'google_access_token',
+      jwt.sign(
+        {
+          email,
+          name,
+          providerUserId: `email-${email}`,
+          provider: AuthProvider.EMAIL,
+          // Email auth has no upstream OAuth refresh token. This opaque token
+          // lets the common loginWorkspace flow create a renewable session.
+          refreshToken: crypto.randomUUID(),
+          accessToken: null,
+          jwtId: pendingAuthJwtId,
+        },
+        process.env.JWT_SECRET!,
+        { expiresIn: '10m' },
+      ),
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict' as const,
+        path: '/',
+        maxAge: 10 * 60 * 1000,
+      },
+    );
+  }
+
   /**
    * Login with email + password
    * POST /v2/auth/email/login
    *
-   * Verifies against orgMember.passwordHash. On success creates a session,
-   * issues JWT + cookies, and returns workspace info identical to OAuth flow.
+   * Verifies against orgMember.passwordHash. On success issues pending auth
+   * and returns workspace info; loginWorkspace creates the final session.
    */
   login = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -237,42 +270,7 @@ export class EmailAuthController {
           // signal the frontend to complete the join for this workspace.
           const approvedJoinRequest = approvedJoinRequests[0];
           const userName = normalizedEmail.split('@')[0];
-          const pendingAuthJwtId = crypto.randomUUID();
-
-          await redisService.set(
-            `pendingauth:jwtid:${pendingAuthJwtId}`,
-            normalizedEmail,
-            10 * 60,
-          );
-
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-                jwtId: pendingAuthJwtId,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
+          await this.setPendingAuthCookie(res, normalizedEmail, userName);
 
           res.status(200).json({
             success: true,
@@ -293,42 +291,7 @@ export class EmailAuthController {
           });
           const workspaceMap = new Map(workspaces.map(w => [w.id, w.name]));
           const userName = normalizedEmail.split('@')[0];
-          const pendingAuthJwtId = crypto.randomUUID();
-
-          await redisService.set(
-            `pendingauth:jwtid:${pendingAuthJwtId}`,
-            normalizedEmail,
-            10 * 60,
-          );
-
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-                jwtId: pendingAuthJwtId,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
+          await this.setPendingAuthCookie(res, normalizedEmail, userName);
 
           res.status(200).json({
             success: true,
@@ -364,49 +327,11 @@ export class EmailAuthController {
         return;
       }
 
-      // Cookie base (used below for both invitation-pending and normal flows)
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
       if (pendingInvitation) {
         // Invited user hasn't accepted yet — set pending auth cookie (mirrors OAuth flow)
         // and return a signal so the frontend redirects to the invite page.
         const userName = normalizedEmail.split('@')[0];
-        const pendingAuthJwtId = crypto.randomUUID();
-
-        // Store the pending-auth token ID in Redis with 10-minute TTL.
-        // acceptInvitation will verify this entry exists before proceeding.
-        await redisService.set(
-          `pendingauth:jwtid:${pendingAuthJwtId}`,
-          normalizedEmail,
-          10 * 60, // 10 minutes
-        );
-
-        res.cookie(
-          'google_access_token',
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-              jwtId: pendingAuthJwtId,
-            },
-            process.env.JWT_SECRET!,
-            { expiresIn: '10m' },
-          ),
-          {
-            ...cookieBase,
-            maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
-          },
-        );
+        await this.setPendingAuthCookie(res, normalizedEmail, userName);
 
         res.status(200).json({
           success: true,
@@ -420,80 +345,31 @@ export class EmailAuthController {
       }
 
       const workspaceUser = workspaceUsers[0];
-
-      // 5. Create session
-      const refreshToken = crypto.randomUUID();
-      const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
-
-      const session = await this.userSessionService.createSession({
-        userId: workspaceUser.id,
-        refreshToken,
-        refreshTokenExpiry,
-        deviceInfo: JSON.stringify({
-          userAgent: req.headers['user-agent'],
-          timestamp: new Date().toISOString(),
-        }),
-        ipAddress: req.ip || req.connection.remoteAddress || undefined,
-      });
-
-      // 6. Generate JWT
-      const jwtToken = jwtService.generateToken({
-        sub: workspaceUser.id,
-        email: workspaceUser.email,
-        name: workspaceUser.name,
-        workspaceId: workspaceUser.workspaceId,
-        memberId: workspaceUser.orgMemberId,
-        providerUserId: `email-${workspaceUser.email}`,
-        provider: AuthProvider.EMAIL,
-      });
-
-      res.cookie('google_access_token', jwtToken, {
-        ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-
-      res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-        ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-
-      res.cookie('user_session_id', session.id, {
-        ...cookieBase,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-        ...cookieBase,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      // Build workspaces array for frontend auth machine
       const workspaces = workspaceUsers.map(u => ({
         id: u.workspaceId,
         name: u.workspace?.name || u.workspaceId,
         role: u.role,
       }));
 
-      // 8. Success response — shape matches what useAuth.signInWithEmail expects
+      // Defer workspace-scoped cookies and session creation to the common
+      // loginWorkspace endpoint, exactly like the OAuth callbacks.
+      await this.setPendingAuthCookie(
+        res,
+        normalizedEmail,
+        workspaceUser.name || normalizedEmail.split('@')[0],
+      );
+
       res.status(200).json({
         success: true,
-        user: {
-          id: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          workspaceId: workspaceUser.workspaceId,
-          role: workspaceUser.role,
-          orgRole: orgMember.role,
-          memberId: orgMember.memberId,
-          authProvider: AuthProvider.EMAIL,
-        },
         workspaces,
         pendingUserData: {
           email: workspaceUser.email,
           name: workspaceUser.name,
         },
         userExistsButRemoved: false,
+        ...(workspaces.length === 1
+          ? { autoLoginWorkspace: workspaces[0]!.id }
+          : {}),
       });
     } catch (error) {
       res.status(500).json({
@@ -1082,42 +958,7 @@ export class EmailAuthController {
 
       // Issue pending-auth cookie — same mechanism as OAuth callback.
       const userName = name || normalizedEmail.split('@')[0];
-      const pendingAuthJwtId = crypto.randomUUID();
-
-      await redisService.set(
-        `pendingauth:jwtid:${pendingAuthJwtId}`,
-        normalizedEmail,
-        10 * 60,
-      );
-
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-            jwtId: pendingAuthJwtId,
-          },
-          process.env.JWT_SECRET!,
-          { expiresIn: '10m' },
-        ),
-        {
-          ...cookieBase,
-          maxAge: 10 * 60 * 1000,
-        },
-      );
+      await this.setPendingAuthCookie(res, normalizedEmail, userName);
 
       // Build response — mirrors OAuth callback structure.
       // If workspaceId was provided, return empty workspaces so the frontend
@@ -1167,6 +1008,9 @@ export class EmailAuthController {
         workspaces: workspaces.map(w => ({ id: w.id, name: w.name, role: w.role })),
         pendingUserData: { email: normalizedEmail, name: userName },
         userExistsButRemoved: false,
+        ...(workspaces.length === 1
+          ? { autoLoginWorkspace: workspaces[0]!.id }
+          : {}),
         ...(domainConflictError ? { domainConflictError } : {}),
         ...(enterpriseJoinOrgName ? { enterpriseJoinOrgName } : {}),
         ...(enterpriseJoinWorkspaces ? { enterpriseJoinWorkspaces } : {}),
