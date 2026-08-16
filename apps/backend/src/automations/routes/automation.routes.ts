@@ -938,6 +938,36 @@ router.get('/debug/runs', async (req: Request, res: Response) => {
     const workflowById = new Map(workflows.map(w => [w.id, w]));
     const workflowIds = [...workflowById.keys()];
 
+    // Fast path: WorkflowStep rows stamp entityType/entityId at execution time (see
+    // AutomationExecutor.upsertStepRow), so this is an indexed lookup instead of a scan.
+    // Falls through to the scan below for rows written before that stamping existed, or
+    // for trigger types with no natural entity id (e.g. WEBHOOK).
+    const fastExecs = await db.workflowExecution.findMany({
+      where: {
+        workflowId: { in: workflowIds },
+        workflowSteps: {
+          some: {
+            workspaceId: auth.workspaceId,
+            entityType: { in: ENTITY_EVENT_TYPES[type] },
+            entityId,
+          },
+        },
+      },
+      select: { id: true, workflowId: true, status: true, createdAt: true, updatedAt: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+    });
+    if (fastExecs.length > 0) {
+      res.json({
+        success: true,
+        data: {
+          runs: fastExecs.map(exec => toDebugRunRow(exec, workflowById.get(exec.workflowId))),
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const runs: DebugRunRow[] = [];
     // Try the windowed fast path first (covers near-instant triggers); if it
     // finds nothing, fall back to an unwindowed scan for stragglers like

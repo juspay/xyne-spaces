@@ -569,6 +569,8 @@ model WorkflowStep {
   status              String?
   markdownSummary     String? // AI-generated markdown summary of checkpoint execution
   attachment          String? // JSON string
+  entityType          String? // Debug correlation: same values as Workflow.eventType (trigger type), e.g. TICKET_CREATED
+  entityId            String? // Debug correlation: id of the entity that triggered the run (ticketId/emailId/messageId/callId/sourceId)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -578,6 +580,7 @@ model WorkflowStep {
 
   @@index([stepSubType])
   @@index([workflowExecutionId])
+  @@index([entityType, entityId])
   @@unique([workflowExecutionId, stepName])
   @@map("workflow_steps")
   @@schema("workflow")
