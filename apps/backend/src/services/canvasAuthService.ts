@@ -44,7 +44,7 @@ class CanvasAuthService {
   private async hasGuestChannelAccess(userId: string, workspaceId: string, channelId: string): Promise<boolean> {
     const channel = await db.channel.findUnique({
       where: { id: channelId },
-      select: { workspaceId: true, projectId: true },
+      select: { workspaceId: true },
     });
     if (!channel || channel.workspaceId !== workspaceId) {
       return false;
@@ -59,37 +59,7 @@ class CanvasAuthService {
       },
       select: { id: true },
     });
-    if (directGuestAccess) {
-      return true;
-    }
-
-    if (!channel.projectId) {
-      return false;
-    }
-
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: channel.projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
-  }
-
-  private async hasGuestProjectAccess(userId: string, workspaceId: string, projectId: string): Promise<boolean> {
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
+    return Boolean(directGuestAccess);
   }
 
   private async hasEffectiveChannelAccess(
@@ -153,9 +123,6 @@ class CanvasAuthService {
       if (canvas.channelId) {
         return this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId);
       }
-      if (canvas.projectId) {
-        return this.hasGuestProjectAccess(userId, context.workspaceId, canvas.projectId);
-      }
       return false;
     }
     return true;
@@ -172,19 +139,7 @@ class CanvasAuthService {
     if (canvas.channelId && (await this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId))) {
       return true;
     }
-    if (!canvas.projectId) {
-      return false;
-    }
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId: context.workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: canvas.projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
+    return false;
   }
 
   async checkCanvasAccess(

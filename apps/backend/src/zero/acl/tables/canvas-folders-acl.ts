@@ -81,10 +81,6 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
         throw new MutationACLError('Canvas folder insert failed: the specified channel does not exist', 'canvas_folders');
       }
 
-      if (channel.projectId !== projectId) {
-        throw new MutationACLError('Canvas folder insert failed: the specified channel does not belong to the project', 'canvas_folders');
-      }
-
       const channelMembership = await tx.run(
         zql.channel_participants
           .where('channelId', args.channelId)

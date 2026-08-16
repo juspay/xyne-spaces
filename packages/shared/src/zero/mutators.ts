@@ -331,29 +331,6 @@ async function hasCanvasVersionEditAccess(
     }
   }
 
-  // Batch query: fetch projectIds for all participant channels 
-  if (channelIds.length > 0) {
-    const channels = await tx.run(
-      zql.channels.where(({ cmp }) => cmp('id', 'IN', channelIds)),
-    );
-    const projectIds = channels
-      .map(ch => ch.projectId)
-      .filter((id): id is string => Boolean(id));
-
-    if (projectIds.length > 0) {
-      const projectGuestAccess = await tx.run(
-        zql.guest_access
-          .where('userId', userId)
-          .where('workspaceId', ctx.workspaceId)
-          .where('accessibleEntityType', GuestEntity.PROJECT)
-          .where(({ cmp }) => cmp('accessibleEntityId', 'IN', projectIds)),
-      );
-      if (projectGuestAccess.length > 0) {
-        return true;
-      }
-    }
-  }
-
   return false;
 }
 
@@ -7249,7 +7226,6 @@ export const mutators = defineMutators({
                   targetId: entityId,
                   linkKind: SurfaceLinkKind.RELATES_TO,
                   createdBy: ctx.userID,
-                  projectId: nudge.projectId,
                   createdAt: timestamp,
                 });
               }
@@ -8830,7 +8806,6 @@ export const mutators = defineMutators({
           name: trimmed,
           ...(color ? { color } : {}),
           channelId,
-          projectId: channel.projectId,
           workspaceId: channel.workspaceId,
           createdBy: ctx.userID,
           createdAt: timestamp,
@@ -8875,7 +8850,6 @@ export const mutators = defineMutators({
             name: trimmed,
             ...(args.color ? { color: args.color } : {}),
             channelId: args.channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: now,

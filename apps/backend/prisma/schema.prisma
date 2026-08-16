@@ -2079,7 +2079,7 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
-  projectId   String   // Project (denormalized from channel)
+  projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
@@ -2516,12 +2516,11 @@ model SurfaceNudge {
   state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
-  projectId   String
+  projectId   String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
-  @@index([projectId, state])
   @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
@@ -3851,13 +3850,12 @@ model SurfaceLink {
 
   linkKind    String
   createdBy   String
-  projectId   String
+  projectId   String?
   createdAt   DateTime        @default(now())
 
   @@unique([sourceType, sourceId, targetType, targetId, linkKind])
   @@index([sourceType, sourceId])
   @@index([targetType, targetId])
-  @@index([projectId])
   @@map("surface_links")
   @@schema("public")
 }

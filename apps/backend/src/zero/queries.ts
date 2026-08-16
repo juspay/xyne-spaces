@@ -3304,6 +3304,19 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  // Boards mapped to a channel via ChannelBoardMapping.
+  // Preferred path for resolving channel → boards; consumer falls back to
+  // boardsListByProject if the mapping is empty.
+  boardsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_board_mappings
+        .where('channelId', channelId)
+        .related('board')
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
   boardsListByProject: defineQuery(
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {

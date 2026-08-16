@@ -116,7 +116,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
   selectedBoardName?: string | undefined;
@@ -460,9 +460,42 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     (isFromSubTicket || isFromAI) && selectedChannel?.projectId
       ? selectedChannel.projectId
       : projectId;
-  const [boards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId }),
+  const effectiveChannelId =
+    isFromSubTicket || isFromAI ? (selectedChannelId ?? channelId) : channelId;
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: effectiveChannelId }),
+    { enabled: !!effectiveChannelId },
   );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
+    { enabled: !!selectedChannelProjectId },
+  );
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      console.info('[boardsByChannel] CreateTicketModal using ChannelBoardMapping', {
+        channelId: effectiveChannelId,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    // Only fall back to project boards once the mapping query has fully synced —
+    // an empty result before that is just the zero cache warming up, not a truly
+    // unmapped channel.
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    console.info('[boardsByChannel] CreateTicketModal falling back to boardsListByProject', {
+      channelId: effectiveChannelId,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId]);
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
@@ -582,7 +615,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDuplicateTicketCheck({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedBoard?.projectId ?? '',
     boardId: formValues?.boardId,
     isOpen,
     debounceMs: 2000,
@@ -612,7 +645,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedChannelProjectId ?? '',
     currentBoardId: formValues?.boardId || '',
     isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
     debounceMs: 2000,
@@ -621,8 +654,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedChannelProjectId }),
-    { enabled: tagsQueried },
+    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
   const userGroupOptions = useUserGroups();
@@ -1174,8 +1207,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           'channelId',
           isFromSubTicket || isFromAI ? formData.channelId : channelId,
         );
-        if (selectedChannelProjectId) {
-          formDataPayload.append('projectId', selectedChannelProjectId);
+        if (selectedBoard?.projectId) {
+          formDataPayload.append('projectId', selectedBoard.projectId);
         }
 
         if (assignedTo) {
@@ -1277,7 +1310,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
-          ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
+          ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
@@ -1406,7 +1439,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       popoutId,
       workspaceId: user?.workspaceId,
       channelId,
-      projectId,
+      ...(projectId ? { projectId } : {}),
       tab: tab || undefined,
       sourceConversationId: sourceConversation?.conversationId,
       initialMessageId: sourceConversation?.initialMessageId,

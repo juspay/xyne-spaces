@@ -9632,10 +9632,6 @@ export function createMutators(
             throw new Error('Folder name is required');
           }
 
-          if (!projectId && channelId) {
-            throw new Error('Channel folders must belong to a project');
-          }
-
           if (projectId) {
             const project = await tx.run(zql.projects.where('id', projectId).one());
             if (!project) {
@@ -9652,7 +9648,7 @@ export function createMutators(
                 throw new Error('Channel is archived');
               }
 
-              if (channel.projectId !== projectId) {
+              if (channel.projectId != null && channel.projectId !== projectId) {
                 throw new Error('Channel does not belong to project');
               }
             }
@@ -9987,7 +9983,6 @@ export function createMutators(
                   nudgeId,
                   nudgeKind: nudge.nudgeKind,
                   sourceId: nudge.sourceId,
-                  projectId: nudge.projectId,
                 },
               },
             });
@@ -10079,7 +10074,6 @@ export function createMutators(
                     targetId: entityId,
                     linkKind: SurfaceLinkKind.RELATES_TO,
                     createdBy: ctx.userID,
-                    projectId: nudge.projectId,
                     createdAt: timestamp,
                   });
                 }
@@ -11611,7 +11605,6 @@ export function createMutators(
             name: trimmed,
             ...(color ? { color } : {}),
             channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: timestamp,
@@ -11653,7 +11646,6 @@ export function createMutators(
               name: trimmed,
               ...(args.color ? { color: args.color } : {}),
               channelId: args.channelId,
-              projectId: channel.projectId,
               workspaceId: channel.workspaceId,
               createdBy: ctx.userID,
               createdAt: now,
