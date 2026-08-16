@@ -518,8 +518,66 @@ export class MicrosoftAuthController {
           }
         }
 
-        // Keep provider tokens in Redis. The short-lived cookie contains only
-        // normalized identity and the Redis lookup key consumed by loginWorkspace.
+        // Mobile (browser-based OAuth): create user/session and redirect to app deep link.
+        // Old mobile clients expect xyne-spaces://auth/microsoft/callback with token in URL.
+        // New mobile clients use POST /microsoft/exchange-mobile instead.
+        if (resolvedPlatform === 'mobile') {
+          const { user } = await this.userService.findOrCreateOAuthUser({
+            provider: AuthProvider.MICROSOFT,
+            providerUserId: microsoftUserData.providerUserId,
+            email: microsoftUserData.email,
+            name: microsoftUserData.name,
+            picture: microsoftUserData.picture,
+          }, workspaces[0]?.id ?? '');
+
+          await this.userService.ensureUserPresence(user.id, user.workspaceId);
+
+          const customToken = jwtService.generateToken({
+            sub: user.id,
+            email: user.email,
+            name: user.name,
+            picture: user.picture ?? undefined,
+            workspaceId: user.workspaceId ?? undefined,
+            memberId: user.orgMemberId ?? undefined,
+          });
+
+          if (refreshToken) {
+            try {
+              const refreshTokenExpiry = new Date();
+              refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
+              await this.userSessionService.createSession({
+                userId: user.id,
+                refreshToken,
+                refreshTokenExpiry,
+                accessToken,
+                accessTokenExpiry,
+                deviceInfo: JSON.stringify({
+                  userAgent: req.headers['user-agent'],
+                  acceptLanguage: req.headers['accept-language'],
+                  timestamp: new Date().toISOString(),
+                }),
+                ipAddress: req.ip || req.socket.remoteAddress || undefined,
+              });
+            } catch (sessionError) {
+              logger.error(`[${requestId}] Error creating user session:`, sessionError);
+            }
+          }
+
+          const mobileParams = new URLSearchParams({
+            success: 'true',
+            token: customToken,
+            user_id: user.id,
+            email: user.email,
+            name: user.name,
+          });
+          const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
+          logger.info(`[${requestId}] Redirecting to mobile app: xyne-spaces://auth/microsoft/callback`);
+          res.redirect(mobileRedirectUrl);
+          return;
+        }
+
+        // Web: set google_access_token cookie and redirect to frontend.
+        // loginWorkspace creates the session from this cookie.
         const tokenKey = await this.storePendingOAuthTokens(
           refreshToken,
           accessToken,
