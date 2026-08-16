@@ -4437,6 +4437,11 @@ export const queries = defineQueries({
     },
   ),
 
+  // Single collection by id (e.g. to resolve its name for an Activity row).
+  collectionById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.collections.where('id', id).where('deletedAt', 'IS', null);
+  }),
+
   // Collections filtered by generic scope (scopeType + scopeId).
   // For channel-scoped collections pass { scopeType: 'CHANNEL', scopeId: channelId }.
   // Future scopes (THREAD, TICKET, …) just use a different scopeType — no schema change needed.

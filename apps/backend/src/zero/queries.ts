@@ -4794,6 +4794,11 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Single collection by id (e.g. to resolve its name for an Activity row).
+  collectionById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.collections.where('id', id).where('deletedAt', 'IS', null);
+  }),
+
   // Root collections, optionally filtered by scope. Pass { scopeType, scopeId } to
   // scope to a channel; pass {} for ALL collections the user can access (Ask AI
   // picker from any chat). Access is enforced by the collections ACL either way.

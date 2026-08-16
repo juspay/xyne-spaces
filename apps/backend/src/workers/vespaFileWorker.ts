@@ -12,6 +12,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
 import { SubApp } from '@/vespa/src/types';
+import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
 
 export class VespaFileWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -184,6 +185,11 @@ export class VespaFileWorker {
 					where: { id: item.id },
 					data: { ingestionStatus: status },
 				});
+				// When a file reaches a terminal state, check whether the whole
+				// collection is now done and, if so, notify the owner (fire-and-forget).
+				if (status === IngestionStatus.COMPLETED || status === IngestionStatus.FAILED) {
+					void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
+				}
 			}
 		} catch (err) {
 			logger.warn(`[VESPA_FILE_WORKER] Failed to update ingestionStatus for ${fileId}`, {
