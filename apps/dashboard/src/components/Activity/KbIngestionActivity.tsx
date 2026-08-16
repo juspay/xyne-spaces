@@ -31,7 +31,10 @@ export const KbIngestionActivity = ({
   const snap = (activity.blockId ?? '').split(',');
   const hasSnap = snap.length === 2 && snap.every(n => /^\d+$/.test(n));
 
-  const [collections] = useCachedQuery(queries.collectionById({ id: collectionId }), !!collectionId);
+  const [collections] = useCachedQuery(
+    queries.collectionById({ id: collectionId }),
+    !!collectionId,
+  );
   const [files] = useCachedQuery(
     queries.collectionFilesByRoot({ rootCollectionId: collectionId }),
     !hasSnap && !!collectionId,
@@ -88,7 +91,10 @@ export const KbIngestionActivity = ({
         ) : null}
         {total > 0 ? (
           <span className='ml-1 inline-flex items-center gap-2 align-middle'>
-            <span title='Succeeded' className='inline-flex items-center gap-1 text-muted-foreground'>
+            <span
+              title='Succeeded'
+              className='inline-flex items-center gap-1 text-muted-foreground'
+            >
               <CheckCircle2 className='h-3.5 w-3.5 text-green-600' strokeWidth={2} />
               {succeeded}
             </span>
