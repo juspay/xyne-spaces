@@ -45,6 +45,7 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   MentionType,
+  type MentionData,
   ChannelCommandMenuProps,
   TYPE_SUGGESTIONS,
   SearchableTypes,
@@ -87,7 +88,7 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { LexicalSearchInput } from './LexicalSearchInput';
+import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
@@ -96,6 +97,7 @@ import {
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
 import { searchMetricsService } from '../../../services/searchMetricsService';
+import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -333,12 +335,38 @@ const ChannelCommandMenu = ({
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
-  // caller's query straight through. Memoized so the reference stays stable across renders.
+  // The search the user left behind when the palette sent them to the results page, handed
+  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+
+  // While seeding, feed the editor a `/` through the existing initial-query path; a restored
+  // search goes down the same path. Otherwise pass the caller's query straight through.
+  // Memoized so the reference stays stable across renders.
   const effectiveInitialQuery = useMemo(
-    () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
-    [seedCommandMode, initialQuery],
+    () =>
+      seedCommandMode ? { mentions: [], text: '/' } : restoredQuery ? restoredQuery : initialQuery,
+    [seedCommandMode, restoredQuery, initialQuery],
   );
+
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
+  // (and the browser back gesture) closes the palette instead of leaving the page. When a
+  // row sends the user to the results page, that entry keeps the search — so back from the
+  // results page reopens the palette with it rather than landing on a bare page.
+  const { markNavigating, setPayload } = useHistoryBackedOverlay<InitialQueryData>({
+    open,
+    onClose: () => onOpenChange(false),
+    onRestore: restored => {
+      setRestoredQuery(restored ?? null);
+      onOpenChange(true);
+    },
+    id: 'command-menu',
+    enabled: !inline && !contextSelectionMode,
+  });
+
+  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
+  useEffect(() => {
+    if (!open) setRestoredQuery(null);
+  }, [open]);
 
   useShortcutById(
     'global.search',
@@ -995,6 +1023,20 @@ const ChannelCommandMenu = ({
     return params;
   }
 
+  // Keep the palette's history entry carrying the current search. The palette can be left
+  // in many ways — opening a DM, a channel, a message, a ticket, the results page — and
+  // each goes through its own handler, so recording it here is what makes ANY of them
+  // restorable when the user comes back.
+  useEffect(() => {
+    if (!open) return;
+    setPayload({
+      text: searchText,
+      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
+      // same values at runtime, they're only ever set from that union.
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+    });
+  }, [open, searchText, selectedMentions, setPayload]);
+
   // Leave the palette for the full-screen results page via the "Show results for" row.
   // Logged as its own event so the jump-out rate is readable per palette and trigger.
   const goToSearchResults = (trigger: 'click' | 'keyboard'): void => {
@@ -1002,6 +1044,10 @@ const ChannelCommandMenu = ({
     if (navigatingToResultsRef.current) return;
     navigatingToResultsRef.current = true;
     showResultsTriggerRef.current = 'keyboard';
+
+    // Mark the close as a navigation so the palette's entry isn't popped out from under
+    // us. The search itself is already on that entry, kept current by the effect above.
+    markNavigating();
 
     // Metrics must never be able to swallow the navigation.
     try {
