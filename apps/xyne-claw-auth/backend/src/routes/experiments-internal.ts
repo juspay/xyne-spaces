@@ -35,6 +35,10 @@ experimentsInternalRouter.get("/:id/ledger", async (req: Request<{ id: string }>
       counts: counts(findings),
       deadlineAt: run.deadlineAt.toISOString(),
       epoch: run.epoch,
+      // Exposed so the claw-side end-experiment gate can enforce the
+      // understanding-run deliverable (a delivered .html) against real state
+      // rather than the model's word.
+      deliveredArtifacts: run.deliveredArtifacts,
     },
   });
 });

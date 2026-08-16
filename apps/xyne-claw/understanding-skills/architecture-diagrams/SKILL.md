@@ -10,6 +10,15 @@ mermaid or any diagram library: the artifact is a single file that must render
 with no network and no JavaScript, and script-based renderers are stripped or
 silently blank.
 
+Diagram the FLOWS, not just the system. One overview diagram is not enough for
+anything real: each end-to-end path in the document's flows section earns its
+own figure — "a message becomes a desktop notification", "…a mobile push",
+"…a Slack fallback" are three flows and three diagrams, not one box-and-line
+sketch that tries to hold all of them. A document explaining a multi-path system
+with a single diagram under-drew it. Put each flow's diagram immediately beside
+the numbered walk it illustrates, so a reader sees the path and its picture
+together.
+
 Pick the diagram by the relationship, and draw at most one idea per figure:
 
 - Components and who talks to whom: boxes + arrows, direction shown by an

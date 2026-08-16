@@ -43,6 +43,9 @@ interface LedgerData {
   counts: { conjecture: number; proved: number; refuted: number };
   deadlineAt: string;
   epoch: number;
+  /** Filenames delivered to the thread via sandbox-deliver-files. The
+   *  understanding deliverable (a .html document) is enforced against this. */
+  deliveredArtifacts?: string[];
 }
 
 const BASE_PATH = "/claw/api/v1/internal/experiments";
@@ -403,10 +406,14 @@ export function buildExperimentTools(
           // bounded even if the frontier never fully closes.
           let open: number | undefined;
           let closed = 0;
+          let deliveredArtifacts: string[] = [];
+          let ledgerReadOk = false;
           try {
             const ledger = await readLedger(ctx);
             open = ledger.counts.conjecture;
             closed = ledger.counts.proved + ledger.counts.refuted;
+            deliveredArtifacts = ledger.deliveredArtifacts ?? [];
+            ledgerReadOk = true;
           } catch {
             // Ledger unreachable: we cannot prove exhaustion, so only the
             // deadline cap below can release the run.
@@ -425,6 +432,19 @@ export function buildExperimentTools(
             return textResult(
               `❌ Cannot end: the code-path frontier is not exhausted (epoch ${ctx.epoch}). ${why} Exit unlocks only when open reaches 0. Your report was NOT accepted.`,
               { refused: true, open, closed },
+            );
+          }
+          // DELIVERABLE GATE. The output of an understanding run is the HTML
+          // document, not the ledger — an exhausted frontier means the work is
+          // DONE, not DELIVERED. Enforce it against the real delivered-artifact
+          // list so the run cannot end (even at the safety cap) until the doc
+          // exists. Fail OPEN only when the ledger is unreachable: we cannot
+          // strand a finished run on our own inability to check.
+          const hasHtml = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(".html"));
+          if (ledgerReadOk && !hasHtml) {
+            return textResult(
+              `❌ Cannot end: the explanation document has not been delivered (epoch ${ctx.epoch}). Write ONE self-contained .html covering the scope you explained — grouped sections, inline-SVG diagrams (no <script>, no CDN), and a file:line citation for every claim — then send it with sandbox-deliver-files and end again. The frontier is closed; only the deliverable is missing. Your report was NOT accepted.`,
+              { refused: true, reason: "missing-html-artifact" },
             );
           }
         } else if (!pastDeadline) {
