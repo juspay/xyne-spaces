@@ -44,3 +44,23 @@ export function calculateWorkingDurationMs(startUtc: Date, endUtc: Date): number
 export function getWorkingHoursConfig(): { start: number; end: number; perDay: number; offset: number } {
   return sharedGetWorkingHoursConfig(workingHoursConfig);
 }
+
+/**
+ * Recompute the overall Ticket.eta from the current stage's own deadline plus the hours
+ * budgeted for stages still ahead of it, so Ticket.eta can never land before the current
+ * stage's deadline (calculateETADeadline only ever moves forward in time).
+ *
+ * Returns null when neither the current stage nor any future stage has an ETA configured —
+ * callers should leave Ticket.eta untouched in that case rather than overwriting it with `now`.
+ */
+export function recomputeOverallTicketEta(
+  currentStageEta: Date,
+  stageEnteredAt: Date,
+  futureStagesEtaHours: number,
+): Date | null {
+  const currentStageHasEta = currentStageEta.getTime() > stageEnteredAt.getTime();
+  if (!currentStageHasEta && futureStagesEtaHours <= 0) {
+    return null;
+  }
+  return calculateETADeadline(currentStageEta, futureStagesEtaHours);
+}

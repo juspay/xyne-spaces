@@ -27,6 +27,7 @@ import {
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
 import SettingsContent from '../Settings/Settings';
+import ProfileModal from '../ProfileSidebar/ProfileModal';
 import Preferences, { type PreferenceSection } from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
 import { isStatusExpired } from '../../utils/statusUtils';
@@ -195,6 +196,7 @@ const AppSidebar = (): ReactElement => {
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
@@ -567,6 +569,7 @@ const AppSidebar = (): ReactElement => {
               onClose={() => setIsSettingsPopoverOpen(false)}
               onOpenPreferences={handleOpenPreferences}
               onOpenStatusModal={handleStatusClick}
+              onOpenProfileModal={userId => setProfileModalUserId(userId)}
             />
           </Popover>
 
@@ -574,6 +577,14 @@ const AppSidebar = (): ReactElement => {
             open={isPreferencesOpen}
             onClose={() => setIsPreferencesOpen(false)}
             {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
+          />
+
+          {/* Profile modal — used on non-chat pages where the routed profile
+              sidebar (`/chat/dir/.../profile/...`) is not mounted. */}
+          <ProfileModal
+            userId={profileModalUserId}
+            isOpen={profileModalUserId !== null}
+            onClose={() => setProfileModalUserId(null)}
           />
         </div>
 

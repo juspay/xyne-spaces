@@ -1221,13 +1221,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const currentSessionId = searchSessionId || '';
               const vespaResponse = await searchService.vespaSearch({
                 ...searchFilters,
-                // The `unified` profile normalizes every schema's score into the same
-                // 0-1 range, so its hits are directly comparable across doc types.
-                // Grouping would bucket that single global ranking back into per-type
-                // lists (<=10 each), so opt out with an explicit empty groupBy — the
-                // backend falls back to 'docType' when the param is absent entirely.
+                //unified rank profile filters
                 ...(effectiveRankProfile === 'unified'
-                  ? { groupBy: '' }
+                  ? {
+                      groupBy: '',
+                      apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+                    }
                   : options.groupByDocType && { groupBy: 'docType' }),
                 searchId: currentSessionId,
                 presentationSummary: 'lean',
@@ -1478,7 +1477,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`,
           // ALL-tab load-more only runs when the initial search was flat (grouped=false),
           // so force a flat continuation; without this the multi-app query re-groups.
-          ...(activeTab === TabType.ALL && { groupBy: '' }),
+          // Mail is left out for the same reason page 1 leaves it out.
+          ...(activeTab === TabType.ALL && {
+            groupBy: '',
+            apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+          }),
           offset: currentOffset,
           // Fixed-size window: constant limit, advancing offset (standard pagination).
           limit: pageSize,

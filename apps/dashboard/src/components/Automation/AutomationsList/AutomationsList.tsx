@@ -67,6 +67,7 @@ export function AutomationsList({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ListCategory>('all');
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
+  const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
   const zero = useZero();
   const navigate = useNavigate();
@@ -132,15 +133,18 @@ export function AutomationsList({
     },
   });
   const disableMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => {
-      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now() }));
-      toast.success('Automation disabled');
+    mutationFn: ({ id, cancelQueued }: { id: string; cancelQueued: boolean }): Promise<void> => {
+      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now(), cancelQueued }));
+      toast.success(
+        cancelQueued ? 'Automation disabled, queued runs will not fire' : 'Automation disabled',
+      );
       return Promise.resolve();
     },
     onError: err => {
       toast.error(err instanceof Error ? err.message : 'Disable failed');
     },
   });
+
   const archiveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
       zero.mutate(mutators.automations.archive({ id, timestamp: Date.now() }));
@@ -255,7 +259,7 @@ export function AutomationsList({
                   onClone={() => handleClone(item)}
                   onDelete={() => setPendingDelete(item)}
                   onArchive={
-                    isAutomationsAdmin && isLiveStatus(item.status)
+                    isAutomationsAdmin && item.status === AutomationStatusValues.DISABLED
                       ? () => archiveMutation.mutate(item.id)
                       : undefined
                   }
@@ -263,13 +267,12 @@ export function AutomationsList({
                     isLiveStatus(item.status) &&
                     (item.status === AutomationStatusValues.DISABLED ||
                       (item.status === AutomationStatusValues.ACTIVE && isAutomationsAdmin))
-                      ? next =>
-                          next ? activateMutation.mutate(item.id) : disableMutation.mutate(item.id)
+                      ? next => (next ? activateMutation.mutate(item.id) : setPendingDisable(item))
                       : undefined
                   }
                   toggleLoading={
                     (activateMutation.isPending && activateMutation.variables === item.id) ||
-                    (disableMutation.isPending && disableMutation.variables === item.id)
+                    (disableMutation.isPending && disableMutation.variables?.id === item.id)
                   }
                 />
               ))}
@@ -277,6 +280,64 @@ export function AutomationsList({
           )}
         </div>
       </div>
+
+      <Dialog
+        open={pendingDisable !== null}
+        onOpenChange={open => {
+          if (!open) setPendingDisable(null);
+        }}
+        title='Disable automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-2 px-5 py-4 text-sm'>
+          <p className='text-base font-semibold text-foreground'>
+            Disable {pendingDisable?.name || 'this automation'}?
+          </p>
+          <p className='text-muted-foreground'>What should happen to the runs already queued?</p>
+          <div className='flex flex-wrap items-center justify-end gap-2 pt-4'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setPendingDisable(null)}
+              data-track-category='automations-list'
+              data-track-name='disable-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={disableMutation.isPending}
+              onClick={() => {
+                if (pendingDisable) {
+                  disableMutation.mutate({ id: pendingDisable.id, cancelQueued: false });
+                  setPendingDisable(null);
+                }
+              }}
+              data-track-category='automations-list'
+              data-track-name='disable-keep-queued'
+            >
+              Let them finish
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={disableMutation.isPending}
+              loading={disableMutation.isPending}
+              onClick={() => {
+                if (pendingDisable) {
+                  disableMutation.mutate({ id: pendingDisable.id, cancelQueued: true });
+                  setPendingDisable(null);
+                }
+              }}
+              data-track-category='automations-list'
+              data-track-name='disable-cancel-queued'
+            >
+              Stop them
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={pendingDelete !== null}

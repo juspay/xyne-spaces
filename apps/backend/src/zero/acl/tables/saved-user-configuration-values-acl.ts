@@ -42,6 +42,8 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
 function validateTicketValue(fieldName: string, fieldValue: string): void {
   const table = 'saved_user_configuration_values' as const;
 
+  if (fieldName === '__columns') return;
+
   if (!fieldValue) {
     throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
   }

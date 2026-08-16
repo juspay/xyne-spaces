@@ -47,7 +47,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
-import { Copy } from 'lucide-react';
+import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
 import axios from 'axios';
 import { cn } from '../../../utils/classNames';
@@ -453,6 +453,7 @@ const ActionTray: React.FC<{
 }> = ({ attachmentId, fileName, canDelete, onDelete, imageBlobUrl }) => {
   const { isMobile } = usePlatform();
   const { copyImage } = useClipboard();
+  const [copied, setCopied] = useState(false);
 
   const handleCopyImage = async (): Promise<void> => {
     if (!imageBlobUrl) return;
@@ -460,6 +461,8 @@ const ActionTray: React.FC<{
       const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
       const blob = response.data;
       await copyImage(blob);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
     } catch {
       toast.error('Failed to copy image');
     }
@@ -480,7 +483,11 @@ const ActionTray: React.FC<{
               data-track-category='MESSAGE_ATTACHMENT'
               data-track-name='CopyImage'
             >
-              <Copy className='h-[18px] w-[18px]' />
+              {copied ? (
+                <CopyCopied size={18} className='text-status-success' />
+              ) : (
+                <CopyDefault size={18} />
+              )}
             </button>
           )}
           <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
