@@ -228,7 +228,7 @@ import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
-import DailyBriefScreen from './DailyBriefScreen';
+import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
@@ -875,6 +875,8 @@ export const router = createBrowserRouter([
                 children: [
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
+                  { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                  { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
                   {
                     path: 'admin',
@@ -1531,10 +1533,6 @@ export const router = createBrowserRouter([
               {
                 path: 'guide',
                 element: <UserGuideScreen />,
-              },
-              {
-                path: 'daily-brief',
-                element: <DailyBriefScreen />,
               },
             ],
           },

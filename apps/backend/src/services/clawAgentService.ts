@@ -12,6 +12,12 @@ import { randomUUID } from 'crypto';
 import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
+import { Agent } from 'undici';
+
+// A brief run streams nothing while the model composes; undici's default 300s
+// bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
+// real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
+const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 export interface ChannelClawAgent {
   id: string;
@@ -1576,11 +1582,11 @@ export async function getDailyBriefConfig(
   return response.json();
 }
 
-/** PUT the user's Daily Brief config ({ enabled?, instructions? }). */
+/** PUT the user's Daily Brief config ({ enabled?, instructions?, instructionsEnabled? }). */
 export async function saveDailyBriefConfig(
   req: { headers?: { cookie?: string } },
   userId: string,
-  body: { enabled?: boolean; instructions?: string | null }
+  body: { enabled?: boolean; instructions?: string | null; instructionsEnabled?: boolean }
 ): Promise<unknown> {
   const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
     method: 'PUT',
@@ -1682,8 +1688,10 @@ export async function regenerateDailyBriefStream(
       ...extractUserIdHeader(userId),
     },
     body: '{}',
+    // `dispatcher` is an undici extension not in the DOM RequestInit type.
+    dispatcher: briefStreamDispatcher,
     ...(opts.signal ? { signal: opts.signal } : {}),
-  });
+  } as unknown as RequestInit);
 
   if (!response.ok || !response.body) {
     const detail = response.body ? await safeReadText(response) : 'no response body';
