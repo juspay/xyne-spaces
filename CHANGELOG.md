@@ -1,3 +1,10 @@
+## [1.187.0](https://github.com/juspay/xyne-spaces/compare/v1.186.2...v1.187.0) (2026-08-16)
+
+
+### Features
+
+* implement daily brief ([#465](https://github.com/juspay/xyne-spaces/issues/465)) ([37ca9f8](https://github.com/juspay/xyne-spaces/commit/37ca9f8afbc1bfc28ff13631774c40000c56ddab))
+
 ## [1.186.2](https://github.com/juspay/xyne-spaces/compare/v1.186.1...v1.186.2) (2026-08-15)
 
 ## [1.186.1](https://github.com/juspay/xyne-spaces/compare/v1.186.0...v1.186.1) (2026-08-15)
