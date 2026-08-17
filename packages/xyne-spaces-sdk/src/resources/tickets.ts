@@ -11,6 +11,7 @@
 import { Resource } from './base.js';
 import {
   ticketsOperations,
+  type TicketActivityCursor,
   type TicketCursor,
   type TicketViewMode,
 } from '../registry/tickets.js';
@@ -94,6 +95,19 @@ export class TicketsResource extends Resource {
   }
 
   /** Get several tickets by id. */
+  /**
+   * Get the bare ticket row, without resolving any relations.
+   *
+   * Cheaper than `get`, which also pulls project, tags, assignments, references,
+   * and stage data. Use this when only the ticket's own columns matter.
+   *
+   * @example
+   * const ticket = await sdk.tickets.getRow('ticket-1');
+   */
+  getRow(ticketId: string): Promise<Ticket | null> {
+    return this.call(ticketsOperations.getRow, { ticketId });
+  }
+
   getMany(ticketIds: string[]): Promise<Ticket[]> {
     return this.call(ticketsOperations.getMany, { ticketIds });
   }
@@ -111,6 +125,26 @@ export class TicketsResource extends Resource {
   /** List a ticket's activity timeline. */
   listActivities(ticketId: string): Promise<unknown[]> {
     return this.call(ticketsOperations.listActivities, { ticketId });
+  }
+
+  /**
+   * Activities across several tickets at once, newest first.
+   *
+   * The batch counterpart to `listActivities`. Page by passing the last row's
+   * `{ timestamp, id }` back as `start`.
+   *
+   * @example
+   * const page = await sdk.tickets.listActivitiesForTickets({
+   *   ticketIds: ['t1', 't2'],
+   *   limit: 50,
+   * });
+   */
+  listActivitiesForTickets(options: {
+    ticketIds: string[];
+    limit?: number;
+    start?: TicketActivityCursor;
+  }): Promise<unknown[]> {
+    return this.call(ticketsOperations.listActivitiesForTickets, options);
   }
 
   /** List a ticket's assignment history. */
@@ -210,6 +244,20 @@ export class TicketsResource extends Resource {
   }
 
   /** Get sub-tickets by id. */
+  /**
+   * Sub-ticket mappings for several parent tickets at once.
+   *
+   * Returns the mapping rows, each carrying its sub-ticket — so when batching many
+   * parents you can still tell which parent each sub-ticket belongs to. Use
+   * `listSubTickets` for a single parent's sub-tickets directly.
+   *
+   * @example
+   * const mappings = await sdk.tickets.listSubTicketMappings(['t1', 't2']);
+   */
+  listSubTicketMappings(ticketIds: string[]): Promise<unknown[]> {
+    return this.call(ticketsOperations.listSubTicketMappings, { ticketIds });
+  }
+
   getSubTickets(subTicketIds: string[]): Promise<SubTicket[]> {
     return this.call(ticketsOperations.getSubTickets, { subTicketIds });
   }

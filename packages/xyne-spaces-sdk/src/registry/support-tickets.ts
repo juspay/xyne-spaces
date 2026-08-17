@@ -119,7 +119,12 @@ export const supportTicketsOperations = {
 
   /**
    * A desk ticket's full detail, by id or by key.
-   * Maps to: Zero query 'supportTicketDetail'
+   * Maps to: Zero query 'supportTicketDetailV2'
+   *
+   * V2 takes the same arguments but resolves fewer relations than V1 — it drops
+   * the caller-scoped `emailDrafts` / `emailReads` and the `conversation`. Neither
+   * was part of this method's declared `Ticket` result, so the typed surface is
+   * unchanged; read email state through `sdk.email` instead.
    */
   getDetail: query<
     {
@@ -130,7 +135,7 @@ export const supportTicketsOperations = {
       isMember?: boolean;
     },
     Ticket | null
-  >('supportTicketDetail', {
+  >('supportTicketDetailV2', {
     mapArgs: (args) => ({
       workspaceId: args.workspaceId,
       channelId: args.channelId,

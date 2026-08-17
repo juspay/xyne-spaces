@@ -847,6 +847,64 @@ export interface SearchOptions {
   sortOrder?: 'asc' | 'desc';
 }
 
+// ----- Flow Plan (flow boards) -----
+
+/**
+ * What must happen before a flow step opens.
+ *
+ * Mirrors `FlowStepGateSchema` in `@xyne/shared`. Declared locally because the SDK
+ * ships with no dependencies.
+ */
+export type FlowStepGate =
+  | { type: 'confirmation'; prompt?: string }
+  | { type: 'form'; formId: string };
+
+export interface FlowPlanNode {
+  id: string;
+  title: string;
+  description?: string;
+  assignedTo?: string | null;
+  parentIds: string[];
+  order: number;
+  gate?: FlowStepGate;
+  groupId?: string | null;
+}
+
+export interface FlowPlanGroup {
+  id: string;
+  name: string;
+  parentIds: string[];
+  order?: number;
+  groupId?: string | null;
+}
+
+export interface FlowDecisionRoute {
+  key: string;
+  label: string;
+  value?: string;
+  targetId: string;
+}
+
+export interface FlowPlanDecision {
+  id: string;
+  parentNodeId: string;
+  fieldId: string;
+  fieldName: string;
+  fieldType: 'STRING' | 'BOOLEAN' | 'SINGLE_SELECT';
+  operator?: 'equals' | 'notEquals';
+  comparisonValue?: string;
+  routes: FlowDecisionRoute[];
+}
+
+/** A flow board's DAG of steps. `version` is pinned to 2; v1 plans are migrated on read. */
+export interface FlowPlan {
+  version: 2;
+  nodes: FlowPlanNode[];
+  groups?: FlowPlanGroup[];
+  decisions?: FlowPlanDecision[];
+  updatedAt: number;
+}
+
 // ----- Claw Types (remote agents) -----
 
 /** A remote agent that can be dispatched to. */

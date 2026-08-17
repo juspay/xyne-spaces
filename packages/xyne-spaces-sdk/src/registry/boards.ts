@@ -9,7 +9,7 @@
 
 import { query, mutator } from './types.js';
 import { now } from '../core/ids.js';
-import type { Board, Stage, TicketPriority, TicketStatusV2 } from '../types/index.js';
+import type { Board, FlowPlan, Stage, TicketPriority, TicketStatusV2 } from '../types/index.js';
 
 /** A stage as accepted by `board.update`, which replaces the whole stage list. */
 export interface StageInput {
@@ -211,4 +211,22 @@ export const boardsOperations = {
       now: now(),
     }),
   }),
+
+  /**
+   * Replace a flow board's plan — its nodes, groups, and decision routing.
+   * Maps to: Zero mutator 'board.updateFlowPlan'
+   *
+   * A whole-plan replace, not a patch: anything absent from `plan.nodes` is
+   * removed. Read the current plan first and edit it.
+   */
+  updateFlowPlan: mutator<{ boardId: string; plan: FlowPlan }, void>(
+    'board.updateFlowPlan',
+    {
+      mapArgs: (args) => ({
+        boardId: args.boardId,
+        plan: args.plan,
+        timestamp: now(),
+      }),
+    }
+  ),
 } as const;

@@ -93,6 +93,13 @@ export type {
   Board,
   Stage,
   Project,
+  // Flow boards
+  FlowPlan,
+  FlowPlanNode,
+  FlowPlanGroup,
+  FlowPlanDecision,
+  FlowDecisionRoute,
+  FlowStepGate,
   // Canvases
   Canvas,
   CanvasFolder,
@@ -141,7 +148,11 @@ export type {
 export type { ConversationCursor } from './registry/conversations.js';
 export type { MessageCursor } from './registry/messages.js';
 export type { ActivityCursor } from './registry/activities.js';
-export type { TicketCursor, TicketViewMode } from './registry/tickets.js';
+export type {
+  TicketCursor,
+  TicketActivityCursor,
+  TicketViewMode,
+} from './registry/tickets.js';
 export type { SupportTicketCursor } from './registry/support-tickets.js';
 export type { StageInput } from './registry/boards.js';
 export type { CanvasCursor, CanvasScope } from './registry/canvases.js';
