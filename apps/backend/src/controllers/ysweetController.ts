@@ -1,25 +1,11 @@
 import { Request, Response } from 'express';
-import type { ClientToken } from '@y-sweet/sdk';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
+import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
 
 const TOKEN_VALID_SECONDS = 3600;
-
-async function ysweetPost<T>(docId: string, path: string, body: unknown): Promise<T> {
-  const base = config.ysweet.url.replace(/\/$/, '');
-  const url = `${base}/${path}?docId=${encodeURIComponent(docId)}&z=${Date.now().toString(36)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`y-sweet ${path} responded ${res.status} ${res.statusText}`);
-  }
-  return (await res.json()) as T;
-}
 
 const isDevelopment = config.env === 'development' || config.isTestEnv;
 
@@ -208,15 +194,10 @@ export class YSweetController {
         ysweetUrl: config.ysweet.url,
       });
 
-      await ysweetPost(canonicalDocId, 'doc/new', { docId: canonicalDocId });
-      const clientToken = await ysweetPost<ClientToken>(
-        canonicalDocId,
-        `doc/${encodeURIComponent(canonicalDocId)}/auth`,
-        {
-          authorization,
-          validForSeconds: TOKEN_VALID_SECONDS,
-        }
-      );
+      const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
+        authorization,
+        validForSeconds: TOKEN_VALID_SECONDS,
+      });
 
       logger.debug('[YSweet] Received client token from y-sweet', {
         baseUrl: clientToken.baseUrl,
