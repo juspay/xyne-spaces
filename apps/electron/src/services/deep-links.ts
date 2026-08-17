@@ -11,6 +11,31 @@ import { isHexToken } from '../utils/validation';
 
 let mainWindow: BrowserWindow | null = null;
 
+// A deep link that arrived before the renderer could receive it, held until it
+// can. 'navigate-to' is a fire-and-forget IPC send with no buffering: the
+// listener lives in NotificationHandler, which only mounts once the app is
+// authenticated and past its loading screen, so on a cold start (the app is
+// *launched* by the link rather than already running) the send lands in the gap
+// and the navigation is silently lost. Queue instead of sending into the void.
+let pendingNavigatePath: string | null = null;
+let isRendererReadyForNavigation = false;
+
+/**
+ * Called from the renderer once its 'navigate-to' listener is live. Delivers a
+ * deep link that arrived earlier, if any.
+ */
+export function markDeepLinkRendererReady(): void {
+  isRendererReadyForNavigation = true;
+  if (!pendingNavigatePath) return;
+
+  const pathStr = pendingNavigatePath;
+  pendingNavigatePath = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    log.info('[DeepLinks] Delivering deferred deep-link navigation:', pathStr);
+    mainWindow.webContents.send('navigate-to', pathStr);
+  }
+}
+
 /**
  * A xyne-spaces:// deep link is externally triggerable (any web page can set
  * location.href = 'xyne-spaces://...') and its path is forwarded to the renderer's
@@ -73,7 +98,23 @@ function parseResponseBody(response: IncomingMessage): Promise<any> {
 }
 
 export function setMainWindow(window: BrowserWindow | null): void {
+  // Only react to an actual window change: setWindowReferences() re-runs on
+  // several unrelated paths (tray, recording controller) with the window that's
+  // already current, and clearing readiness there would strand a deep link
+  // behind a listener that is mounted and will never re-announce itself.
+  if (window === mainWindow) return;
+
   mainWindow = window;
+  // A different window has no mounted 'navigate-to' listener yet.
+  isRendererReadyForNavigation = false;
+
+  // Same for a reload or a full-page navigation within this window: React
+  // unmounts, taking the listener with it, and re-announces on remount. Without
+  // this the flag would still claim "ready" and a link arriving mid-reload would
+  // be sent into the gap and lost.
+  window?.webContents.on('did-start-loading', () => {
+    isRendererReadyForNavigation = false;
+  });
 }
 
 /**
@@ -122,16 +163,24 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
     }
   });
 
-  // Handle Windows startup deep link
-  if (process.platform === 'win32' && process.argv.length > 1) {
+  // Cold-start deep link: when the link *launches* the app rather than reaching an
+  // already-running instance, the OS passes it as an argv entry. Neither handler
+  // above covers that — 'open-url' is macOS-only, and 'second-instance' by
+  // definition only fires when an instance already holds the lock — so without
+  // this the launching link is dropped.
+  //
+  // Not gated on win32 (it used to be): on Linux both a .desktop protocol handler
+  // and a direct `xyne-spaces "xyne-spaces://..."` invocation — how an unattended
+  // room station's launcher starts the app — arrive exactly this way.
+  if (process.argv.length > 1) {
     const url = process.argv.find(arg => arg.startsWith(`${config.DEEP_LINK_PROTOCOL}://`));
     if (url){
-      Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
+      Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, {
         url,
-        origin: 'windows-startup'
+        origin: 'cold-start-argv'
       });
       void handleDeepLink(url);
-    } 
+    }
   }
 
   return true;
@@ -385,7 +434,15 @@ async function handleDeepLink(url: string): Promise<void> {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
+    }
+
+    // Hold it if the renderer's listener isn't mounted yet (cold start, or still
+    // on the login screen); markDeepLinkRendererReady delivers it when it is.
+    if (mainWindow && isRendererReadyForNavigation) {
       mainWindow.webContents.send('navigate-to', pathStr);
+    } else {
+      log.info('[DeepLinks] Renderer not ready — deferring navigation:', pathStr);
+      pendingNavigatePath = pathStr;
     }
   }
 }

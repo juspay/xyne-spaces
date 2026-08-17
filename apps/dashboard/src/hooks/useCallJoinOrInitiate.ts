@@ -6,12 +6,23 @@ import { CallType } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
 
-interface JoinCallParams {
+/**
+ * Call setup a caller can request up front, applied by roomMachine as the call
+ * connects. Every field is optional; omitting one keeps the existing default
+ * (platform-derived view mode, user's saved mic/camera join preferences).
+ */
+interface CallSetupOverrides {
+  viewMode?: 'full' | 'mini';
+  initialMicEnabled?: boolean;
+  initialCameraEnabled?: boolean;
+}
+
+interface JoinCallParams extends CallSetupOverrides {
   callId: string;
   onComplete?: () => void;
 }
 
-interface InitiateCallParams {
+interface InitiateCallParams extends CallSetupOverrides {
   channelId: string;
   targetUserIds?: string[];
   callDisplayName?: string;
@@ -19,6 +30,22 @@ interface InitiateCallParams {
   artifactMessageId?: string;
   onComplete?: () => void;
 }
+
+/**
+ * Only forward the media fields the caller actually set — a literal `undefined`
+ * and an absent key mean the same thing to roomMachine, but keeping them absent
+ * matches how the other optional event fields are spread below.
+ */
+const mediaOverrideFields = (
+  overrides: CallSetupOverrides,
+): Pick<CallSetupOverrides, 'initialMicEnabled' | 'initialCameraEnabled'> => ({
+  ...(overrides.initialMicEnabled !== undefined && {
+    initialMicEnabled: overrides.initialMicEnabled,
+  }),
+  ...(overrides.initialCameraEnabled !== undefined && {
+    initialCameraEnabled: overrides.initialCameraEnabled,
+  }),
+});
 
 interface UseCallJoinOrInitiateReturn {
   joinCall: (params: JoinCallParams) => void;
@@ -32,16 +59,19 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   const { isMobile } = usePlatform();
 
   // Store pending action and completion callback
-  const pendingActionRef = useRef<{
-    type: 'JOIN_CALL' | 'INITIATE_CALL';
-    callId?: string;
-    channelId?: string;
-    targetUserIds?: string[];
-    callDisplayName?: string;
-    conversationId?: string;
-    artifactMessageId?: string;
+  const pendingActionRef = useRef<
+    | (CallSetupOverrides & {
+        type: 'JOIN_CALL' | 'INITIATE_CALL';
+        callId?: string;
+        channelId?: string;
+        targetUserIds?: string[];
+        callDisplayName?: string;
+        conversationId?: string;
+        artifactMessageId?: string;
     onComplete?: () => void;
-  } | null>(null);
+      })
+    | null
+  >(null);
 
   // Get state from roomActor
   const stateSnapshot = useSelector(roomActor, state => state);
@@ -72,7 +102,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           type: 'JOIN_CALL',
           callId: action.callId,
           zero,
-          viewMode: isMobile ? 'full' : 'mini',
+          viewMode: action.viewMode ?? (isMobile ? 'full' : 'mini'),
+          ...mediaOverrideFields(action),
         });
 
         // Call completion callback after sending join event
@@ -83,7 +114,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           channelId: action.channelId,
           callType: CallType.AUDIO,
           zero,
-          viewMode: isMobile ? 'full' : 'mini',
+          viewMode: action.viewMode ?? (isMobile ? 'full' : 'mini'),
+          ...mediaOverrideFields(action),
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
@@ -110,7 +142,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   /**
    * Join a specific call
    */
-  const joinCall = ({ callId, onComplete }: JoinCallParams): void => {
+  const joinCall = ({ callId, onComplete, ...overrides }: JoinCallParams): void => {
     if (!callId) return;
 
     // Case 1: User not in any call - join directly
@@ -120,7 +152,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         type: 'JOIN_CALL',
         callId,
         zero,
-        viewMode: isMobile ? 'full' : 'mini',
+        viewMode: overrides.viewMode ?? (isMobile ? 'full' : 'mini'),
+        ...mediaOverrideFields(overrides),
       });
       onComplete?.();
       return;
@@ -130,6 +163,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     pendingActionRef.current = {
       type: 'JOIN_CALL',
       callId,
+      ...overrides,
       ...(onComplete && { onComplete }),
     };
     roomActor.send({ type: 'DISCONNECT' });
@@ -146,6 +180,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     conversationId,
     artifactMessageId,
     onComplete,
+    ...overrides
   }: InitiateCallParams): void => {
     if (!channelId) return;
 
@@ -157,7 +192,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         channelId,
         callType: CallType.AUDIO,
         zero,
-        viewMode: isMobile ? 'full' : 'mini',
+        viewMode: overrides.viewMode ?? (isMobile ? 'full' : 'mini'),
+        ...mediaOverrideFields(overrides),
         ...(targetUserIds && { targetUserIds }),
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),
@@ -171,6 +207,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     pendingActionRef.current = {
       type: 'INITIATE_CALL',
       channelId,
+      ...overrides,
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
       ...(conversationId && { conversationId }),

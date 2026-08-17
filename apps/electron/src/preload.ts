@@ -119,7 +119,17 @@ const electronAPI = {
   onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => {
     const listener = (_event: unknown, url: string, workspaceId?: string) => callback(url, workspaceId);
     ipcRenderer.on('navigate-to', listener);
+    // Tell main the listener is live, so a deep link that arrived before this
+    // point (cold start, or while the login screen was up) gets delivered now
+    // instead of having been sent into the void.
+    ipcRenderer.send('deep-link:renderer-ready');
     return () => ipcRenderer.removeListener('navigate-to', listener);
+  },
+
+  // Fullscreen the app window. Unlike document.requestFullscreen this needs no
+  // user gesture, which is what makes it usable on an unattended room station.
+  setWindowFullscreen: (fullscreen: boolean) => {
+    ipcRenderer.send('window:set-fullscreen', fullscreen);
   },
   onBrowserNewTab: (callback: () => void) => {
     const listener = () => callback();
