@@ -2569,6 +2569,25 @@ export async function removeAgentShare(slug: string, requesterId: string, target
   );
 }
 
+/**
+ * Health-check a single agent-pinned MCP instance. Hits the agent-scoped
+ * health route (mirrors checkConnectionHealth for global connections) so the
+ * agent MCP tab can show a real reachability status instead of a hardcoded
+ * "connected" badge.
+ */
+export async function checkAgentMcpConnectionHealth(
+  slug: string,
+  requesterId: string,
+  mcpServerType: string,
+  instanceSlug = "default",
+): Promise<HealthResult> {
+  const data = await request<{ success: boolean; data: HealthResult }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/mcp/connections/${encodeURIComponent(mcpServerType)}/${encodeURIComponent(instanceSlug)}/health`,
+    { headers: { "x-user-id": requesterId } },
+  );
+  return data.data;
+}
+
 // ── Agent-scoped MCP connections ────────────────────────────────────
 //
 // Lists / upserts / deletes credentials pinned to a specific agent. The
