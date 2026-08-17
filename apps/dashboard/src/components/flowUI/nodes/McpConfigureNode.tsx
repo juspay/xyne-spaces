@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import type { FlowComponent } from '@xyne/shared';
 import { McpServerIcon } from '../../ClawAgents/McpServerIcon';
+import type { McpServer } from '@/services/claw/clawMcpTypes';
 import { cn } from '../../../utils/classNames';
 import { useFlow } from '../FlowContext';
 
@@ -89,7 +90,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
       style={node.style}
     >
       <div className='flex items-start gap-3'>
-        <McpServerIcon server={{ type: props.serverType, name: props.serverName }} size='md' />
+        <McpServerIcon server={{ type: props.serverType, name: props.serverName } as McpServer} size='md' />
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
             <p className='truncate text-base font-semibold leading-[1.25] text-foreground'>
