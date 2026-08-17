@@ -45,9 +45,10 @@ export const VITE_ZERO_SERVER =
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
 const otelPort = isLocalhost || isDockerTestEnv ? ':4318' : '';
+const otelPath = isLocalhost || isDockerTestEnv ? '/v1/metrics' : '/godel/v1/metrics';
 export const OTEL_METRICS_ENDPOINT = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/godel/v1/metrics`
-  : `${protocol}://${otelHost}${otelPort}/godel/v1/metrics`;
+  : `${protocol}://${otelHost}${otelPort}${otelPath}`;
 export const OTEL_SERVICE_NAME =
   (import.meta.env['VITE_OTEL_SERVICE_NAME'] as string) || 'xyne-spaces-frontend';
 export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(

@@ -146,7 +146,7 @@ services:
 
   # Zero Cache Server
   zero-cache:
-    image: mirror.gcr.io/rocicorp/zero:1.6.0
+    image: mirror.gcr.io/rocicorp/zero:1.9.0
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-zero-cache
     # ZERO_AUTH_SECRET is injected from apps/backend/.env.local (gitignored) so the
     # backend and zero-cache always share the same secret; never hardcode it here.
@@ -173,7 +173,7 @@ services:
       - ZERO_PORT=4848
       # OTEL metrics export
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.6.0
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.9.0
       - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
     ports:
       - "${ZERO_BIND_PORT_1:-4848}:4848"

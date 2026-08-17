@@ -16253,6 +16253,14 @@ export function createMutators(
           }
 
           const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+
+          logger.info(`[MUTATOR-NON-LINEAR] stage transitions for board ${boardId} updated by ${authData.sub}`, {
+            boardId,
+            userId: authData.sub,
+            oldTransitionIds: existing.map(t => t.id),
+            newTransitionIds: transitions.map(t => t.id),
+          });
+
           for (const t of existing) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', t.id),
