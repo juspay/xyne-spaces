@@ -146,11 +146,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [canvasList],
   );
   const canvases = useMemo(
-    () =>
-      filterExcludedCallGeneratedCanvases(
-        canvasItems,
-        excludeCallGeneratedCanvases,
-      ),
+    () => filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
     [canvasItems, excludeCallGeneratedCanvases],
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
@@ -650,12 +646,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [z],
   );
 
-  const handleArchivedStateChange = useCallback(
-    (canvasId: string, isArchived: boolean): void => {
-      setCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
-    },
-    [],
-  );
+  const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
+    setCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
+  }, []);
   const handleArchiveToggleCanvas = useCanvasArchiveToggle({
     onArchivedStateChange: handleArchivedStateChange,
   });

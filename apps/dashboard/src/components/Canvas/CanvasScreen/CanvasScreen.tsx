@@ -622,14 +622,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     onCreated: handleVersionCopyCreated,
   });
 
-  const handleArchivedStateChange = useCallback(
-    (canvasId: string, isArchived: boolean): void => {
-      setSelectedCanvas(current =>
-        current?.id === canvasId ? { ...current, isArchived } : current,
-      );
-    },
-    [],
-  );
+  const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
+    setSelectedCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
+  }, []);
   const handleArchiveToggleCanvas = useCanvasArchiveToggle({
     onArchivedStateChange: handleArchivedStateChange,
   });
