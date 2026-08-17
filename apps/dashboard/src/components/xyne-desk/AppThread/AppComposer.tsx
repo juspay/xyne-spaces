@@ -9,18 +9,10 @@ interface AppComposerProps {
   conversationId: string;
   channelId?: string | null;
   drafts?: readonly EmailDraftRecord[];
-  /** Requester name, used for the "Reply to <name>…" prompt. */
   replyToName?: string | null;
-  /** Receive-only desk: the note is stored on the ticket but never delivered. */
   recordOnly?: boolean;
 }
 
-/**
- * App-desk reply box — the chat composer (`InputBox`), not a desk-specific one,
- * so an app conversation composes exactly like a chat thread. Only the send
- * target differs: attachments are uploaded through the desk pipeline and the
- * body is POSTed to the app-desk reply route.
- */
 const AppComposer = ({
   conversationId,
   channelId,
@@ -82,8 +74,6 @@ const AppComposer = ({
         features={{
           richText: true,
           commands: false,
-          // @-mentions and slash commands address Xyne users/actions; this
-          // message is delivered to an app customer, so neither is offered.
           mentions: false,
           fileAttachments: true,
           emojiPicker: true,

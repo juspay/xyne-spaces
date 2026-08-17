@@ -7,10 +7,8 @@ interface AppThreadProps {
   ticketId?: string | null | undefined;
 }
 
-/** Messages from one sender within this window read as a single burst. */
 const GROUP_WINDOW_MS = 10 * 60 * 1000;
 
-/** Inbound app messages land as DEFAULT; everything the desk sends back is a reply. */
 const isOutbound = (message: AppDeskMessage): boolean => message.type !== 'DEFAULT';
 
 const senderKey = (message: AppDeskMessage): string =>
@@ -73,12 +71,6 @@ function buildRows(messages: AppDeskMessage[]): ThreadRow[] {
   return rows;
 }
 
-/**
- * App-desk conversation view: a two-sided message thread rather than the
- * stacked email/Slack cards. The end customer writes from a phone, so the
- * transcript is rendered the way they saw it — grouped bubbles, day rules and
- * one timestamp per burst.
- */
 const AppThread = ({ messages, ticketId }: AppThreadProps): ReactElement => {
   const sorted = useMemo(
     () => [...messages].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)),
@@ -86,8 +78,6 @@ const AppThread = ({ messages, ticketId }: AppThreadProps): ReactElement => {
   );
   const rows = useMemo(() => buildRows(sorted), [sorted]);
 
-  // Same read-receipt contract as the email and Slack threads: opening the
-  // ticket marks the newest message read.
   useMarkEmailRead(ticketId, sorted[sorted.length - 1]?.id ?? null, true);
 
   return (
