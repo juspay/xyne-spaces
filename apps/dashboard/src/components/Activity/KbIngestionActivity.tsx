@@ -4,7 +4,6 @@ import { IngestionStatus } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
-import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 
@@ -42,7 +41,6 @@ export const KbIngestionActivity = ({
 
   if (!actor) return null;
 
-  const actorName = getUserDisplayName(actor);
   const collectionName = collections?.[0]?.name;
 
   let succeeded: number;
@@ -72,11 +70,13 @@ export const KbIngestionActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={activity.actorId}
-      actorName={actorName}
+      // System event — the subject is the knowledge base, not the person. (The card
+      // always bold-prefixes this label; passing the user's name read as "Om did it".)
+      actorName='Knowledge base'
       channelId={undefined}
       badgeIcon={<FolderCheck className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
-      description={<span className='text-muted-foreground text-sm'>finished processing</span>}
+      description={<span className='text-muted-foreground text-sm'>finished processing files</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}
@@ -85,7 +85,7 @@ export const KbIngestionActivity = ({
           here — the collapsed row clamps children to one line, so context +
           name + counts stay together on the line that's actually visible. */}
       <div className={isExpanded ? 'text-sm mt-2' : 'text-sm'}>
-        <span className='text-muted-foreground'>{'KB collection: '}</span>
+        <span className='text-muted-foreground'>{'Collection '}</span>
         {collectionName ? (
           <span className='font-medium text-foreground'>{`"${collectionName}" `}</span>
         ) : null}

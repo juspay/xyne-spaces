@@ -50,24 +50,30 @@ export const CollectionStatusBadgeV2: React.FC<CollectionStatusBadgeV2Props> = (
     tooltip = `All ${String(total)} file${total === 1 ? '' : 's'} ready to search`;
   }
 
+  const baseClass = 'grid h-5 w-5 place-items-center rounded-full bg-background ring-1 ring-border';
+
   return (
     <Tooltip content={tooltip} side='top'>
-      <button
-        type='button'
-        aria-label={tooltip}
-        onClick={ev => {
-          ev.stopPropagation();
-          onOpenStatus?.(entry);
-        }}
-        data-track-category='knowledge-base'
-        data-track-name='open-collection-status'
-        className={cn(
-          'grid h-5 w-5 place-items-center rounded-full bg-background ring-1 ring-border',
-          'transition hover:ring-ring/50',
-        )}
-      >
-        {icon}
-      </button>
+      {onOpenStatus ? (
+        <button
+          type='button'
+          aria-label={tooltip}
+          onClick={ev => {
+            ev.stopPropagation();
+            onOpenStatus(entry);
+          }}
+          data-track-category='knowledge-base'
+          data-track-name='open-collection-status'
+          className={cn(baseClass, 'transition hover:ring-ring/50')}
+        >
+          {icon}
+        </button>
+      ) : (
+        // No click handler (e.g. subfolders inside a collection) → static indicator.
+        <span aria-label={tooltip} className={baseClass}>
+          {icon}
+        </span>
+      )}
     </Tooltip>
   );
 };

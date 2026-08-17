@@ -34,7 +34,9 @@ import {
 import { CollectionTreeNode } from '../../components/knowledgeBase/tree/treeTypes';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, IngestionStatus } from '@xyne/shared';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useAllVisibleChannels, useVisibleProjects } from '../../hooks/useChannels';
 import { EntryGridV2 } from '../../components/knowledgeBaseV2/components/EntryGridV2';
@@ -81,6 +83,26 @@ const KB_ROOT_COLUMNS: ReadonlyArray<ColumnDef> = [
 const SP_COLLECTION = 'cl';
 const SP_PARENT = 'parent';
 const SP_QUERY = 'q';
+
+/** A folder id + all descendant folder ids (used to scope a file listing to a subtree). */
+function collectSubtreeFolderIds(
+  rootId: string,
+  nodes: Record<string, CollectionTreeNode>,
+): string[] {
+  const ids = new Set<string>([rootId]);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (cur === undefined) break;
+    for (const childId of nodes[cur]?.childrenIds ?? []) {
+      if (nodes[childId]?.type === 'FOLDER' && !ids.has(childId)) {
+        ids.add(childId);
+        stack.push(childId);
+      }
+    }
+  }
+  return [...ids];
+}
 
 export const KnowledgeBaseV2Screen: React.FC = () => {
   const navigate = useNavigate();
@@ -252,6 +274,41 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const isAtRoot = !collectionId;
   const isAtCollectionRoot = !!collectionId && !spParentId;
 
+  // Inside a collection, load ALL its files so each subfolder can show the same
+  // rolled-up ingestion badge the root collections do. (The tree loads files
+  // lazily per folder, so it alone can't roll up an unopened subfolder.)
+  const [allCollectionFiles] = useCachedQuery(
+    queries.collectionFilesByRoot({ rootCollectionId: collectionId ?? '' }),
+    !isAtRoot && !!collectionId,
+  );
+
+  // folderId → rolled-up counts of every file anywhere beneath it (recursive).
+  const subfolderRollup = useMemo(() => {
+    const map = new Map<
+      string,
+      { total: number; failed: number; processing: number; pending: number }
+    >();
+    if (isAtRoot || !collectionId) return map;
+    for (const f of allCollectionFiles ?? []) {
+      const status = (f.ingestionStatus ?? '').toUpperCase() as IngestionStatus;
+      // Attribute the file to each ancestor subfolder, stopping at the root collection.
+      let cur: string | null = f.collectionId;
+      while (cur && cur !== collectionId) {
+        let r = map.get(cur);
+        if (!r) {
+          r = { total: 0, failed: 0, processing: 0, pending: 0 };
+          map.set(cur, r);
+        }
+        r.total += 1;
+        if (status === IngestionStatus.FAILED) r.failed += 1;
+        else if (status === IngestionStatus.PROCESSING) r.processing += 1;
+        else if (status === IngestionStatus.PENDING) r.pending += 1;
+        cur = nodes[cur]?.parentId ?? null;
+      }
+    }
+    return map;
+  }, [isAtRoot, collectionId, allCollectionFiles, nodes]);
+
   // ── Build entries ────────────────────────────────────────────────────
   const entries: CollectionChild[] = useMemo(() => {
     if (isAtRoot) {
@@ -275,17 +332,44 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     return childIds
       .map(id => nodes[id])
       .filter((n): n is CollectionTreeNode => Boolean(n))
-      .map(node => ({
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        size: node.size ?? 0,
-        updatedAt: node.updatedAt,
-        ingestionStatus: node.uploadStatus,
-        mimeType: node.mimeType ?? '',
-        parentId: node.parentId,
-      }));
-  }, [isAtRoot, globalCollections.collections, spParentId, nodes, rootChildrenIds]);
+      .map(node => {
+        const child: CollectionChild = {
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          size: node.size ?? 0,
+          updatedAt: node.updatedAt,
+          ingestionStatus: node.uploadStatus,
+          mimeType: node.mimeType ?? '',
+          parentId: node.parentId,
+        };
+        // Give subfolders the same rolled-up status badge as root collections.
+        if (node.type === 'FOLDER') {
+          const r = subfolderRollup.get(node.id);
+          if (r && r.total > 0) {
+            child.ingestionStatus =
+              r.processing > 0
+                ? IngestionStatus.PROCESSING
+                : r.pending > 0
+                  ? IngestionStatus.PENDING
+                  : r.failed > 0
+                    ? IngestionStatus.FAILED
+                    : null;
+            child.fileTotal = r.total;
+            child.fileFailed = r.failed;
+            child.fileIngested = r.total - r.failed - r.processing - r.pending;
+          }
+        }
+        return child;
+      });
+  }, [
+    isAtRoot,
+    globalCollections.collections,
+    spParentId,
+    nodes,
+    rootChildrenIds,
+    subfolderRollup,
+  ]);
 
   const folderCount = entries.filter(e => e.type === 'FOLDER').length;
   const fileCount = entries.filter(e => e.type === 'FILE').length;
@@ -459,9 +543,25 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // Open the per-collection ingestion status drawer (root badge click).
   const onOpenStatus = useCallback(
     (entry: CollectionChild): void => {
-      setStatusFor({ id: entry.id, name: entry.name, location: locationOf(entry) });
+      if (isAtRoot) {
+        setStatusFor({
+          id: entry.id,
+          name: entry.name,
+          location: locationOf(entry),
+          rootCollectionId: entry.id,
+        });
+        return;
+      }
+      if (!collectionId) return;
+      // Subfolder: scope the drawer to files under this folder (itself + descendants).
+      setStatusFor({
+        id: entry.id,
+        name: entry.name,
+        rootCollectionId: collectionId,
+        folderIds: collectSubtreeFolderIds(entry.id, nodes),
+      });
     },
-    [locationOf],
+    [isAtRoot, collectionId, locationOf, nodes],
   );
 
   // ── Open entry ───────────────────────────────────────────────────────
@@ -977,7 +1077,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
-                  {...(isAtRoot ? { folderCaption: locationOf, onShare, onOpenStatus } : {})}
+                  onOpenStatus={onOpenStatus}
+                  {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
                 />
               ) : (
                 <EntryListV2
@@ -992,10 +1093,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
+                  onOpenStatus={onOpenStatus}
                   {...(isAtRoot
                     ? {
                         onShare,
-                        onOpenStatus,
                         resolveColumnValue: (entry, key): string | undefined =>
                           key === 'location' ? locationOf(entry) : undefined,
                       }

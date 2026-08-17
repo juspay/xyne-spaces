@@ -12,6 +12,11 @@ export interface StatusDrawerTarget {
   name: string;
   /** "#channel · project" line, precomputed by the screen. */
   location?: string;
+  /** Root collection to query files from (files are keyed by rootCollectionId). */
+  rootCollectionId: string;
+  /** When set (a subfolder), only show files whose immediate parent is one of these
+   *  folder ids (the subfolder + its descendants). Absent = the whole collection. */
+  folderIds?: string[];
 }
 
 interface CollectionStatusDrawerProps {
@@ -61,12 +66,17 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
   const open = collection !== null;
 
   const [files] = useCachedQuery(
-    queries.collectionFilesByRoot({ rootCollectionId: collection?.id ?? '' }),
+    queries.collectionFilesByRoot({ rootCollectionId: collection?.rootCollectionId ?? '' }),
     open,
   );
 
   const { rows, ready, processing, queued, failed } = useMemo(() => {
-    const list = (files ?? []).map(f => ({
+    // A subfolder target scopes to files under it (by immediate-parent folder id).
+    const folderIds = collection?.folderIds ? new Set(collection.folderIds) : null;
+    const scoped = folderIds
+      ? (files ?? []).filter(f => folderIds.has(f.collectionId))
+      : (files ?? []);
+    const list = scoped.map(f => ({
       id: f.id,
       name: f.name,
       size: f.attachment?.size ?? 0,
@@ -79,7 +89,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
       queued: list.filter(r => r.state === 'queued').length,
       failed: list.filter(r => r.state === 'failed').length,
     };
-  }, [files]);
+  }, [files, collection?.folderIds]);
 
   // Header pill mirrors the card badge's priority: failures first, then active
   // work, then queued, else all-ready.
