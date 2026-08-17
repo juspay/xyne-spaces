@@ -18,12 +18,20 @@ import {
 export class TeamIntelligenceTeamController {
   private async resolveCallerOrgId(req: Request): Promise<string | null> {
     const workspaceId = req.user?.workspaceId;
-    if (!workspaceId) return null;
+    if (!workspaceId) {
+      logger.warn('[TeamIntelligenceTeam] resolveCallerOrgId: no workspaceId on request');
+      return null;
+    }
     const mapping = await db.workspaceOrganization.findFirst({
       where: { workspaceId },
       select: { orgId: true },
     });
-    return mapping?.orgId ?? null;
+    if (!mapping?.orgId) {
+      logger.warn('[TeamIntelligenceTeam] resolveCallerOrgId: no org mapping found for caller workspace');
+      return null;
+    }
+    logger.info('[TeamIntelligenceTeam] resolveCallerOrgId: org context resolved for caller, applying org filter');
+    return mapping.orgId;
   }
 
   /** Returns one independently paginated section from the newest team snapshot. */
@@ -63,6 +71,13 @@ export class TeamIntelligenceTeamController {
       });
       const snapshot = result.snapshots[0];
       if (!snapshot?.summary) {
+        logger.warn('[TeamIntelligenceTeam] No team leadership snapshot found for caller org', {
+          endpoint: 'getTeamLeadershipSection',
+          section,
+          teamId,
+          from,
+          to,
+        });
         res.status(404).json({ error: 'No team leadership snapshot found' });
         return;
       }
@@ -115,7 +130,16 @@ export class TeamIntelligenceTeamController {
         page,
         limit,
       });
-
+      if (result.total === 0) {
+        logger.warn('[TeamIntelligenceTeam] No team bullets found for caller org', {
+          endpoint: 'getTeamBullets',
+          teamId,
+          from,
+          to,
+          page,
+          limit,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceTeam] getTeamBullets error', { err });
@@ -153,6 +177,14 @@ export class TeamIntelligenceTeamController {
         teamId,
         orgId,
       });
+      if (!result.snapshots || result.snapshots.length === 0) {
+        logger.warn('[TeamIntelligenceTeam] No team leadership snapshots found for caller org', {
+          endpoint: 'getTeamLeadershipSnapshots',
+          teamId,
+          from,
+          to,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceTeam] getTeamLeadershipSnapshots error', { err });

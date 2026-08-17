@@ -18,12 +18,20 @@ import {
 export class TeamIntelligenceOrgController {
   private async resolveCallerOrgId(req: Request): Promise<string | null> {
     const workspaceId = req.user?.workspaceId;
-    if (!workspaceId) return null;
+    if (!workspaceId) {
+      logger.warn('[TeamIntelligenceOrg] resolveCallerOrgId: no workspaceId on request');
+      return null;
+    }
     const mapping = await db.workspaceOrganization.findFirst({
       where: { workspaceId },
       select: { orgId: true },
     });
-    return mapping?.orgId ?? null;
+    if (!mapping?.orgId) {
+      logger.warn('[TeamIntelligenceOrg] resolveCallerOrgId: no org mapping found for caller workspace');
+      return null;
+    }
+    logger.info('[TeamIntelligenceOrg] resolveCallerOrgId: org context resolved for caller, applying org filter');
+    return mapping.orgId;
   }
 
   /** Groups teams by their highest active goal track and all available evidence. */
@@ -79,6 +87,12 @@ export class TeamIntelligenceOrgController {
       });
       const snapshot = result.snapshots[0];
       if (!snapshot) {
+        logger.warn('[TeamIntelligenceOrg] No org leadership snapshot found for caller org', {
+          endpoint: 'getOrgLeadershipSection',
+          section,
+          from,
+          to,
+        });
         res.status(404).json({ error: 'No organization leadership snapshot found' });
         return;
       }
@@ -132,6 +146,13 @@ export class TeamIntelligenceOrgController {
         from: fromDate,
         to: toDate,
       });
+      if (result.snapshots.length === 0) {
+        logger.warn('[TeamIntelligenceOrg] No org leadership snapshots found for caller org', {
+          endpoint: 'getOrgLeadershipSnapshots',
+          from,
+          to,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceOrg] getOrgLeadershipSnapshots error', { err });
@@ -176,7 +197,13 @@ export class TeamIntelligenceOrgController {
         to: toDate,
         orgId,
       });
-
+      if (!result || (Array.isArray(result.orgSummary) && result.orgSummary.length === 0)) {
+        logger.warn('[TeamIntelligenceOrg] No org summary data found for caller org', {
+          endpoint: 'getOrgSummary',
+          from,
+          to,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceOrg] getOrgSummary error', { err });
@@ -224,7 +251,15 @@ export class TeamIntelligenceOrgController {
         limit,
         orgId,
       });
-
+      if (result.total === 0) {
+        logger.warn('[TeamIntelligenceOrg] No org bullets found for caller org', {
+          endpoint: 'getOrgBullets',
+          from,
+          to,
+          page,
+          limit,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceOrg] getOrgBullets error', { err });
@@ -267,7 +302,13 @@ export class TeamIntelligenceOrgController {
         to: toDate,
         orgId,
       });
-
+      if (!result.teams || result.teams.length === 0) {
+        logger.warn('[TeamIntelligenceOrg] No org teams found for caller org', {
+          endpoint: 'getOrgTeams',
+          from,
+          to,
+        });
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceOrg] getOrgTeams error', { err });
