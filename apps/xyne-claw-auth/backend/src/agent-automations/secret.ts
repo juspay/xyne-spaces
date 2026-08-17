@@ -64,3 +64,21 @@ export function storedSecretMatches(candidate: string, storedRaw: string): boole
   if (a.length !== b.length) return false; // timingSafeEqual throws on length mismatch
   return timingSafeEqual(a, b);
 }
+
+/**
+ * Seal an arbitrary secret string (e.g. a per-source signing secret) for at-rest
+ * storage in a text column. Same AES-256-GCM envelope as the URL secret but a
+ * DISTINCT purpose: this value must be DECRYPTED at verify time (to recompute an
+ * HMAC), whereas the URL secret is only ever compared. Returns the serialised
+ * encrypted blob; the plaintext is never persisted.
+ */
+export function sealSecret(plaintext: string): string {
+  return serializeStoredSecret(encrypt(plaintext, CONFIG.encryptionKey));
+}
+
+/** Reverse of sealSecret — returns the plaintext signing secret. Throws on a
+ *  malformed/undecryptable blob so the caller can fail closed (401). */
+export function openSecret(storedRaw: string): string {
+  const stored = parseStoredSecret(storedRaw);
+  return decrypt(stored.ciphertext, stored.iv, stored.authTag, CONFIG.encryptionKey);
+}

@@ -24,7 +24,8 @@ import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { assertMatchesSchema } from "../agent-automations/declared-schema.js";
 import { matchesPredicate, type Predicate } from "../agent-automations/predicate.js";
-import { issueSecret, serializeStoredSecret, storedSecretMatches } from "../agent-automations/secret.js";
+import { issueSecret, serializeStoredSecret, storedSecretMatches, sealSecret, openSecret } from "../agent-automations/secret.js";
+import { verifySignature, isKnownVerifier, knownVerifierSources } from "../agent-automations/verify.js";
 import { dispatchAutomationRun } from "../agent-automations/dispatch.js";
 
 const log = createLogger("agent-automations");
@@ -55,6 +56,17 @@ function safeHeaders(req: Request): Record<string, string> {
   return out;
 }
 
+// All headers, lower-cased, for signature verification (the signature header
+// itself must survive — so this does NOT strip like safeHeaders).
+function lowerHeaders(req: Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === "string") out[k.toLowerCase()] = v;
+    else if (Array.isArray(v)) out[k.toLowerCase()] = v.join(", ");
+  }
+  return out;
+}
+
 function deliveryIdFor(req: Request, body: unknown): string {
   const hdr =
     (req.headers["x-delivery-id"] as string) ||
@@ -72,7 +84,8 @@ function deliveryIdFor(req: Request, body: unknown): string {
 export const agentAutomationsHooksRouter = Router();
 
 agentAutomationsHooksRouter.post("/:automationId/:secret", async (req: Request, res: Response) => {
-  const { automationId, secret } = req.params;
+  const automationId = String(req.params.automationId ?? "");
+  const secret = String(req.params.secret ?? "");
 
   const auto = await prisma.agentAutomation.findFirst({ where: { id: automationId } }).catch(() => null);
   // Uniform 404 for "not found" AND "not active" so the endpoint can't be probed.
@@ -83,6 +96,34 @@ agentAutomationsHooksRouter.post("/:automationId/:secret", async (req: Request, 
   if (!auto.secret || !storedSecretMatches(secret, auto.secret)) {
     res.status(401).json({ error: "invalid secret" });
     return;
+  }
+
+  // Optional per-source signature verification (defense-in-depth on top of the
+  // URL secret). Byte-exact: uses req.rawBody captured by main.ts, never a
+  // re-serialised body. An unknown/misconfigured verifier fails closed.
+  if (auto.verifySource) {
+    if (!auto.signingSecret) {
+      log.error(`[hooks] verifySource set without signingSecret automation=${auto.id}`);
+      res.status(401).json({ error: "verification misconfigured" });
+      return;
+    }
+    let signingSecret: string;
+    try {
+      signingSecret = openSecret(auto.signingSecret);
+    } catch {
+      res.status(401).json({ error: "verification misconfigured" });
+      return;
+    }
+    const vr = verifySignature(auto.verifySource, {
+      rawBody: (req as unknown as { rawBody?: Buffer }).rawBody,
+      headers: lowerHeaders(req),
+      signingSecret,
+      signatureHeader: auto.signatureHeader,
+    });
+    if (!vr.ok) {
+      res.status(401).json({ error: "signature verification failed" });
+      return;
+    }
   }
 
   const body = (req.body ?? {}) as Record<string, unknown>;
@@ -112,8 +153,13 @@ agentAutomationsHooksRouter.post("/:automationId/:secret", async (req: Request, 
     return;
   }
 
-  // Lifetime caps → 202 (accepted, not run).
+  // Lifetime caps → 202 (accepted, not run). An expired automation is also
+  // transitioned to EXPIRED so the ingress stops matching it (uniform 404
+  // thereafter) and it drops out of the active set.
   if (auto.expiresAt && auto.expiresAt.getTime() < Date.now()) {
+    await prisma.agentAutomation
+      .update({ where: { id: auto.id }, data: { status: STATUS.EXPIRED, secret: null } })
+      .catch(() => undefined);
     res.status(202).json({ status: "skipped", reason: "expired" });
     return;
   }
@@ -205,6 +251,9 @@ agentAutomationsRouter.post("/", async (req: Request, res: Response) => {
     taskTemplate?: string;
     maxRuns?: number;
     expiresAt?: string;
+    verifySource?: string;
+    signingSecret?: string;
+    signatureHeader?: string;
   };
 
   // Force ownership to the authed requester; only S2S or admins may set another.
@@ -231,6 +280,22 @@ agentAutomationsRouter.post("/", async (req: Request, res: Response) => {
     return;
   }
 
+  // Optional signature verification config. Reject an unknown verifier at
+  // propose-time (fail loud) rather than letting it silently no-op at ingress.
+  // A verifier requires a signing secret; we seal it (AES-256-GCM) before store.
+  let sealedSigningSecret: string | null = null;
+  if (b.verifySource) {
+    if (!isKnownVerifier(b.verifySource)) {
+      res.status(400).json({ success: false, error: `unknown verifySource; known: ${knownVerifierSources().join(", ")}` });
+      return;
+    }
+    if (!b.signingSecret) {
+      res.status(400).json({ success: false, error: "signingSecret is required when verifySource is set" });
+      return;
+    }
+    sealedSigningSecret = sealSecret(b.signingSecret);
+  }
+
   const created = await prisma.agentAutomation.create({
     data: {
       orgId,
@@ -248,6 +313,9 @@ agentAutomationsRouter.post("/", async (req: Request, res: Response) => {
       status: STATUS.PENDING,
       maxRuns: b.maxRuns ?? null,
       expiresAt: b.expiresAt ? new Date(b.expiresAt) : null,
+      verifySource: b.verifySource ?? null,
+      signingSecret: sealedSigningSecret,
+      signatureHeader: b.signatureHeader ?? null,
     },
   });
 
@@ -291,6 +359,34 @@ agentAutomationsRouter.post("/:id/approve", async (req: Request, res: Response) 
   res.json({ success: true, id: auto.id, status: STATUS.ACTIVE, webhookUrl: url });
 });
 
+// Rotate the URL secret — interactive requester only, same-org (admins may
+// cross-user). Invalidates the previous URL immediately and returns the new one
+// exactly ONCE. Only meaningful for an ACTIVE automation.
+agentAutomationsRouter.post("/:id/rotate-secret", async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(403).json({ success: false, error: "rotation requires an interactive user" });
+    return;
+  }
+  const auto = await prisma.agentAutomation.findFirst({ where: { id: req.params.id } });
+  if (!auto) {
+    res.status(404).json({ success: false, error: "not found" });
+    return;
+  }
+  if (auto.status !== STATUS.ACTIVE) {
+    res.status(409).json({ success: false, error: `cannot rotate from status ${auto.status}` });
+    return;
+  }
+  if (auto.createdByUserId !== requesterId && !(await isClawAdmin(requesterId))) {
+    res.status(403).json({ success: false, error: "not permitted" });
+    return;
+  }
+  const { plaintext, stored } = issueSecret();
+  await prisma.agentAutomation.update({ where: { id: auto.id }, data: { secret: serializeStoredSecret(stored) } });
+  const url = `${PUBLIC_BASE}${HOOK_PATH}/${auto.id}/${plaintext}`;
+  res.json({ success: true, id: auto.id, webhookUrl: url });
+});
+
 agentAutomationsRouter.get("/", async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req);
   const where = requesterId ? { createdByUserId: requesterId } : {};
@@ -332,6 +428,6 @@ agentAutomationsInternalRouter.post("/runs/:runId/result", async (req: Request, 
       where: { id: req.params.runId },
       data: { status: status ?? "COMPLETED", error: error ?? null, completedAt: new Date() },
     })
-    .catch((e) => log.warn(`[result] update failed run=${req.params.runId}: ${e instanceof Error ? e.message : e}`));
+    .catch((e: unknown) => log.warn(`[result] update failed run=${req.params.runId}: ${e instanceof Error ? e.message : e}`));
   res.json({ success: true });
 });

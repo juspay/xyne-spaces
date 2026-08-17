@@ -94,7 +94,9 @@ export async function dispatchAutomationRun(input: AutomationDispatchInput): Pro
     if (!res.ok || !body.success) {
       return { success: false, error: body.error ?? `run dispatch HTTP ${res.status}` };
     }
-    return { success: true, sessionId: body.sessionId };
+    // Conditional spread: with exactOptionalPropertyTypes an optional field must
+    // be OMITTED rather than set to undefined.
+    return body.sessionId ? { success: true, sessionId: body.sessionId } : { success: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     log.error(`dispatch failed for automation=${input.automationId} delivery=${input.deliveryId}: ${error}`);

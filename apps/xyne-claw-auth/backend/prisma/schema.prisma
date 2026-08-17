@@ -2394,6 +2394,13 @@ model AgentAutomation {
   // Encrypted-at-rest (AES-256-GCM) capability secret embedded in the webhook
   // URL. Null until approved; cleared on revoke. Rotatable.
   secret           String?
+  // Optional per-source signature verification (defense-in-depth ON TOP of the
+  // URL secret). verifySource names a registered verifier in
+  // agent-automations/verify.ts; signingSecret is encrypted-at-rest; signatureHeader
+  // overrides the verifier's default header. All null = URL secret only.
+  verifySource     String?
+  signingSecret    String?
+  signatureHeader  String?
   status           String    @default("PENDING_APPROVAL")
   maxRuns          Int?
   runCount         Int       @default(0)
