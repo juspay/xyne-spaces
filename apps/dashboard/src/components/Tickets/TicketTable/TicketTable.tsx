@@ -10,6 +10,7 @@ import {
   IHeaderParams,
   RowClickedEvent,
   GridReadyEvent,
+  ValueGetterParams,
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { BoardType, isDeskChannelType } from '@xyne/shared';
@@ -404,6 +405,27 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             </Tooltip>
           );
         },
+      },
+
+      {
+        key: 'age',
+        colId: 'age',
+        headerName: 'Age',
+        minWidth: 80,
+        // Sorts on days elapsed, not createdAt — that would invert the order.
+        valueGetter: (params: ValueGetterParams<Ticket>) => {
+          const createdAt = params.data?.createdAt;
+          if (!createdAt) return null;
+          const created = new Date(createdAt);
+          if (Number.isNaN(created.getTime())) return null;
+          return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
+        },
+        cellRenderer: (params: ICellRendererParams<Ticket>) =>
+          typeof params.value === 'number' ? (
+            <span className='text-sm text-muted-foreground whitespace-nowrap'>{params.value}d</span>
+          ) : (
+            <span className='text-muted-foreground'>—</span>
+          ),
       },
 
       {

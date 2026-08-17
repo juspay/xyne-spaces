@@ -85,6 +85,7 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 const PAGE_SIZE = 15;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
   const [hour = 0, minute = 0] = time.split(':').map(Number);
@@ -104,6 +105,11 @@ export const formatDuration = (seconds: number | null): string => {
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 };
+
+// Whole days since creation, shared by the ticket table and its CSV export so
+// the two never drift.
+const ageInDays = (createdAtMs: number): number =>
+  Math.max(0, Math.floor((Date.now() - createdAtMs) / DAY_MS));
 
 const priorityLabel = (p: string): string =>
   p.charAt(0) + p.slice(1).toLowerCase().replace(/_/g, ' ');
@@ -126,6 +132,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     'CSAT',
     ...customKeys,
     'Created At',
+    'Age',
   ];
   const rows = tickets.map(t => [
     t.xyneId ?? t.ticketId.slice(0, 8),
@@ -139,6 +146,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     t.csatScore !== null ? `${t.csatScore.toFixed(1)}/5` : (t.csatRating ?? '—'),
     ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
     `"${new Date(t.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}"`,
+    `${ageInDays(t.createdAt)}d`,
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -600,13 +608,19 @@ const MetricsTicketTable = ({
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 CSAT
               </th>
-              {customFieldKeys.length > 0 && (
-                <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-                  Custom Fields
+              {customFieldKeys.map(key => (
+                <th
+                  key={key}
+                  className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'
+                >
+                  {key}
                 </th>
-              )}
+              ))}
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Created At
+              </th>
+              <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Age
               </th>
             </tr>
           </thead>
@@ -652,57 +666,14 @@ const MetricsTicketTable = ({
                     ? `${row.csatScore.toFixed(1)}/5`
                     : (row.csatRating ?? '—')}
                 </td>
-                {customFieldKeys.length > 0 && (
-                  <td className='px-4 py-2'>
-                    {row.customFields && Object.keys(row.customFields).length > 0 ? (
-                      <Popover
-                        side='top'
-                        align='start'
-                        sideOffset={8}
-                        collisionPadding={16}
-                        hideWhenDetached={true}
-                        trigger={
-                          <button
-                            type='button'
-                            className='inline-flex items-center gap-1 rounded-[6px] border border-desk-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground dark:border-border'
-                            data-track-category='DeskMetrics'
-                            data-track-name='CustomFieldsPopover'
-                          >
-                            {Object.keys(row.customFields).length} fields
-                            <ChevronDown size={10} />
-                          </button>
-                        }
-                        className='p-0'
-                      >
-                        <div className='min-w-[180px] max-w-[320px]'>
-                          <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                            Custom Fields
-                          </div>
-                          <div
-                            className='max-h-48 overflow-y-auto'
-                            onWheel={e => e.stopPropagation()}
-                          >
-                            {Object.entries(row.customFields).map(([key, val]) => (
-                              <div
-                                key={key}
-                                className='flex items-start gap-2 px-3 py-1.5 text-xs odd:bg-muted/30'
-                              >
-                                <span className='w-24 shrink-0 font-medium text-foreground'>
-                                  {key}
-                                </span>
-                                <span className='min-w-0 break-words text-muted-foreground'>
-                                  {val || '—'}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </Popover>
-                    ) : (
-                      <span className='text-xs text-muted-foreground'>—</span>
-                    )}
+                {customFieldKeys.map(key => (
+                  <td
+                    key={key}
+                    className='whitespace-nowrap px-4 py-2 text-xs text-muted-foreground'
+                  >
+                    <div className='max-w-[160px] truncate'>{row.customFields?.[key] || '—'}</div>
                   </td>
-                )}
+                ))}
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
                   {new Date(row.createdAt).toLocaleString(undefined, {
                     month: 'short',
@@ -710,6 +681,9 @@ const MetricsTicketTable = ({
                     hour: '2-digit',
                     minute: '2-digit',
                   })}
+                </td>
+                <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
+                  {ageInDays(row.createdAt)}d
                 </td>
               </tr>
             ))}
