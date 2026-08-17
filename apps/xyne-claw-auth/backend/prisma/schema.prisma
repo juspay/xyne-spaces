@@ -2358,3 +2358,75 @@ model EntityExtractionRun {
   @@index([workspaceId, status])
   @@map("entity_extraction_runs")
 }
+
+// ---------------------------------------------------------------------------
+// Agent-automations — self-proposed, event-driven agent wakeups.
+// An agent proposes ("wake me on this thread when a comment lands on PR #123");
+// a human approves; a generic signed webhook then wakes the agent INSIDE the
+// original conversationId each time a matching event arrives. Design mirrors
+// xyne-spaces' generic external WEBHOOK trigger — see
+// src/routes/agent-automations.ts and src/agent-automations/README.md.
+// ---------------------------------------------------------------------------
+model AgentAutomation {
+  id               String    @id @default(cuid())
+  orgId            String
+  // Owning user — runs execute AS this user; set from the proposer.
+  createdByUserId  String
+  // The human who approved (activated) the automation. HITL gate.
+  approvedByUserId String?
+  agentSlug        String
+  // ORIGINAL thread the agent resumes on each wakeup (NOT a fresh session).
+  conversationId   String
+  channelId        String?
+  workspaceId      String?
+  // Free-form event source label ("generic", "github", "stripe", ...). Does
+  // NOT switch code paths — ingress is vendor-agnostic; optional per-source
+  // signature verification can key off this later.
+  source           String    @default("generic")
+  eventType        String    @default("webhook")
+  // Declared body/header schemas (recursive record of field-type leaves) used
+  // to reject malformed payloads at ingress. See agent-automations/declared-schema.ts.
+  bodySchema       Json?
+  headerSchema     Json?
+  // Optional flat dot-path→value predicate scoping to one resource (e.g. PR #123).
+  matchPredicate   Json?
+  taskTemplate     String    @db.Text
+  // Encrypted-at-rest (AES-256-GCM) capability secret embedded in the webhook
+  // URL. Null until approved; cleared on revoke. Rotatable.
+  secret           String?
+  status           String    @default("PENDING_APPROVAL")
+  maxRuns          Int?
+  runCount         Int       @default(0)
+  lastRunAt        DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  runs AgentAutomationRun[]
+
+  @@index([orgId])
+  @@index([createdByUserId])
+  @@index([status])
+  @@index([conversationId])
+  @@map("agent_automations")
+}
+
+model AgentAutomationRun {
+  id           String          @id @default(cuid())
+  automationId String
+  automation   AgentAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  // Stable per-delivery id — the idempotency boundary. A retried webhook with
+  // the same deliveryId loses the unique-insert race and is treated as a dup.
+  deliveryId   String
+  // xyne-claw run/session id once dispatched.
+  agentRunId   String?
+  status       String
+  error        String?         @db.Text
+  startedAt    DateTime        @default(now())
+  completedAt  DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@unique([automationId, deliveryId])
+  @@index([automationId])
+  @@map("agent_automation_runs")
+}
