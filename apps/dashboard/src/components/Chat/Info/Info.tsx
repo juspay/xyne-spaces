@@ -118,7 +118,36 @@ const Info = ({
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: channel.id }),
+  );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: channel.projectId }),
+  );
+
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      console.info('[boardsByChannel] Info panel using ChannelBoardMapping', {
+        channelId: channel.id,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    console.info('[boardsByChannel] Info panel falling back to boardsListByProject', {
+      channelId: channel.id,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {

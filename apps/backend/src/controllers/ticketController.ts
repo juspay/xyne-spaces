@@ -483,15 +483,34 @@ export class TicketController {
         }
 
         const channel = await this.channelRepository.findById(cacConfig.channelId);
-        if (!channel?.projectId) {
-          res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+        if (!channel) {
+          res.status(503).json({ error: 'Support channel not found.' });
           return;
         }
 
         req.body.channelId = cacConfig.channelId;
-        req.body.projectId = channel.projectId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
+          const board = await this.boardRepository.findBoardById(cacConfig.boardId);
+          if (!board?.projectId) {
+            res.status(503).json({ error: 'Support board has no project mapping.' });
+            return;
+          }
+          req.body.projectId = board.projectId;
+        } else {
+          // No explicit board configured — fall back to the channel's oldest board
+          // mapping and derive projectId from board.projectId, never from channel.projectId.
+          const mapping = await db.channelBoardMapping.findFirst({
+            where: { channelId: channel.id },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+            include: { board: { select: { projectId: true } } },
+          });
+          const mappedProjectId = mapping?.board?.projectId;
+          if (!mappedProjectId) {
+            res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+            return;
+          }
+          req.body.projectId = mappedProjectId;
         }
         req.body.tags = ['Support Ticket'];
       }
@@ -502,7 +521,7 @@ export class TicketController {
         title,
         description,
         assignedTo,
-        projectId,
+        projectId: clientProjectId,
         userGroupId,
         statusV2,
         priority,
@@ -520,6 +539,8 @@ export class TicketController {
         ticketType,
         stageName
       }: CreateTicketRequest & { parentTicketId?: string } = req.body;
+
+      let projectId = clientProjectId;
 
       const fromTicketsTab = req.body.fromTicketsTab === true || req.body.fromTicketsTab === 'true';
 
@@ -657,6 +678,9 @@ export class TicketController {
       const initialMessageId = randomUUID();
 
       const board = await this.boardRepository.findBoardById(boardId);
+      if (board?.projectId) {
+        projectId = board.projectId;
+      }
       const effectiveStatusV2 =
         board?.boardType === BoardType.FLOW ? TicketStatusV2.TODO : (statusV2 as TicketStatusV2);
       const effectiveStageName = board?.boardType === BoardType.FLOW ? 'TODO' : stageName;

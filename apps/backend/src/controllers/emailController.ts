@@ -987,13 +987,13 @@ export class EmailController {
       try {
         let boardId: string | undefined =
           preference?.boardId ?? externalSource.boardId ?? undefined;
-        if (!boardId && channel.projectId) {
-          const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true },
+        if (!boardId) {
+          const mapping = await db.channelBoardMapping.findFirst({
+            where: { channelId },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+            select: { boardId: true },
           });
-          boardId = firstBoard?.id;
+          boardId = mapping?.boardId;
         }
 
         const created = await emailService.createConversationWithEmail({

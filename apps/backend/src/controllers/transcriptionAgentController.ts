@@ -152,23 +152,32 @@ class TranscriptionAgentController {
         return;
       }
 
-      // 4. Determine boardId - use from request, or get default board for project
+      // 4. Determine boardId - use from request, or get default board for channel
       let boardId = requestBoardId;
+      let boardProjectId: string | undefined;
       if (!boardId) {
-        // Get first board for the project as default
-        const defaultBoard = await db.board.findFirst({
-          where: { projectId: channel.projectId },
-          orderBy: { createdAt: 'asc' },
+        // Get default board via ChannelBoardMapping (isDefault, or oldest)
+        const mapping = await db.channelBoardMapping.findFirst({
+          where: { channelId: channel.id },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          include: { board: { select: { id: true, name: true, projectId: true } } },
         });
 
-        if (!defaultBoard) {
-          logger.error(`[TicketTool] No board found for project: ${channel.projectId}`);
-          res.status(400).json({ success: false, error: 'No board found for project' });
+        if (!mapping?.board) {
+          logger.error(`[TicketTool] No board found for channel: ${channel.id}`);
+          res.status(400).json({ success: false, error: 'No board found for channel' });
           return;
         }
 
-        boardId = defaultBoard.id;
-        logger.info(`[TicketTool] Using default board: ${defaultBoard.name} (${boardId})`);
+        boardId = mapping.board.id;
+        boardProjectId = mapping.board.projectId ?? undefined;
+        logger.info(`[TicketTool] Using default board: ${mapping.board.name} (${boardId})`);
+      } else {
+        const board = await db.board.findUnique({
+          where: { id: boardId },
+          select: { projectId: true },
+        });
+        boardProjectId = board?.projectId ?? undefined;
       }
 
       // 5. Create ticket using shared method
@@ -178,7 +187,7 @@ class TranscriptionAgentController {
         createdBy: call.createdByUserId,
         updatedBy: call.createdByUserId,
         conversationId,
-        projectId: channel.projectId,
+        projectId: boardProjectId!,
         boardId,
         assignedTo: assignedTo || undefined,
         priority: (priority.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'),

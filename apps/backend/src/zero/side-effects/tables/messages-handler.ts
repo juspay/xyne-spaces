@@ -337,7 +337,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true }
+        select: { name: true, scopeType: true }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -353,13 +353,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { allowThreadBroadcastMentions: true },
       })),
     ]);
-
-    const channelProject = channel?.projectId
-      ? await db.project.findUnique({
-          where: { id: channel.projectId },
-          select: { name: true },
-        })
-      : null;
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
@@ -426,7 +419,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         : extractSpecialMentions(contentForMentions);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
 
-    if (channel?.projectId && !isDMChannel) {
+    if (!isDMChannel) {
       // Emit a synthetic MESSAGE/SENT activity event.
       // This flows through activityTrackingService -> nudge framework.
       // Fires for both parent messages and replies to enable link-paste detection.
@@ -443,7 +436,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId,
           channelId,
-          projectId: channel.projectId,
           senderId,
         },
       });
@@ -478,7 +470,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
               originalMessageId,
               conversationId,
               channelId,
-              projectId: channel.projectId,
               senderId,
             },
           });
@@ -576,8 +567,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
-        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -606,8 +595,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       senderName,
       channelId,
       channelName: channel?.name ?? channelId,
-      ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-      ...(channelProject?.name ? { projectName: channelProject.name } : {}),
       mentionedUserIds: nonAppMentionedUserIds,
     };
 
@@ -1965,12 +1952,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
 
       const channelId = conversation?.channelId;
-      const channel = channelId
-        ? await db.channel.findUnique({
-            where: { id: channelId },
-            select: { projectId: true },
-          })
-        : null;
 
       void activityTrackingService.saveActivityEvent({
         user_id: this.ctx.userID,
@@ -1985,7 +1966,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId: conversation?.conversationId,
           channelId,
-          projectId: channel?.projectId,
         },
       });
     } catch (error) {

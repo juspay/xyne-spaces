@@ -1129,22 +1129,24 @@ export class EmailService {
       }
     }
 
-    const projectId = channel.projectId;
-
     // Fetch boardId from EmailChannelPreference table
     const emailChannelPreference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
 
-    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > first board in project
+    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > ChannelBoardMapping (isDefault or oldest)
     let configuredBoardId = passedBoardId || emailChannelPreference?.boardId;
 
     if (!configuredBoardId) {
-      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to first board in project ${projectId}`);
-      const firstBoard = await this.prisma.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
-      configuredBoardId = firstBoard?.id;
+      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to ChannelBoardMapping`);
+      const mapping = await this.prisma.channelBoardMapping.findFirst({
+        where: { channelId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { board: { select: { id: true } } },
+      });
+      configuredBoardId = mapping?.board.id;
     }
 
     if (!configuredBoardId) {
-      logger.error(`[EmailService] No board found for channel ${channelId} in project ${projectId}`);
+      logger.error(`[EmailService] No board found for channel ${channelId}`);
       throw new Error(`EmailChannelPreference must have a boardId configured. Channel: ${channelId}. Please configure boardId in email_channel_preferences table.`);
     }
 
@@ -1155,11 +1157,7 @@ export class EmailService {
       throw new Error(`Configured boardId ${configuredBoardId} not found in database. Please verify email_channel_preferences.boardId points to a valid board.`);
     }
 
-    // Validate that the board belongs to the same project as the channel
-    if (configuredBoard.projectId !== projectId) {
-      logger.error(`[EmailService] Board project mismatch: boardId ${configuredBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
-      throw new Error(`Configured boardId ${configuredBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). Email channel and board must be in the same project.`);
-    }
+    const projectId = configuredBoard.projectId;
 
     const boardId = configuredBoardId;
     logger.info(`[EmailService] Using configured boardId ${boardId} from EmailChannelPreference table`);
@@ -2071,7 +2069,6 @@ export class EmailService {
       );
     }
 
-    const projectId = channel.projectId;
     if (sourceName) {
       try {
         const ctx = createBlockingContext({
@@ -2140,6 +2137,7 @@ export class EmailService {
 
     let boardId: string | undefined;
     let groupId: string | null = null;
+    let projectId: string | undefined;
     if (!existingFirstEmail) {
       const externalSource = await this.prisma.externalSource.findUnique({
         where: { id: externalSourceId },
@@ -2148,17 +2146,22 @@ export class EmailService {
       boardId =
         preference?.boardId ?? externalSource?.boardId ?? undefined;
       if (!boardId) {
-        const firstBoard = await this.prisma.board.findFirst({
-          where: { projectId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
+        const mapping = await this.prisma.channelBoardMapping.findFirst({
+          where: { channelId },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { board: { select: { id: true, projectId: true } } },
         });
-        boardId = firstBoard?.id;
+        boardId = mapping?.board.id;
+        projectId = mapping?.board.projectId ?? undefined;
       }
       if (!boardId) {
         throw new Error(
-          `[EmailService] No board configured for channel ${channelId} (project ${projectId})`,
+          `[EmailService] No board configured for channel ${channelId}`,
         );
+      }
+      if (!projectId) {
+        const board = await this.boardRepository.findById(boardId);
+        projectId = board?.projectId ?? undefined;
       }
       groupId = preference?.assigneeUserGroupId ?? null;
     }
@@ -2225,7 +2228,7 @@ export class EmailService {
             },
           });
 
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId!);
           const createdTicket = await tx.ticket.create({
             data: {
               title: firstEmail.subject,
@@ -2236,7 +2239,7 @@ export class EmailService {
               channelId,
               workspaceId: channel.workspaceId,
               xyneId,
-              projectId,
+              projectId: projectId!,
               boardId: boardId!,
               lastEmailAt: firstEmail.receivedAt ?? new Date(),
               stageName: firstStage.name,
@@ -2517,7 +2520,7 @@ export class EmailService {
       ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
 
       if (groupId) {
-        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId, createdBy: userId };
+        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId: projectId!, createdBy: userId };
         void emitTicketUpdated({
           ticket: ticketForEmit as Parameters<typeof emitTicketUpdated>[0]['ticket'],
           changes: { userGroupId: { previousValue: null, newValue: groupId } },
