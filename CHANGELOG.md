@@ -1,3 +1,15 @@
+## [1.188.0](https://github.com/juspay/xyne-spaces/compare/v1.187.2...v1.188.0) (2026-08-17)
+
+
+### Features
+
+* add canvas archive UI ([#583](https://github.com/juspay/xyne-spaces/issues/583)) ([e66d2b8](https://github.com/juspay/xyne-spaces/commit/e66d2b8726ef08a96769e87edd4f5320dd02e25a))
+
+
+### Bug Fixes
+
+* canvas creation fix ([#630](https://github.com/juspay/xyne-spaces/issues/630)) ([1759f67](https://github.com/juspay/xyne-spaces/commit/1759f679ca142c04f8f258a292159532bcd00bc0))
+
 ## [1.187.2](https://github.com/juspay/xyne-spaces/compare/v1.187.1...v1.187.2) (2026-08-17)
 
 
