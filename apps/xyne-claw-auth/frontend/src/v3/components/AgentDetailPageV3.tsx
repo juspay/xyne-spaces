@@ -982,7 +982,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           adminBusy={adminBusy}
           onClone={() => setCloneDialogOpen(true)}
           cloning={cloning}
-          cloneNeedsApproval={!permissions?.canEdit}
+          cloneNeedsApproval={false} // cloning no longer requires source-owner approval
         />
 
         <div className="flex flex-1 overflow-hidden">
@@ -1169,7 +1169,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         open={cloneDialogOpen}
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
-        needsApproval={!permissions?.canEdit}
+        needsApproval={false} // cloning no longer requires source-owner approval
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}
       />
