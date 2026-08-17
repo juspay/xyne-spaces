@@ -1,3 +1,11 @@
+## [1.189.3](https://github.com/juspay/xyne-spaces/compare/v1.189.2...v1.189.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* flow board ui fixes ([#626](https://github.com/juspay/xyne-spaces/issues/626)) ([f4b2fa2](https://github.com/juspay/xyne-spaces/commit/f4b2fa212522e235472f78f8f9f8591cb2d48757))
+* local otel setup ([#623](https://github.com/juspay/xyne-spaces/issues/623)) ([b93a1bf](https://github.com/juspay/xyne-spaces/commit/b93a1bfdbddb770dc207c75a072f1d29b9a82017))
+
 ## [1.189.2](https://github.com/juspay/xyne-spaces/compare/v1.189.1...v1.189.2) (2026-08-17)
 
 
