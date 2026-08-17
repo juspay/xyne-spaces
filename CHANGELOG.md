@@ -1,3 +1,10 @@
+## [1.189.4](https://github.com/juspay/xyne-spaces/compare/v1.189.3...v1.189.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* optimize Y-Sweet routes and database cleanup logic ([#643](https://github.com/juspay/xyne-spaces/issues/643)) ([b871715](https://github.com/juspay/xyne-spaces/commit/b871715f984835a7c7ee9e41063483702cc0bcd9))
+
 ## [1.189.3](https://github.com/juspay/xyne-spaces/compare/v1.189.2...v1.189.3) (2026-08-17)
 
 
