@@ -45,12 +45,22 @@ export interface SubagentDefinition {
    *  tool sweep. Used for hard retrieval where the first sweep often misses.
    *  Omit/false to keep the default single-sweep guidance. */
   allowRequery?: boolean;
+  /** When true, the PARENT agent may send a FOLLOW-UP question to the SAME
+   *  child session (via the `session_id` this tool returns) instead of spawning
+   *  a fresh subagent that has lost all prior context. The child session is then
+   *  PERSISTED under sessions/{conversationId}/subagents/{name}/{handle}/ so it
+   *  can be resumed, and it rides the existing recursive GCS session archive for
+   *  free. Only enable for read/research subagents where a scoped drill-down on
+   *  the same evidence is the natural next step. Omit/false → always fresh, and
+   *  no session_id parameter is exposed to the parent. */
+  supportsFollowUp?: boolean;
 }
 
 export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [
   // ── Spaces ──────────────────────────────────────────────────────
   {
     name: "spaces",
+    supportsFollowUp: true,
     progressLabels: [
       "🔍 Searching Spaces...",
       "📬 Scanning messages and channels...",
@@ -126,6 +136,7 @@ HARD RULES:
   // ── Bitbucket ───────────────────────────────────────────────────
   {
     name: "bitbucket",
+    supportsFollowUp: true,
     progressLabels: [
       "🔀 Checking Bitbucket...",
       "🌿 Looking up branches and PRs...",
@@ -153,6 +164,7 @@ Return structured findings with relevant identifiers (PR IDs, branch names, comm
   // ── GitHub ──────────────────────────────────────────────────────
   {
     name: "github",
+    supportsFollowUp: true,
     progressLabels: [
       "🐙 Checking GitHub...",
       "🌿 Looking up branches and PRs...",
@@ -206,6 +218,7 @@ Return structured findings (lists of {repo, number, title, state, url} when surf
   // ── Grafana ─────────────────────────────────────────────────────
   {
     name: "grafana",
+    supportsFollowUp: true,
     progressLabels: [
       "📊 Querying Grafana...",
       "📈 Pulling metrics and time ranges...",
@@ -233,6 +246,7 @@ Return structured findings with error counts, metric values, patterns, and time 
   // ── DeepWiki ────────────────────────────────────────────────────
   {
     name: "deepwiki",
+    supportsFollowUp: true,
     progressLabels: [
       "📚 Researching docs...",
       "🧠 Reading the wiki index...",
@@ -265,6 +279,7 @@ Return a concise answer grounded in the actual docs. Cite specific pages when re
   // ── Context7 ────────────────────────────────────────────────────
   {
     name: "context7",
+    supportsFollowUp: true,
     progressLabels: [
       "📖 Fetching library docs...",
       "📦 Resolving the library id...",
