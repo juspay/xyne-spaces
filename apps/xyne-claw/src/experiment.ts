@@ -343,16 +343,34 @@ export function buildExperimentTools(
                 );
               }
             }
-            // A framework opportunity is a COUNT, not an opinion. The failure
-            // mode is "this could be abstracted" with nothing behind it, so a
-            // close must cite at least 3 occurrences — two is a coincidence.
+            // A framework opportunity is a STRUCTURAL claim, not taste — and NOT
+            // just duplication. The old gate demanded ">=3 identical occurrences",
+            // which reduced framework mode to a dedup linter and wrongly refused
+            // the opportunities that matter most (convention drift, missing paved
+            // paths, change-amplification) precisely because their sites VARY.
+            //
+            // Replaced with a tag-agnostic contract the agent self-tags into:
+            //   Tag:        <the agent's own word for the shape of the gap>
+            //   evidence:   at least one file:line the gap actually lives at
+            //   Prevents:   the concrete bug / drift / change-amplification the
+            //               framework would have stopped — this is what separates
+            //               an opportunity from taste, and it holds for ANY tag.
+            // The ledger does NOT judge whether the evidence fits the tag; that
+            // subjective call is the checker's job (experiment-review).
             if (ctx.kind === "framework" && status === "proved") {
               const note = typeof p["note"] === "string" ? p["note"] : "";
-              const citations = note.match(/[\w./-]+\.[A-Za-z][\w]*:\d+/g) ?? [];
-              if (citations.length < 3) {
+              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+              const hasCitation = /[\w./-]+\.[A-Za-z][\w]*:\d+/.test(note);
+              const hasConsequence = /(^|\n)\s*(prevents|consequence):\s*\S/i.test(note);
+              if (!hasTag || !hasCitation || !hasConsequence) {
+                const missing = [
+                  !hasTag ? "a `Tag:` line (your own word for the shape — e.g. convention-drift, missing-paved-path, change-amplification, duplication; reuse a tag already in the ledger if it fits)" : null,
+                  !hasCitation ? "at least one `file.ext:LINE` where the gap lives" : null,
+                  !hasConsequence ? "a `Prevents:` line naming the concrete bug, drift, or change-amplification the framework would have stopped" : null,
+                ].filter(Boolean).join("; ");
                 return textResult(
-                  `Cannot close this opportunity: \`note\` cites ${citations.length} occurrence(s); a framework opportunity needs at least 3, each as file.ext:LINE. Two occurrences is a coincidence, three is a pattern. If you cannot find a third, refute it — the repetition is probably incidental.`,
-                  { error: true, needsOccurrences: true, found: citations.length },
+                  `Cannot close this opportunity — the note is missing: ${missing}. A framework opportunity is not \"this could be abstracted\"; it is a named structural gap with evidence and a cost. If you cannot name what it prevents, it is taste — refute it and move on.`,
+                  { error: true, needsFrameworkContract: true },
                 );
               }
             }
@@ -484,11 +502,20 @@ export function buildExperimentTools(
           // list so the run cannot end (even at the safety cap) until the doc
           // exists. Fail OPEN only when the ledger is unreachable: we cannot
           // strand a finished run on our own inability to check.
-          const hasHtml = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(".html"));
-          if (ledgerReadOk && !hasHtml) {
+          // The deliverable's FORMAT is kind-specific: an understanding run
+          // produces a self-contained .html explanation; a framework run
+          // produces a markdown report of tagged opportunities. Requiring .html
+          // for framework (the old bug) refused every correctly-finished
+          // framework run and told it to draw SVG diagrams for a dedup report.
+          const wantsHtml = ctx.kind === "understanding";
+          const ext = wantsHtml ? ".html" : ".md";
+          const hasDeliverable = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(ext));
+          if (ledgerReadOk && !hasDeliverable) {
             return textResult(
-              `❌ Cannot end: the explanation document has not been delivered (epoch ${ctx.epoch}). Write ONE self-contained .html covering the scope you explained — grouped sections, inline-SVG diagrams (no <script>, no CDN), and a file:line citation for every claim — then send it with sandbox-deliver-files and end again. The frontier is closed; only the deliverable is missing. Your report was NOT accepted.`,
-              { refused: true, reason: "missing-html-artifact" },
+              wantsHtml
+                ? `❌ Cannot end: the explanation document has not been delivered (epoch ${ctx.epoch}). Write ONE self-contained .html covering the scope you explained — grouped sections, inline-SVG diagrams (no <script>, no CDN), and a file:line citation for every claim — then send it with sandbox-deliver-files and end again. The frontier is closed; only the deliverable is missing. Your report was NOT accepted.`
+                : `❌ Cannot end: the report has not been delivered (epoch ${ctx.epoch}). Write ONE markdown report — group the opportunities by their Tag, and for each give the file:line evidence, the abstraction, what it Prevents, and the migration cost — then send it with sandbox-deliver-files and end again. The candidate list is exhausted; only the deliverable is missing. Your report was NOT accepted.`,
+              { refused: true, reason: wantsHtml ? "missing-html-artifact" : "missing-md-artifact" },
             );
           }
         } else if (!pastDeadline) {
