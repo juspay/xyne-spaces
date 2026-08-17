@@ -55,8 +55,6 @@ import {
   railShortcutsAvailable,
 } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
-import { useAILandingDefault } from '../../hooks/useAILandingDefault';
-import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
@@ -155,7 +153,6 @@ const AppSidebar = (): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
-  const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();

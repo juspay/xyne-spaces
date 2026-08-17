@@ -14419,13 +14419,37 @@ export function createMutators(
           updates: z.object({
             name: z.string().optional(),
             description: z.string().optional(),
+            disabledToolbarPaths: z.array(z.string()).optional(),
           }),
         }),
         async ({ tx, args: { workspaceId, timestamp, updates } }) => {
           // ACL check is handled by WorkspacesACL
+          const { disabledToolbarPaths, ...columnUpdates } = updates;
+
+          let metadataUpdate: Record<string, unknown> | undefined;
+          if (disabledToolbarPaths !== undefined) {
+            const admin = await tx.run(
+              zql.users
+                .where('id', authData.sub)
+                .where('workspaceId', workspaceId)
+                .where('role', 'IN', [WorkspaceRole.OWNER, WorkspaceRole.ADMIN])
+                .where('leftAt', 'IS', null)
+                .one(),
+            );
+            if (!admin) throw new Error('Admin access required to change disabled toolbar items');
+
+            const workspace = await tx.run(zql.workspaces.where('id', workspaceId).one());
+            const existingMetadata =
+              workspace?.metadata && typeof workspace.metadata === 'object' && !Array.isArray(workspace.metadata)
+                ? (workspace.metadata as Record<string, unknown>)
+                : {};
+            metadataUpdate = { ...existingMetadata, disabledToolbarPaths };
+          }
+
           await tx.mutate.workspaces.update({
             id: workspaceId,
-            ...updates,
+            ...columnUpdates,
+            ...(metadataUpdate !== undefined ? { metadata: metadataUpdate as ReadonlyJSONValue } : {}),
             updatedAt: timestamp,
           });
         }

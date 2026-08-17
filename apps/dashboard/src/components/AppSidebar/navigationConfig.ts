@@ -29,6 +29,7 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  SparkleAi01,
   type PikaIconProps,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
@@ -67,6 +68,7 @@ export interface NavigationItem {
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
+  { path: '/ai', label: 'Xyne AI', icon: SparkleAi01 },
   { path: '/chat/dir', label: 'Chat', icon: Hashtag },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
