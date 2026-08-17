@@ -5719,7 +5719,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // Notify user if result is empty (but not if copilot has pendingResponses, and
   // not when a capability card was just posted — there the card IS the answer
   // and an apology under it would be nonsense).
-  if (!resultWithCitations.trim() && !payload.pendingResponses?.length && !postedAgentProfileCard) {
+  // ATTACHMENTS COUNT AS AN ANSWER. Without `!payload.attachments?.length` here,
+  // a run whose entire output is a file — a rendered video, a PDF, a report zip —
+  // falls into the empty-result branch: the user is told "I didn't have a final
+  // answer to show" and the file is DROPPED, never posted. Observed live: a
+  // 92 KB explainer.mp4 rendered successfully, the run completed, and the thread
+  // got the apology instead of the video.
+  if (
+    !resultWithCitations.trim() &&
+    !payload.attachments?.length &&
+    !payload.pendingResponses?.length &&
+    !postedAgentProfileCard
+  ) {
     if (ctx.responseMode === "approval") {
       log.warn("Empty result in approval mode — skipping (no thread message)");
       await deleteSession(sessionId);

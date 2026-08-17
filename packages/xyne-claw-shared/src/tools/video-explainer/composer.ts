@@ -152,7 +152,21 @@ function mermaidRuntime(): Buffer | null {
 async function shipMermaidRuntime(session: Session, workDir: string): Promise<boolean> {
   const bundle = mermaidRuntime();
   if (!bundle) return false;
-  await session.files.write(`${workDir}/mermaid.min.js`, bundle);
+  // STREAM, don't write. mermaid.min.js is ~3.3 MB, and files.write base64-encodes
+  // the whole thing into ONE JSON body (~4.4 MB) — which the sandbox rejects with
+  // `request entity too large`. Observed live: every storyboard containing a
+  // diagram scene failed here, while title-only storyboards succeeded, because
+  // this function only runs when a diagram is present. The agent then silently
+  // retried with a single trivial scene rather than surfacing the 413.
+  //
+  // writeStream chunks through the same /write endpoint and appends server-side,
+  // so no single request is large. 1 MiB keeps a wide margin under any body cap
+  // in the router or workspace agent.
+  await session.files.writeStream(
+    `${workDir}/mermaid.min.js`,
+    (async function* () { yield new Uint8Array(bundle); })(),
+    { chunkBytes: 1024 * 1024 },
+  );
   return true;
 }
 
