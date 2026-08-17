@@ -2786,41 +2786,6 @@ async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
     }
 
-    // Agent authoring (agent.config.agentAuthoring): inject the terminal
-    // propose-agent tool so this agent can DRAFT another agent. Gated on the same
-    // interactive-surface conditions as the plan tools — a draft is worthless
-    // without a human to approve its card, so a scheduled/automation run (no one
-    // watching) must never get the tool. Never alongside the other terminal tools
-    // (plan / daily brief own turn termination in their modes).
-    const agentAuthoringEnabled =
-      agentConfig?.["agentAuthoring"] === true &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isPlanMode &&
-      !isDailyBrief;
-    if (agentAuthoringEnabled) {
-      allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
-      log("Agent authoring enabled — injected terminal propose-agent tool");
-    }
-
-    // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
-    // question any agent should answer from its real configuration rather than
-    // from prose the model invents. Gated only on there being somewhere to post
-    // the card — a scheduled/automation run has no one to show it to.
-    //
-    // Deliberately NOT excluded in plan mode: the tool writes nothing (plan
-    // mode's read-only filter passes it through untouched), and an agent
-    // configured to plan first should still be able to say what it is. Twin is
-    // excluded because that flow delivers through its own approval surface.
-    const describeAgentAvailable =
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isDailyBrief;
-    if (describeAgentAvailable) {
-      allTools.push(buildDescribeAgentTool(describeAgentRef));
-    }
 
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
