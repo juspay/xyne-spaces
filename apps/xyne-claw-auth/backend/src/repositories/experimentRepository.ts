@@ -43,7 +43,7 @@ export const experimentRepository = {
     channelId: string;
     agentSlug: string;
     userId: string;
-    orgId?: string | null;
+    orgId: string;
     focus?: string | null;
     provider?: string | null;
     modelId?: string | null;
@@ -56,7 +56,7 @@ export const experimentRepository = {
         channelId: args.channelId,
         agentSlug: args.agentSlug,
         userId: args.userId,
-        orgId: args.orgId ?? null,
+        orgId: args.orgId,
         focus: args.focus ?? null,
         provider: args.provider ?? null,
         modelId: args.modelId ?? null,
