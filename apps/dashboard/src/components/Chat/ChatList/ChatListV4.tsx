@@ -24,6 +24,7 @@ import { useEditContext } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
+import { startOfDay } from 'date-fns';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -46,6 +47,11 @@ export type ChatListProps = {
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
   linkedConversationId?: string | null;
+  // True only for a date jump: a bare `#createdAt=<epoch>` hash with no linked
+  // conversation. Distinguishes a user picking a date from the OTHER carriers of
+  // linkedItemCreatedAt (Unreads-inbox `lastViewedAt` override, search anchors),
+  // which must keep their original cutoff-windowing and landing behavior.
+  isDateJump?: boolean;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
 };
@@ -61,6 +67,15 @@ type UpdatedConveresationsAnchor = {
 };
 
 const PAGE_SIZE = 50;
+
+// Monotonic per-jump nonce. Re-picking the SAME date navigates to the same
+// `#createdAt=X` hash, which alone is not a new location — so the remount key
+// wouldn't change and the list wouldn't re-land. Carrying this nonce in router
+// state makes every jump a distinct location (new key), so the remount fires
+// even for a repeat pick. Module-level so it survives the remount between two
+// consecutive jumps (a per-mount counter would reset to the same value and
+// collide; Date.now() can collide on a sub-millisecond double-click).
+let jumpNavigationSeq = 0;
 
 function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   const map = new Map<string, Conversation>();
@@ -199,6 +214,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
   linkedConversationId,
+  isDateJump = false,
   channelScopeType,
   skipMarkAsReadRef,
 }) => {
@@ -291,6 +307,20 @@ const ChatListV4: React.FC<ChatListProps> = ({
   });
   const initialLinkedIdRef = useRef<string | null>(null);
   const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
+  // True for a short settle window right after a date-jump 'start' landing.
+  // While set, size changes of rows ABOVE the viewport top are compensated so the
+  // landed target stays flush at the top as rows measure — otherwise it drifts
+  // down, a sliver of the previous day shows, and the sticky pill reads that
+  // previous day. Position-based (see shouldAdjustScrollPositionOnItemSizeChange).
+  const jumpSettlingRef = useRef(false);
+  const jumpSettleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The float date pill normally shows the date of the OLDEST visible message.
+  // Right after a date jump the landing can leave a sliver of the previous day at
+  // the top, so that computation reads the previous day. Since we KNOW the picked
+  // day, force the float to it on landing and hold it until the user actually
+  // scrolls (the IntersectionObserver honours this and skips its own write). This
+  // guarantees the float matches the day jumped to regardless of scroll precision.
+  const jumpForcedStickyRef = useRef<string | null>(null);
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
@@ -339,8 +369,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
+  // A date jump must window around the picked day, so it takes the anchor-based
+  // normal path — not the unread-cutoff path, which would window around the seen
+  // cutoff instead. Keyed off isDateJump, NOT linkedItemCreatedAt: the latter is
+  // also set by the Unreads inbox / search, which must keep the cutoff path.
   const shouldUseCutoffQuery =
-    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+    channelParticipation?.conversationSeenCutoffAt !== null &&
+    isMember &&
+    !linkedConversationId &&
+    !isDateJump;
 
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
@@ -378,6 +415,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // the changed item is among the last few (prevents drift from async loads).
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
     if (!lifecycleRef.current.initialPositionSet) return false;
+    // Date-jump settle window: keep the top-aligned target pinned by compensating
+    // ONLY for rows that start above the current viewport top. Compensating for
+    // rows below would shove the target around — so this is deliberately not a
+    // blanket `return true`. Index-free, so it survives pagination/list changes.
+    if (jumpSettlingRef.current) {
+      const offset = instance.scrollOffset ?? 0;
+      return item.start < offset;
+    }
     if (!lifecycleRef.current.initialLoadComplete) {
       // Only keep the viewport pinned while we intentionally anchored to bottom.
       // This prevents "almost at bottom" drift on initial load as tall rows measure.
@@ -409,6 +454,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
     },
     [virtualizer],
   );
+
+  // Clear the date-jump settle timer on unmount so it can't fire against a
+  // torn-down instance (jumps remount the list, so this runs on every jump).
+  useEffect(() => {
+    return () => {
+      if (jumpSettleTimerRef.current) clearTimeout(jumpSettleTimerRef.current);
+    };
+  }, []);
 
   // ── Queries ───────────────────────────────────────────────────────────────────
   const [updatedConversations, updatedConversationsDetails] = useQuery(
@@ -452,6 +505,49 @@ const ChatListV4: React.FC<ChatListProps> = ({
       isMember,
       limit: PAGE_SIZE / 2,
     }),
+  );
+
+  // Oldest conversation in the channel → the floor for the jump-to-date picker
+  // (earlier days can't be selected). direction:'backward' + start:null returns
+  // ascending order, so the first row is the channel's very first message.
+  const [oldestConversation] = useQuery(
+    queries.channelConversationsPaginatedV3({
+      channelId,
+      isMember,
+      start: null,
+      direction: 'backward',
+      limit: 1,
+    }),
+  );
+  const firstMessageDate =
+    oldestConversation.length > 0
+      ? startOfDay(new Date(oldestConversation[0]!.createdAt))
+      : undefined;
+
+  // ── Jump to date ──────────────────────────────────────────────────────────────
+  // A jump is just "re-open the channel at the picked day". We push the target as
+  // a bare `#createdAt=<epoch>` hash and let ConversationPanelV2 remount the list
+  // (its key keys on this hash). The fresh mount then windows around the target
+  // and lands on it before the first paint — the same flicker-free path a deep
+  // link uses. No in-place window swap, no settling timer.
+  //
+  // The remount unmounts this instance, which would otherwise fire the
+  // mark-as-read-on-unmount effect (marking the channel read at Date.now()). A
+  // date jump is in-channel navigation, not leaving the channel, so it must not
+  // touch read state — suppress that one unmount via the shared skip ref (the
+  // handler resets it, so the eventual real leave still marks read).
+  const handleJumpToDate = useCallback(
+    (target: Date) => {
+      const targetTs = startOfDay(target).getTime();
+      if (skipMarkAsReadRef) skipMarkAsReadRef.current = true;
+      // jumpNonce makes a repeat pick of the same date a distinct location so the
+      // remount still fires (see jumpNavigationSeq).
+      void navigate(
+        { hash: `createdAt=${targetTs}` },
+        { state: { jumpNonce: ++jumpNavigationSeq } },
+      );
+    },
+    [navigate, skipMarkAsReadRef],
   );
 
   // ── Initial load (normal path) ────────────────────────────────────────────────
@@ -707,8 +803,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // ── Initial scroll ────────────────────────────────────────────────────────────
   // Fires as soon as there is data to render (cache or fresh fetch). Runs before
   // the first browser paint so the user never sees the wrong scroll position.
-  // Priority: 1) browser panel restore, 2) deep link in cache, 3) unread boundary,
-  // 4) bottom (also covers deep link NOT in cache — activity re-scroll corrects later).
+  // Priority: 0) pending date jump (land on the first message on/after the picked
+  // day; cold-cache far jumps land at the tail then deferred-correct), 1) browser
+  // panel restore, 2) deep link in cache, 3) unread boundary, 4) bottom (also
+  // covers deep link NOT in cache — activity re-scroll corrects later).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     if (combinedMessages.length === 0) return;
@@ -725,6 +823,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
     }
 
     // ── Compute all priority candidates upfront ──
+    // p0 — a date jump wins over everything: land on the first message on or
+    // after the picked day, before the first paint (fresh remount, no in-place
+    // swap). A short settle window (jumpSettlingRef) then keeps the target pinned
+    // at the top while rows measure, so the sticky date pill reads the target day
+    // rather than a sliver of the previous day.
+    // combinedMessages[i].createdAt is a Date. Gated on isDateJump so the Unreads
+    // inbox / search anchors (also linkedItemCreatedAt) don't take this path.
+    const jumpTs = isDateJump && linkedItemCreatedAt ? linkedItemCreatedAt.createdAt : null;
+
     const pathname = window.location.pathname;
     const p1SavedConvId = browserPanelActor
       .getSnapshot()
@@ -743,7 +850,90 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // ── Select winner by priority order ──
     let doScroll: () => void;
 
-    if (p1Idx !== -1) {
+    if (jumpTs !== null) {
+      // With the cold-jump empty-cache gate in ConversationPanelV2, a date-jump
+      // list only renders once its target window is loaded, so the target row is
+      // present here — jumpIdx === -1 only when the target is newer than every
+      // loaded message ("jump to today" before any message today) → land at tail.
+      const jumpIdx = combinedMessages.findIndex(m => m.createdAt.getTime() >= jumpTs);
+      const targetConvId =
+        jumpIdx === -1 ? undefined : combinedMessages[jumpIdx]?.data.conversationId;
+      doScroll = () => {
+        if (jumpIdx === -1) {
+          // Target is newer than the whole window (jumped to "today" in a quiet
+          // channel) — the latest message is the closest match.
+          lifecycleRef.current.didInitialScrollAlign = 'end';
+          virtualizer.scrollToEnd({ behavior: 'auto' });
+          return;
+        }
+        lifecycleRef.current.didInitialScrollAlign = 'start';
+        // Force the float date to the picked day and hold it until the user
+        // scrolls, so it's correct even if the landing leaves a sliver of the
+        // previous day at the top (see jumpForcedStickyRef).
+        const targetDateText = formatDatePill(combinedMessages[jumpIdx]!.createdAt);
+        jumpForcedStickyRef.current = targetDateText;
+        setStickyDate(targetDateText);
+        // Open the settle window BEFORE scrolling so the first measurements of
+        // the rows above the target are already compensated (keeps the target
+        // flush at the top; see jumpSettlingRef).
+        jumpSettlingRef.current = true;
+        if (jumpSettleTimerRef.current) clearTimeout(jumpSettleTimerRef.current);
+        jumpSettleTimerRef.current = setTimeout(() => {
+          jumpSettlingRef.current = false;
+        }, 400);
+        virtualizer.scrollToIndex(jumpIdx, { align: 'start', behavior: 'auto' });
+
+        // After the scroll settles (rAF, then again once late rows measure):
+        // (1) pull the target's real DOM top flush to the container top so
+        //     estimate drift can't leave a sliver of the previous day, and
+        // (2) if the target genuinely CAN'T reach the top — jumped near the end
+        //     of the list, so the container is already at max scroll and an
+        //     earlier day still occupies the top (e.g. "jump to today" when
+        //     today is already visible at the bottom) — correct the forced float
+        //     to the day actually at the top edge, so it never mislabels the view.
+        if (targetConvId) {
+          const TOP_TOLERANCE_PX = 4;
+          const settleFloat = (): void => {
+            const container = parentRef.current;
+            if (!container) return;
+            const containerTop = container.getBoundingClientRect().top;
+
+            const el = container.querySelector<HTMLElement>(
+              `[data-conversation-id="${CSS.escape(targetConvId)}"]`,
+            );
+            if (el) {
+              const delta = el.getBoundingClientRect().top - containerTop;
+              // No-op when clamped at the end of the list (browser caps scrollTop).
+              if (Math.abs(delta) > 0.5) container.scrollTop += delta;
+            }
+
+            const atMaxScroll =
+              container.scrollTop >= container.scrollHeight - container.clientHeight - 1;
+            const targetTop = el ? el.getBoundingClientRect().top - containerTop : 0;
+            if (atMaxScroll && targetTop > TOP_TOLERANCE_PX) {
+              const refLine = containerTop + TOP_TOLERANCE_PX;
+              const rows = container.querySelectorAll<HTMLElement>('[data-item-timestamp]');
+              for (const row of rows) {
+                const r = row.getBoundingClientRect();
+                if (r.top <= refLine && r.bottom > refLine) {
+                  const ts = Number(row.getAttribute('data-item-timestamp'));
+                  if (!Number.isNaN(ts)) {
+                    const dateText = formatDatePill(ts);
+                    jumpForcedStickyRef.current = dateText;
+                    setStickyDate(dateText);
+                  }
+                  break;
+                }
+              }
+            }
+          };
+          requestAnimationFrame(() => {
+            settleFloat();
+            window.setTimeout(settleFloat, 120);
+          });
+        }
+      };
+    } else if (p1Idx !== -1) {
       browserPanelActor.send({ type: 'CLEAR_SCROLL_POSITION', channelId });
       doScroll = () => {
         lifecycleRef.current.didInitialScrollAlign = 'end';
@@ -1124,6 +1314,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
     lifecycleRef.current.initialPositionSet = true;
 
+    // Release the jump-forced float date on the user's first real scroll (the
+    // programmatic settle snaps run while jumpSettlingRef is set, so they don't
+    // count). After this the IntersectionObserver drives the float again.
+    if (jumpForcedStickyRef.current !== null && !jumpSettlingRef.current) {
+      jumpForcedStickyRef.current = null;
+    }
+
     const distanceFromEnd = Math.max(el.scrollHeight - el.clientHeight - el.scrollTop, 0);
     // Near-bottom: within ~300px of end (DOM-based, avoids virtualizer scroll lag)
     const isNearBottom = distanceFromEnd <= 1000;
@@ -1221,6 +1418,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
   ]);
 
   const handleLatestMessagesScroll = useCallback(() => {
+    // Only ever runs outside a date jump: the "Latest messages" pill is hidden
+    // during a jump, and scrollToBottom handles the jump case before delegating
+    // here. (Return-to-latest for a jump is scrollToBottom's isDateJump branch.)
     const latestConversation = latestConversationsList[latestConversationsList.length - 1];
     const oldLatestConversation = latestConversationsList[0];
     if (latestConversation && oldLatestConversation) {
@@ -1265,7 +1465,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         if (sorted.length === 0) return;
 
         const oldestItem = sorted[0];
-        if (oldestItem?.[1]) {
+        // While a jump-forced date is held, don't let the oldest-visible
+        // computation overwrite it (a previous-day sliver would win). Cleared on
+        // the user's first scroll after the settle window (see handleScroll).
+        if (oldestItem?.[1] && jumpForcedStickyRef.current === null) {
           setStickyDate(formatDatePill(oldestItem[1].timestamp));
         }
 
@@ -1293,13 +1496,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, []);
 
   const scrollToBottom = useCallback(() => {
+    // If a date jump is active, the window is around a past day and doesn't hold
+    // the live tail. Clear the `#createdAt` hash so the list remounts fresh at the
+    // latest message (flicker-free mount path) instead of swapping in place. Skip
+    // the mark-as-read this remount would trigger — same reasoning as the jump.
+    if (isDateJump) {
+      if (skipMarkAsReadRef) skipMarkAsReadRef.current = true;
+      void navigate({ hash: '' });
+      return;
+    }
     if (latestConversationsListRef.current.length > 0) {
       handleLatestMessagesScroll();
       return;
     }
     virtualizer.scrollToEnd();
     setShowScrollButton(false);
-  }, [handleLatestMessagesScroll, virtualizer]);
+  }, [handleLatestMessagesScroll, virtualizer, isDateJump, navigate, skipMarkAsReadRef]);
 
   // ── Empty / loading states ─────────────────────────────────────────────────────
   if (conversations.length === 0 && isInitialLoadComplete)
@@ -1334,7 +1546,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
       {stickyDate && isFirstItemScrolledOff && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
-            <DatePill dateText={stickyDate} />
+            <DatePill
+              dateText={stickyDate}
+              {...(!isMobile && { onJumpToDate: handleJumpToDate })}
+              {...(firstMessageDate && { minDate: firstMessageDate })}
+            />
           </div>
         </div>
       )}
@@ -1410,7 +1626,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
                         className={shouldHideInlineDatePill ? 'invisible' : 'block'}
                         aria-hidden={shouldHideInlineDatePill}
                       >
-                        <DatePill dateText={dateText} />
+                        <DatePill
+                          dateText={dateText}
+                          {...(!isMobile && { onJumpToDate: handleJumpToDate })}
+                          {...(firstMessageDate && { minDate: firstMessageDate })}
+                        />
                       </div>
                     )}
                     {isNewMessageBoundary && (
@@ -1458,8 +1678,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </button>
       )}
 
-      {/* Latest messages floating pill */}
-      {latestConversationsList.length > 0 && (
+      {/* Latest messages floating pill — only in the live tail context (new
+          messages arrived while reading). During a date jump the user
+          deliberately navigated to the past, so the plain "go to bottom" arrow
+          below is shown instead. */}
+      {!isDateJump && latestConversationsList.length > 0 && (
         <button
           data-track-category='CHAT_LIST'
           data-track-name='CLICK_LATEST_MESSAGES_PILL'
@@ -1471,8 +1694,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </button>
       )}
 
-      {/* Scroll to bottom button */}
-      {showScrollButton && (
+      {/* Scroll to bottom button. During a date jump the loaded window is a past
+          day disjoint from the tail (latestConversationsList populated), so show
+          the arrow regardless of scroll position — clicking it clears the hash
+          and remounts at the live latest (see scrollToBottom). */}
+      {(showScrollButton || (isDateJump && latestConversationsList.length > 0)) && (
         <button
           onClick={scrollToBottom}
           className='absolute bottom-6 right-6 bg-background border border-border rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-accent z-50'

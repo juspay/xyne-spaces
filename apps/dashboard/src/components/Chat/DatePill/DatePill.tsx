@@ -1,13 +1,35 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import Badge from '../../ui/Badge';
+import Popover from '../../ui/Popover';
+import { badgeVariants } from '../../ui/Badge/Badge';
+import { cn } from '../../../utils/classNames';
+import { JumpToDatePicker } from './JumpToDatePicker';
 
 export interface DatePillProps {
   dateText: string;
+  /**
+   * When provided, the pill becomes a "jump to date" dropdown trigger, called
+   * with the picked date. Omit it to render a plain, non-interactive separator
+   * (default — used by threads, DM compose, mobile, etc.).
+   */
+  onJumpToDate?: (date: Date) => void;
+  /** Earliest selectable day in the picker. */
+  minDate?: Date;
+  /** Latest selectable day in the picker (defaults to today). */
+  maxDate?: Date;
 }
 
-export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
+export const DatePill = ({
+  dateText,
+  onJumpToDate,
+  minDate,
+  maxDate,
+}: DatePillProps): ReactElement => {
   // Default false for rendering grey horizontal rule
   const [showLines, setShowLines] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const interactive = typeof onJumpToDate === 'function';
   const wrapperRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -69,10 +91,46 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
         className={`absolute left-0 right-0 top-1/2 h-px bg-border -translate-y-1/2 transition-opacity duration-150 ${showLines ? 'opacity-100' : 'opacity-0'}`}
       />
 
-      <div className='relative'>
-        <Badge variant='outline' className='bg-background'>
-          {dateText}
-        </Badge>
+      <div className='relative pointer-events-auto'>
+        {interactive ? (
+          <Popover
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            modal={true}
+            side='bottom'
+            align='center'
+            className='p-2'
+            // Don't return focus to the trigger pill on close — the browser would
+            // scroll it back into view and undo the jump-to-date scroll (flicker).
+            onCloseAutoFocus={e => e.preventDefault()}
+            trigger={
+              <button
+                type='button'
+                aria-label={`Jump to date — currently ${dateText}`}
+                className={cn(
+                  badgeVariants({ variant: 'outline' }),
+                  'bg-background cursor-pointer gap-1 hover:bg-accent hover:text-accent-foreground',
+                )}
+              >
+                {dateText}
+                <ChevronDown className='size-3' />
+              </button>
+            }
+          >
+            <JumpToDatePicker
+              {...(minDate && { minDate })}
+              {...(maxDate && { maxDate })}
+              onSelect={date => {
+                setPickerOpen(false);
+                onJumpToDate?.(date);
+              }}
+            />
+          </Popover>
+        ) : (
+          <Badge variant='outline' className='bg-background'>
+            {dateText}
+          </Badge>
+        )}
       </div>
     </div>
   );
