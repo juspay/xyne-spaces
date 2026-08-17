@@ -207,6 +207,57 @@ export async function uploadFilesToCollection(
   return response.data;
 }
 
+export interface DriveImportResult {
+  success: boolean;
+  imported: number;
+  skipped: number;
+  failed: number;
+  results: Array<{ fileName: string; status: string; itemId?: string; reason?: string }>;
+  errors?: Array<{ fileName: string; error: string }>;
+  /** True when a private/org link failed and the user hasn't connected Google Drive. */
+  needsDriveAuth?: boolean;
+}
+
+/**
+ * Ask the backend for the Google Drive OAuth "connect" URL. Uses OAuth incremental
+ * authorization, so an already-signed-in Google user just approves the Drive scope —
+ * no re-login. `returnPath` is the same-origin SPA path (e.g. the current KB URL) the
+ * backend redirects back to after consent, with `?driveOAuth=success` appended.
+ */
+export async function initDriveOAuth(returnPath: string): Promise<{ authUrl?: string }> {
+  const { data } = await apiInstance.post<{ success: boolean; authUrl?: string }>(
+    '/drive/oauth/google/init',
+    { returnPath },
+  );
+  return data.authUrl ? { authUrl: data.authUrl } : {};
+}
+
+/**
+ * Import a Google Drive file or folder link into a collection. The server reads the
+ * file with the user's connected Drive OAuth token and ingests the bytes like a normal
+ * upload. If the user hasn't connected Drive, the response has `needsDriveAuth: true`.
+ */
+export async function addDriveLinkToCollection(
+  collectionId: string,
+  driveUrl: string,
+  opts?: {
+    parentId?: string | null;
+    duplicateStrategy?: 'skip' | 'rename' | 'overwrite';
+    sessionId?: string;
+  },
+): Promise<DriveImportResult> {
+  const response = await apiInstance.post<DriveImportResult>(
+    `/collections/${collectionId}/upload-drive-link`,
+    {
+      driveUrl,
+      parentId: opts?.parentId ?? null,
+      duplicateStrategy: opts?.duplicateStrategy ?? 'rename',
+      sessionId: opts?.sessionId,
+    },
+  );
+  return response.data;
+}
+
 export async function uploadFilesInBatches(
   collectionId: string,
   files: File[],

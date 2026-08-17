@@ -6,6 +6,7 @@ import {
   File,
   FolderOpen,
   FolderPlus,
+  Link2,
   Loader2,
   Plus,
   Upload,
@@ -42,6 +43,12 @@ import {
   CollectionStatusDrawer,
   StatusDrawerTarget,
 } from '../../components/knowledgeBaseV2/components/CollectionStatusDrawer';
+import { AddDriveLinkModal } from '../../components/knowledgeBaseV2/components/AddDriveLinkModal';
+import { DriveConnectDialog } from '../../components/knowledgeBaseV2/components/DriveConnectDialog';
+import {
+  runDriveImport,
+  takePendingDriveImport,
+} from '../../components/knowledgeBaseV2/utils/driveImport';
 import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
 import { ViewToggleV2, ViewMode } from '../../components/knowledgeBaseV2/components/ViewToggleV2';
 import { EmptyPaneV2 } from '../../components/knowledgeBaseV2/components/EmptyPaneV2';
@@ -83,6 +90,36 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const spCollectionId = searchParams.get(SP_COLLECTION);
   const spParentId = searchParams.get(SP_PARENT);
   const spQuery = searchParams.get(SP_QUERY) ?? '';
+
+  // Resume a Drive import after the full-page "Connect Google Drive" OAuth redirect.
+  // The backend returns us to this KB URL with ?driveOAuth=success|driveOAuthError;
+  // we clear those params and re-run the import that was stashed before the redirect.
+  const handledDriveOAuthReturn = useRef(false);
+  useEffect(() => {
+    if (handledDriveOAuthReturn.current) return;
+    const success = searchParams.get('driveOAuth');
+    const errorCode = searchParams.get('driveOAuthError');
+    if (!success && !errorCode) return;
+    handledDriveOAuthReturn.current = true;
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('driveOAuth');
+    next.delete('driveOAuthError');
+    setSearchParams(next, { replace: true });
+
+    const pending = takePendingDriveImport();
+    if (errorCode) {
+      toast.error('Google Drive connection failed. Please try again.');
+      return;
+    }
+    if (pending) {
+      // Post-connect resume: don't offer connect again (avoid a loop) — a token
+      // now exists, so private files import; if it still fails, show the error.
+      runDriveImport(pending, { allowConnect: false });
+    } else {
+      toast.success('Google Drive connected.');
+    }
+  }, [searchParams, setSearchParams]);
 
   const {
     activeCollection,
@@ -132,6 +169,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const [shareTarget, setShareTarget] = useState<CollectionChild | null>(null);
   // Collection whose ingestion status drawer is open (root view only).
   const [statusFor, setStatusFor] = useState<StatusDrawerTarget | null>(null);
+  // "Add from Google Drive link" modal (inside a collection).
+  const [driveLinkOpen, setDriveLinkOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
@@ -862,6 +901,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
                     Upload folder
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setDriveLinkOpen(true)}>
+                    <Link2 className='h-4 w-4' strokeWidth={1.75} />
+                    Add from Drive link
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <input
@@ -1010,6 +1053,15 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         : null}
 
       <CollectionStatusDrawer collection={statusFor} onClose={() => setStatusFor(null)} />
+
+      <AddDriveLinkModal
+        isOpen={driveLinkOpen}
+        onClose={() => setDriveLinkOpen(false)}
+        collectionId={collectionId ?? null}
+        collectionName={activeCollection?.name ?? rootLabel}
+        parentId={spParentId}
+      />
+      <DriveConnectDialog />
     </div>
   );
 };

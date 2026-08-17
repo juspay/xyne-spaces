@@ -15,6 +15,18 @@ import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
 import {
+    parseDriveTarget,
+    getMetadata,
+    listFolderRecursive,
+    downloadFile,
+    DriveNotAccessibleError,
+    DriveInvalidLinkError,
+    DriveRateLimitedError,
+    DriveUnauthorizedError,
+    type DriveFile,
+} from '@/services/googleDriveImportService';
+import { getDriveAccessToken, clearDriveCredentials } from '@/services/driveTokenService';
+import {
     resolveCollectionAccess,
     listAccessibleRootCollections,
     expandCollectionTrees,
@@ -264,6 +276,175 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
     };
 
     /**
+     * POST /api/collections/:collectionId/upload-drive-link
+     *
+     * Imports a Google Drive file OR folder into the collection using the user's
+     * connected Drive OAuth token (drive.readonly). Downloads bytes server-side via
+     * the Drive API, stores them, and enqueues ingestion — identical to a normal
+     * upload from that point on. Folders are imported recursively, recreating their
+     * structure. Requires a connected Drive; responds needsDriveAuth otherwise.
+     */
+    uploadFromDriveLink = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const { collectionId } = req.params;
+            const user = req.user;
+
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+            if (!collectionId || typeof collectionId !== 'string' || collectionId.trim() === '') {
+                res.status(400).json({ error: 'Collection ID is required' });
+                return;
+            }
+
+            const { role } = await this.getCollectionOrRole(collectionId, user.id, user.workspaceId);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
+                return;
+            }
+            if (role === CollectionRole.VIEWER) {
+                res.status(403).json({ error: 'Forbidden: You do not have edit access to this collection' });
+                return;
+            }
+
+            const driveUrl = z.string().min(1).parse(req.body?.driveUrl);
+            const validated = uploadFilesSchema.parse({
+                duplicateStrategy: req.body.duplicateStrategy || 'rename',
+                parentId: req.body.parentId || null,
+                sessionId: req.body.sessionId,
+            });
+
+            // Imports are OAuth-only: the user must have connected Google Drive so we
+            // can read the file as them. No token → prompt the UI to connect.
+            const driveToken = await getDriveAccessToken(user.id);
+            if (!driveToken) {
+                res.status(400).json({
+                    error: 'Connect Google Drive to import files.',
+                    needsDriveAuth: true,
+                });
+                return;
+            }
+
+            const target = parseDriveTarget(driveUrl);
+            let workList: DriveFile[];
+            if (target.kind === 'folder') {
+                // Probe the folder first: files.list returns an empty set (not an error)
+                // for a folder we can't read, which would silently import nothing;
+                // files.get 404s, surfacing DriveNotAccessibleError instead of "0 imported".
+                await getMetadata(target.id, driveToken);
+                workList = await listFolderRecursive(target.id, driveToken);
+            } else {
+                workList = [await getMetadata(target.id, driveToken)];
+            }
+
+            const baseParentFolderId = validated.parentId ?? collectionId;
+            const results: any[] = [];
+            const errors: any[] = [];
+            let skipped = 0;
+            // Set when the connected token is rejected mid-import — prompt a reconnect.
+            let needsDriveAuth = false;
+
+            for (const df of workList) {
+                try {
+                    const downloaded = await downloadFile(df, driveToken);
+                    if (!downloaded) {
+                        skipped++;
+                        results.push({ fileName: df.name, status: 'skipped', reason: 'unsupported-type' });
+                        continue;
+                    }
+
+                    const uploaded = await storageService.uploadFile(downloaded.buffer, {
+                        filename: downloaded.name,
+                        contentType: downloaded.contentType,
+                        scopeType: 'collection',
+                        scopeId: collectionId,
+                    });
+
+                    const parentFolderId = df.relPath
+                        ? await this.ensureFolderPath(collectionId, df.relPath, baseParentFolderId, user.id)
+                        : baseParentFolderId;
+
+                    let finalFileName = downloaded.name;
+                    const existingItem = await this.collectionRepository.findItemByPath(parentFolderId, finalFileName);
+                    if (existingItem) {
+                        if (validated.duplicateStrategy === DuplicateStrategy.SKIP) {
+                            await storageService.deleteFile(uploaded.path).catch(() => undefined);
+                            skipped++;
+                            results.push({ fileName: finalFileName, status: 'skipped', reason: 'duplicate' });
+                            continue;
+                        } else if (validated.duplicateStrategy === DuplicateStrategy.RENAME) {
+                            const siblings = await this.collectionRepository.findItemsByCollectionAndParentId(parentFolderId);
+                            finalFileName = this.generateUniqueName(finalFileName, siblings.map(s => s.name));
+                        } else if (validated.duplicateStrategy === DuplicateStrategy.OVERWRITE) {
+                            await this.collectionRepository.softDeleteItem(existingItem.id);
+                        }
+                    }
+
+                    const item = await this.collectionRepository.createFileItem({
+                        rootCollectionId: collectionId,
+                        collectionId: parentFolderId,
+                        name: finalFileName,
+                        storageKey: uploaded.path,
+                        mimeType: downloaded.contentType,
+                        fileSize: uploaded.size,
+                        ownerId: user.id,
+                        workspaceId: user.workspaceId,
+                        ingestionStatus: IngestionStatus.PENDING,
+                    });
+
+                    await vespaQueue.addJob({ schema: 'file', docId: item.fileId, jobType: 'feed', userId: user.id, app: SubApp.COLLECTIONS });
+                    results.push({ fileName: finalFileName, itemId: item.id, status: 'success' });
+                } catch (err) {
+                    logger.error(`[DRIVE_IMPORT] Failed to import ${df.name}:`, err);
+                    if (err instanceof DriveUnauthorizedError) {
+                        // The connected token was rejected — clear the stale row and
+                        // re-prompt to connect.
+                        needsDriveAuth = true;
+                        await clearDriveCredentials(user.id);
+                    }
+                    errors.push({ fileName: df.name, error: err instanceof Error ? err.message : 'Unknown error' });
+                }
+            }
+
+            res.status(200).json({
+                success: errors.length === 0,
+                imported: results.filter(r => r.status === 'success').length,
+                skipped,
+                failed: errors.length,
+                results,
+                errors: errors.length > 0 ? errors : undefined,
+                needsDriveAuth: needsDriveAuth || undefined,
+            });
+        } catch (error) {
+            if (error instanceof z.ZodError) {
+                res.status(400).json({ error: 'Validation failed', details: error.errors });
+                return;
+            }
+            if (error instanceof DriveRateLimitedError) {
+                res.status(429).json({ error: error.message });
+                return;
+            }
+            if (error instanceof DriveUnauthorizedError) {
+                // Connected token was rejected (revoked/expired). Clear the stale row
+                // so the DB matches Google, and prompt a reconnect.
+                if (req.user) await clearDriveCredentials(req.user.id);
+                res.status(400).json({ error: error.message, needsDriveAuth: true });
+                return;
+            }
+            if (error instanceof DriveNotAccessibleError) {
+                // Connected, but the account can't see this file (wrong account / no
+                // access). Not a reconnect case — just surface the error.
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            if (error instanceof DriveInvalidLinkError) {
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            logger.error('[DRIVE_IMPORT] Error in uploadFromDriveLink:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+
+    /**
      * Check user role on a root collection (collectionId must be a root Collection.id).
      *
      * Delegates to services/collectionAccess.resolveCollectionAccess so that owner,
@@ -350,7 +531,10 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 });
                 currentFolderId = newFolder.id;
                 logger.info(`[UPLOAD] Auto-created folder: ${folderName}`);
-                await vespaQueue.addJob({ schema: 'file', docId: newFolder.id, jobType: 'feed', userId: ownerId, app: SubApp.COLLECTIONS });
+                // Folders are `collections` rows (structural), not `collection_items`
+                // file documents — so they are NOT indexed in Vespa. Enqueuing a folder
+                // as a `file` feed job made the mapper look it up by fileId, always miss,
+                // and log "Data not found for file/<id>". Files inside are fed on their own.
             }
         }
 
