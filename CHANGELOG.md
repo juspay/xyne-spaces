@@ -1,3 +1,11 @@
+## [1.187.1](https://github.com/juspay/xyne-spaces/compare/v1.187.0...v1.187.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* added 60 days and 90 days filter, added age column for tickets, form fields coming as columns ([#589](https://github.com/juspay/xyne-spaces/issues/589)) ([e0e8d9b](https://github.com/juspay/xyne-spaces/commit/e0e8d9be717c8a3ac0813b8fd87c9e7ba4d6971e))
+* flowJson ingestion in vespa ([#581](https://github.com/juspay/xyne-spaces/issues/581)) ([b4283cc](https://github.com/juspay/xyne-spaces/commit/b4283cc28a32bbecd87ff36603030d8ee6f8365f))
+
 ## [1.187.0](https://github.com/juspay/xyne-spaces/compare/v1.186.2...v1.187.0) (2026-08-16)
 
 
