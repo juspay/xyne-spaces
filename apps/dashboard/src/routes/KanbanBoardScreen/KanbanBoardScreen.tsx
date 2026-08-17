@@ -167,7 +167,7 @@ import Tooltip from '../../components/ui/Tooltip';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import {
   getPriorityIcon,
-  isStageEtaOverdue,
+  isStageOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
 import {
   TicketPriority,
@@ -1852,7 +1852,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     // Filter for stage overdue tickets
     if (showOverdueOnly) {
-      tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
+      tickets = tickets.filter(ticket => isStageOverdue(ticket));
     }
 
     return tickets;

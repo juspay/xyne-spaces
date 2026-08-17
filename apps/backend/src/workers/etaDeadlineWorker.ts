@@ -1,34 +1,7 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
-import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
-import { ActivityType } from '@xyne/shared';
-import {
-  getUsersToNotifyForTicket,
-  getTicketBotActorId,
-  calculateDaysOverdueMidnight,
-  createEtaSystemMessage,
-  OPEN_STATUSES,
-} from '@/utils/etaNotificationUtils';
-
-const BREACH_REMIND_DAYS = [1, 3, 7, 15, 31, 63, 127, 255];
-const ETA_REMINDER_BATCH_SIZE = 50;
-const ETA_REMINDER_BATCH_DELAY_MS = 1000;
-
-const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
-  if (chunkSize <= 0) return [items];
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += chunkSize) {
-    chunks.push(items.slice(index, index + chunkSize));
-  }
-  return chunks;
-};
-
-const sleep = async (ms: number): Promise<void> => {
-  if (ms <= 0) return;
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
+import { OPEN_STATUSES } from '@/utils/etaNotificationUtils';
 
 class EtaDeadlineWorker {
   private isInitialized = false;
@@ -70,64 +43,9 @@ class EtaDeadlineWorker {
       const tickets = await this.getOpenTickets(today);
 
       logger.info(`[ETA-DEADLINE-WORKER] Found ${tickets.length} open tickets with ETA`);
-
-      const ticketBatches = chunkArray(tickets, ETA_REMINDER_BATCH_SIZE);
-
-      for (let batchIndex = 0; batchIndex < ticketBatches.length; batchIndex += 1) {
-        const ticketBatch = ticketBatches[batchIndex]!;
-
-        logger.info(
-          `[ETA-DEADLINE-WORKER] Processing ETA batch ${batchIndex + 1}/${ticketBatches.length} (${ticketBatch.length} tickets)`
-        );
-
-        for (const ticket of ticketBatch) {
-          if (!ticket.eta) continue;
-
-          const actorId = await getTicketBotActorId(ticket.workspaceId);
-          const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
-
-          if (daysOverdue <= 0 || !BREACH_REMIND_DAYS.includes(daysOverdue)) {
-            continue;
-          }
-
-          const usersToNotify = await getUsersToNotifyForTicket(
-            ticket.id,
-            ticket.assignedTo,
-            ticket.createdBy
-          );
-
-          await TicketsSideEffectHandler.createEtaBreachActivities({
-            ticketId: ticket.id,
-            xyneId: ticket.xyneId,
-            channelId: ticket.channelId,
-            userIds: usersToNotify,
-            actorAction: 'eta_breach',
-            actorId,
-            daysOverdue,
-          });
-
-          if (ticket.conversationId) {
-            // Multi-workspace cron → open a per-ticket tenant context so the system message's
-            // workspaceId gets stamped from this ticket's workspace.
-            await runAsServiceActor('eta-deadline-worker', ticket.workspaceId,
-              () => createEtaSystemMessage({
-                conversationId: ticket.conversationId!,
-                content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
-                createdAt: now,
-                activityType: ActivityType.ETA,
-              }),
-            );
-          }
-
-          logger.info(
-            `[ETA-DEADLINE-WORKER] Sending breach reminder for ticket ${ticket.xyneId} (${daysOverdue} days overdue)`
-          );
-        }
-
-        if (batchIndex < ticketBatches.length - 1) {
-          await sleep(ETA_REMINDER_BATCH_DELAY_MS);
-        }
-      }
+      logger.info(
+        '[ETA-DEADLINE-WORKER] Notification and activity delivery are disabled; no overdue column is updated here'
+      );
 
       logger.info('[ETA-DEADLINE-WORKER] ETA deadline check completed');
     } catch (error) {

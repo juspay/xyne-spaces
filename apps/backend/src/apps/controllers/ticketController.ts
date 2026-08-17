@@ -56,6 +56,7 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -404,6 +405,8 @@ const transferTicketToBoard = async (params: {
         },
       });
     }
+
+    await syncStageOverdueFlag(tx, ticketId, now);
 
     await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
   });
