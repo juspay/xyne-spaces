@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.1](https://github.com/juspay/xyne-spaces/compare/v1.187.0...v1.187.1-release-20260817.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* canvas creation fix ([#630](https://github.com/juspay/xyne-spaces/issues/630)) ([#633](https://github.com/juspay/xyne-spaces/issues/633)) ([cb28273](https://github.com/juspay/xyne-spaces/commit/cb2827335498c53ae13a67bc60220abb8d254bc5))
+
 ## [1.187.0](https://github.com/juspay/xyne-spaces/compare/v1.186.2...v1.187.0) (2026-08-16)
 
 
