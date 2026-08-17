@@ -90,7 +90,10 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
       style={node.style}
     >
       <div className='flex items-start gap-3'>
-        <McpServerIcon server={{ type: props.serverType, name: props.serverName } as McpServer} size='md' />
+        <McpServerIcon
+          server={{ type: props.serverType, name: props.serverName } as McpServer}
+          size='md'
+        />
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
             <p className='truncate text-base font-semibold leading-[1.25] text-foreground'>
