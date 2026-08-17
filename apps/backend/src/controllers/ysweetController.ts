@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { DocumentManager } from '@y-sweet/sdk';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
+import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
 
 const TOKEN_VALID_SECONDS = 3600;
 
@@ -193,15 +193,11 @@ export class YSweetController {
       logger.debug('[YSweet] Using ENV URL for DocumentManager', {
         ysweetUrl: config.ysweet.url,
       });
-      const manager = new DocumentManager(config.ysweet.url);
-
-      const clientToken = await manager.getOrCreateDocAndToken(
-        canonicalDocId,
-        {
-          authorization,
-          validForSeconds: TOKEN_VALID_SECONDS,
-        }
-      );
+      
+      const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
+        authorization,
+        validForSeconds: TOKEN_VALID_SECONDS,
+      });
 
       logger.debug('[YSweet] Received client token from DocumentManager', {
         baseUrl: clientToken.baseUrl,
