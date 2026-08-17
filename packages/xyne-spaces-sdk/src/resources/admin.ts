@@ -226,8 +226,11 @@ export class AdminResource extends Resource {
   }
 
   /** List apps published by the organization. */
-  listOrgApps(options?: { limit?: number; start?: AppCursor }): Promise<unknown[]> {
-    return this.call(adminOperations.listOrgApps, options ?? {});
+  listOrgApps(
+    orgId: string,
+    options?: { limit?: number; start?: AppCursor }
+  ): Promise<unknown[]> {
+    return this.call(adminOperations.listOrgApps, { orgId, ...options });
   }
 
   /** List apps available to install. */

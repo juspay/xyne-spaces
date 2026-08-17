@@ -32,53 +32,116 @@ const MUTATORS = join(repoRoot, 'apps/backend/src/zero/mutators.ts');
 const REGISTRY_DIR = join(sdkRoot, 'src/registry');
 const EXCLUSIONS = join(sdkRoot, 'src/exclusions.json');
 
-/** Catalog query names. */
-function readQueries() {
-  const src = readFileSync(QUERIES, 'utf8');
-  return new Set([...src.matchAll(/^ {2}([a-zA-Z0-9_]+): defineQuery\(/gm)].map((m) => m[1]));
+/**
+ * Index of the closing bracket matching the opener at `open`.
+ *
+ * Brace-balanced rather than regex: a zod schema nests objects and arrays freely,
+ * and a lazy `[\s\S]*?` stops at the first `})` it sees, which is usually inside
+ * the schema rather than at its end.
+ */
+function matchBracket(src, open) {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{' || ch === '[' || ch === '(') depth++;
+    else if (ch === '}' || ch === ']' || ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 /**
- * Catalog mutator names and their required arguments.
+ * Required top-level argument names for a `defineQuery(` / `defineMutator(` whose
+ * opening paren is at `open`.
  *
- * Required means "declared without .optional()" at the top level of the
- * mutator's zod object — nested object fields are the mutator's own business.
+ * Returns null when the operation declares no inline `z.object({…})` schema — a
+ * no-argument operation, or one built from a named schema constant. Those cannot be
+ * checked here and must not be guessed at.
+ *
+ * Required means "not `.optional()`". The whole field span is inspected, not just
+ * its first line, so a modifier chain broken across lines is still seen.
  */
+function readRequiredArgs(src, open) {
+  // Skip whitespace and comments between the paren and the schema.
+  let i = open + 1;
+  for (;;) {
+    while (i < src.length && /\s/.test(src[i])) i++;
+    if (src.startsWith('//', i)) {
+      i = src.indexOf('\n', i) + 1;
+      continue;
+    }
+    if (src.startsWith('/*', i)) {
+      i = src.indexOf('*/', i) + 2;
+      continue;
+    }
+    break;
+  }
+  if (!src.startsWith('z.object(', i)) return null;
+
+  const brace = src.indexOf('{', i);
+  const end = matchBracket(src, brace);
+  if (brace === -1 || end === -1) return null;
+
+  // Group the body into top-level fields, carrying each field's full text.
+  const fields = [];
+  let depth = 0;
+  let current = null;
+  for (const line of src.slice(brace + 1, end).split('\n')) {
+    const field = depth === 0 ? /^\s*([a-zA-Z][a-zA-Z0-9_]*)\s*:/.exec(line) : null;
+    if (field) {
+      if (current) fields.push(current);
+      current = { name: field[1], text: line };
+    } else if (current) {
+      current.text += `\n${line}`;
+    }
+    depth += (line.match(/[{[(]/g) ?? []).length - (line.match(/[}\])]/g) ?? []).length;
+  }
+  if (current) fields.push(current);
+
+  return fields.filter((f) => !f.text.includes('.optional()')).map((f) => f.name);
+}
+
+/** Catalog query names and their required arguments. */
+function readQueries() {
+  const src = readFileSync(QUERIES, 'utf8');
+  const names = new Set();
+  const required = new Map();
+
+  for (const m of src.matchAll(/^ {2}([a-zA-Z0-9_]+): defineQuery\(/gm)) {
+    names.add(m[1]);
+    const args = readRequiredArgs(src, m.index + m[0].length - 1);
+    if (args) required.set(m[1], args);
+  }
+  return { names, required };
+}
+
+/** Catalog mutator names and their required arguments. */
 function readMutators() {
   const src = readFileSync(MUTATORS, 'utf8');
-  const body = src.slice(src.indexOf('return defineMutators({'));
+  const offset = src.indexOf('return defineMutators({');
+  const body = src.slice(offset);
   const lines = body.split('\n');
 
   const names = new Set();
   const required = new Map();
   let namespace = null;
+  let cursor = 0; // char offset of the current line within `body`
 
   for (let i = 0; i < lines.length; i++) {
-    const ns = /^ {4}([a-zA-Z][a-zA-Z0-9]*): \{/.exec(lines[i]);
-    if (ns) {
-      namespace = ns[1];
-      continue;
+    const line = lines[i];
+    const ns = /^ {4}([a-zA-Z][a-zA-Z0-9]*): \{/.exec(line);
+    if (ns) namespace = ns[1];
+
+    const mut = /^\s{5,8}([a-zA-Z][a-zA-Z0-9]*): defineMutator\(/.exec(line);
+    if (mut && namespace) {
+      const full = `${namespace}.${mut[1]}`;
+      names.add(full);
+      const args = readRequiredArgs(body, cursor + mut[0].length - 1);
+      if (args) required.set(full, args);
     }
-    const mut = /^\s{5,8}([a-zA-Z][a-zA-Z0-9]*): defineMutator\(/.exec(lines[i]);
-    if (!mut || !namespace) continue;
-
-    const full = `${namespace}.${mut[1]}`;
-    names.add(full);
-
-    // A comment may sit between the schema and the handler.
-    const window = lines.slice(i, i + 50).join('\n');
-    const schema = /z\.object\(\{([\s\S]*?)\}\)\s*,\s*(?:\/\/[^\n]*\n\s*)*async/.exec(window);
-    if (!schema) continue;
-
-    const fields = [];
-    let depth = 0;
-    for (const line of schema[1].split('\n')) {
-      const field = /^([a-zA-Z][a-zA-Z0-9]*):/.exec(line.trim());
-      if (field && depth === 0 && !line.includes('.optional()')) fields.push(field[1]);
-      depth +=
-        (line.match(/[{[]/g) ?? []).length - (line.match(/[}\]]/g) ?? []).length;
-    }
-    required.set(full, fields);
+    cursor += line.length + 1;
   }
   return { names, required };
 }
@@ -90,14 +153,76 @@ function readRegistryUsage() {
     if (file === 'types.ts') continue;
     const src = readFileSync(join(REGISTRY_DIR, file), 'utf8');
     for (const m of src.matchAll(/\b(query|mutator)<[\s\S]*?>\(\s*\n?\s*'([^']+)'/g)) {
-      used.set(m[2], { file, kind: m[1], src, index: m.index });
+      // Bound each entry to its own call. Without this, an entry with no `mapArgs`
+      // reads the `mapArgs` of whichever operation happens to follow it.
+      const callOpen = m.index + m[0].lastIndexOf('(');
+      used.set(m[2], {
+        file,
+        kind: m[1],
+        src,
+        index: m.index,
+        generic: m[0],
+        argsStart: m.index + m[0].length,
+        argsEnd: matchBracket(src, callOpen),
+      });
     }
   }
   return used;
 }
 
-const queries = readQueries();
-const { names: mutators, required } = readMutators();
+/**
+ * The argument names an entry actually sends, or null when that cannot be decided.
+ *
+ * This looks at the `mapArgs` return object specifically, rather than searching the
+ * surrounding text for the field name. Searching text passes as soon as the name
+ * appears anywhere — including in the TypeScript generic and in JSDoc — so an entry
+ * that declares `direction?: 'forward'` in its type but forgets it in `mapArgs`
+ * would look fine while failing at runtime.
+ *
+ * With no `mapArgs`, args are forwarded verbatim, so the entry's own type is the
+ * contract and its declared property names are what gets sent.
+ */
+function suppliedArgs(info) {
+  if (info.argsEnd === -1) return null;
+  const tail = info.src.slice(info.argsStart, info.argsEnd);
+
+  const mapArgs = /mapArgs:\s*\([^)]*\)\s*=>\s*\(?\s*\{/.exec(tail);
+  if (mapArgs) {
+    const brace = info.argsStart + mapArgs.index + mapArgs[0].length - 1;
+    const end = matchBracket(info.src, brace);
+    if (end === -1) return null;
+    const body = info.src.slice(brace + 1, end);
+
+    // A bare `...args` forwards everything, so nothing can be proven missing.
+    if (/\.\.\.\s*args\b/.test(body)) return null;
+
+    const keys = new Set();
+    let depth = 0;
+    for (const line of body.split('\n')) {
+      if (depth === 0) {
+        for (const k of line.matchAll(/(?:^|[{,\s])([a-zA-Z][a-zA-Z0-9_]*)\s*:/g)) keys.add(k[1]);
+        // `...(args.foo ? { foo } : {})` supplies foo conditionally.
+        for (const k of line.matchAll(/\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}/g)) keys.add(k[1]);
+      }
+      depth += (line.match(/[{[(]/g) ?? []).length - (line.match(/[}\])]/g) ?? []).length;
+    }
+    return keys;
+  }
+
+  // No mapArgs: args are forwarded verbatim, so the entry's own generic is the
+  // contract. Read it from the matched text, which is exactly this entry.
+  const generic = /<([\s\S]*)>\(/.exec(info.generic);
+  if (!generic) return null;
+  const keys = new Set();
+  for (const k of generic[1].matchAll(/([a-zA-Z][a-zA-Z0-9_]*)\s*\??\s*:/g)) keys.add(k[1]);
+  return keys;
+}
+
+const { names: queries, required: queryArgs } = readQueries();
+const { names: mutators, required: mutatorArgs } = readMutators();
+
+// One lookup for both kinds. Names cannot collide: mutators are namespaced.
+const required = new Map([...queryArgs, ...mutatorArgs]);
 const used = readRegistryUsage();
 const excluded = new Map(
   JSON.parse(readFileSync(EXCLUSIONS, 'utf8')).exclusions.map((e) => [e.name, e])
@@ -113,19 +238,17 @@ for (const [name, info] of used) {
   }
 }
 
-// 2. Required mutator arguments must be supplied.
+// 2. Required arguments must be supplied — for queries as well as mutators. A
+//    missing one fails zod validation server-side with no compile-time signal,
+//    since the registries reference operations by string.
 for (const [name, info] of used) {
-  if (info.kind !== 'mutator' || !required.has(name)) continue;
-  // Look at the generic parameters before the name and the mapArgs after it.
-  const window = info.src
-    .slice(Math.max(0, info.index - 700), info.index + 1400)
-    .split('\n  },')[0];
-  const missing = required
-    .get(name)
-    .filter((field) => !new RegExp(`\\b${field}\\b`).test(window));
+  if (!required.has(name)) continue;
+  const supplied = suppliedArgs(info);
+  if (!supplied) continue; // opaque entry — cannot decide, so do not guess
+  const missing = required.get(name).filter((field) => !supplied.has(field));
   if (missing.length > 0) {
     problems.push(
-      `mutator "${name}" (registry/${info.file}) never supplies required arg(s): ${missing.join(', ')}`
+      `${info.kind} "${name}" (registry/${info.file}) never supplies required arg(s): ${missing.join(', ')}`
     );
   }
 }

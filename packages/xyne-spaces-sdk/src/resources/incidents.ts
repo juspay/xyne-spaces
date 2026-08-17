@@ -153,8 +153,11 @@ export class IncidentsResource extends Resource {
   }
 
   /** List application release tickets. */
-  listApplicationReleaseTickets(): Promise<unknown[]> {
-    return this.call(incidentsOperations.listApplicationReleaseTickets, undefined);
+  listApplicationReleaseTickets(releaseId: string, limit?: number): Promise<unknown[]> {
+    return this.call(incidentsOperations.listApplicationReleaseTickets, {
+      releaseId,
+      ...(limit !== undefined ? { limit } : {}),
+    });
   }
 
   /** List the changes bundled into a release. */
@@ -219,5 +222,16 @@ export class IncidentsResource extends Resource {
   /** Record who tested a release ticket. */
   setReleaseTicketTestedBy(id: string, userId: string): Promise<void> {
     return this.call(incidentsOperations.setReleaseTicketTestedBy, { id, userId });
+  }
+  /**
+   * A release's event log, newest first. `FORM_SAVED` events are omitted as noise.
+   *
+   * @param limit - Capped at 100 server-side
+   */
+  listReleaseEvents(releaseId: string, limit?: number): Promise<unknown[]> {
+    return this.call(incidentsOperations.listReleaseEvents, {
+      releaseId,
+      ...(limit !== undefined ? { limit } : {}),
+    });
   }
 }

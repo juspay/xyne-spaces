@@ -297,9 +297,18 @@ export const adminOperations = {
    * Apps published by the organization.
    * Maps to: Zero query 'getOrgApps'
    */
-  listOrgApps: query<{ limit?: number; start?: AppCursor }, unknown[]>('getOrgApps', {
-    mapArgs: (args) => ({ limit: args?.limit ?? 50, start: args?.start ?? null }),
-  }),
+  listOrgApps: query<{ orgId: string; limit?: number; start?: AppCursor }, unknown[]>(
+    'getOrgApps',
+    {
+      // orgId is required server-side and was never sent — the call always failed
+      // validation. Get one from `listAvailableOrgs` / `listWorkspaceOrgs`.
+      mapArgs: (args) => ({
+        orgId: args.orgId,
+        limit: args?.limit ?? 50,
+        start: args?.start ?? null,
+      }),
+    }
+  ),
 
   /**
    * Apps available to install.

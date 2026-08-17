@@ -32,10 +32,14 @@ export const preferencesOperations = {
   listBookmarks: query<void, unknown[]>('userBookmarks'),
 
   /**
-   * Saved filter views the current user created.
+   * Saved filter views a user created.
    * Maps to: Zero query 'savedConfigsByUser'
+   *
+   * Takes an explicit `userId` — despite the old `void` signature suggesting it was
+   * caller-scoped, the query has no `ctx` fallback, so it required an argument the
+   * SDK never sent. Pass `me.id` from `sdk.users.me()` for your own views.
    */
-  listSavedViews: query<void, unknown[]>('savedConfigsByUser'),
+  listSavedViews: query<{ userId: string }, unknown[]>('savedConfigsByUser'),
 
   // ----- Notification settings -----
 
@@ -96,6 +100,30 @@ export const preferencesOperations = {
       mapArgs: (args) => ({ ...args, timestamp: now() }),
     }
   ),
+
+  /**
+   * Set the filter and sort applied to one sidebar group.
+   * Maps to: Zero mutator 'userPreference.setSidebarGroupPreference'
+   *
+   * `filterMode` is ACTIVE | UNREADS | MENTIONS | ALL.
+   */
+  setSidebarGroup: mutator<
+    {
+      id: string;
+      group: 'starred' | 'channels' | 'dms';
+      filterMode?: string;
+      sortOrder?: string;
+    },
+    void
+  >('userPreference.setSidebarGroupPreference', {
+    mapArgs: (args) => ({
+      id: args.id,
+      group: args.group,
+      ...(args.filterMode ? { filterMode: args.filterMode } : {}),
+      ...(args.sortOrder ? { sortOrder: args.sortOrder } : {}),
+      timestamp: now(),
+    }),
+  }),
 
   /**
    * Choose whether Enter sends a message or inserts a newline.

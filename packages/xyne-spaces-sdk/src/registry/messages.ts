@@ -61,6 +61,36 @@ export const messagesOperations = {
   ),
 
   /**
+   * Messages authored by a given user, newest first.
+   * Maps to: Zero query 'messagesBySenderPaginated'
+   *
+   * Use this rather than searching with `from=<userId>` when building someone's
+   * authored history: search is relevance-ranked with a practical offset ceiling, so
+   * a thin page cannot be distinguished from a truncated one. This is ordered by
+   * `createdAt` and cursors cleanly.
+   */
+  listByUser: query<
+    {
+      userId: string;
+      limit?: number;
+      start?: MessageCursor;
+      /** Inclusive epoch-ms lower bound. */
+      after?: number;
+      /** Inclusive epoch-ms upper bound. */
+      before?: number;
+    },
+    Message[]
+  >('messagesBySenderPaginated', {
+    mapArgs: (args) => ({
+      userId: args.userId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      ...(args.after !== undefined ? { after: args.after } : {}),
+      ...(args.before !== undefined ? { before: args.before } : {}),
+    }),
+  }),
+
+  /**
    * The latest message in a channel.
    * Maps to: Zero query 'channelLatestMessageV2'
    */
@@ -293,16 +323,29 @@ export const messagesOperations = {
 
   /**
    * Every attachment shared in a channel, newest first.
-   * Maps to: Zero query 'getConversationAttachements'
+   * Maps to: Zero query 'getConversationAttachementsV2'
+   *
+   * V2 takes identical arguments; it moves channel-visibility gating out of the
+   * query body and onto the table ACL, so this is a drop-in swap.
+   *
+   * `direction` is required server-side. It was previously never sent, which made
+   * every call fail validation — the coverage gate only checks mutator arguments,
+   * so nothing caught it.
    */
   listChannelAttachments: query<
-    { channelId: string; limit?: number; start?: { attachementId: string; createdAt: number } },
+    {
+      channelId: string;
+      limit?: number;
+      start?: { attachementId: string; createdAt: number };
+      direction?: 'forward' | 'backward';
+    },
     unknown[]
-  >('getConversationAttachements', {
+  >('getConversationAttachementsV2', {
     mapArgs: (args) => ({
       channelId: args.channelId,
       limit: args.limit ?? 50,
       start: args.start ?? null,
+      direction: args.direction ?? 'forward',
     }),
   }),
 
@@ -340,7 +383,10 @@ export const messagesOperations = {
       conversationId?: string;
     },
     void
-  >('draft.createAttachments'),
+  >('draft.createAttachments', {
+    // timestamp is required and was never sent.
+    mapArgs: (args) => ({ ...args, timestamp: now() }),
+  }),
 
   /**
    * Clear a channel or thread draft's content.

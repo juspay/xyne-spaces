@@ -69,6 +69,12 @@ export const callsOperations = {
    * Summary templates available for call notes.
    * Maps to: Zero query 'summaryTemplates'
    */
+  /**
+   * One call-summary template by id.
+   * Maps to: Zero query 'summaryTemplateById'
+   */
+  getSummaryTemplate: query<{ templateId: string }, unknown | null>('summaryTemplateById'),
+
   listSummaryTemplates: query<void, unknown[]>('summaryTemplates', {
     // The query declares an empty object rather than no arguments at all.
     mapArgs: () => ({}),

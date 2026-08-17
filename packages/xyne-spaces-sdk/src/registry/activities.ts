@@ -31,15 +31,18 @@ export const activitiesOperations = {
    * The activity feed, paginated.
    * Maps to: Zero query 'userActivitiesPaginatedV2'
    */
-  listPaginated: query<{ limit?: number; start?: ActivityCursor }, Activity[]>(
-    'userActivitiesPaginatedV2',
-    {
-      mapArgs: (args) => ({
-        limit: args.limit ?? 50,
-        start: args.start ?? null,
-      }),
-    }
-  ),
+  listPaginated: query<
+    { limit?: number; start?: ActivityCursor; types?: string[] },
+    Activity[]
+  >('userActivitiesPaginatedV2', {
+    // `types` is required server-side and was never sent, so this paged read always
+    // failed validation. Empty means "no type filter".
+    mapArgs: (args) => ({
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      types: args.types ?? [],
+    }),
+  }),
 
   /**
    * Unread activities only.

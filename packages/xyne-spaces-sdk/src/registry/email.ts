@@ -38,11 +38,22 @@ export const emailOperations = {
 
   /**
    * Emails on several conversations at once.
-   * Maps to: Zero query 'getEmailsForConversations'
+   * Maps to: Zero query 'getEmailsForConversationsV2'
+   *
+   * V2 takes `channelId` and `isMember`, which it forwards to the table ACL for
+   * channel-membership gating rather than gating inside the query body. Same result
+   * shape; the channel is now required.
    */
-  listForConversations: query<{ conversationIds: string[] }, unknown[]>(
-    'getEmailsForConversations'
-  ),
+  listForConversations: query<
+    { conversationIds: string[]; channelId: string; isMember?: boolean },
+    unknown[]
+  >('getEmailsForConversationsV2', {
+    mapArgs: (args) => ({
+      conversationIds: args.conversationIds,
+      channelId: args.channelId,
+      isMember: args.isMember ?? true,
+    }),
+  }),
 
   /**
    * Mail the current user has sent from a channel.
@@ -77,11 +88,20 @@ export const emailOperations = {
 
   /**
    * The reply draft on one conversation, if any.
-   * Maps to: Zero query 'getDraftForConversation'
+   * Maps to: Zero query 'getDraftForConversationV2'
+   *
+   * V2 adds `channelId` / `isMember` for ACL membership gating. Same result shape.
    */
-  getDraftForConversation: query<{ conversationId: string }, EmailDraft | null>(
-    'getDraftForConversation'
-  ),
+  getDraftForConversation: query<
+    { conversationId: string; channelId: string; isMember?: boolean },
+    EmailDraft | null
+  >('getDraftForConversationV2', {
+    mapArgs: (args) => ({
+      conversationId: args.conversationId,
+      channelId: args.channelId,
+      isMember: args.isMember ?? true,
+    }),
+  }),
 
   /**
    * Compose drafts in a channel — those not yet tied to a conversation.

@@ -35,7 +35,9 @@ import {
   queryMessages,
   queryMessageDetail,
   queryChannels,
+  queryChannelMessages,
   queryChannelParticipants,
+  queryUserMessages,
   queryConversations,
   queryUsers,
   queryUserActivity,
@@ -86,6 +88,10 @@ const tools: Tool[] = [
         after: { type: "string", description: "Created after date" },
         range: { type: "string", description: "Time range: today, yesterday, this week, last 7 days, last 30 days" },
         filterOnly: { type: "boolean", description: "Set true to search with filters only, no query text required" },
+        orderBy: { type: "string", enum: ["newest", "oldest", "relevance"], description: "Result order. Use 'newest' for 'the latest N' — the default is relevance, which cannot be paged through time reliably." },
+        groupBy: { type: "string", description: "Pass an empty string to disable grouping and get one flat ranked list" },
+        onlyMyChannels: { type: "boolean", description: "Restrict to channels you are a member of — the main way to cut cross-channel noise" },
+        includeBotMessages: { type: "boolean", description: "Include bot/automation messages (excluded by default)" },
         limit: { type: "number", minimum: 1, maximum: 50, default: 10, description: "Max results per group (default 10)" },
         offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0)" },
       },
@@ -123,6 +129,10 @@ const tools: Tool[] = [
         boardId: { type: "string", description: "Filter by board ID (use spaces-search to find board IDs)" },
         projectId: { type: "string", description: "Filter by project ID (use spaces-search to find project IDs)" },
         stageName: { type: "string", description: "Filter by stage name" },
+        createdAfter: { type: "string", description: "Only tickets created on/after this ISO date (e.g. 2026-08-01)" },
+        createdBefore: { type: "string", description: "Only tickets created on/before this ISO date" },
+        updatedAfter: { type: "string", description: "Only tickets updated on/after this ISO date" },
+        updatedBefore: { type: "string", description: "Only tickets updated on/before this ISO date" },
         limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max tickets (default 20)" },
         offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
       },
@@ -230,11 +240,47 @@ const tools: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
+        name: { type: "string", description: "Find channels whose #name contains this text — the way to look up a channel you know by name" },
         visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"], description: "Filter by visibility" },
         scopeType: { type: "string", enum: ["DEFAULT", "DM", "TICKET", "DOCUMENT", "GROUP_DM"], description: "Filter by scope type" },
-        participantName: { type: "string", description: "Filter channels by participant name (partial match)" },
+        participantName: { type: "string", description: "Filter channels by MEMBER name (not the channel's own name — use 'name' for that)" },
         limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max channels (default 20)" },
+        offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset — walk the full list a page at a time" },
       },
+    },
+  },
+  {
+    name: "spaces-channel-messages",
+    description:
+      "Read a channel's message timeline, flattened across all its threads, newest first. " +
+      "This is the 'what is happening in this channel' read — pass a ChannelID from spaces-channels. " +
+      "Use spaces-messages instead when you want one specific thread by its ConversationID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channelId: { type: "string", description: "ChannelID from spaces-channels" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max messages (default 50)" },
+        before: { type: "string", description: "Only messages at/before this ISO timestamp — page backwards with the value the previous call reports" },
+      },
+      required: ["channelId"],
+    },
+  },
+  {
+    name: "spaces-user-messages",
+    description:
+      "Everything a user wrote, newest first, ordered by time. Use this to build someone's authored " +
+      "history — it pages reliably, unlike spaces-search with from=<userId>, which ranks by relevance " +
+      "so a thin page cannot be told apart from a truncated one. Get the UserID from spaces-users or " +
+      "spaces-whoami.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        userId: { type: "string", description: "UserID from spaces-users or spaces-whoami" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max messages (default 50)" },
+        after: { type: "string", description: "Only messages on/after this ISO date" },
+        before: { type: "string", description: "Only messages on/before this ISO date — page backwards with the value the previous call reports" },
+      },
+      required: ["userId"],
     },
   },
   {
@@ -602,9 +648,25 @@ function formatSearchResult(r: SearchResult): string {
   const sc = r.searchContext
   if (sc) {
     if (sc["senderName"]) lines.push(`  From: ${sc["senderName"]}`)
-    if (sc["xyneId"]) lines.push(`  ID: ${sc["xyneId"]}`)
+    if (sc["conversationId"]) lines.push(`  ConversationID: ${sc["conversationId"]}`)
+    if (sc["channelId"]) lines.push(`  ChannelID: ${sc["channelId"]}`)
   }
+  // The result's own id, labelled by what it actually identifies. Without this a
+  // channel or ticket hit is a dead end — you can see it but not act on it.
+  if (r.id) lines.push(`  ${idLabel(r.type)}: ${r.id}`)
+  if (sc?.["xyneId"] && sc["xyneId"] !== r.id) lines.push(`  Key: ${sc["xyneId"]}`)
   return lines.join("\n")
+}
+
+/** Name the id field after the thing it points at, so the agent knows what to pass where. */
+function idLabel(type: string): string {
+  const t = type.toLowerCase()
+  if (t.includes("channel")) return "ChannelID"
+  if (t.includes("ticket")) return "TicketID"
+  if (t.includes("message") || t.includes("conversation")) return "MessageID"
+  if (t.includes("user")) return "UserID"
+  if (t.includes("attachment") || t.includes("file")) return "AttachmentID"
+  return "ID"
 }
 
 /**
@@ -641,6 +703,13 @@ async function handleToolCall(
       if (args.after) params.set("after", args.after as string)
       if (args.range) params.set("range", args.range as string)
       if (args.filterOnly) params.set("filterOnly", "true")
+      if (args.orderBy) params.set("orderBy", args.orderBy as string)
+      // groupBy is meaningful when empty, so test for presence rather than truth.
+      if (args.groupBy !== undefined) params.set("groupBy", args.groupBy as string)
+      if (args.onlyMyChannels !== undefined) params.set("onlyMyChannels", String(args.onlyMyChannels))
+      if (args.includeBotMessages !== undefined) {
+        params.set("includeBotMessages", String(args.includeBotMessages))
+      }
 
       const data = (await spacesFetch(`/search?${params}`)) as {
         success: boolean
@@ -727,6 +796,10 @@ async function handleToolCall(
         boardId: args.boardId as string | undefined,
         projectId: args.projectId as string | undefined,
         stageName: args.stageName as string | undefined,
+        createdAfter: args.createdAfter as string | undefined,
+        createdBefore: args.createdBefore as string | undefined,
+        updatedAfter: args.updatedAfter as string | undefined,
+        updatedBefore: args.updatedBefore as string | undefined,
         limit: args.limit as number | undefined,
         offset: args.offset as number | undefined,
       })
@@ -839,7 +912,26 @@ async function handleToolCall(
         (args.limit as number) ?? 20,
         args.visibility as string | undefined,
         args.scopeType as string | undefined,
-        args.participantName as string | undefined
+        args.participantName as string | undefined,
+        args.name as string | undefined,
+        args.offset as number | undefined
+      )
+    }
+
+    case "spaces-channel-messages": {
+      return queryChannelMessages(
+        args.channelId as string,
+        (args.limit as number) ?? 50,
+        args.before as string | undefined
+      )
+    }
+
+    case "spaces-user-messages": {
+      return queryUserMessages(
+        args.userId as string,
+        (args.limit as number) ?? 50,
+        args.after as string | undefined,
+        args.before as string | undefined
       )
     }
 

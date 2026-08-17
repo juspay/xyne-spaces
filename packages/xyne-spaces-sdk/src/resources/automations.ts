@@ -95,8 +95,11 @@ export class AutomationsResource extends Resource {
   }
 
   /** Stop running an automation without deleting it. */
-  disable(id: string): Promise<void> {
-    return this.call(automationsOperations.disable, { id });
+  disable(id: string, cancelQueued?: boolean): Promise<void> {
+    return this.call(automationsOperations.disable, {
+      id,
+      ...(cancelQueued !== undefined ? { cancelQueued } : {}),
+    });
   }
 
   /** Retire an automation. */

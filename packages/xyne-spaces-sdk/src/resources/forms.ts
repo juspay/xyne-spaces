@@ -38,6 +38,24 @@ export class FormsResource extends Resource {
   }
 
   /** List forms bound to a kind of context. */
+  /**
+   * Form-to-context mappings for several contexts at once, with their fields.
+   *
+   * @param contextType - BOARD | RELEASE_CHANGE | STAGE
+   * @param entityType - TICKET | SUB_TICKET | RELEASE_MIGRATION_FORM | RELEASE_ENV_FORM
+   */
+  listMappingsByContextIds(
+    contextIds: string[],
+    contextType: string,
+    entityType: string
+  ): Promise<unknown[]> {
+    return this.call(formsOperations.listMappingsByContextIds, {
+      contextIds,
+      contextType,
+      entityType,
+    });
+  }
+
   listByContextType(contextType: string): Promise<Form[]> {
     return this.call(formsOperations.listByContextType, { contextType });
   }

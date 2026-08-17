@@ -395,15 +395,21 @@ class AgentAuthService {
       log.info(`[AgentAuth] Proxying ${method} request to ${backendUrl}`);
 
       // Make request to backend with user's access token
-      const backendResponse = await this.makeBackendRequest({
-        url: backendUrl,
-        method,
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        data
-      });
+      const backendResponse = await this.sendWithRefresh(accessToken, (token) =>
+        this.makeBackendRequest({
+          url: backendUrl,
+          method,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          data
+        }),
+      );
+      if (!backendResponse) {
+        this.reauthRequired(res);
+        return;
+      }
 
       // Forward backend response to agent
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
@@ -468,14 +474,20 @@ class AgentAuthService {
       log.info(`[AgentAuth] Proxying GET vespaSearch request to ${backendUrl}`);
 
       // Make request to backend with user's access token
-      const backendResponse = await this.makeBackendRequest({
-        url: backendUrl,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const backendResponse = await this.sendWithRefresh(accessToken, (token) =>
+        this.makeBackendRequest({
+          url: backendUrl,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+      );
+      if (!backendResponse) {
+        this.reauthRequired(res);
+        return;
+      }
 
       // Forward backend response to agent
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
@@ -1012,15 +1024,24 @@ class AgentAuthService {
       const backendUrl = `${config.BACKEND_URL}${backendPath}`;
       log.info(`[AgentAuth] Proxying ${method} to ${backendUrl}`);
 
-      const backendResponse = await this.makeBackendRequest({
-        url: backendUrl,
-        method,
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        ...(expectsBody ? { data: body } : {})
-      });
+      const send = (token: string) =>
+        this.makeBackendRequest({
+          url: backendUrl,
+          method,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          ...(expectsBody ? { data: body } : {})
+        });
+
+      // The forwarded workspace token is short-lived, so refresh once on a 401 and
+      // replay — a long agent run would otherwise die mid-job.
+      const backendResponse = await this.sendWithRefresh(accessToken, send);
+      if (!backendResponse) {
+        this.reauthRequired(res);
+        return;
+      }
 
       // 5. Return backend response
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
@@ -1496,6 +1517,90 @@ class AgentAuthService {
     }
 
     return null;
+  }
+
+  /**
+   * Ask the backend to mint a fresh workspace token from the browser session.
+   *
+   * The workspace cookie this proxy forwards is short-lived, and nothing here used
+   * to notice it expiring: a long-running local agent would simply start getting
+   * 401s ("Token expired and no session provided for refresh") partway through a
+   * job and have to be reconnected by hand.
+   *
+   * `/api/v2/auth/refresh-session` is driven by the `user_session_id` cookie, so
+   * that has to be forwarded — the access token we are replacing is exactly the
+   * thing that is no longer valid.
+   *
+   * Returns the new token, or null when the session itself is gone and the user
+   * genuinely has to sign in again.
+   */
+  /**
+   * Run a backend call, refreshing the workspace token once on a 401 and replaying.
+   *
+   * Returns null when the session could not be refreshed, meaning the caller should
+   * answer 401 with `reauthRequired` rather than pass the failure through opaquely.
+   */
+  private async sendWithRefresh(
+    firstToken: string,
+    send: (token: string) => Promise<{ statusCode: number; data: any }>,
+  ): Promise<{ statusCode: number; data: any } | null> {
+    const response = await send(firstToken);
+    if (response.statusCode !== 401) return response;
+
+    log.info('[AgentAuth] Backend returned 401; attempting session refresh');
+    const refreshed = await this.refreshUserAccessToken();
+    if (!refreshed) return null;
+    return send(refreshed);
+  }
+
+  private reauthRequired(res: ServerResponse): void {
+    this.sendJson(res, 401, {
+      error: 'Unauthorized',
+      message:
+        'Your Spaces session expired and could not be refreshed. Sign in again in the Spaces app.',
+      reauthRequired: true,
+    });
+  }
+
+  private async refreshUserAccessToken(): Promise<string | null> {
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const sessionCookie = cookies.find((cookie) => cookie.name === 'user_session_id');
+      if (!sessionCookie) {
+        log.warn('[AgentAuth] Cannot refresh: no user_session_id cookie');
+        return null;
+      }
+
+      const response = await this.makeBackendRequest({
+        url: `${config.BACKEND_URL}/api/v2/auth/refresh-session`,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `user_session_id=${sessionCookie.value}`,
+        },
+      });
+
+      if (response.statusCode !== 200) {
+        log.warn(`[AgentAuth] Session refresh returned ${response.statusCode}`);
+        return null;
+      }
+
+      // The backend sets the refreshed workspace cookie as a side effect of the
+      // call, but Electron's net module is run with useSessionCookies:false, so
+      // re-read from the session rather than trusting a Set-Cookie round trip.
+      const refreshed = await this.getUserAccessTokenFromSession();
+      if (refreshed) {
+        log.info('[AgentAuth] Refreshed the workspace access token');
+        return refreshed;
+      }
+
+      // Fall back to a token in the response body if the cookie did not land.
+      const data = response.data as { accessToken?: string; token?: string } | undefined;
+      return data?.accessToken ?? data?.token ?? null;
+    } catch (error: any) {
+      log.error('[AgentAuth] Session refresh failed:', error);
+      return null;
+    }
   }
 
   /**
