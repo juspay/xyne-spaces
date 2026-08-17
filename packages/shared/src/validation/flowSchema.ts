@@ -648,41 +648,80 @@ export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
+// ============================================================================
+// UNKNOWN COMPONENT (forward compatibility)
+// ============================================================================
+
+const knownComponentUnion = z.discriminatedUnion('type', [
+  textComponentSchema,
+  headingComponentSchema,
+  inputComponentSchema,
+  textareaComponentSchema,
+  dropdownComponentSchema,
+  selectComponentSchema,
+  multiselectComponentSchema,
+  dateComponentSchema,
+  buttonComponentSchema,
+  dividerComponentSchema,
+  imageComponentSchema,
+  linkComponentSchema,
+  tableComponentSchema,
+  planComponentSchema,
+  prComponentSchema,
+  prApprovalComponentSchema,
+  callScheduleComponentSchema,
+  agentComponentSchema,
+  // Container types — inline here so they can reference flowComponentSchema
+  baseComponentSchema.extend({
+    type: z.literal('row'),
+    children: z.array(z.lazy(() => flowComponentSchema)).optional(),
+  }),
+  baseComponentSchema.extend({
+    type: z.literal('column'),
+    children: z.array(z.lazy(() => flowComponentSchema)).optional(),
+  }),
+  baseComponentSchema.extend({
+    type: z.literal('card'),
+    children: z.array(z.lazy(() => flowComponentSchema)).optional(),
+  }),
+]);
+
+/** Derived from the union itself, so it can never drift as types are added. */
+const KNOWN_COMPONENT_TYPES: ReadonlySet<string> = new Set(
+  knownComponentUnion.options.map(option => option.shape.type.value),
+);
+
+/**
+ * Accepts a component type this build doesn't recognise, keeping its props and
+ * children intact.
+ *
+ * Flow messages are persisted, so a client can be asked to render a component
+ * type added after it was built — an older tab or desktop window mid-rollout,
+ * or any client after a release carrying a new type is rolled back. Without
+ * this branch one unknown `type` fails the whole `flowDefinitionSchema` and
+ * FlowRenderer replaces the entire message with "Invalid flow definition", so a
+ * single new component type breaks every message containing it, permanently,
+ * for everyone not yet updated.
+ *
+ * Validating unknown types loosely lets FlowRenderer fall back to rendering
+ * their children, degrading the message to its text content instead of an
+ * error. Types this build *does* know are excluded here, so a malformed known
+ * component still fails validation rather than slipping through this branch.
+ */
+export const unknownComponentSchema = baseComponentSchema.extend({
+  type: z
+    .string()
+    .min(1)
+    .refine(type => !KNOWN_COMPONENT_TYPES.has(type), {
+      message: 'Known component types must satisfy their own schema',
+    }),
+  children: z.array(z.lazy(() => flowComponentSchema)).optional(),
+});
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
-  z.discriminatedUnion('type', [
-    textComponentSchema,
-    headingComponentSchema,
-    inputComponentSchema,
-    textareaComponentSchema,
-    dropdownComponentSchema,
-    selectComponentSchema,
-    multiselectComponentSchema,
-    dateComponentSchema,
-    buttonComponentSchema,
-    dividerComponentSchema,
-    imageComponentSchema,
-    linkComponentSchema,
-    tableComponentSchema,
-    planComponentSchema,
-    prComponentSchema,
-    prApprovalComponentSchema,
-    callScheduleComponentSchema,
-    agentComponentSchema,
-    // Container types — inline here so they can reference flowComponentSchema
-    baseComponentSchema.extend({
-      type: z.literal('row'),
-      children: z.array(z.lazy(() => flowComponentSchema)).optional(),
-    }),
-    baseComponentSchema.extend({
-      type: z.literal('column'),
-      children: z.array(z.lazy(() => flowComponentSchema)).optional(),
-    }),
-    baseComponentSchema.extend({
-      type: z.literal('card'),
-      children: z.array(z.lazy(() => flowComponentSchema)).optional(),
-    }),
-  ]),
+  // Unknown last: only reached when no known type matched.
+  z.union([knownComponentUnion, unknownComponentSchema]),
 );
 
 // ============================================================================
