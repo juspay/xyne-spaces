@@ -29,7 +29,8 @@ type FlowComponentType =
   | 'link'
   | 'plan'
   | 'agent'
-  | 'pr';
+  | 'pr'
+  | 'sandbox';
 
 interface FlowComponentStyle {
   padding?: string;
