@@ -1303,7 +1303,7 @@ export const canvasTable = table('canvases')
   })
   .primaryKey('id');
 
-export const canvasLabelTable = table('canvas_labels')
+export const canvasLabelTable = table('canvas_labels') // Prisma model: CanvasLabel
   .columns({
     id: string(),
     workspaceId: string(),
