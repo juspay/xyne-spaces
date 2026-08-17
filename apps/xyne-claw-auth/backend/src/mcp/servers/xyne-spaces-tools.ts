@@ -4368,6 +4368,95 @@ const spacesUpdateTicket: ToolDef = {
     }
   },
 };
+// ── spaces-bulk-relabel-tickets ─────────────────────────────────────
+
+const spacesBulkRelabelTickets: ToolDef = {
+  name: "spaces-bulk-relabel-tickets",
+  description:
+    "Add and/or remove tags (labels) across MANY tickets in ONE approval. Use this to relabel a whole " +
+    "set of tickets — e.g. move every ticket carrying 'SET Sprint June Week 2' onto 'SET Sprint Aug Week 2' — " +
+    "without touching any of their other labels. Semantics are ADDITIVE, not replace: only the names you pass " +
+    "in addTags/removeTags are changed; every other label on each ticket is preserved. " +
+    "First gather the exact ticket Internal IDs with spaces-tickets or spaces-search (filter by the old label), " +
+    "then pass them here as ticketIds. Provide at least one of addTags or removeTags. Max 1000 ticketIds per call. " +
+    "Only tickets in your workspace are affected; any id that is not found or is in another workspace is skipped " +
+    "and reported back. This is a single write action and is approved once for the whole batch.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ticketIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Internal database IDs of the tickets to relabel (use spaces-tickets — 'Internal ID', not 'Xyne ID'). Non-empty, max 1000.",
+      },
+      addTags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tag names to add to every ticket (skipped where already present).",
+      },
+      removeTags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tag names to remove from every ticket (skipped where absent).",
+      },
+    },
+    required: ["ticketIds"],
+  },
+  async handler(args) {
+    try {
+      const rawIds = args["ticketIds"];
+      if (!Array.isArray(rawIds) || rawIds.length === 0) {
+        return err("ticketIds must be a non-empty array of ticket Internal IDs.");
+      }
+      const ticketIds = (rawIds as unknown[]).map((t) => String(t).trim()).filter(Boolean);
+      if (ticketIds.length === 0) return err("ticketIds must contain at least one non-empty id.");
+      if (ticketIds.length > 1000) return err("ticketIds cannot exceed 1000 per call.");
+
+      const rawAdd = args["addTags"];
+      const rawRemove = args["removeTags"];
+      if (rawAdd !== undefined && !Array.isArray(rawAdd)) return err("addTags must be an array of strings.");
+      if (rawRemove !== undefined && !Array.isArray(rawRemove)) return err("removeTags must be an array of strings.");
+      const addTags = Array.isArray(rawAdd) ? (rawAdd as unknown[]).map((t) => String(t)) : undefined;
+      const removeTags = Array.isArray(rawRemove) ? (rawRemove as unknown[]).map((t) => String(t)) : undefined;
+
+      if ((!addTags || addTags.length === 0) && (!removeTags || removeTags.length === 0)) {
+        return err("Provide at least one of addTags or removeTags.");
+      }
+
+      const body: Record<string, unknown> = { ticketIds };
+      if (addTags && addTags.length > 0) body["addTags"] = addTags;
+      if (removeTags && removeTags.length > 0) body["removeTags"] = removeTags;
+
+      const result = (await spacesFetch("/api/tickets/bulk-tags", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as {
+        success: boolean;
+        updated?: Array<{ ticketId: string }>;
+        unchanged?: string[];
+        skipped?: string[];
+        totalAdded?: number;
+        totalRemoved?: number;
+      };
+
+      const updated = result.updated?.length ?? 0;
+      const unchanged = result.unchanged?.length ?? 0;
+      const skipped = result.skipped?.length ?? 0;
+      const lines = [
+        `Bulk relabel done: ${updated} ticket(s) updated, ${unchanged} unchanged, ${skipped} skipped.`,
+        `  tags added: ${result.totalAdded ?? 0}, tags removed: ${result.totalRemoved ?? 0}`,
+      ];
+      if (skipped > 0) {
+        lines.push(`  skipped ids (not found or other workspace): ${result.skipped!.join(", ")}`);
+      }
+      return ok(lines.join("\n"));
+    } catch (e) {
+      return err(`Bulk relabel error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 // ── spaces-schedule-call ────────────────────────────────────────────
 
 const spacesScheduleCall: ToolDef = {
@@ -7762,6 +7851,7 @@ export const tools: ToolDef[] = [
   spacesCreateTicket,
   spacesCreateBulkTickets,
   spacesUpdateTicket,
+  spacesBulkRelabelTickets,
   spacesScheduleCall,
   spacesReadCanvas,
   spacesEditCanvas,
