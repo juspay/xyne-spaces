@@ -2232,29 +2232,128 @@ function getCookieValue(req: Request, name: string): string | undefined {
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
-function extractUserToken(req: Request): string | undefined {
-  // Try body
-  const bodyToken = (req.body as { userToken?: string }).userToken;
-  if (bodyToken) return bodyToken;
+/** Claims we care about from a Spaces authV2 workspace JWT. Payload only —
+ *  this is never a trust decision, Spaces verifies the signature. We read it
+ *  solely to keep the token, the workspace and the session pointing at the
+ *  same identity before forwarding them. */
+interface WorkspaceTokenClaims {
+  sub?: string;
+  workspaceId?: string;
+}
 
-  // Try Authorization header
+function decodeWorkspaceToken(token: string): WorkspaceTokenClaims | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[1]) return null;
+  try {
+    const json = Buffer.from(parts[1], "base64url").toString("utf8");
+    const claims = JSON.parse(json) as WorkspaceTokenClaims;
+    return typeof claims === "object" && claims !== null ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every `xyne_ws_<workspaceId>_token` cookie on the request. */
+function workspaceTokenCookies(req: Request): Array<{ workspaceId: string; token: string }> {
+  const cookie = req.headers["cookie"] ?? "";
+  const out: Array<{ workspaceId: string; token: string }> = [];
+  for (const match of cookie.matchAll(/(?:^|;\s*)xyne_ws_([^=;]+)_token=([^;]*)/g)) {
+    const workspaceId = match[1];
+    const raw = match[2];
+    if (!workspaceId || !raw) continue;
+    out.push({ workspaceId, token: decodeURIComponent(raw) });
+  }
+  return out;
+}
+
+/**
+ * The Spaces credentials to forward, resolved as ONE consistent triple.
+ *
+ * Why this is not three independent lookups: a browser holds a SEPARATE
+ * `xyne_ws_<id>_token` per workspace but only ONE `user_session_id`. When the
+ * same human has two Spaces user rows (observed live: one email owning both
+ * `cmgjk5fcz…` and `cmqsf2vlq…`, in different orgs), picking the bearer by
+ * `xyne_last_workspace` while taking the session from its own cookie forwards a
+ * token for user A alongside a session for user B. Spaces then resolves an
+ * inconsistent principal and `req.user.workspaceId` comes back unusable —
+ * surfacing downstream as a misleading `ORG_REQUIRED`, with every workspace row
+ * involved perfectly healthy.
+ *
+ * So: the workspace is taken FROM the chosen token's own claims (falling back
+ * to the cookie name that carried it), never from an independent cookie read,
+ * and a token whose `sub` disagrees with the other workspace tokens is logged
+ * rather than silently forwarded.
+ */
+function resolveSpacesUserAuth(req: Request): {
+  token?: string | undefined;
+  workspaceId?: string | undefined;
+  sub?: string | undefined;
+} {
+  const explicitWorkspace = typeof req.headers["x-workspace-id"] === "string" && req.headers["x-workspace-id"]
+    ? (req.headers["x-workspace-id"] as string)
+    : undefined;
+
+  // An explicitly supplied token wins — the caller has already decided.
+  const bodyToken = (req.body as { userToken?: string } | undefined)?.userToken;
   const authHeader = req.headers["authorization"];
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+  const explicitToken = bodyToken
+    ?? (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined);
+  if (explicitToken) {
+    const claims = decodeWorkspaceToken(explicitToken);
+    return {
+      token: explicitToken,
+      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
+  }
 
-  // Prefer the Spaces authV2 workspace cookie: xyne_ws_<workspaceId>_token
-  const lastWorkspace = getCookieValue(req, "xyne_last_workspace");
-  if (lastWorkspace) {
-    const wsToken = getCookieValue(req, `xyne_ws_${lastWorkspace}_token`);
-    if (wsToken) return wsToken;
+  const wsTokens = workspaceTokenCookies(req);
+  if (wsTokens.length > 0) {
+    const preferred = explicitWorkspace ?? getCookieValue(req, "xyne_last_workspace");
+    const chosen = wsTokens.find((t) => t.workspaceId === preferred) ?? wsTokens[0]!;
+    const claims = decodeWorkspaceToken(chosen.token);
+
+    // Two workspace tokens for two DIFFERENT users is the ambiguity above. We
+    // cannot tell from here which one `user_session_id` belongs to, so forward
+    // the chosen one but make the situation visible instead of mysterious.
+    const subs = new Set(
+      wsTokens.map((t) => decodeWorkspaceToken(t.token)?.sub).filter((v): v is string => Boolean(v)),
+    );
+    if (subs.size > 1) {
+      log.warn(
+        `[agents] multiple Spaces identities on one request — forwarding sub=${claims?.sub ?? "unknown"} ` +
+        `for workspace=${claims?.workspaceId ?? chosen.workspaceId}; all subs=[${[...subs].join(", ")}]. ` +
+        `If Spaces rejects this (e.g. ORG_REQUIRED), the session cookie likely belongs to a different one.`,
+      );
+    }
+
+    // Workspace comes from the token we are actually sending, so the pair can
+    // never disagree — the cookie name is only a fallback for a malformed JWT.
+    return {
+      token: chosen.token,
+      workspaceId: claims?.workspaceId ?? chosen.workspaceId,
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
   }
 
   // Fall back to legacy google_access_token — but ONLY if it looks like a JWT.
   // During the authV2 pending-auth window this cookie holds a JSON blob, which
   // is not a valid bearer token.
   const legacy = getCookieValue(req, "google_access_token");
-  if (legacy && legacy.split(".").length === 3) return legacy;
+  if (legacy && legacy.split(".").length === 3) {
+    const claims = decodeWorkspaceToken(legacy);
+    return {
+      token: legacy,
+      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
+  }
 
-  return undefined;
+  return { ...(explicitWorkspace ? { workspaceId: explicitWorkspace } : {}) };
+}
+
+function extractUserToken(req: Request): string | undefined {
+  return resolveSpacesUserAuth(req).token;
 }
 
 function extractSessionId(req: Request): string | undefined {
@@ -2264,9 +2363,9 @@ function extractSessionId(req: Request): string | undefined {
 }
 
 function extractWorkspaceId(req: Request): string | undefined {
-  const header = req.headers["x-workspace-id"];
-  if (typeof header === "string" && header) return header;
-  return getCookieValue(req, "xyne_last_workspace");
+  // Derived from the SAME resolution as the bearer token, so the two can never
+  // point at different workspaces. See resolveSpacesUserAuth.
+  return resolveSpacesUserAuth(req).workspaceId ?? getCookieValue(req, "xyne_last_workspace");
 }
 
 // /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
@@ -2310,6 +2409,27 @@ router.post("/:slug/create-app", async (req: Request<{ slug: string }>, res: Res
 
     if (!createRes.ok) {
       const text = await createRes.text().catch(() => "");
+      // ORG_REQUIRED from Spaces means it could not resolve an org for
+      // `req.user.workspaceId` — which, when the workspace itself is healthy,
+      // means the principal it resolved is not the one we think we sent. Say so
+      // here: chasing this from the Spaces-side message alone leads through the
+      // workspace, its orgId and the org mapping, all of which look fine.
+      if (text.includes("ORG_REQUIRED")) {
+        const auth = resolveSpacesUserAuth(req);
+        log.warn(
+          `[agents] create-app ORG_REQUIRED slug=${req.params.slug} ` +
+          `forwardedSub=${auth.sub ?? "unknown"} forwardedWorkspace=${auth.workspaceId ?? "none"} ` +
+          `sessionId=${sessionId ? "present" : "MISSING"}`,
+        );
+        res.status(400).json({
+          success: false,
+          error:
+            `Spaces could not resolve an organization for workspace ${auth.workspaceId ?? "(none sent)"}. ` +
+            `This usually means the workspace token and the login session belong to different Spaces users. ` +
+            `Switch to the workspace you normally work in and retry.`,
+        });
+        return;
+      }
       res.status(createRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
       return;
     }
