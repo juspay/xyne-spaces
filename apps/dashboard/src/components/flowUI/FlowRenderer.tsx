@@ -266,8 +266,17 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     if (!isVisible(component)) return null;
     const Component = NodeRegistry.get(component.type);
     if (!Component) {
+      // A component type added after this build was shipped — an older tab or
+      // desktop window mid-rollout, or any client after a release is rolled
+      // back. Render the children so the message degrades to its text content
+      // instead of silently vanishing; the wrapper's own presentation is the
+      // only thing lost.
       console.warn(`[FlowRenderer] Unknown component type: ${component.type}`);
-      return null;
+      return (
+        <React.Fragment key={component.id}>
+          {component.children?.map(renderComponent)}
+        </React.Fragment>
+      );
     }
     return (
       <Component key={component.id} node={component}>
