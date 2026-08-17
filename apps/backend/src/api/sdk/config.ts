@@ -1,5 +1,5 @@
 /**
- * /api/v1 configuration.
+ * /api/sdk configuration.
  *
  * Read straight from the environment rather than threaded through the Joi
  * schema in `config/env.ts`, so enabling the SDK surface in a deployment is
@@ -9,7 +9,7 @@
  * since the backend is now both AS and RS (no external auth service).
  */
 
-export const v1Config = {
+export const sdkConfig = {
   /** Master switch. The router is not mounted at all when false. */
   get enabled(): boolean {
     return process.env['SDK_API_ENABLED'] === 'true';

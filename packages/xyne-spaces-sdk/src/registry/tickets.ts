@@ -46,9 +46,9 @@ export const ticketsOperations = {
 
   /**
    * Create a ticket through the server-side sequence allocator and workflow.
-   * Maps to: POST /api/v1/tickets
+   * Maps to: POST /api/sdk/tickets
    */
-  create: api<CreateTicketInput, CreateTicketResponse>('POST', '/api/v1/tickets', {
+  create: api<CreateTicketInput, CreateTicketResponse>('POST', '/api/sdk/tickets', {
     mapArgs: (args) => {
       const { files, ...fields } = args;
       if (!files || files.length === 0) return fields;

@@ -1,5 +1,5 @@
 /**
- * Error plumbing for /api/v1.
+ * Error plumbing for /api/sdk.
  *
  * Every failure path funnels through `ApiError`; `middleware/errorHandler.ts` is
  * the only place that writes a status code. Domain errors thrown inside the

@@ -1,5 +1,5 @@
 /**
- * Wire helpers for /api/v1: pagination cursors, batch id parsing, and the
+ * Wire helpers for /api/sdk: pagination cursors, batch id parsing, and the
  * list/item response shapes.
  */
 

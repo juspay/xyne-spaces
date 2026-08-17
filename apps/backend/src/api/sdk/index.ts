@@ -1,5 +1,5 @@
 /**
- * The Xyne Spaces public API (v1).
+ * The Xyne Spaces public SDK API.
  *
  * Both authorization server and resource server for SDK clients: OAuth endpoints
  * mint RS256 access tokens which the same process verifies on resource requests.
@@ -36,7 +36,7 @@ export const allRoutes: readonly RouteDefinition[] = [
   ...searchRoutes,
 ];
 
-export function createV1Router(): Router {
+export function createSdkRouter(): Router {
   const router = Router();
 
   router.use(requestId);

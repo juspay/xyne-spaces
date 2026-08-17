@@ -51,7 +51,7 @@ lifecycle and gives the current access token to the SDK:
 
 ```typescript
 const sdk = createClient({
-  // Use the Spaces origin. The SDK adds /api/v1 to its requests.
+  // Use the Spaces origin. The SDK adds /api/sdk to its requests.
   baseUrl: process.env.XYNE_SPACES_BASE_URL,
   token: accessToken,
 });
@@ -69,7 +69,7 @@ are examples; the SDK does not read environment variables itself.
 
 ```dotenv
 XYNE_SPACES_BASE_URL=http://localhost:3001
-XYNE_SPACES_OAUTH_BASE_URL=http://localhost:3001/api/v1/oauth
+XYNE_SPACES_OAUTH_BASE_URL=http://localhost:3001/api/sdk/oauth
 XYNE_SPACES_CLIENT_ID=my-chat-app
 XYNE_SPACES_REDIRECT_URI=http://localhost:4173/auth/callback
 XYNE_SPACES_SCOPES=spaces.channels:read spaces.conversations:read spaces.messages:read spaces.messages:write spaces.users:read
@@ -122,7 +122,7 @@ The flow is:
 ```typescript
 // Supply these from your framework's public runtime/build configuration.
 // The client id is public; there is deliberately no client secret.
-const oauthBaseUrl = 'http://localhost:3001/api/v1/oauth';
+const oauthBaseUrl = 'http://localhost:3001/api/sdk/oauth';
 const clientId = 'my-chat-app';
 const redirectUri = 'http://localhost:4173/auth/callback';
 const requestedScopes = [

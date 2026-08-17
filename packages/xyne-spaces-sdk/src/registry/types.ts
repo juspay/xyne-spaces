@@ -3,16 +3,16 @@
  *
  * Defines the types for mapping SDK methods to backend operations.
  * Operations can be:
- * - Zero queries (via /api/v1/catalog/query)
- * - Zero mutators (via /api/v1/catalog/mutate)
- * - Direct API calls (via /api/v1/*)
+ * - Zero queries (via /api/sdk/catalog/query)
+ * - Zero mutators (via /api/sdk/catalog/mutate)
+ * - Direct API calls (via /api/sdk/*)
  */
 
 export type OperationType = 'query' | 'mutator' | 'api';
 
 /**
  * A Zero query operation.
- * Executed via POST /api/v1/catalog/query
+ * Executed via POST /api/sdk/catalog/query
  */
 export interface QueryOperation<TArgs = unknown, TResult = unknown> {
   readonly type: 'query';
@@ -26,7 +26,7 @@ export interface QueryOperation<TArgs = unknown, TResult = unknown> {
 
 /**
  * A Zero mutator operation.
- * Executed via POST /api/v1/catalog/mutate
+ * Executed via POST /api/sdk/catalog/mutate
  */
 export interface MutatorOperation<TArgs = unknown, TResult = unknown> {
   readonly type: 'mutator';
@@ -42,13 +42,13 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /**
  * A direct REST API operation.
- * Executed via the specified HTTP method to /api/v1/*
+ * Executed via the specified HTTP method to /api/sdk/*
  */
 export interface ApiOperation<TArgs = unknown, TResult = unknown> {
   readonly type: 'api';
   /** HTTP method */
   readonly method: HttpMethod;
-  /** API endpoint path (e.g., '/api/v1/search') */
+  /** API endpoint path (e.g., '/api/sdk/search') */
   readonly path: string | ((args: TArgs) => string);
   /** Transform SDK args to API request body/params */
   readonly mapArgs?: (args: TArgs) => unknown;
@@ -99,7 +99,7 @@ export function mutator<TArgs = void, TResult = unknown>(
  * Define a direct API operation.
  *
  * @example
- * const searchUsers = api<{ query: string }, User[]>('GET', '/api/v1/users/search');
+ * const searchUsers = api<{ query: string }, User[]>('GET', '/api/sdk/users/search');
  */
 export function api<TArgs = void, TResult = unknown>(
   method: HttpMethod,

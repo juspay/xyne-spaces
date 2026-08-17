@@ -33,14 +33,14 @@ export const conversationsOperations = {
 
   /**
    * Start a thread while uploading file bytes in the same request.
-   * Maps to: POST /api/v1/channels/:channelId/conversations
+   * Maps to: POST /api/sdk/channels/:channelId/conversations
    */
   createWithAttachments: api<
     CreateConversationWithAttachmentsInput,
     { conversationId: string; messageId: string }
   >(
     'POST',
-    (args) => `/api/v1/channels/${encodeURIComponent(args.channelId)}/conversations`,
+    (args) => `/api/sdk/channels/${encodeURIComponent(args.channelId)}/conversations`,
     {
       mapArgs: (args) => {
         const form = new FormData();

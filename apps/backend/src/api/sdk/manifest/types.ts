@@ -1,7 +1,7 @@
 /**
  * The route manifest.
  *
- * Every /v1 endpoint is declared as data rather than as an Express handler
+ * Every /sdk endpoint is declared as data rather than as an Express handler
  * registration, because three consumers need the same description:
  *   - the runtime, to build the router and its middleware chain
  *   - the OpenAPI generator, to emit the committed spec
@@ -45,7 +45,7 @@ export interface RouteResult {
 
 export interface RouteDefinition {
   readonly method: HttpMethod;
-  /** Express path relative to the /v1 mount, e.g. `/channels/:channelId/participants`. */
+  /** Express path relative to the /sdk mount, e.g. `/channels/:channelId/participants`. */
   readonly path: string;
   /** Stable identifier used in OpenAPI and as the idempotency scope. */
   readonly operationId: string;

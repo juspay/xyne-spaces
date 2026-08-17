@@ -2,7 +2,7 @@
  * OAuth routes for the SDK authorization server.
  *
  * The backend is both AS and RS: these endpoints mint tokens that the same
- * process verifies on /api/v1 requests. No external auth service dependency.
+ * process verifies on /api/sdk requests. No external auth service dependency.
  *
  * Flow:
  * 1. SDK opens browser to GET /authorize?client_id=...&redirect_uri=...&scope=...
@@ -90,7 +90,7 @@ router.get('/jwks.json', async (_req: Request, res: Response) => {
 
 /** Discovery document for OAuth clients. */
 router.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  const base = `${req.protocol}://${req.get('host')}/api/v1/oauth`;
+  const base = `${req.protocol}://${req.get('host')}/api/sdk/oauth`;
   res.json({
     issuer: oauthConfig.issuer,
     authorization_endpoint: `${base}/authorize`,

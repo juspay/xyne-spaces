@@ -11,8 +11,8 @@ build/
 zero-*
 # The public API deliberately centralizes its pinned Zero private imports in
 # these source files; they are not generated Zero build output.
-!src/api/v1/engine/zero-internals.ts
-!src/api/v1/engine/zero-internals.test.ts
+!src/api/sdk/engine/zero-internals.ts
+!src/api/sdk/engine/zero-internals.test.ts
 
 # Environment variables
 .env

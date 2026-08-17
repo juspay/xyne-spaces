@@ -25,7 +25,7 @@ import {
 } from '@/zero/server';
 import { logger } from '@/utils/logger';
 import { ApiError } from '../errors';
-import { v1Config } from '../config';
+import { sdkConfig } from '../config';
 import { asQueryInternals, executePostgresQuery } from './zero-internals';
 
 export interface CallQueryOptions {
@@ -39,13 +39,13 @@ export interface CallQueryOptions {
 
 /** Whether reads can be served at all in this deployment. */
 export function readsAvailable(): boolean {
-  return replicaDbProvider !== null || v1Config.allowPrimaryForReads;
+  return replicaDbProvider !== null || sdkConfig.allowPrimaryForReads;
 }
 
 function readProvider(usePrimary: boolean): typeof dbProvider {
   if (usePrimary) return dbProvider;
   if (replicaDbProvider) return replicaDbProvider;
-  if (v1Config.allowPrimaryForReads) return dbProvider;
+  if (sdkConfig.allowPrimaryForReads) return dbProvider;
   throw new ApiError(
     'service_misconfigured',
     'Read replica is not configured for this deployment (DATABASE_READ_REPLICA_POOL_URL).',
@@ -66,7 +66,7 @@ export async function callQuery<T = unknown>(
   } catch (err) {
     // A manifest entry naming a query that no longer exists is a deployment
     // bug, not a client error.
-    logger.error('[v1] unknown query in route manifest', { name, err });
+    logger.error('[sdk] unknown query in route manifest', { name, err });
     throw new ApiError('internal', `Query "${name}" is not registered.`, { cause: err });
   }
 
@@ -89,7 +89,7 @@ export async function callQuery<T = unknown>(
     conformToZeroShape(data, format as ZeroResultFormat);
     return data as T;
   } catch (err) {
-    logger.error('[v1] query execution failed', { name, err });
+    logger.error('[sdk] query execution failed', { name, err });
     throw new ApiError('upstream_unavailable', 'The database is temporarily unavailable.', {
       cause: err,
     });

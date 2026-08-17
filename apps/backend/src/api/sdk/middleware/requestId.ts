@@ -6,7 +6,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      /** Correlation id echoed on every /v1 response and embedded in error envelopes. */
+      /** Correlation id echoed on every /sdk response and embedded in error envelopes. */
       apiRequestId?: string;
     }
   }
