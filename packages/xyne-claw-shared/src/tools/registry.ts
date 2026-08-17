@@ -30,6 +30,7 @@ import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
 import * as recordSkill from "./record-skill/index.js";
+import * as agentTools from "./agent-tools/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -177,8 +178,16 @@ register(postmanSbx.postmanSbxRunCollection);
 
 // Register skill-management tools — create-skill (write tool: draft + approve →
 // personal skill) and update-skill (proposes a diff to the skill owner via DM).
+// Both carry source "custom:agent-tools" so they group with the agent/subagent/
+// MCP authoring tools below: to a user picking tools, "what this agent can
+// AUTHOR" is one idea, and it was previously split across three one-tool groups.
 register(skillManagement.createSkillTool);
 register(skillManagement.updateSkillTool);
+
+// Register agent-authoring tools — create/update agent, create/update subagent,
+// create MCP server. All approval-gated writes applied in claw-auth's
+// flow-action `serverType==="agent-tools"` branch; see agent-tools/tools.ts.
+for (const t of agentTools.AGENT_TOOL_DEFS) register(t);
 
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the

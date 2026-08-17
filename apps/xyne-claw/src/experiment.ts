@@ -437,7 +437,13 @@ export function buildExperimentTools(
         const report = typeof p["report"] === "string" ? p["report"] : "";
         const deadline = deadlineMs(ctx);
         const pastDeadline = Date.now() >= deadline;
-        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "security") {
+        // NOTE: "security" is deliberately NOT here. Understanding and framework
+        // runs enumerate a bounded set (code paths, duplication candidates) and
+        // can genuinely exhaust it. Attack surface cannot be enumerated that
+        // way — there is always one more endpoint — so an exhaustion gate would
+        // either never open or open on a false claim of completeness. A security
+        // run is time-boxed and exits on the deadline like /experiment.
+        if (ctx.kind === "understanding" || ctx.kind === "framework") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
           // runs out. The deadline is only a hard safety cap so the loop stays

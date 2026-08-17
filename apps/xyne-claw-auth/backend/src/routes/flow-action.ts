@@ -44,6 +44,7 @@ import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 
@@ -855,12 +856,37 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      // ── agent-authoring writes: agents, subagents, MCP servers ─────────────
+      // serverType "agent-tools" has no MCP connector — the row is written
+      // directly, by the approving user (writeUserId, already verified ===
+      // callerUserId above), in lib/agent-tools-apply.ts. Permission on UPDATE
+      // targets is re-checked there against the row, since a signed action
+      // carries no authority of its own. create-skill also routes here now that
+      // it shares the group's source; the legacy "skill" branch below still
+      // handles actions signed before that change shipped.
+      if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
+        const outcome = await applyAgentToolAction(tool, params, writeUserId);
+        if (!outcome.ok) {
+          resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          res.json(resp);
+          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
+          return;
+        }
+        const suffix = outcome.note ? `\n\n_${outcome.note}_` : "";
+        resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
+        return;
+      }
+
       // ── create-skill: persist an agent-authored skill on approval ──────────
       // serverType "skill" has no MCP connector; the write is applied directly
       // via skillRepository, owned by the approving user (writeUserId, already
       // verified === callerUserId above) in their org. HMAC over {serverType,
       // tool, params, userId} was verified above, so params are trusted here.
-      if (serverType === "skill") {
+      // "agent-tools" is create-skill's CURRENT serverType (it moved groups);
+      // "skill" is kept so actions signed before that deploy still apply.
+      if (serverType === "skill" || (serverType === "agent-tools" && tool === "create-skill")) {
         const { skillRepository } = await import("../repositories/index.js");
         const name = String(params["name"] ?? "").trim();
         const description = String(params["description"] ?? "").trim();
