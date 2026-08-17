@@ -1254,6 +1254,7 @@ model PrThreadLink {
 
 model TeamIntelligenceIngestionBatchV2 {
   id              String                           @id @default(cuid())
+  orgId           String?
   reportDate      DateTime
   source          String
   idempotencyKey  String                           @unique
@@ -1277,6 +1278,7 @@ model TeamIntelligenceIngestionBatchV2 {
   teamSummaries TeamIntelligenceTeamSummaryV2[]
   orgSummary    TeamIntelligenceOrgSummaryV2?
 
+  @@index([orgId])
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, receivedAt])
@@ -1285,7 +1287,7 @@ model TeamIntelligenceIngestionBatchV2 {
 }
 
 model TeamIntelligenceUserIngestionV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId            String? // denormalized org scoping key (nullable; stamped on insert)
   id               String                                @id @default(cuid())
   batchId          String
   reportDate       DateTime
@@ -1311,6 +1313,7 @@ model TeamIntelligenceUserIngestionV2 {
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userEmail])
+  @@index([orgId])
   @@index([reportDate, userEmail])
   @@index([batchId, processingStatus])
   @@index([source, reportDate])
@@ -1319,7 +1322,7 @@ model TeamIntelligenceUserIngestionV2 {
 }
 
 model TeamIntelligenceTeamSummaryV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId           String? // denormalized org scoping key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String
   reportDate      DateTime
@@ -1346,6 +1349,7 @@ model TeamIntelligenceTeamSummaryV2 {
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, teamId])
+  @@index([orgId])
   @@index([reportDate, teamId])
   @@index([batchId, status])
   @@index([source, reportDate])
@@ -1354,7 +1358,7 @@ model TeamIntelligenceTeamSummaryV2 {
 }
 
 model TeamIntelligenceOrgSummaryV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId           String? // denormalized org scoping key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String                        @unique
   reportDate      DateTime
@@ -1378,6 +1382,7 @@ model TeamIntelligenceOrgSummaryV2 {
 
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
+  @@index([orgId])
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, createdAt])

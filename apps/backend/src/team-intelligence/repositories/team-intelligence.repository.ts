@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 
 export interface CreateTeamIntelligenceBatchData {
+  orgId?: string | null;
   reportDate: Date;
   source: string;
   idempotencyKey: string;
@@ -23,7 +24,7 @@ export interface CreateTeamIntelligenceBatchData {
 }
 
 export interface CreateTeamIntelligenceUserData {
-  workspaceId?: string | null;
+  orgId?: string | null;
   reportDate: Date;
   source: string;
   userEmail: string;
@@ -52,7 +53,7 @@ export interface TeamIntelligenceBatchProgress {
 }
 
 export interface CreateTeamIntelligenceTeamSummaryData {
-  workspaceId?: string | null;
+  orgId?: string | null;
   batchId: string;
   reportDate: Date;
   source: string;
@@ -75,7 +76,7 @@ export interface TeamIntelligenceTeamProgress {
 }
 
 export interface CreateTeamIntelligenceOrgSummaryData {
-  workspaceId?: string | null;
+  orgId?: string | null;
   batchId: string;
   reportDate: Date;
   source: string;
@@ -439,12 +440,12 @@ class TeamIntelligenceRepository {
   }
 
   async findPreviousCompletedOrgSummary(
-    workspaceId: string,
+    orgId: string,
     beforeReportDate: Date
   ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
     return await this.prisma.teamIntelligenceOrgSummaryV2.findFirst({
       where: {
-        workspaceId,
+        orgId,
         status: TeamIntelligenceBatchStatus.COMPLETED,
         reportDate: { lt: beforeReportDate },
         contentUrl: { not: null },

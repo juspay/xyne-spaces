@@ -159,6 +159,7 @@ class TeamIntelligenceWorker {
         teamId: user.teamId,
         teamName: user.teamName,
         source: user.source,
+        orgId: user.orgId ?? '',
       });
 
       if (enqueueResult.enqueued || enqueueResult.duplicateJobState === 'waiting' || enqueueResult.duplicateJobState === 'delayed' || enqueueResult.duplicateJobState === 'paused') {
@@ -239,6 +240,7 @@ class TeamIntelligenceWorker {
         teamId: teamSummary.teamId,
         teamName: teamSummary.teamName,
         source: teamSummary.source,
+        orgId: teamSummary.orgId ?? '',
       });
 
       if (enqueueResult.enqueued || enqueueResult.duplicateJobState === 'waiting' || enqueueResult.duplicateJobState === 'delayed' || enqueueResult.duplicateJobState === 'paused') {
@@ -317,6 +319,7 @@ class TeamIntelligenceWorker {
         orgSummaryId: orgSummary.id,
         reportDate: orgSummary.reportDate.toISOString().slice(0, 10),
         source: orgSummary.source,
+        orgId: orgSummary.orgId ?? '',
       });
 
       if (enqueueResult.enqueued || enqueueResult.duplicateJobState === 'waiting' || enqueueResult.duplicateJobState === 'delayed' || enqueueResult.duplicateJobState === 'paused') {
@@ -402,7 +405,7 @@ class TeamIntelligenceWorker {
         teamId: userIngestion.teamId,
         teamName: userIngestion.teamName,
         source: userIngestion.source,
-        workspaceId: userIngestion.workspaceId,
+        orgId: userIngestion.orgId,
         reportDate: userIngestion.reportDate,
       });
 
@@ -441,6 +444,7 @@ class TeamIntelligenceWorker {
         batchId,
         reportDate: userIngestion.reportDate,
         source: userIngestion.source,
+        orgId: userIngestion.orgId ?? '',
       });
 
       await this.reconcileBatchStatus(batchId);
@@ -474,6 +478,7 @@ class TeamIntelligenceWorker {
       batchId: data.batchId,
       reportDate: new Date(`${data.reportDate}T00:00:00.000Z`),
       source: data.source,
+      orgId: data.orgId,
     });
 
     await this.reconcileBatchStatus(data.batchId);
@@ -634,6 +639,7 @@ class TeamIntelligenceWorker {
         batchId,
         reportDate: teamSummary.reportDate,
         source: teamSummary.source,
+        orgId: job.data.orgId,
       });
     } catch (error) {
       if (this.isFinalAttempt(job)) {
@@ -664,6 +670,7 @@ class TeamIntelligenceWorker {
       batchId: data.batchId,
       reportDate: new Date(`${data.reportDate}T00:00:00.000Z`),
       source: data.source,
+      orgId: data.orgId,
     });
   }
 
@@ -698,41 +705,24 @@ class TeamIntelligenceWorker {
         throw new Error(`No completed team summaries found for batchId=${batchId}`);
       }
 
-      const workspaceId =
-        orgSummary.workspaceId?.trim() || appConfig.defaultWorkspaceId?.trim();
+      const orgId = orgSummary.orgId?.trim() || null;
 
-      // Resolve the organization identity for the summary. workspaceId is only
-      // used as a bridge to the org record — it is not part of the ingestion
-      // data itself. When it is unavailable (no DEFAULT_WORKSPACE_ID, or the
-      // org summary record was created without one), fall back to a generic
-      // org identity instead of failing the job. This mirrors the team/user
-      // summary workers, which do not hard-fail on a missing workspaceId.
+      // Resolve the organization identity for the summary. orgId is stamped on
+      // the org summary record at ingestion time. When unavailable (legacy records
+      // created before this migration), fall back to a generic org identity.
       let organization: { id: string; name: string };
-      if (workspaceId) {
-        const workspace = await db.workspace.findUnique({
-          where: { id: workspaceId },
-          select: {
-            id: true,
-            orgId: true,
-            organization: {
-              select: {
-                name: true,
-              },
-            },
-          },
+      if (orgId) {
+        const org = await db.organization.findUnique({
+          where: { orgId },
+          select: { name: true },
         });
-        if (!workspace) {
-          throw new Error(
-            `Workspace ${workspaceId} not found for organization summary batchId=${batchId}`
-          );
-        }
         organization = {
-          id: workspace.orgId,
-          name: workspace.organization.name,
+          id: orgId,
+          name: org?.name ?? 'Organization',
         };
       } else {
         logger.warn(
-          `[TEAM-INTEL-WORKER] No workspaceId for org summary ${orgSummaryId}; falling back to generic org identity`
+          `[TEAM-INTEL-WORKER] No orgId for org summary ${orgSummaryId}; falling back to generic org identity`
         );
         organization = {
           id: appConfig.superposition.orgId || 'unknown',
@@ -766,9 +756,9 @@ class TeamIntelligenceWorker {
       );
 
       let previousContinuityState: TeamIntelligenceOrgContinuityState | null = null;
-      const previousOrgSummary = workspaceId
+      const previousOrgSummary = orgId
         ? await teamIntelligenceRepository.findPreviousCompletedOrgSummary(
-            workspaceId,
+            orgId,
             orgSummary.reportDate
           )
         : null;
@@ -892,6 +882,7 @@ class TeamIntelligenceWorker {
     teamId: string | null;
     teamName: string | null;
     source: string;
+    orgId: string;
   }): Promise<void> {
     const teamName = input.teamName?.trim() || 'No Team';
     const teamId = input.teamId?.trim() || null;
@@ -915,7 +906,7 @@ class TeamIntelligenceWorker {
     if (!teamSummary) {
       try {
         teamSummary = await teamIntelligenceRepository.createTeamSummary({
-          workspaceId: appConfig.defaultWorkspaceId?.trim() || null,
+          orgId: input.orgId || null,
           batchId: input.batchId,
           reportDate: input.reportDate,
           source: input.source,
@@ -974,6 +965,7 @@ class TeamIntelligenceWorker {
       teamId,
       teamName,
       source: input.source,
+      orgId: input.orgId,
     });
 
     if (enqueueResult.enqueued || enqueueResult.duplicateJobState) {
@@ -993,6 +985,7 @@ class TeamIntelligenceWorker {
     batchId: string;
     reportDate: Date;
     source: string;
+    orgId: string;
   }): Promise<void> {
     const batchProgress = await teamIntelligenceRepository.getBatchProgress(input.batchId);
     const terminalUsers = batchProgress.completedUsers + batchProgress.failedUsers;
@@ -1030,6 +1023,7 @@ class TeamIntelligenceWorker {
           teamId: team.teamId,
           teamName: team.teamName,
           source: input.source,
+          orgId: input.orgId,
         })
       )
     );
@@ -1039,6 +1033,7 @@ class TeamIntelligenceWorker {
     batchId: string;
     reportDate: Date;
     source: string;
+    orgId: string;
   }): Promise<void> {
     const batchProgress = await teamIntelligenceRepository.getBatchProgress(input.batchId);
     const terminalUsers = batchProgress.completedUsers + batchProgress.failedUsers;
@@ -1056,7 +1051,7 @@ class TeamIntelligenceWorker {
     let orgSummary = await teamIntelligenceRepository.findOrgSummaryByBatchId(input.batchId);
     if (!orgSummary) {
       orgSummary = await teamIntelligenceRepository.createOrgSummary({
-        workspaceId: appConfig.defaultWorkspaceId?.trim() || null,
+        orgId: input.orgId || null,
         batchId: input.batchId,
         reportDate: input.reportDate,
         source: input.source,
@@ -1100,6 +1095,7 @@ class TeamIntelligenceWorker {
       orgSummaryId: orgSummary.id,
       reportDate: input.reportDate.toISOString().slice(0, 10),
       source: input.source,
+      orgId: input.orgId,
     });
 
     if (enqueueResult.enqueued || enqueueResult.duplicateJobState) {

@@ -49,7 +49,7 @@ interface GenerateUserSummaryInput {
   teamId: string | null;
   teamName: string | null;
   source: string;
-  workspaceId?: string | null;
+  orgId?: string | null;
   reportDate: Date;
 }
 
@@ -731,6 +731,7 @@ function buildEvidenceChunkPrompt(input: {
     '- Optimize for signal, not coverage. Large input volume must not produce a long inventory of routine activity.',
     '- Keep only candidate facts involving a meaningful outcome, goal movement, material change, blocker, risk, decision, dependency, ownership/load concern, or required action.',
     '- Omit routine updates, raw activity counts, minor implementation detail, social chatter, repeated evidence, and facts whose absence would not change a manager action or conclusion.',
+    '- Never use PR numbers, commit hashes, ticket IDs, file counts, or line addition/deletion tallies as the substance of a fact. Describe what was built or decided, not artifact metadata.',
     '- Rank candidates by impact, urgency, and evidence strength. Return at most 5 items in each fact array; fewer or none is preferred when evidence is not important.',
     '- Do not judge performance. Describe visible work state and evidence.',
     '- If the chunk has no useful manager signal, return empty arrays rather than filler.',
@@ -886,6 +887,7 @@ function buildDigestMergePrompt(input: {
     'Remove duplicates only when they clearly describe the same underlying evidence-backed fact.',
     'Do not introduce any evidenceId that is not present in the supplied digests.',
     'Optimize for signal, not coverage. Rank by impact, urgency, and evidence strength; retain at most 5 items per fact array and drop routine, low-impact, stale, weak, or redundant facts.',
+    'Never surface facts framed as PR numbers, commit hashes, ticket IDs, file counts, or line addition/deletion tallies. Keep what was built, decided, or changed and why it matters, not artifact metadata.',
     '',
     'Return one valid JSON object only with this shape:',
     JSON.stringify({
@@ -1325,6 +1327,8 @@ function buildUserSectionPrompt(input: {
     '- Apply a mandatory importance gate: include an insight only when omitting it could cause the manager to miss a material outcome, meaningful goal movement, significant change, blocker, risk, unresolved decision, dependency, ownership/load concern, or concrete action.',
     '- Optimize for decision value, not coverage. Input volume must never increase output volume by itself.',
     '- Exclude routine status updates, ordinary completed tasks, raw activity counts, minor implementation details, duplicated signals, stale context with no current consequence, and weak inference.',
+    '- Never describe work using PR numbers, commit hashes, ticket IDs, file counts, or line addition/deletion tallies. These are artifact identifiers, not insights.',
+    '- Write about what was built, decided, or resolved and why it matters. Avoid phrases like "Merged PR #N", "N additions across M files", or "commit X". Instead describe the outcome: what capability was shipped, what problem was solved, what decision was made.',
     '- Completed work is important only when it creates a material outcome, advances a meaningful goal, changes risk, unlocks others, or requires recognition/leadership awareness; a PR, commit, ticket, call, or message is not important merely because it exists.',
     '- Treat missing data as one consolidated insight only when it materially changes confidence or requires corrective action. Never generate multiple bullets from the same visibility gap.',
     '- Rank candidates by impact, urgency, evidence strength, and actionability. Return only the strongest non-overlapping insights.',
@@ -2316,7 +2320,7 @@ class TeamIntelligenceSummaryService {
       input.userEmail,
       input.userName,
       input.reportDate,
-      input.workspaceId
+      input.orgId
     );
     const codeEvidence = normalizeCodeEvidence(
       input.pullRequests,

@@ -9,6 +9,7 @@ import { logger } from '@/utils/logger';
 export interface OrgSummaryDateRangeFilters {
   from: Date;
   to: Date;
+  orgId?: string | null;
 }
 
 export interface AiUsageAggregate {
@@ -30,6 +31,7 @@ export interface OrgBulletsByDateFilters {
   to: Date;
   page: number;
   limit: number;
+  orgId?: string | null;
 }
 
 export interface OrgBulletsByDateResult {
@@ -45,6 +47,7 @@ export interface OrgBulletsByDateResult {
 export interface OrgTeamsDateRangeFilters {
   from: Date;
   to: Date;
+  orgId?: string | null;
 }
 
 export interface OrgTeamAggregate {
@@ -188,7 +191,7 @@ class TeamIntelligenceOrgRepository {
    * for all batches whose reportDate falls within [from, to] (inclusive).
    */
   async getDashboardSummary(filters: OrgSummaryDateRangeFilters): Promise<OrgDashboardSummary> {
-    const { from, to } = filters;
+    const { from, to, orgId } = filters;
 
     // Extend to to end-of-day so the "to" date is fully inclusive
     const toEndOfDay = new Date(to);
@@ -198,6 +201,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceOrgSummaryV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: { reportDate: 'desc' },
         select: {
@@ -207,6 +211,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
+          ...(orgId ? { orgId } : {}),
         },
         select: {
           contentUrl: true,
@@ -298,17 +303,17 @@ class TeamIntelligenceOrgRepository {
   }
 
   async getOrgLeadershipSnapshotsByDate(filters: {
-    workspaceId: string;
+    orgId: string;
     from: Date;
     to: Date;
   }): Promise<OrgLeadershipSnapshotsResult> {
-    const { workspaceId, from, to } = filters;
+    const { orgId, from, to } = filters;
     const toEndOfDay = new Date(to);
     toEndOfDay.setUTCHours(23, 59, 59, 999);
 
     const rows = await db.teamIntelligenceOrgSummaryV2.findMany({
       where: {
-        workspaceId,
+        orgId,
         reportDate: { gte: from, lte: toEndOfDay },
         status: 'COMPLETED',
         contentUrl: { not: null },
@@ -373,7 +378,7 @@ class TeamIntelligenceOrgRepository {
    * flattened into a single array and paginated.
    */
   async getOrgBulletsByDate(filters: OrgBulletsByDateFilters): Promise<OrgBulletsByDateResult> {
-    const { from, to, page, limit } = filters;
+    const { from, to, page, limit, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -384,6 +389,7 @@ class TeamIntelligenceOrgRepository {
     const orgSummaries = await db.teamIntelligenceOrgSummaryV2.findMany({
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -446,7 +452,7 @@ class TeamIntelligenceOrgRepository {
   }
 
   async getOrgTeamsByDate(filters: OrgTeamsDateRangeFilters): Promise<OrgTeamsDateRangeResult> {
-    const { from, to } = filters;
+    const { from, to, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -458,6 +464,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceTeamSummaryV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: [{ teamName: 'asc' }, { reportDate: 'asc' }],
         select: {
@@ -469,6 +476,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: [{ teamName: 'asc' }, { userEmail: 'asc' }],
         select: {

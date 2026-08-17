@@ -220,6 +220,8 @@ function buildSectionPrompt(
     '- This is a team rollup, not a per-member exhaustive report. Do not create one item for every member or every source signal.',
     '- Include only leadership-significant facts: CRITICAL/HIGH priority, BLOCKED/OPEN/STALLED/REGRESSING items, progressing work that meaningfully advances the team bet, unresolved decisions, dependencies, or manager-actionable risks.',
     '- Omit routine completed work, low-impact activity, duplicated member-level detail, and medium/low items unless they are required to explain a blocker, critical movement, ownership gap, or manager action.',
+    '- Never describe work using PR numbers, commit hashes, ticket IDs, file counts, or line addition/deletion tallies. These are artifact identifiers, not insights.',
+    '- Write about what was built, decided, or resolved and why it matters. Avoid phrases like "Merged PR #N", "N additions across M files", or "commit X". Instead describe the outcome: what capability was shipped, what problem was solved, what decision was made.',
     '- Apply a mandatory importance gate: include an insight only when omitting it could cause leadership to miss a material outcome, meaningful goal movement, significant change, blocker, risk, unresolved decision, cross-member dependency, ownership/load concern, or concrete manager action.',
     '- Optimize for decision value, not coverage. More members or more source data must not produce more output by itself.',
     '- Rank candidates by organizational impact, urgency, evidence strength, and actionability; merge overlapping member signals into one team-level insight.',

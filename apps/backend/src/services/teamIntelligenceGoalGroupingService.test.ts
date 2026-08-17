@@ -1,7 +1,10 @@
 import { db } from '@/database/client';
 import { mettleTeamGoalsService } from '@/services/mettleTeamGoalsService';
 import { mettleTeamSyncService } from '@/services/mettleTeamSyncService';
-import { teamIntelligenceGoalGroupingService } from '@/services/teamIntelligenceGoalGroupingService';
+import {
+  classifyTeamGoalGroup,
+  teamIntelligenceGoalGroupingService,
+} from '@/services/teamIntelligenceGoalGroupingService';
 
 jest.mock('@/database/client', () => ({
   db: {
@@ -30,6 +33,33 @@ jest.mock('@/team-intelligence/services/team-intelligence-content-storage.servic
 }));
 
 describe('TeamIntelligenceGoalGroupingService', () => {
+  it('uses the highest evidence-matched track instead of the highest active track', () => {
+    const classification = classifyTeamGoalGroup(
+      [
+        { id: 'goal-10x', title: 'Unmatched 10X goal', track: '10X' },
+        { id: 'goal-2x', title: 'Matched 2X goal', track: '2X' },
+      ],
+      [
+        {
+          goalId: 'goal-10x',
+          track: '10X',
+          isTeamWorkingTowardsGoal: false,
+        },
+        {
+          goalId: 'goal-2x',
+          track: '2X',
+          isTeamWorkingTowardsGoal: true,
+        },
+      ]
+    );
+
+    expect(classification).toEqual({
+      group: '2X',
+      highestTrack: '2X',
+      matchedGoalCount: 1,
+    });
+  });
+
   it('returns the other teams when one Mettle goal request fails', async () => {
     jest.mocked(mettleTeamSyncService.fetchTeamsFromMettle).mockResolvedValue({
       teams: [
@@ -52,10 +82,7 @@ describe('TeamIntelligenceGoalGroupingService', () => {
     });
     jest.mocked(db.teamIntelligenceTeamSummaryV2.findMany).mockResolvedValue([]);
 
-    const result = await teamIntelligenceGoalGroupingService.getTeamGoalGroups(
-      'workspace-1',
-      new Date('2026-08-10T12:00:00.000Z')
-    );
+    const result = await teamIntelligenceGoalGroupingService.getTeamGoalGroups('workspace-1');
 
     expect(result.totalTeams).toBe(3);
     expect(result.groups.READY_TO_ACCELERATE.map((team) => team.id)).toEqual(['team-a', 'team-c']);

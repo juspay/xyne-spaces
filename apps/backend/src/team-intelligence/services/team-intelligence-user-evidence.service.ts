@@ -1,4 +1,3 @@
-import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -33,15 +32,9 @@ class TeamIntelligenceUserEvidenceService {
     userEmail: string,
     userName: string,
     reportDate: Date,
-    ingestionWorkspaceId?: string | null
+    ingestionOrgId?: string | null
   ): Promise<TeamIntelligenceUserEvidence> {
     const normalizedEmail = userEmail.trim().toLowerCase();
-    const preferredWorkspaceIds = [
-      ingestionWorkspaceId?.trim(),
-      appConfig.defaultWorkspaceId?.trim(),
-    ].filter((value, index, values): value is string =>
-      Boolean(value) && values.indexOf(value) === index
-    );
     const userSelect = {
       id: true,
       email: true,
@@ -51,10 +44,10 @@ class TeamIntelligenceUserEvidenceService {
       workspace: { select: { orgId: true } },
     } as const;
 
-    let user = preferredWorkspaceIds.length > 0
+    let user = ingestionOrgId?.trim()
       ? await db.user.findFirst({
           where: {
-            workspaceId: { in: preferredWorkspaceIds },
+            workspace: { orgId: ingestionOrgId.trim() },
             email: { equals: normalizedEmail, mode: 'insensitive' },
             leftAt: null,
           },
@@ -73,7 +66,7 @@ class TeamIntelligenceUserEvidenceService {
       });
       if (matchingUsers.length > 1) {
         throw new Error(
-          `Multiple active Spaces users found for ${userEmail}; Team Intelligence requires a workspaceId to avoid cross-workspace evidence`
+          `Multiple active Spaces users found for ${userEmail}; Team Intelligence requires an orgId to avoid cross-org evidence`
         );
       }
       user = matchingUsers[0] ?? null;
@@ -82,7 +75,7 @@ class TeamIntelligenceUserEvidenceService {
     if (!user) {
       logger.warn('[TEAM-INTEL-EVIDENCE] No Spaces user found; continuing with incoming activity only', {
         userEmail: normalizedEmail,
-        ingestionWorkspaceId: ingestionWorkspaceId ?? null,
+        ingestionOrgId: ingestionOrgId ?? null,
       });
       return {
         user: {
@@ -90,8 +83,8 @@ class TeamIntelligenceUserEvidenceService {
           email: normalizedEmail,
           name: userName,
           role: null,
-          workspaceId: ingestionWorkspaceId?.trim() || null,
-          organizationId: null,
+          workspaceId: null,
+          organizationId: ingestionOrgId?.trim() || null,
           resolvedInWorkspace: false,
         },
         tickets: [],

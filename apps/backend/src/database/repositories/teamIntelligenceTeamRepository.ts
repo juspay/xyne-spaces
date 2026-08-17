@@ -250,6 +250,8 @@ class TeamIntelligenceTeamRepository {
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
         teamId,
+        status: 'COMPLETED',
+        contentUrl: { not: null },
       },
       orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
       select: {

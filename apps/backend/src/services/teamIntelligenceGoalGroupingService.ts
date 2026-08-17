@@ -51,9 +51,13 @@ export const classifyTeamGoalGroup = (
   highestTrack: '10X' | '5X' | '2X' | null;
   matchedGoalCount: number;
 } => {
-  const track = highestTrack(activeGoals);
-  if (activeGoals.length === 0 || !track) {
-    return { group: 'NO_GOAL_DATA', highestTrack: track, matchedGoalCount: 0 };
+  const highestActiveTrack = highestTrack(activeGoals);
+  if (activeGoals.length === 0 || !highestActiveTrack) {
+    return {
+      group: 'NO_GOAL_DATA',
+      highestTrack: null,
+      matchedGoalCount: 0,
+    };
   }
 
   const activeGoalIds = new Set(activeGoals.map((goal) => goal.id));
@@ -68,9 +72,12 @@ export const classifyTeamGoalGroup = (
       .map((alignment) => alignment.goalId as string)
   );
 
+  const matchedGoals = activeGoals.filter((goal) => matchedGoalIds.has(goal.id));
+  const highestMatchedTrack = highestTrack(matchedGoals);
+
   return {
-    group: matchedGoalIds.size > 0 ? track : 'READY_TO_ACCELERATE',
-    highestTrack: track,
+    group: highestMatchedTrack ?? 'READY_TO_ACCELERATE',
+    highestTrack: highestMatchedTrack,
     matchedGoalCount: matchedGoalIds.size,
   };
 };
@@ -93,7 +100,7 @@ const mapWithConcurrency = async <T, U>(
 };
 
 class TeamIntelligenceGoalGroupingService {
-  async getTeamGoalGroups(workspaceId: string): Promise<TeamGoalGroupsResponse> {
+  async getTeamGoalGroups(orgId: string): Promise<TeamGoalGroupsResponse> {
     const { teams } = await mettleTeamSyncService.fetchTeamsFromMettle();
     const sortedTeams = [...(teams ?? [])].sort((a, b) => a.name.localeCompare(b.name));
     const teamIds = sortedTeams.map((team) => team.id);
@@ -126,7 +133,7 @@ class TeamIntelligenceGoalGroupingService {
         ? Promise.resolve([])
         : db.teamIntelligenceTeamSummaryV2.findMany({
             where: {
-              workspaceId,
+              orgId,
               teamId: { in: teamIds },
               status: 'COMPLETED',
               contentUrl: { not: null },

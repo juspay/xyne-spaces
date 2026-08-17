@@ -235,6 +235,8 @@ function buildSectionPrompt(
     '- Write naturally, for example: "Mettle/Pragati team is blocked on leadership taxonomy confirmation" or "Ananya Rao in Xyne shipped approval-card rendering". Do not use bracketed labels as the only team context.',
     '- When a supplied team payload includes member names, include the relevant individual name for ownership, achievement, blocker, or decision context. If no individual is clear, name the team.',
     '- Omit routine completed work, low-impact activity, duplicated team-level detail, and medium/low items unless they are required to explain a blocker, critical movement, ownership gap, dependency, or founder action.',
+    '- Never describe work using PR numbers, commit hashes, ticket IDs, file counts, or line addition/deletion tallies. These are artifact identifiers, not insights.',
+    '- Write about what was built, decided, or resolved and why it matters. Avoid phrases like "Merged PR #N", "N additions across M files", or "commit X". Instead describe the outcome: what capability was shipped, what problem was solved, what decision was made.',
     '- Apply a mandatory importance gate: include an insight only when omitting it could cause founders or leadership to miss a material organization outcome, strategic movement, significant change, blocker, risk, unresolved decision, cross-team dependency, ownership/capability/load concern, or concrete leadership action.',
     '- Optimize for decision value, not coverage. More teams or more source data must not produce more output by itself.',
     '- Rank candidates by organization-wide impact, urgency, evidence strength, and actionability; merge overlapping team signals into one organization-level insight.',

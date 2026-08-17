@@ -12,12 +12,14 @@ export interface UserDetailsDateRangeFilters {
   userEmail: string;
   page: number;
   limit: number;
+  orgId?: string | null;
 }
 
 export interface UserOverviewDateRangeFilters {
   from: Date;
   to: Date;
   userEmail: string;
+  orgId?: string | null;
 }
 
 export interface UserAiUsageAggregate {
@@ -160,7 +162,7 @@ function paginateArray<T>(items: T[], page: number, limit: number): { total: num
 
 class TeamIntelligenceUserRepository {
   private async getUserIngestions(filters: UserOverviewDateRangeFilters) {
-    const { from, to, userEmail } = filters;
+    const { from, to, userEmail, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -175,6 +177,7 @@ class TeamIntelligenceUserRepository {
           equals: userEmail,
           mode: 'insensitive',
         },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -499,7 +502,7 @@ class TeamIntelligenceUserRepository {
   async getUserLeadershipSnapshotsByDate(
     filters: UserOverviewDateRangeFilters
   ): Promise<UserLeadershipSnapshotsDateRangeResult> {
-    const { from, to, userEmail } = filters;
+    const { from, to, userEmail, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -516,6 +519,7 @@ class TeamIntelligenceUserRepository {
           mode: 'insensitive',
         },
         contentUrl: { not: null },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
       select: {

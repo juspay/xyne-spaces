@@ -53,12 +53,14 @@ export class TeamIntelligenceUserController {
         res.status(400).json({ error: '"from" must be before or equal to "to"' });
         return;
       }
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) return;
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) return;
 
       const result = await teamIntelligenceUserDashboardService.getUserLeadershipSnapshots({
         from: fromDate,
         to: toDate,
         userEmail,
+        orgId,
       });
       const snapshot = result.snapshots[0];
       if (!snapshot) {
@@ -83,15 +85,15 @@ export class TeamIntelligenceUserController {
   };
   /**
    * Ensures the requested email belongs to a user in the caller's workspace.
-   * The same person may exist in multiple workspaces; access is allowed only
-   * when the target email shares the caller's workspace. Writes a 403 and
-   * returns false otherwise.
+   * Returns the caller's orgId on success, or false (and writes a 403) on
+   * failure. The orgId is used to scope all Team Intelligence data queries
+   * so users only see data ingested for their own organisation.
    */
   private assertEmailInWorkspace = async (
     email: string,
     req: Request,
     res: Response
-  ): Promise<boolean> => {
+  ): Promise<string | false> => {
     const workspaceId = req.user?.workspaceId;
     if (!workspaceId) {
       res.status(403).json({ error: 'Access denied' });
@@ -108,7 +110,12 @@ export class TeamIntelligenceUserController {
       return false;
     }
 
-    return true;
+    const mapping = await db.workspaceOrganization.findFirst({
+      where: { workspaceId },
+      select: { orgId: true },
+    });
+
+    return mapping?.orgId ?? '';
   };
 
   /**
@@ -128,7 +135,7 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(parseResult.data.email, req, res))) {
+      if ((await this.assertEmailInWorkspace(parseResult.data.email, req, res)) === false) {
         return;
       }
 
@@ -202,7 +209,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -215,6 +223,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -250,7 +259,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -263,6 +273,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -299,7 +310,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -307,6 +319,7 @@ export class TeamIntelligenceUserController {
         from: fromDate,
         to: toDate,
         userEmail,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -343,7 +356,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -351,6 +365,7 @@ export class TeamIntelligenceUserController {
         from: fromDate,
         to: toDate,
         userEmail,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -386,7 +401,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -399,6 +415,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);
