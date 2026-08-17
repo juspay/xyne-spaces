@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
-import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, CalendarVisibility } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -18,6 +18,7 @@ import {
   sendCallInvitationReply,
 } from '@/services/callInvitationEmailService';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -205,6 +206,7 @@ export class ScheduleCallController {
           recurringSeriesId: series.id,
           organizerId: userId,
           userIds: recurringParticipantUserIds,
+          workspaceId: req.user!.workspaceId!,
           tx,
         });
 
@@ -213,6 +215,7 @@ export class ScheduleCallController {
             recurringSeriesId: series.id,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -318,7 +321,7 @@ export class ScheduleCallController {
       const externalId = uuidv4();
 
       // Generate room link for scheduled call
-      const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
+      const roomLink = buildCallInviteUrl(externalId);
 
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
       const hasExternals = !!(
@@ -787,6 +790,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             userIds: recurringParticipantUserIds,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -796,6 +800,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -1197,14 +1202,14 @@ export class ScheduleCallController {
 
       const calls = await repositories.calls.getScheduledCallsForUser(userId!, fromDate, toDate);
 
-      if (targetUser.calendarVisibility === 'PRIVATE') {
+      if (targetUser.calendarVisibility === CalendarVisibility.PRIVATE) {
         const busySlots = calls.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt }));
-        res.json({ success: true, calendarVisibility: 'PRIVATE', calls: busySlots });
+        res.json({ success: true, calendarVisibility: CalendarVisibility.PRIVATE, calls: busySlots });
         return;
       }
 
       const safeCalls = calls.map(({ roomLink, transcript, aiSummary, metadata, ...rest }) => rest);
-      res.json({ success: true, calendarVisibility: 'PUBLIC', calls: safeCalls });
+      res.json({ success: true, calendarVisibility: CalendarVisibility.PUBLIC, calls: safeCalls });
     } catch (error) {
       logger.error('Failed to fetch other user scheduled calls:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch scheduled calls' });

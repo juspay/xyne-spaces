@@ -3,7 +3,8 @@
  * Platform-agnostic interfaces
  */
 
-import { ExternalSource } from '@prisma/client';
+import type { ExternalSource } from '@prisma/client';
+import type { EmailType, FormFieldType } from '@xyne/shared';
 import { RefetchOptions, RefetchResult } from './baseRefetch';
 import type { DownloadedAttachment } from '@/services/externalAttachmentService';
 export type { RefetchOptions, RefetchResult };
@@ -20,6 +21,12 @@ export enum ExternalSourcePlatform {
   GOOGLE = 'google',
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
+  GOOGLE_PLAY = 'google-play-reviews',
+}
+
+export interface IngestionOptions {
+  /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
+  ignoreSyncCursor?: boolean;
 }
 
 /**
@@ -84,7 +91,21 @@ export interface NormalizedData {
     cc?: string[];
     bcc?: string[];
     replyTo?: string[];
+    type?: EmailType;
+    sentByUserId?: string;
+    rating?: number;
+    clientVersionName?: string;
+    clientVersionCode?: string;
+    updateExisting?: boolean;
+    syncTicketOnUpdate?: boolean;
+    skipBlockingCheck?: boolean;
   };
+
+  ticketCustomFields?: Array<{
+    fieldName: string;
+    fieldType: FormFieldType;
+    value: string;
+  }>;
 
   metadata: {
     eventType: string; // "ticket.created", "comment.added", etc.
@@ -172,6 +193,9 @@ export interface ExternalSourceAdapter {
   /** Platform name (e.g., "zoho", "slack") */
   name: string;
 
+  /** True when the adapter is ingested by a scheduled provider poll. */
+  supportsPolling?: boolean;
+
   /** Authenticate incoming request (JWT, HMAC, etc.) and check if processing should be skipped */
   authenticate(
     rawBody: string,
@@ -181,7 +205,11 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(rawPayload: unknown, source?: ExternalSource): Promise<unknown>;
+  preprocess?(
+    rawPayload: unknown,
+    source?: ExternalSource,
+    options?: IngestionOptions,
+  ): Promise<unknown>;
 
   /** Optional: Dynamically determine source name for database lookup based on payload */
   getSourceNameFromDB?(payload: unknown): string | undefined;
@@ -194,7 +222,10 @@ export interface ExternalSourceAdapter {
   isTestQueryParam?(query: Record<string, string | undefined>): TestPayloadResult;
 
   /** Transform platform-specific data to NormalizedData */
-  transform(payload: unknown): Promise<ParseResult<NormalizedData>>;
+  transform(
+    payload: unknown,
+    source?: ExternalSource,
+  ): Promise<ParseResult<NormalizedData | NormalizedData[]>>;
 
   /** Optional: Postprocess after conversation/message creation (e.g., create tickets, trigger workflows) */
   postprocess?(context: PostprocessContext): Promise<void>;
@@ -218,6 +249,10 @@ export interface ExternalSourceAdapter {
    * Present ⇒ this provider can initiate brand-new email threads from xyne desk.
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
+
+  /** Optional: provider reply sender for non-email Desk interactions. */
+  sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 
 import type { MailReplyContext, MailReplyResult, NewMailContext } from './baseMailReplySender';
+import type { InteractionReplyContext } from './baseInteractionReplySender';

@@ -171,6 +171,10 @@ export interface RoomContext {
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
+  isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
+  transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
+  privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
+  transcriptionPending: boolean; // A host toggle is in-flight, awaiting the agent's confirmation
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -273,6 +277,12 @@ export type RoomMachineEvent =
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
   | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
   | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
+  | { type: 'TOGGLE_TRANSCRIPTION' } // Host requested a transcription on/off change (command only)
+  | { type: 'TRANSCRIPTION_CONFIRMED'; enabled: boolean } // Agent's authoritative state broadcast
+  | { type: 'TRANSCRIPTION_TIMEOUT' } // No agent confirmation within the timeout window
+  | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
+  | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
+  | { type: 'SYNC_TRANSCRIPTION_STATE'; enabled: boolean } // Late-joiner sync from room metadata
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -303,7 +313,7 @@ export type RoomMachineEvent =
   | {
       type: 'NATIVE_CALL_ENDED';
       callId: string;
-      callType: 'AUDIO' | 'VIDEO';
+      callType: CallType;
       durationMs: number;
       initiatedBy: 'user' | 'callkit' | 'error';
     }
@@ -427,21 +437,42 @@ export const roomMachine = setup({
           }
         };
 
+        // Late-joiner sync: the host's transcription on/off state is mirrored into room
+        // metadata by the backend (data messages don't reach participants who join later).
+        const syncTranscriptionState = (metadata?: string) => {
+          if (!metadata) return;
+          try {
+            const parsed = JSON.parse(metadata) as { transcriptionEnabled?: unknown };
+            if (typeof parsed.transcriptionEnabled === 'boolean') {
+              sendBack({ type: 'SYNC_TRANSCRIPTION_STATE', enabled: parsed.transcriptionEnabled });
+            }
+          } catch {
+            // ignore malformed metadata
+          }
+        };
+
         // Connection events
         room.on(LiveKitRoomEvent.Connected, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
           updateParticipants();
           syncHostControls(room.metadata);
+          syncTranscriptionState(room.metadata);
         });
 
         room.on(LiveKitRoomEvent.RoomMetadataChanged, (metadata: string) => {
           syncHostControls(metadata);
+          syncTranscriptionState(metadata);
           updateParticipants();
         });
 
         // Listener mounts after connect; sync current metadata once.
         syncHostControls(room.metadata);
+        syncTranscriptionState(room.metadata);
         updateParticipants();
+
+        // Same for connection state: the Connected event fired before this listener
+        // existed, so seed from room.state instead of waiting for the next event.
+        sendBack({ type: 'CONNECTION_STATE_CHANGED', state: room.state });
 
         room.on(LiveKitRoomEvent.Reconnecting, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Reconnecting });
@@ -717,6 +748,22 @@ export const roomMachine = setup({
                   } as const);
                 }
                 break;
+
+              case 'AI_TRANSCRIPTION_STATE':
+                // The AGENT's authoritative state broadcast. Only the agent (a trusted,
+                // LiveKit-authenticated identity) may drive the client's privacy state, so
+                // the UI never shows "off" unless the agent actually stopped. The raw
+                // `transcription_toggle` command is intentionally NOT reflected here — a
+                // peer could otherwise spoof "off" while the agent keeps capturing.
+                if (
+                  _topic === AI_DATA_TOPIC &&
+                  event.type === 'AI_TRANSCRIPTION_STATE' &&
+                  !!_participant?.identity &&
+                  isTranscriptionAgentIdentity(_participant.identity)
+                ) {
+                  sendBack({ type: 'TRANSCRIPTION_CONFIRMED', enabled: event.enabled } as const);
+                }
+                break;
             }
           },
         );
@@ -818,7 +865,7 @@ export const roomMachine = setup({
           reactNativeBridge.livekitConnect({
             token,
             serverUrl,
-            callType: callType as 'AUDIO' | 'VIDEO',
+            callType: callType,
             externalId,
             ...(roomLink && { roomLink }),
             ...(callerName && { callerName }),
@@ -1068,7 +1115,7 @@ export const roomMachine = setup({
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
         const room = new Room({
-          adaptiveStream: true,
+          adaptiveStream: false,
           dynacast: true,
           videoCaptureDefaults: {
             resolution: {
@@ -1136,6 +1183,27 @@ export const roomMachine = setup({
       connectionState: ({ event }) =>
         event.type === 'CONNECTION_STATE_CHANGED' ? event.state : ConnectionState.Disconnected,
     }),
+
+    showDisconnectedToast: ({ event }) => {
+      if (event.type !== 'CONNECTION_STATE_CHANGED') return;
+      const reason = event.disconnectReason;
+
+      // We disconnected ourselves - the user already knows.
+      if (reason === DisconnectReason.CLIENT_INITIATED) return;
+
+      if (reason === DisconnectReason.ROOM_DELETED || reason === DisconnectReason.ROOM_CLOSED) {
+        toast.info('Call ended', {
+          description: 'This call has ended',
+          duration: 5000,
+        });
+        return;
+      }
+
+      toast.error('Disconnected from call', {
+        description: 'Your connection to the call was lost. Rejoin to continue.',
+        duration: 6000,
+      });
+    },
 
     setError: assign({
       error: ({ event }) => (event.type === 'ERROR' ? event.error : null),
@@ -1228,6 +1296,10 @@ export const roomMachine = setup({
       callStartTime: () => null,
       isAIAssistantEnabled: () => false,
       transcriptionAgentLeft: () => false,
+      isTranscriptionEnabled: () => true,
+      transcriptionToggleNotice: () => null,
+      privacyPopoverOpen: () => false,
+      transcriptionPending: () => false,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1379,6 +1451,10 @@ export const roomMachine = setup({
     callStartTime: null,
     isAIAssistantEnabled: false,
     transcriptionAgentLeft: false,
+    isTranscriptionEnabled: true,
+    transcriptionToggleNotice: null,
+    privacyPopoverOpen: false,
+    transcriptionPending: false,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -1485,9 +1561,9 @@ export const roomMachine = setup({
             const payload: {
               channelId?: string;
               scopeType?: string | null;
-              callType?: 'AUDIO' | 'VIDEO';
+              callType?: CallType;
             } = {
-              callType: context.callType as 'AUDIO' | 'VIDEO',
+              callType: context.callType,
             };
             if (context.channelId) {
               payload.channelId = context.channelId;
@@ -1582,8 +1658,8 @@ export const roomMachine = setup({
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
             // Find the call being joined to get its type and channel
             const call = context.activeCalls.find(c => c.externalId === context.callId);
-            const payload: { channelId?: string; callType?: 'AUDIO' | 'VIDEO' } = {
-              callType: (call?.callType as 'AUDIO' | 'VIDEO') || 'AUDIO',
+            const payload: { channelId?: string; callType?: CallType } = {
+              callType: call?.callType ?? CallType.AUDIO,
             };
             if (call?.channelId) {
               payload.channelId = call.channelId;
@@ -1940,6 +2016,74 @@ export const roomMachine = setup({
             transcriptionAgentLeft: () => false,
           }),
         },
+        // Host kill-switch (COMMAND ONLY): request the change from the agent and mark it
+        // pending. We do NOT flip the local privacy state here — the client reflects the
+        // agent's authoritative `transcription_state` confirmation instead, so the UI can
+        // never show "off" while the agent may still be capturing (e.g. if the publish
+        // fails or the agent rejects the command).
+        TOGGLE_TRANSCRIPTION: {
+          actions: [
+            assign({
+              transcriptionPending: () => true,
+            }),
+            ({ context }): void => {
+              if (!context.room) return;
+              const desired = !context.isTranscriptionEnabled;
+              void context.room.localParticipant.publishData(
+                new TextEncoder().encode(
+                  JSON.stringify({
+                    type: 'transcription_toggle',
+                    enabled: desired,
+                    at: Date.now(),
+                    participantId: context.room.localParticipant.identity,
+                    participantName: context.room.localParticipant.name,
+                  }),
+                ),
+                { reliable: true, topic: AI_DATA_TOPIC },
+              );
+            },
+          ],
+        },
+        // Agent's authoritative confirmation: reflect the real state + clear pending.
+        // Peers get the toast; the host's own toast/undo is handled by useTranscriptionHostToast.
+        TRANSCRIPTION_CONFIRMED: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
+            transcriptionPending: () => false,
+            transcriptionToggleNotice: ({ event }) => ({
+              enabled: event.enabled,
+              byName: 'The host',
+            }),
+          }),
+        },
+        // No confirmation arrived — clear pending; the privacy state is left unchanged
+        // (never optimistically flipped), so the UI keeps the last confirmed state.
+        TRANSCRIPTION_TIMEOUT: {
+          actions: assign({
+            transcriptionPending: () => false,
+          }),
+        },
+        DISMISS_TRANSCRIPTION_NOTICE: {
+          actions: assign({
+            transcriptionToggleNotice: () => null,
+          }),
+        },
+        SET_PRIVACY_POPOVER: {
+          actions: assign({
+            privacyPopoverOpen: ({ event }) => event.open,
+          }),
+        },
+        // Silent late-joiner sync from room metadata (no toast; idempotent for peers
+        // who already reflected the live data-channel toggle).
+        SYNC_TRANSCRIPTION_STATE: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
+          }),
+        },
         AI_CONTROLLER_CHANGED: {
           actions: assign({
             aiController: ({ event }) =>
@@ -2133,6 +2277,17 @@ export const roomMachine = setup({
             actions: ['updateConnectionState'],
           },
           {
+            // Any other disconnect (network outage, server shutdown, room deleted).
+            // LiveKit only emits Disconnected once its own retries are exhausted, so
+            // the call is really over - staying here left the UI showing a dead call.
+            guard: ({ event }): boolean =>
+              event.type === 'CONNECTION_STATE_CHANGED' &&
+              event.state === ConnectionState.Disconnected,
+            target: 'disconnecting',
+            actions: ['updateConnectionState', 'showDisconnectedToast'],
+          },
+          {
+            // Connecting/Reconnecting - LiveKit is still retrying, keep the call up.
             actions: ['updateConnectionState'],
           },
         ],

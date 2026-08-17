@@ -22,6 +22,7 @@ import {
   queueJiraPurgeTicketVespaDeleteJob,
 } from '@/services/jira/vespa';
 import { runWithContext } from '@/database/tenant/context';
+import { CanvasRole, CanvasVisibility, ConversationParticipation, ExternalEntityType, MessageType } from '@xyne/shared';
 
 const db = DatabaseClient.getInstance();
 
@@ -116,6 +117,7 @@ export class JiraMigrationController {
       const [sourceBoard, targetBoard, channel] = await Promise.all([
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
         db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
+        // The migration target is resolved by workspace, not by the operator's own membership.
         db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
       ]);
 
@@ -131,7 +133,7 @@ export class JiraMigrationController {
       const ticketMappings = await db.externalMessage.findMany({
         where: {
           externalSourceId: externalSource.id,
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
         },
         select: { entityId: true },
@@ -446,24 +448,27 @@ export class JiraMigrationController {
       const sourceExternalSourceName = `jira-${normalizedProjectKey}-${sourceChannelId}`.toLowerCase();
       const targetExternalSourceName = `jira-${normalizedProjectKey}-${targetChannelId}`.toLowerCase();
 
-      const [sourceExternalSource, targetExternalSource, sourceChannel, targetChannel] = await Promise.all([
-        db.externalSource.findUnique({
-          where: { name: sourceExternalSourceName },
-          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
-        }),
-        db.externalSource.findUnique({
-          where: { name: targetExternalSourceName },
-          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
-        }),
-        db.channel.findUnique({
-          where: { id: sourceChannelId },
-          select: { id: true, name: true, projectId: true, workspaceId: true },
-        }),
-        db.channel.findUnique({
-          where: { id: targetChannelId },
-          select: { id: true, name: true, projectId: true, workspaceId: true },
-        }),
-      ]);
+      // Both ends of the move are resolved by workspace, not by the operator's own
+      // membership — the workspace comparison below is the check that decides access.
+      const [sourceExternalSource, targetExternalSource, sourceChannel, targetChannel] =
+        await Promise.all([
+            db.externalSource.findUnique({
+              where: { name: sourceExternalSourceName },
+              select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+            }),
+            db.externalSource.findUnique({
+              where: { name: targetExternalSourceName },
+              select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+            }),
+            db.channel.findUnique({
+              where: { id: sourceChannelId },
+              select: { id: true, name: true, projectId: true, workspaceId: true },
+            }),
+            db.channel.findUnique({
+              where: { id: targetChannelId },
+              select: { id: true, name: true, projectId: true, workspaceId: true },
+            }),
+          ]);
 
       if (!sourceExternalSource || sourceExternalSource.sourceType !== 'jira') {
         res.status(404).json({ error: 'Jira external source not found for provided jiraProjectKey + sourceChannelId' });
@@ -495,7 +500,7 @@ export class JiraMigrationController {
       const ticketMappings = await db.externalMessage.findMany({
         where: {
           externalSourceId: sourceExternalSource.id,
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
         },
         select: { entityId: true },
@@ -538,18 +543,20 @@ export class JiraMigrationController {
         ),
       );
 
+      // Counted across the whole source channel so the preview matches what the real move
+      // will touch, rather than only the operator's own rows.
       const [conversationCount, participantCount] = await Promise.all([
-        conversationIds.length > 0
-          ? db.conversation.count({
-              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-            })
-          : Promise.resolve(0),
-        conversationIds.length > 0
-          ? db.conversationParticipant.count({
-              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-            })
-          : Promise.resolve(0),
-      ]);
+          conversationIds.length > 0
+            ? db.conversation.count({
+                where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+              })
+            : Promise.resolve(0),
+          conversationIds.length > 0
+            ? db.conversationParticipant.count({
+                where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+              })
+            : Promise.resolve(0),
+        ]);
 
       const remainingOnSourceBeforeMove = mappedTicketIds.length - ticketsToMove.length;
       const wouldFullyDrainSource = remainingOnSourceBeforeMove === 0;
@@ -715,10 +722,12 @@ export class JiraMigrationController {
         return;
       }
 
+      // Re-reads the channel the updateMany above just moved, by workspace rather than by
+      // the operator's own membership.
       const updatedChannel = await db.channel.findUnique({
-        where: { id: channelId },
-        select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
-      });
+          where: { id: channelId },
+          select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
+        });
 
       logger.info('analytics_event', {
         event: 'channel_migrated',
@@ -733,109 +742,6 @@ export class JiraMigrationController {
     } catch (error) {
       logger.error('Jira migration channel move failed', error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to move channel projectId' });
-    }
-  };
-
-  changeTicketCreatedBy = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const actorUserId = req.user?.id;
-      if (!actorUserId) {
-        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
-        return;
-      }
-
-      const { ticketId, newCreatedByUserId, updatedAt } = req.body as {
-        ticketId?: string; // accepts Ticket.id or Ticket.xyneId
-        newCreatedByUserId?: string;
-        updatedAt?: string;
-        cascadeConversationAndMessages?: boolean;
-      };
-
-      if (!ticketId || !newCreatedByUserId) {
-        res.status(400).json({ error: 'ticketId and newCreatedByUserId are required' });
-        return;
-      }
-
-      const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
-      if (Number.isNaN(resolvedUpdatedAt.getTime())) {
-        res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
-        return;
-      }
-
-      const userExists = await db.user.findUnique({ where: { id: newCreatedByUserId }, select: { id: true } });
-      if (!userExists) {
-        res.status(404).json({ error: 'newCreatedByUserId user not found' });
-        return;
-      }
-
-      const cascade = Boolean((req.body as { cascadeConversationAndMessages?: boolean })?.cascadeConversationAndMessages);
-
-      const existingTicket = await db.ticket.findFirst({
-        where: { OR: [{ id: ticketId }, { xyneId: ticketId }] },
-        select: { id: true, xyneId: true, conversationId: true, createdBy: true },
-      });
-      if (!existingTicket) {
-        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
-        return;
-      }
-
-      const result = await db.$transaction(async tx => {
-        const ticketUpdate = await tx.ticket.updateMany({
-          where: { id: existingTicket.id },
-          data: { createdBy: newCreatedByUserId, updatedBy: actorUserId, updatedAt: resolvedUpdatedAt },
-        });
-
-        let conversationUpdatedCount = 0;
-        let messageUpdatedCount = 0;
-        let attachmentUpdatedCount = 0;
-
-        if (cascade) {
-          const convUpdate = await tx.conversation.updateMany({
-            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
-            data: { createdBy: newCreatedByUserId },
-          });
-          conversationUpdatedCount = convUpdate.count;
-
-          const msgUpdate = await tx.message.updateMany({
-            where: { conversationId: existingTicket.conversationId, senderId: existingTicket.createdBy },
-            data: { senderId: newCreatedByUserId },
-          });
-          messageUpdatedCount = msgUpdate.count;
-
-          const attachUpdate = await tx.messageAttachment.updateMany({
-            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
-            data: { createdBy: newCreatedByUserId, uploadedByUserId: newCreatedByUserId },
-          });
-          attachmentUpdatedCount = attachUpdate.count;
-        }
-
-        return { ticketUpdate, conversationUpdatedCount, messageUpdatedCount, attachmentUpdatedCount };
-      });
-
-      if (result.ticketUpdate.count === 0) {
-        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
-        return;
-      }
-
-      const updatedTicket = await db.ticket.findFirst({
-        where: { id: existingTicket.id },
-        select: { id: true, createdBy: true, updatedBy: true, updatedAt: true, xyneId: true, title: true, projectId: true, channelId: true },
-      });
-
-      res.json({
-        success: true,
-        data: {
-          updatedCount: result.ticketUpdate.count,
-          ticket: updatedTicket,
-          cascadeConversationAndMessages: cascade,
-          conversationUpdatedCount: result.conversationUpdatedCount,
-          messageUpdatedCount: result.messageUpdatedCount,
-          attachmentUpdatedCount: result.attachmentUpdatedCount,
-        },
-      });
-    } catch (error) {
-      logger.error('Jira migration change ticket createdBy failed', error);
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to change ticket createdBy' });
     }
   };
 
@@ -874,10 +780,12 @@ export class JiraMigrationController {
         }
       }
 
+      // A project-wide purge spans every channel of the project, including ones the
+      // operator does not belong to. An empty result here would widen the purge.
       const channels = await db.channel.findMany({
-        where: { projectId },
-        select: { id: true },
-      });
+          where: { projectId },
+          select: { id: true },
+        });
       const channelIds = channels.map(c => c.id);
 
       const normalizedJiraProjectKey = jiraProjectKey?.trim().toUpperCase();
@@ -1000,6 +908,7 @@ export class JiraMigrationController {
       stats: Record<string, unknown>;
     },
   ): Promise<void> {
+    // The purge deletes rows created by the mapped Jira authors, not by the operator.
     const { actorUserId, externalSourceIds, externalMessageCount, messageIds, conversationIds, attachmentIds, ticketIds, stats } = data;
 
     try {
@@ -1041,10 +950,9 @@ export class JiraMigrationController {
         const chunks = chunkArray(messageIds, phase1MessageChunkSize);
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          const [, , , attachmentResult, messageResult] = await db.$transaction([
+          const [, , attachmentResult, messageResult] = await db.$transaction([
             db.reactionCount.deleteMany({ where: { messageId: { in: chunk } } }),
             db.reaction.deleteMany({ where: { messageId: { in: chunk } } }),
-            db.messageSearch.deleteMany({ where: { messageId: { in: chunk } } }),
             db.messageAttachment.deleteMany({ where: { entityId: { in: chunk } } }),
             db.message.deleteMany({ where: { messageId: { in: chunk } } }),
           ]);
@@ -1209,6 +1117,8 @@ export class JiraMigrationController {
         errorMessage: error instanceof Error ? error.message : 'Unknown purge error',
       });
     }
+
+
   };
 
   userMapLookup = async (req: Request, res: Response): Promise<void> => {
@@ -1656,7 +1566,7 @@ export class JiraMigrationController {
       // Find ticket IDs imported from Jira via external_messages
       const jiraTicketMappings = await db.externalMessage.findMany({
         where: {
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
           ...(externalSourceId ? { externalSourceId } : {}),
         },
@@ -1772,9 +1682,9 @@ export class JiraMigrationController {
     // explicit tenant scope from the import's TARGET workspace (single-target import) so the
     // workspaceId stamper fills the rows this job writes downstream.
     const targetChannel = await db.channel.findUnique({
-      where: { id: input.targetChannelId },
-      select: { workspaceId: true },
-    });
+        where: { id: input.targetChannelId },
+        select: { workspaceId: true },
+      });
     const workspaceId = targetChannel?.workspaceId || config.defaultWorkspaceId;
 
     await runWithContext({ userId: actorUserId, workspaceId }, async () => {
@@ -1975,6 +1885,8 @@ export class JiraMigrationController {
     const now = new Date();
     const canvasId = randomUUID();
     const participantId = randomUUID();
+    // The report canvas is written into the migration's channel, resolved by workspace
+    // rather than by the operator's own membership.
     const canvasChannel = await db.channel.findUniqueOrThrow({
       where: { id: channelId },
       select: { workspaceId: true },
@@ -1989,7 +1901,7 @@ export class JiraMigrationController {
             content: this.buildMigrationReportCanvasBlocks(result) as any,
             channelId,
             createdBy: actorUserId,
-            visibility: 'PUBLIC',
+            visibility: CanvasVisibility.PUBLIC,
             isTemplate: false,
             isCollaborative: false,
             lastEditedBy: actorUserId,
@@ -2018,7 +1930,7 @@ export class JiraMigrationController {
             workspaceId: canvasChannel.workspaceId,
             canvasId,
             userId: actorUserId,
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
           },
@@ -2091,6 +2003,8 @@ export class JiraMigrationController {
       ...(canvasUrl ? ['', `View full report: ${canvasUrl}`] : []),
     ].join('\n');
 
+    // The report message is posted into the migration's channel, resolved by workspace
+    // rather than by the operator's own membership.
     const migrationReportChannel = await db.channel.findUniqueOrThrow({
       where: { id: channelId },
       select: { workspaceId: true },
@@ -2124,7 +2038,7 @@ export class JiraMigrationController {
           senderId: actorUserId,
           workspaceId: migrationReportChannel.workspaceId,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           hasAttachment: false,
           showInChannel: true,
           metadata: {
@@ -2158,14 +2072,14 @@ export class JiraMigrationController {
           id: randomUUID(),
           conversationId,
           userId: actorUserId,
-          participationType: 'AUTHOR',
+          participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: now,
           channelId,
           workspaceId: migrationReportChannel.workspaceId,
         },
         update: {
-          participationType: 'AUTHOR',
+          participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
         },
       });

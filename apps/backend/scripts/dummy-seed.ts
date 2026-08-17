@@ -11,10 +11,11 @@
  */
 
 import { randomUUID } from 'crypto';
-import { PrismaClient,
+import { PrismaClient } from '@prisma/client';
+import {
   AccessType,
   AuthProvider,
-  UserStatus, 
+  UserStatus,
   SessionStatus,
   TicketStatus,
   TicketStatusV2,
@@ -49,8 +50,7 @@ import { PrismaClient,
   FormContextType,
   FormEntityType,
   DocType,
-  ProjectType
-} from '@prisma/client';
+  ProjectType, UserPresenceStatus } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 
 const prisma = new PrismaClient();
@@ -209,7 +209,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user1.id,
-          status: 'ONLINE' as any,
+          status: UserPresenceStatus.ONLINE as any,
           lastActiveAt: now(),
           lastSeenAt: now(),
           isManual: false,
@@ -221,7 +221,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user2.id,
-          status: 'AWAY' as any,
+          status: UserPresenceStatus.AWAY as any,
           lastActiveAt: hoursAgo(1),
           lastSeenAt: hoursAgo(1),
           isManual: false
@@ -231,7 +231,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user3.id,
-          status: 'OFFLINE' as any,
+          status: UserPresenceStatus.OFFLINE as any,
           lastActiveAt: hoursAgo(4),
           lastSeenAt: hoursAgo(4),
           isManual: false
@@ -241,7 +241,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user4.id,
-          status: 'ONLINE' as any,
+          status: UserPresenceStatus.ONLINE as any,
           lastActiveAt: now(),
           lastSeenAt: now(),
           isManual: false,
@@ -427,7 +427,7 @@ async function main() {
           name: 'Xyne Spaces',
           code: 'XYNE',
           description: 'Unified collaboration platform',
-          type: ProjectType.DEFAULT
+          type: ProjectType.DEFAULT,
           createdBy: user1.id,
           updatedBy: user2.id
         }
@@ -945,7 +945,7 @@ async function main() {
             ticketId: ticket2.id,
             updatedBy: user4.id,
             activityType: ActivityType.PRIORITY,
-            value: { priority: 'HIGH', newPriority: 'CRITICAL' }
+            value: { priority: TicketPriority.HIGH, newPriority: 'CRITICAL' }
           },
           {
             ticketId: ticket3.id,

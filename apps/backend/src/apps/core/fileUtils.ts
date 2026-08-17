@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MessageType } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { logger } from '@/utils/logger';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -7,7 +8,6 @@ import { findOrCreateConversation } from './conversationUtils';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
-import { MessageType } from '@prisma/client';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();

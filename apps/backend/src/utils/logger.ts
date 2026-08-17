@@ -1,5 +1,7 @@
 import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
+import fluentLogger from 'fluent-logger';
+import type { Socket } from 'net';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -53,41 +55,137 @@ const normalizeErrors = winston.format((info) => {
   return info;
 });
 
-const productionFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+// msgpack has no cycle detection and throws on BigInt; break cycles and stringify BigInt first.
+function decycle(value: unknown, ancestors: unknown[]): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Error) return serializeError(value);
+  if (typeof value !== 'object' || value === null) return value;
+  if (ancestors.includes(value)) return '[Circular]';
+  // msgpack encodes these natively; skip them or they'd flatten into {} / one key per byte.
+  if (value instanceof Date) return value.toISOString();
+  if (Buffer.isBuffer(value)) return value.toString('base64');
+  if (ArrayBuffer.isView(value)) {
+    const view = value as NodeJS.TypedArray;
+    return Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64');
+  }
+
+  const nextAncestors = [...ancestors, value];
+  if (value instanceof Map) {
+    return decycle(Object.fromEntries(value), nextAncestors);
+  }
+  if (value instanceof Set) {
+    return decycle([...value], nextAncestors);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => decycle(item, nextAncestors));
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    out[key] = decycle((value as Record<string, unknown>)[key], nextAncestors);
+  }
+  return out;
+}
+
+const sanitizeForFluent = winston.format((info) => decycle(info, []) as winston.Logform.TransformableInfo);
+
+// Runs once at call time, before winston-transport's per-transport clone drops Error fields.
+const sharedFormat = winston.format.combine(
+  winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
-  injectContext(),
-  winston.format.json(),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    return JSON.stringify({
-      timestamp,
-      level,
-      message,
-      ...meta,
-    });
-  })
+  injectContext()
 );
 
+// sharedFormat's timestamp is UTC ISO for Fluent Bit; re-render local for console output.
+function formatLocalTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+const productionFormat = winston.format.printf(({ timestamp, level, message, ...meta }) => {
+  return JSON.stringify({
+    timestamp: typeof timestamp === 'string' ? formatLocalTimestamp(timestamp) : timestamp,
+    level,
+    message,
+    ...meta,
+  });
+});
 
 const devFormat = winston.format.combine(
   winston.format.colorize(),
-  winston.format.timestamp({ format: 'HH:mm:ss' }),
-  winston.format.errors({ stack: true }),
-  normalizeErrors(),
-  injectContext(),
   winston.format.printf(({ timestamp, level, message, module, service, ...meta }) => {
     const context = module || service;
     const contextPrefix = context ? `[${context}] ` : '';
     const metaString = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-    return `${timestamp} ${level}: ${contextPrefix}${message}${metaString}`;
+    const time = typeof timestamp === 'string' ? formatLocalTimestamp(timestamp).slice(11) : timestamp;
+    return `${time} ${level}: ${contextPrefix}${message}${metaString}`;
   })
 );
 
+// Streamed straight to Fluent Bit's forward input (docker/fluent-bit/) -- no file, no parser to sync.
+const fluentFormat = winston.format.combine(sanitizeForFluent(), winston.format.json());
+
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: config.env === 'development' || config.env === 'test' ? devFormat : productionFormat,
+  }),
+];
+
+// fluent-logger sets a socket timeout but never handles it. Guard the connect phase only
+// (removed on 'connect', per-socket) so idle established connections and replaced sockets are safe.
+function guardSenderSocketTimeout(sender: { _socket: Socket | null }): void {
+  let socket: Socket | null = null;
+  Object.defineProperty(sender, '_socket', {
+    configurable: true,
+    get: () => socket,
+    set: (next: Socket | null) => {
+      socket = next;
+      if (!next) return;
+      const s = next;
+      const onTimeout = () => {
+        s.destroy(new Error('fluent socket connect timeout'));
+      };
+      s.once('timeout', onTimeout);
+      s.once('connect', () => {
+        s.removeListener('timeout', onTimeout);
+      });
+    },
+  });
+}
+
+if (config.logging.fluent.enabled) {
+  const FluentTransport = fluentLogger.support.winstonTransport();
+  const fluentTransport = new FluentTransport('error.backend', {
+    host: config.logging.fluent.host,
+    port: config.logging.fluent.port,
+    timeout: 10_000, // ms, not seconds; connect timeout only, see guardSenderSocketTimeout
+    reconnectInterval: 30000,
+    messageQueueSizeLimit: 1000, // bound memory when Fluent Bit is unreachable
+    highWaterMark: 1000,
+    level: 'error',
+    format: fluentFormat,
+  }) as winston.transport & {
+    sender: { _socket: Socket | null };
+    log: (info: winston.Logform.TransformableInfo, callback: (err?: unknown, ok?: boolean) => void) => void;
+  };
+  guardSenderSocketTimeout(fluentTransport.sender);
+
+  // fluent-logger only calls back on delivery, so an outage stalls winston's Writable and
+  // freezes Console too. Make it fire-and-forget; the sender has its own queue/reconnect.
+  const deliverToSender = fluentTransport.log.bind(fluentTransport);
+  fluentTransport.log = (info, callback) => {
+    deliverToSender(info, () => {});
+    callback();
+  };
+
+  transports.push(fluentTransport);
+}
+
 export const logger = winston.createLogger({
   level: config.logging.level,
-  format: config.env === 'development' || config.env === 'test' ? devFormat : productionFormat,
-  transports: [new winston.transports.Console()],
+  format: sharedFormat,
+  transports,
   exitOnError: false,
   defaultMeta: {
     version: '1.0',

@@ -94,6 +94,8 @@ import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { loadEmojiData } from '../../../utils/emojiLookup';
+import { RecordingShareContent } from './RecordingShareContent';
+import { useRecordingShareMessage } from './recordingShareMessage';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -529,6 +531,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   showLinkPreview: shouldRenderLinkPreview = true,
   searchItemView = false,
   afterTextContent,
+  headerContent,
   onUserClick,
 }) => {
   const navigate = useNavigate();
@@ -574,6 +577,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return forwardedMessageData.content;
   }, [forwardedMessageData, forwardedOriginalConversation]);
+  const recordingShare = useRecordingShareMessage(
+    isForwardedMessage ? resolvedForwardedContent : message.content,
+  );
 
   const systemMessageStyles: React.CSSProperties = {
     color: 'hsl(var(--muted-foreground))',
@@ -763,6 +769,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
         workflowNumber={workflowNumber}
+        {...(recordingShare && {
+          recordingShare,
+        })}
         {...(onClick && { onClick })}
       />
     );
@@ -873,11 +882,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -979,11 +984,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -1006,7 +1007,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* ================== RIGHT SIDE ================== */}
-        <div className='flex-1 flex flex-col gap-1 min-w-0'>
+        <div className='flex-1 flex flex-col min-w-0'>
           {isBookmarked && variant !== 'pinned' && (
             <div className='inline-flex items-center gap-1 text-blue-700 dark:text-blue-200 text-[11px] font-medium'>
               <Bookmark className='w-3 h-3 fill-current' />
@@ -1135,6 +1136,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {headerContent}
             </div>
           )}
 
@@ -1207,6 +1209,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   body={message.content}
                   emailId={message.messageId}
                   attachments={attachments}
+                />
+              ) : recordingShare && !isForwardedMessage ? (
+                <RecordingShareContent
+                  recordingShare={recordingShare}
+                  renderNote={noteHtml => (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
+                    >
+                      <RenderMessageWithHTML
+                        message={noteHtml}
+                        showEdited={message.edited}
+                        messageId={message.messageId}
+                        conversationId={message.conversationId}
+                        preserveThreadRoute={context === 'thread'}
+                      />
+                    </div>
+                  )}
+                  afterContent={afterTextContent}
                 />
               ) : isMarkdownContent ? (
                 <>
@@ -1325,7 +1345,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </span>
                       )}
                     </div>
-                    {metadata?.isCallMessage && metadata?.callId ? (
+                    {recordingShare ? (
+                      <RecordingShareContent
+                        recordingShare={recordingShare}
+                        renderNote={noteHtml => (
+                          <div
+                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
+                          >
+                            {isMobile ? (
+                              <ExpandableMessage
+                                message={noteHtml}
+                                showEdited={false}
+                                maxHeight={500}
+                              />
+                            ) : (
+                              <RenderMessageWithHTML
+                                message={noteHtml}
+                                showEdited={false}
+                                preserveThreadRoute={context === 'thread'}
+                              />
+                            )}
+                          </div>
+                        )}
+                      />
+                    ) : metadata?.isCallMessage && metadata?.callId ? (
                       <>
                         <CallBubble
                           message={{
@@ -1479,7 +1522,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {shouldRenderLinkPreview && showLinkPreview && previewResult && (
+              {shouldRenderLinkPreview && showLinkPreview && previewResult && !recordingShare && (
                 <div className='mt-2 max-w-full'>
                   {previewResult.type === 'message_preview' ? (
                     <InternalMessagePreview
@@ -1796,7 +1839,7 @@ export const ReactionView = ({
                       setEmojiPickerOpen(false);
                     }}
                     customEmojis={customEmojis || []}
-                    previewConfig={{ showPreview: false }}
+                    previewConfig={{ showPreview: true }}
                   />
                 </Popover.Content>
               </>

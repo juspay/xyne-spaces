@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePath } from '../../../hooks/usePath';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -29,7 +29,15 @@ import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
-import { ArrowLeft, CheckCircle, GitCompare, Loader2, RotateCcw } from 'lucide-react';
+import {
+  ArrowLeft,
+  Archive,
+  CheckCircle,
+  GitCompare,
+  Loader2,
+  MessageSquare,
+  RotateCcw,
+} from 'lucide-react';
 import {
   CheckTickSingle,
   ColorPalette,
@@ -79,8 +87,8 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
-import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
+import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -93,6 +101,7 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -140,9 +149,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const blockIdFromUrl = searchParams.get('blockId') ?? undefined;
+  const commentThreadIdFromUrl = searchParams.get('commentThreadId') ?? undefined;
   const skipAutoFocus = searchParams.get('nofocus') === '1';
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
+  const canvasPanelContext = useOutletContext<CanvasPanelOutletContext | null>();
 
   // Determine if we're on /chat/canvas (full-screen canvas page)
   const isOnChatCanvasPage = usePath().startsWith('/chat/canvas');
@@ -178,6 +189,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   );
 
   const [selectedCanvas, setSelectedCanvas] = useState<Canvas | null>(null);
+  const [openCommentCount, setOpenCommentCount] = useState(0);
+  useEffect(() => {
+    setOpenCommentCount(0);
+  }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
@@ -208,6 +223,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const latestContentRef = useRef<PartialBlock[] | undefined>(undefined);
   const lastSavedContentRef = useRef<string>(''); // Stringify to compare deep equality easily
   const latestHtmlRef = useRef<string>('');
+  const hasPendingCollaborativeTimestampRef = useRef(false);
   const titleRef = useRef(currentTitle);
   const selectedCanvasRef = useRef(selectedCanvas);
   const isCreatingRef = useRef(isCreating);
@@ -217,6 +233,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const previewVersionRef = useRef<CanvasVersionRecord | null>(null);
   const pendingAutoVersionSnapshotsRef = useRef<Set<string>>(new Set());
   const saveCanvasExitSnapshotRef = useRef<(() => void) | null>(null);
+  const flushCollaborativeCanvasTimestampRef = useRef<(() => void) | null>(null);
   const hasPendingSaveRef = useRef(false);
   const currentCanvasIdRef = useRef<string | null>(null); // Track the current canvas ID for file uploads
   const initializedCanvasIdRef = useRef<string | null>(null); // Track which canvas has been initialized to avoid overwriting local edits
@@ -431,6 +448,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             createdBy: user?.id || '',
             visibility: CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: true,
             isStarred: false,
             createdAt: now,
@@ -561,12 +579,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const canEdit =
-    isCreating ||
-    isEditingMessage ||
-    isCreatingMessage ||
-    selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
-    selectedCanvas?.accessLevel === CanvasRole.OWNER ||
-    selectedCanvas?.createdBy === user?.id;
+    !selectedCanvas?.isArchived &&
+    (isCreating ||
+      isEditingMessage ||
+      isCreatingMessage ||
+      selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
+      selectedCanvas?.accessLevel === CanvasRole.OWNER ||
+      selectedCanvas?.createdBy === user?.id);
+  const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -601,6 +621,18 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     canvas: selectedCanvas,
     onCreated: handleVersionCopyCreated,
   });
+
+  const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
+    setSelectedCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
+  }, []);
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle({
+    onArchivedStateChange: handleArchivedStateChange,
+  });
+
+  const handleUnarchiveSelectedCanvas = useCallback((): void => {
+    if (!selectedCanvas) return;
+    handleArchiveToggleCanvas({ ...selectedCanvas, isArchived: true });
+  }, [handleArchiveToggleCanvas, selectedCanvas]);
 
   useEffect(() => {
     canEditRef.current = canEdit;
@@ -706,12 +738,30 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     void handleSave(blocks, html);
   };
 
+  const flushCollaborativeCanvasTimestamp = useCallback((): void => {
+    if (!hasPendingCollaborativeTimestampRef.current) return;
+
+    const canvasToUpdate = selectedCanvasRef.current;
+    hasPendingCollaborativeTimestampRef.current = false;
+    if (!canvasToUpdate?.id || !canEditRef.current) return;
+
+    z.mutate(
+      mutators.canvas.update({
+        id: canvasToUpdate.id,
+        timestamp: Date.now(),
+      }),
+    );
+  }, [z]);
+  flushCollaborativeCanvasTimestampRef.current = flushCollaborativeCanvasTimestamp;
+
   const handleCollaborativeContentChange = useCallback((blocks: PartialBlock[]): void => {
     latestContentRef.current = blocks;
+    hasPendingCollaborativeTimestampRef.current = true;
   }, []);
 
   useEffect(() => {
     return (): void => {
+      flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
   }, [selectedCanvas?.id]);
@@ -724,6 +774,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       if (!contentElement || !(target instanceof Node)) return;
       if (contentElement.contains(target)) return;
 
+      flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
 
@@ -767,47 +818,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     },
   );
 
-  const exitTitleGuard = useCanvasExitTitleGuard({
-    getTitle: () => titleRef.current,
-    getContent: () => editorRef.current?.getBlocks() ?? latestContentRef.current,
-    enabled: !isCreating,
-    canEdit,
-    canDelete:
-      selectedCanvas?.createdBy === user?.id || selectedCanvas?.accessLevel === CanvasRole.OWNER,
-    onExit: () => {
-      saveCanvasExitSnapshot();
-      handleBack();
-    },
-    onSaveTitle: async nextTitle => {
-      if (!selectedCanvas?.id) throw new Error('Canvas is not ready to be titled');
-
-      const result = z.mutate(
-        mutators.canvas.update({
-          id: selectedCanvas.id,
-          title: nextTitle,
-          timestamp: Date.now(),
-        }),
-      );
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to save canvas title');
-      }
-
-      setCurrentTitle(nextTitle);
-      titleRef.current = nextTitle;
-    },
-    onDeleteAndExit: async () => {
-      if (!selectedCanvas?.id) throw new Error('Canvas is not ready to be deleted');
-
-      const result = z.mutate(mutators.canvas.delete({ id: selectedCanvas.id }));
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to delete canvas');
-      }
-    },
-  });
-
-  const handleLeaveCanvas = exitTitleGuard.requestExit;
+  const handleLeaveCanvas = useCallback((): void => {
+    saveCanvasExitSnapshot();
+    handleBack();
+  }, [handleBack, saveCanvasExitSnapshot]);
 
   // Check if this is a knowledge canvas
   const isKnowledgeCanvas =
@@ -1044,7 +1058,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
-    'flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+    'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
@@ -1080,6 +1094,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     </Button>
 
                     <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
+                      {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
                       <Input
                         type='text'
@@ -1163,7 +1178,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 }
                                 size='sm'
                                 count={3}
-                                shape='square'
                               />
                             </button>
                           }
@@ -1181,6 +1195,26 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             ))}
                           </div>
                         </Popover>
+
+                        {/* Comments */}
+                        <button
+                          type='button'
+                          onClick={() => editorRef.current?.toggleComments()}
+                          className={headerIconButtonClass}
+                          title='Comments'
+                          aria-label='Open comment activity'
+                          data-testid='canvas-comments-button'
+                          data-track-category='CANVAS'
+                          data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                          data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                        >
+                          <MessageSquare size={16} className='shrink-0 opacity-60' />
+                          {openCommentCount > 0 && (
+                            <span className='absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground'>
+                              {openCommentCount > 99 ? '99+' : openCommentCount}
+                            </span>
+                          )}
+                        </button>
 
                         {/* Share */}
                         <button
@@ -1371,7 +1405,31 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             </div>
 
             {baseRoute === '/chat/activity' && (
-              <div className='hidden h-[27px] shrink-0 border-b border-border bg-background md:block' />
+              <div className='hidden h-[27px] shrink-0 bg-background md:block' />
+            )}
+
+            {selectedCanvas?.isArchived && (
+              <div
+                className='flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:px-4'
+                data-testid='canvas-archived-banner'
+              >
+                <div className='flex min-w-0 items-center gap-2'>
+                  <Archive size={16} className='shrink-0 text-amber-700' />
+                  <span className='truncate font-medium'>This canvas is archived</span>
+                </div>
+                {canArchiveSelectedCanvas && (
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={handleUnarchiveSelectedCanvas}
+                    data-track-category='CANVAS'
+                    data-track-name='UNARCHIVE_CANVAS_FROM_BANNER'
+                    data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                  >
+                    Unarchive
+                  </Button>
+                )}
+              </div>
             )}
 
             {previewVersion && (
@@ -1434,6 +1492,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasId={selectedCanvas?.id}
                   canvasTitle={currentTitle}
                   initialBlockIdToFocus={blockIdFromUrl}
+                  initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
                   currentUserRole={selectedCanvas?.accessLevel ?? null}
@@ -1455,6 +1515,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   onCollaboratorsChange={handleCollaboratorsChange}
                   initialLegacyContent={selectedCanvas.content}
                   initialBlockIdToFocus={blockIdFromUrl}
+                  initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
@@ -1475,6 +1537,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasTitle={currentTitle}
                   onMentionInsert={handleMentionInsert}
                   initialBlockIdToFocus={blockIdFromUrl}
+                  initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
@@ -1535,6 +1599,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 };
                 void deleteCanvas();
               }}
+              onArchiveToggle={handleArchiveToggleCanvas}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               paginated={true}
@@ -1599,7 +1664,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         onRename={handleRenameVersion}
         onMakeCopy={version => void handleMakeCopyVersion(version)}
       />
-      <CanvasExitTitleDialog {...exitTitleGuard.dialogProps} />
       <Dialog open={showSendConfirmation} onOpenChange={setShowSendConfirmation}>
         <div className='p-6'>
           <h2 className='text-lg font-semibold mb-2'>Send to Channel?</h2>

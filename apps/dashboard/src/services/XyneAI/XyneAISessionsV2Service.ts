@@ -111,9 +111,12 @@ export async function fetchV2Conversations(
 export async function fetchV2ConversationMessages(
   conversationId: string,
   agentSlug?: string | null,
+  urlOverride?: string,
 ): Promise<Message[]> {
   const effectiveAgentSlug = agentSlug ?? 'ask-ai';
-  const url = `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
+  const url =
+    urlOverride ??
+    `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
   const response = await apiInstance.get<ClawMessagesResponse>(url);
 
   if (!response.data.success || !response.data.data) {
@@ -330,4 +333,25 @@ export async function fetchV2DebugArtifacts(
   );
   if (!response.data.success) throw new Error('Failed to fetch debug artifacts');
   return response.data.data;
+}
+
+/** URL for a desk auto-draft's transcript, proxied by Spaces as the desk
+ *  persona after checking channel membership. Same body shape as the v2
+ *  messages endpoint. */
+export function deskAutoDraftMessagesUrl(conversationId: string, channelId: string): string {
+  return `/email/${encodeURIComponent(conversationId)}/autodraft-transcript?channelId=${encodeURIComponent(channelId)}`;
+}
+
+/** Fork a desk auto-draft into a conversation owned by the current user, so
+ *  their first message continues the run privately instead of writing into the
+ *  persona's chat. Returns the new conversation id. */
+export async function forkDeskAutoDraft(
+  conversationId: string,
+  channelId: string,
+): Promise<{ conversationId: string; agentSlug: string }> {
+  const response = await apiInstance.post<{ conversationId: string; agentSlug: string }>(
+    `/email/${encodeURIComponent(conversationId)}/autodraft-continue`,
+    { channelId },
+  );
+  return response.data;
 }

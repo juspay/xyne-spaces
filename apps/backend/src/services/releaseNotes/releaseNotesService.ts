@@ -6,10 +6,12 @@ import { ConversationService } from '@/services/conversationService';
 import { logger } from '@/utils/logger';
 import { generateReleaseNotesContent, ReleaseNotesGeneratorInput } from '@/services/agents/release-notes/release-notes-agent';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
-import { config } from '@/config/env';
 import { AgentsConfig } from '@/agents/config';
-import { FormEntityType } from '@xyne/shared';
-import { BitbucketService } from '@/services/bitbucketService';
+import { FormEntityType, MessageType, VCSProviderType } from '@xyne/shared';
+import { buildVcsClient } from '@/services/release/buildVcsClient';
+import { ApplicationRepository } from '@/database/repositories/applicationRepository';
+import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
+import { db } from '@/database/client';
 
 type LinkedPrTicket = {
   prId: number;
@@ -45,11 +47,11 @@ export interface ReleaseNotesContext {
 }
 
 export class ReleaseNotesService {
-  private commitAnalysisService: CommitAnalysisService | null = null;
   private ticketRepository: TicketRepository | null = null;
   private formsRepository: FormsRepository | null = null;
   private messageRepository: MessageRepository | null = null;
   private conversationService: ConversationService | null = null;
+  private applicationRepository: ApplicationRepository | null = null;
 
   constructor() {
     this.initialize();
@@ -61,24 +63,42 @@ export class ReleaseNotesService {
       this.formsRepository = new FormsRepository();
       this.messageRepository = new MessageRepository();
       this.conversationService = new ConversationService();
-
-      const bitbucketConfig = config.bitbucket;
-      const hasToken = Boolean(bitbucketConfig.apiToken);
-      const hasBasicAuth = Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
-
-      if (hasToken || hasBasicAuth) {
-        const bitbucketService = new BitbucketService({
-          baseUrl: bitbucketConfig.baseUrl || 'https://bitbucket.example.com/rest/api/latest',
-          username: bitbucketConfig.apiUsername || '',
-          password: bitbucketConfig.password || '',
-          token: bitbucketConfig.apiToken || '',
-        });
-        this.commitAnalysisService = new CommitAnalysisService(bitbucketService);
-      }
+      this.applicationRepository = new ApplicationRepository();
 
       logger.info('[ReleaseNotesService] Successfully initialized');
     } catch (error) {
       logger.error('[ReleaseNotesService] Failed to initialize:', error);
+    }
+  }
+
+  // Repo + provider from the release board (like commit analysis), so
+  // GitHub-backed releases work; legacy fallback = Bitbucket XYNE/xyne-spaces.
+  private async deriveRepoContext(boardId: string | null): Promise<{
+    workspace: string;
+    repoSlug: string;
+    provider: VCSProviderType | null;
+  }> {
+    const fallback = { workspace: 'XYNE', repoSlug: 'xyne-spaces', provider: null };
+    if (!boardId || !this.applicationRepository) return fallback;
+    try {
+      const board = await db.board.findUnique({
+        where: { id: boardId },
+        select: { vcsProvider: true },
+      });
+      const provider = (board?.vcsProvider ?? null) as VCSProviderType | null;
+      const apps = await this.applicationRepository.findByMainReleaseBoardId(boardId);
+      const repoUrl = apps.map(a => a.repoUrl?.trim()).find(Boolean);
+      if (!repoUrl) return { ...fallback, provider };
+      const parsed = provider === VCSProviderType.GITHUB
+        ? parseGitHubRepoUrl(repoUrl)
+        : parseBitbucketRepoUrl(repoUrl);
+      if (!parsed) return { ...fallback, provider };
+      return 'owner' in parsed
+        ? { workspace: parsed.owner, repoSlug: parsed.repo, provider }
+        : { workspace: parsed.projectKey, repoSlug: parsed.repoSlug, provider };
+    } catch (error) {
+      logger.warn('[ReleaseNotesService] Failed to derive repo context, using fallback:', error);
+      return fallback;
     }
   }
 
@@ -92,9 +112,12 @@ export class ReleaseNotesService {
       throw new Error(`Ticket ${ticketId} not found`);
     }
 
-    const prs = await this.gatherPRData(ticketId);
-    const conversationMessages = await this.gatherConversationMessages(ticket.conversationId);
-    const hotfixPRs = await this.gatherHotfixPRs(ticketId);
+    // independent reads — overlap the slow VCS analyses with the conversation fetch
+    const [prs, conversationMessages, hotfixPRs] = await Promise.all([
+      this.gatherPRData(ticketId),
+      this.gatherConversationMessages(ticket.conversationId),
+      this.gatherHotfixPRs(ticketId),
+    ]);
     return {
       release: {
         ticketId: ticket.id,
@@ -138,7 +161,7 @@ export class ReleaseNotesService {
   }
 
   private async gatherPRData(ticketId: string): Promise<ReleaseNotesContext['prs']> {
-    if (!this.ticketRepository || !this.commitAnalysisService || !this.formsRepository) {
+    if (!this.ticketRepository || !this.formsRepository) {
       return [];
     }
 
@@ -156,19 +179,20 @@ export class ReleaseNotesService {
         FormEntityType.TICKET
       );
 
-      const deployedCommitId = formValues.deployedCommitId as string;
-      const newCommitId = formValues.newCommitId as string;
-      const branch = (formValues.branch as string) || 'main';
-      // TODO: Replace hardcoded values with actual configuration from project/board settings
-      const workspace = 'XYNE';
-      const repoSlug = 'xyne-spaces';
+      // Trim — form values can have stray whitespace from paste / autofill.
+      const deployedCommitId = String(formValues.deployedCommitId ?? '').trim();
+      const newCommitId = String(formValues.newCommitId ?? '').trim();
+      const branch = String(formValues.branch ?? '').trim() || 'main';
+      const { workspace, repoSlug, provider } = await this.deriveRepoContext(ticket.boardId);
 
       if (!deployedCommitId || !newCommitId) {
         logger.warn(`[ReleaseNotesService] Missing commit IDs in form values for ticket ${ticketId}`);
         return prs;
       }
 
-      const results = await this.commitAnalysisService.analyzeCommits({
+      const commitAnalysisService = new CommitAnalysisService(buildVcsClient(provider));
+
+      const results = await commitAnalysisService.analyzeCommits({
         deployedCommitId,
         newCommitId,
         projectKey: workspace,
@@ -270,7 +294,7 @@ export class ReleaseNotesService {
             continue;
           }
 
-          const urlMatch = nextLine.match(/(https?:\/\/[^\s\)\]\n]+)/);
+          const urlMatch = nextLine.match(/(https?:\/\/[^\s)\]\n]+)/);
           if (urlMatch) {
             return urlMatch[1];
           }
@@ -280,7 +304,7 @@ export class ReleaseNotesService {
       }
     }
 
-    const urlRegex = /(https?:\/\/(?:www\.)?(?:loom\.com|drive\.google\.com|youtube\.com|youtu\.be|vimeo\.com)[^\s\)\]\n]*)/i;
+    const urlRegex = /(https?:\/\/(?:www\.)?(?:loom\.com|drive\.google\.com|youtube\.com|youtu\.be|vimeo\.com)[^\s)\]\n]*)/i;
     const match = description.match(urlRegex);
     if (match) {
       return match[1];
@@ -537,16 +561,13 @@ export class ReleaseNotesService {
 
       logger.info(`[ReleaseNotesService] Found ${hotfixSubTickets.length} hotfix sub-tickets for ${parentTicketId}`);
 
-      const hotfixPRs: ReleaseNotesContext['hotfixPRs'] = [];
-
-      // Gather PRs from each hotfix sub-ticket
-      for (const subTicket of hotfixSubTickets) {
-        if (!subTicket.mappedTicket) continue;
-
-        const subTicketPRs = await this.gatherPRData(subTicket.mappedTicket.id);
-        hotfixPRs.push(...subTicketPRs);
-      }
-      return hotfixPRs;
+      // gather each hotfix sub-ticket's PRs concurrently
+      const perSubTicket = await Promise.all(
+        hotfixSubTickets
+          .filter(subTicket => subTicket.mappedTicket)
+          .map(subTicket => this.gatherPRData(subTicket.mappedTicket!.id)),
+      );
+      return perSubTicket.flat();
     } catch (error) {
       logger.error(`[ReleaseNotesService] Error gathering hotfix PRs:`, error);
       return [];
@@ -597,7 +618,7 @@ export class ReleaseNotesService {
           conversationId: ticket.conversationId,
           userId: releaseBotId,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           metadata: {
             messageSubtype: 'ticket_deployed_with_release',
             canvasUrl,

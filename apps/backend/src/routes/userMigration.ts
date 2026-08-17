@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { AccessType } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import {
   userPresenceBackfillService,
   type PresenceBackfillConfig,

@@ -58,7 +58,7 @@ function AvatarRoot({
   return (
     <AvatarPrimitive.Root
       data-slot='avatar'
-      className={cn('relative flex shrink-0 overflow-hidden rounded-sm', className)}
+      className={cn('relative flex shrink-0 overflow-hidden rounded-[inherit]', className)}
       {...props}
     />
   );
@@ -90,8 +90,9 @@ function AvatarFallback({
   );
 }
 
-// Generate consistent color from user ID using existing tag color palette
-const generateAvatarColor = (userId: string): { bg: string; text: string } => {
+// Generate consistent color from user ID using existing tag color palette.
+// Exported so small user badges can share the same deterministic identity color.
+export const getAvatarColorClassNames = (userId: string): { bg: string; text: string } => {
   if (!userId) return { bg: 'bg-muted', text: 'text-muted-foreground' };
 
   const colorPalette = [
@@ -164,7 +165,7 @@ const Avatar = ({
   const sizeClass = sizeClasses[size];
   const textSizeClass = textSizeClasses[size];
 
-  const colorClass = generateAvatarColor(targetUserId);
+  const colorClass = getAvatarColorClassNames(targetUserId);
 
   const handleImageError = (): void => {
     setImageError(true);
@@ -228,7 +229,7 @@ const Avatar = ({
   return (
     <div
       className={cn(
-        'relative inline-flex shrink-0 visual-regression-hide',
+        'relative inline-flex shrink-0 visual-regression-hide rounded-sm',
         sizeClass,
         roundedClass,
         className,

@@ -19,13 +19,23 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
+import { Dialog } from '../../../components/ui/Dialog';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../../components/ui/dropdown-menu';
-import { TicketStatusV2, PRStatusEvent, FormContextType, BoardType } from '@xyne/shared';
+import {
+  TicketStatusV2,
+  PRStatusEvent,
+  FormContextType,
+  BoardType,
+  ApproverType,
+  ReenterMode,
+  VisitSlaMode,
+} from '@xyne/shared';
 import { toast } from 'sonner';
 import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import type { StageNode as Stage, StageCondition } from './BoardStageConfigScreen.types';
@@ -480,6 +490,7 @@ const BoardStageConfigScreen = ({
   initialBoard,
 }: BoardStageConfigScreenProps): ReactElement | null => {
   const zero = useZero();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   // initialBoard may only replace the query when it actually carries stage
@@ -527,7 +538,7 @@ const BoardStageConfigScreen = ({
         readonly id: string;
         readonly userId: string | null;
         readonly roleId: string | null;
-        readonly approverType: 'USER' | 'ROLE' | null;
+        readonly approverType: ApproverType | null;
         readonly stageId: string;
       }[];
       readonly formContextMappings?: readonly {
@@ -675,6 +686,7 @@ const BoardStageConfigScreen = ({
     new Map(),
   );
   const [isTransitionsLoading, setIsTransitionsLoading] = useState(false);
+  const [showTransitionsLoadingNotice, setShowTransitionsLoadingNotice] = useState(false);
   const hasLoadedTransitions = useRef(false);
 
   // ── Transition Metadata (non-linear boards) ─────────────────────────────────
@@ -812,11 +824,11 @@ const BoardStageConfigScreen = ({
         formId: string | null;
         requiresApproval: boolean | null;
         requestApprovalOnEntry?: boolean | null;
-        visitSlaMode: string | null;
+        visitSlaMode: VisitSlaMode | null;
         fixedEtaHours: number | null;
-        onReenter: string | null;
+        onReenter: ReenterMode | null;
         transitionApprovers?: readonly {
-          approverType?: string | null;
+          approverType?: ApproverType | null;
           userId: string | null;
           roleId: string | null;
         }[];
@@ -846,21 +858,21 @@ const BoardStageConfigScreen = ({
                   userId: string | null;
                   roleId: string | null;
                 }) => {
-                  const type = a.approverType ?? 'USER';
+                  const type = a.approverType ?? ApproverType.USER;
                   if (type === 'ROLE') {
                     return a.roleId
-                      ? { approverId: a.roleId, approverType: 'ROLE' as const }
+                      ? { approverId: a.roleId, approverType: ApproverType.ROLE as const }
                       : null;
                   }
-                  return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+                  return a.userId
+                    ? { approverId: a.userId, approverType: ApproverType.USER as const }
+                    : null;
                 },
               )
-              .filter(
-                (x): x is { approverId: string; approverType: 'USER' | 'ROLE' } => x !== null,
-              ),
-            visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
+              .filter((x): x is { approverId: string; approverType: ApproverType } => x !== null),
+            visitSlaMode: t.visitSlaMode ?? VisitSlaMode.STAGE_DEFAULT,
             fixedEtaHours: t.fixedEtaHours,
-            onReenter: t.onReenter ?? 'RESET',
+            onReenter: t.onReenter ?? ReenterMode.RESET,
           });
         }
       }
@@ -961,11 +973,15 @@ const BoardStageConfigScreen = ({
         prStatuses,
         approvers: (s.approvers ?? [])
           .map(a => {
-            const type = a.approverType ?? 'USER';
-            if (type === 'ROLE') {
-              return a.roleId ? { approverId: a.roleId, approverType: 'ROLE' as const } : null;
+            const type = a.approverType ?? ApproverType.USER;
+            if (type === ApproverType.ROLE) {
+              return a.roleId
+                ? { approverId: a.roleId, approverType: ApproverType.ROLE as const }
+                : null;
             }
-            return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+            return a.userId
+              ? { approverId: a.userId, approverType: ApproverType.USER as const }
+              : null;
           })
           .filter((x): x is ApproverEntry => x !== null),
         formId: s.formContextMappings?.[0]?.formId || '',
@@ -1107,8 +1123,8 @@ const BoardStageConfigScreen = ({
         const newMeta: TransitionMeta = {
           requiresApproval: false,
           approvers: [],
-          visitSlaMode: 'STAGE_DEFAULT',
-          onReenter: 'RESET',
+          visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+          onReenter: ReenterMode.RESET,
           ...existing,
           ...meta,
         };
@@ -1588,7 +1604,7 @@ const BoardStageConfigScreen = ({
         formId?: string | null;
         requiresApproval?: boolean;
         requestApprovalOnEntry?: boolean;
-        approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+        approvers?: Array<{ approverId: string; approverType: ApproverType }>;
         visitSlaMode?: string;
         fixedEtaHours?: number | null;
         onReenter?: string;
@@ -2038,6 +2054,25 @@ const BoardStageConfigScreen = ({
   const handleSave = useCallback(async () => {
     if (!boardId) return;
 
+    if (isTransitionsLoading || (stages.some(s => s.id) && !hasLoadedTransitions.current)) {
+      setShowTransitionsLoadingNotice(true);
+      return;
+    }
+
+    if (
+      boardType === BoardType.NON_LINEAR &&
+      !Array.from(transitionsByTempId.values()).some(targets => targets.size > 0)
+    ) {
+      const proceed = await confirm({
+        title: 'No transitions configured',
+        description:
+          'Tickets will not be able to move between stages. Save without any transitions?',
+        confirmLabel: 'Save anyway',
+        cancelLabel: 'Cancel',
+      });
+      if (!proceed) return;
+    }
+
     const invalidStages = stages.filter(s => !s.name.trim());
     if (invalidStages.length > 0) {
       toast.error('Please fill in all stage names');
@@ -2163,6 +2198,9 @@ const BoardStageConfigScreen = ({
     boardType,
     syncStageTransitions,
     reloadTransitionsFromServer,
+    isTransitionsLoading,
+    transitionsByTempId,
+    confirm,
   ]);
 
   if (!isOpen) return null;
@@ -2396,7 +2434,7 @@ const BoardStageConfigScreen = ({
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeCreateForm}
-                  onSave={formData => void handleEdgeCreateFormSave(formData)}
+                  onSave={handleEdgeCreateFormSave}
                   projectId={projectId}
                 />
               </div>
@@ -2473,7 +2511,7 @@ const BoardStageConfigScreen = ({
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseCreateForm}
-                    onSave={formData => void handleCreateFormSave(formData)}
+                    onSave={handleCreateFormSave}
                     projectId={projectId}
                   />
                 </div>
@@ -2485,7 +2523,7 @@ const BoardStageConfigScreen = ({
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseDirectForm}
-                    onSave={formData => void handleDirectFormSave(formData)}
+                    onSave={handleDirectFormSave}
                     title='Configure Transition Form'
                     projectId={projectId}
                   />
@@ -2500,7 +2538,7 @@ const BoardStageConfigScreen = ({
                     isOpen={true}
                     onClose={handleCloseEditForm}
                     onSave={() => {}}
-                    onUpdate={formData => void handleEditFormSave(formData)}
+                    onUpdate={handleEditFormSave}
                     {...(editingFormId ? { formId: editingFormId } : {})}
                     initialData={editingFormData}
                     title='Edit Transition Form'
@@ -2514,7 +2552,7 @@ const BoardStageConfigScreen = ({
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeForm}
-                  onSave={formData => void handleEdgeFormSave(formData)}
+                  onSave={handleEdgeFormSave}
                   projectId={projectId}
                   {...(edgeEditFormId ? { formId: edgeEditFormId } : {})}
                   {...(edgeEditFormData
@@ -2580,6 +2618,29 @@ const BoardStageConfigScreen = ({
           </div>
         </div>
       </div>
+      <Dialog
+        open={showTransitionsLoadingNotice}
+        onOpenChange={setShowTransitionsLoadingNotice}
+        title='Please wait'
+        description='Loading transitions, please wait...'
+      >
+        <div className='p-6'>
+          <p className='text-[14px] text-muted-foreground mb-6'>
+            Loading transitions, please wait...
+          </p>
+          <div className='flex justify-end'>
+            <Button
+              type='button'
+              onClick={() => setShowTransitionsLoadingNotice(false)}
+              data-track-category='board_config'
+              data-track-name='transitions_loading_notice_ok'
+            >
+              OK
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+      <ConfirmDialog />
     </div>
   );
 };

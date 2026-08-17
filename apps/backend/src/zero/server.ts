@@ -1,4 +1,4 @@
-import { mustGetQuery, mustGetMutator } from '@rocicorp/zero';
+import { mustGetQuery, mustGetMutator, type AnyCustomQuery } from '@rocicorp/zero';
 import { handleMutateRequest, handleQueryRequest } from '@rocicorp/zero/server';
 import { zeroNodePg } from '@rocicorp/zero/server/adapters/pg';
 // Zero internal APIs for fallback system (mapped via #imports in package.json)
@@ -32,6 +32,30 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { superpositionClient } from '@/services/superpositionClient';
+
+const mustGetBackendQuery = (name: string): AnyCustomQuery =>
+  mustGetQuery(queries as never, name) as AnyCustomQuery;
+
+const ZERO_DISABLED_QUERIES_KEY = 'zero_disabled_queries';
+
+const parseDisabledQueries = (raw: string): Set<string> =>
+  new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  );
+
+const isQueryDisabled = async (name: string): Promise<boolean> => {
+  try {
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
+    return parseDisabledQueries(raw).has(name);
+  } catch (error) {
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
+  }
+};
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -178,6 +202,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
   const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
@@ -228,13 +253,24 @@ export async function handleMutate(request: Request): Promise<unknown> {
       request,
       handler: transact => {
         const mutationAsyncTasks: (() => Promise<void>)[] = [];
+        const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
-          const mutators = createMutators(authData, mutationAsyncTasks);
-          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
+          const mutators = createMutators(
+            authData,
+            mutationAsyncTasks,
+            mutationAwaitedPostCommitTasks,
+          );
+          const wrappedTx = wrapTransactionWithACL(
+            tx,
+            context,
+            mutationVespaJobs,
+            mutationSideEffectJobs,
+            mutatorName,
+          );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
         }).then((mutatorResult) => {
@@ -242,6 +278,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
           // back the transaction. Do not dispatch work staged by that rollback.
           if (!('error' in mutatorResult.result)) {
             asyncTasks.push(...mutationAsyncTasks);
+            awaitedPostCommitTasks.push(...mutationAwaitedPostCommitTasks);
             vespaJobs.push(...mutationVespaJobs);
             sideEffectJobs.push(...mutationSideEffectJobs);
           }
@@ -274,6 +311,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
       });
     }
 
+    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
     Promise.allSettled(asyncTasks.map((task) => task()));
 
     Promise.allSettled(
@@ -316,8 +354,16 @@ export async function handleMutate(request: Request): Promise<unknown> {
     // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
     // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
     // async chain scheduled inside the callback.
+    // Runs as the requesting user so handler ACLs stay in force; the workspace-wide fan-outs
+    // inside elevate themselves via withWorkspaceScope.
     void runWithContext(
-      { userId: authData.sub, workspaceId: authData.workspaceId },
+      {
+        userId: authData.sub,
+        workspaceId: authData.workspaceId,
+        role: authData.role,
+        orgRole: authData.orgRole,
+        memberId: authData.memberId,
+      },
       () => processSideEffectJobs(sideEffectJobs, context),
     );
 
@@ -353,12 +399,20 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      (queryName, args) => {
-        capturedQueryName = queryName;
-        const query = mustGetQuery(queries, queryName);
-        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-        return query.fn({ args, ctx: context });
-      },
+      // zero's QueryRequestHandler type is sync-only but the runtime awaits the
+      // handler result, so returning a promise (typed as any) is safe.
+      (queryName, args): any =>
+        (async () => {
+          capturedQueryName = queryName;
+          if (await isQueryDisabled(queryName)) {
+            getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+            logger.warn('zero_query_disabled', { query: queryName });
+            throw new Error(`Query '${queryName}' is disabled`);
+          }
+          const query = mustGetBackendQuery(queryName);
+          const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
+          return query.fn({ args, ctx: context });
+        })(),
       schema,
       request
     );
@@ -435,7 +489,7 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
+          const queryDef = mustGetBackendQuery(req.name);
           const query = queryDef.fn({
             args: req.args || {},
             ctx: context,
@@ -498,7 +552,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
+          const queryDef = mustGetBackendQuery(req.name);
           const query = queryDef.fn({
             args: req.args || {},
             ctx: context,
@@ -566,6 +620,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
   }
 
   const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
   const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
 
@@ -578,12 +633,13 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     console.log(`Fallback executing mutation: ${mutation.name}`);
 
     await dbProvider.transaction(async (tx) => {
-      const mutators = createMutators(authData, asyncTasks);
+      const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
       const wrappedTx = wrapTransactionWithACL(
         tx,
         { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
         vespaJobs,
-        sideEffectJobs
+        sideEffectJobs,
+        mutation.name,
       );
       const mutator = mustGetMutator(mutators, mutation.name);
       await mutator.fn({
@@ -592,6 +648,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }
       });
     });
+    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
     Promise.allSettled(asyncTasks.map(task => task()));
     Promise.allSettled(
       vespaJobs.map(async (job) => {
@@ -633,7 +690,13 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
     // async chain scheduled inside the callback.
     void runWithContext(
-      { userId: authData.sub, workspaceId: authData.workspaceId },
+      {
+        userId: authData.sub,
+        workspaceId: authData.workspaceId,
+        role: authData.role,
+        orgRole: authData.orgRole,
+        memberId: authData.memberId,
+      },
       () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
     );
     return { success: true };

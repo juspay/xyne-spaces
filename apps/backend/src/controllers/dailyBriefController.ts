@@ -31,13 +31,17 @@ export async function getConfig(req: Request, res: Response) {
   }
 }
 
-/** PUT /api/daily-brief/config — { enabled?, instructions? }. */
+/** PUT /api/daily-brief/config — { enabled?, instructions?, instructionsEnabled? }. */
 export async function saveConfig(req: Request, res: Response) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const { enabled, instructions } = req.body ?? {};
-    const result = await saveDailyBriefConfig(req, userId, { enabled, instructions });
+    const { enabled, instructions, instructionsEnabled } = req.body ?? {};
+    const result = await saveDailyBriefConfig(req, userId, {
+      enabled,
+      instructions,
+      instructionsEnabled,
+    });
     return res.json(unwrap(result));
   } catch (error) {
     logger.error('[DailyBrief] Error saving config:', error);

@@ -24,7 +24,12 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE_PATH: Joi.string().default('logs/app.log'),
+  // Streams error-level logs to Fluent Bit's forward input (see docker/fluent-bit/).
+  // Off by default so envs without a Fluent Bit endpoint (e.g. prod, until one
+  // is provisioned there) don't try to connect anywhere.
+  LOG_FLUENT_ENABLED: Joi.boolean().default(false),
+  LOG_FLUENT_HOST: Joi.string().default('localhost'),
+  LOG_FLUENT_PORT: Joi.number().default(24224),
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
@@ -58,7 +63,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -70,14 +75,14 @@ const envSchema = Joi.object({
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
   S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
   // Google Cloud Storage Configuration (Workload Identity)
-  GCS_PROJECT_ID: Joi.string().default(''),
-  GCS_BUCKET_NAME: Joi.string().default(''),
-  GCS_BUNDLE_BUCKET_NAME: Joi.string().default(''),
-  GCS_CANVAS_BUCKET_NAME: Joi.string().default(''),
-  GCS_DOCS_BUCKET_NAME: Joi.string().default(''),
+  GCS_PROJECT_ID: Joi.string().allow('').default(''),
+  GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
-  FAKE_GCS_HOST: Joi.string().default('localhost:4443'),
-  TRANSCRIPTION_BUCKET_NAME: Joi.string().default(''),
+  FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
+  TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
   GCS_WORKFLOW_VR_BUCKET_NAME: Joi.string().default(''),
@@ -90,6 +95,8 @@ const envSchema = Joi.object({
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+
+  DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
@@ -97,6 +104,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
@@ -106,6 +114,7 @@ const envSchema = Joi.object({
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
   LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
+  ORG_DEFAULT_MODELS: Joi.string().allow('').default('kimi-latest,private-large'),
   BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
@@ -162,8 +171,13 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
+  // How long a thread's job sits delayed before it runs. This is the debounce
+  // window: every message on the thread inside it collapses into one job, so a
+  // busy thread costs one extraction per window, not one per message.
+  ENTITY_EXTRACTION_DEBOUNCE_MS: Joi.number().default(15 * 60 * 1000),
   // Org-level framing prepended to the mention-extraction prompt, so the model
   // knows whose data it is reading. Fixes identity-relative errors like listing
   // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
@@ -194,12 +208,14 @@ const envSchema = Joi.object({
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
@@ -252,12 +268,11 @@ const envSchema = Joi.object({
   SUPERPOSITION_TOKEN: Joi.string().allow('').default('123456'),
   SUPERPOSITION_ORG_ID: Joi.string().allow('').default('localorg'),
   SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default('test'),
+  SUPERPOSITION_LOTUS_WORKSPACE_ID: Joi.string().allow('').default('lotus'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
   // Jenkins Configuration
-  JENKINS_BASE_URL: Joi.string()
-    .uri()
-    .default(''),
+  JENKINS_BASE_URL: Joi.string().uri().default(''),
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
@@ -291,9 +306,7 @@ const envSchema = Joi.object({
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
-  BITBUCKET_BASE_URL: Joi.string()
-    .allow('')
-    .default(''),
+  BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
@@ -307,12 +320,25 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  // Thread catch-up summary — comma-separated channel IDs, or "all" for every channel (empty = disabled everywhere)
+  THREAD_SUMMARY_ENABLED_CHANNELS: Joi.string().allow('').default(''),
+  THREAD_SUMMARY_MIN_MESSAGES: Joi.number().integer().min(0).default(6),
+  THREAD_SUMMARY_MESSAGE_LIMIT: Joi.number().integer().min(1).default(300),
+  THREAD_SUMMARY_LLM_TIMEOUT_MS: Joi.number().integer().min(1).default(300000),
+  THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
+  THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
+  THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
+  ENC_ORG_PROVISION: Joi.boolean().default(false),
+  ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
   JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
     .allow('')
     .default(''),
@@ -350,9 +376,13 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  ENC_S2S_KEY: Joi.string().allow(''),
+  ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
+  ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(50),
   EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
@@ -490,7 +520,11 @@ export const config = {
   },
   logging: {
     level: envVars.LOG_LEVEL,
-    filePath: envVars.LOG_FILE_PATH,
+    fluent: {
+      enabled: envVars.LOG_FLUENT_ENABLED,
+      host: envVars.LOG_FLUENT_HOST,
+      port: envVars.LOG_FLUENT_PORT,
+    },
     logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
@@ -561,6 +595,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
@@ -570,16 +605,23 @@ export const config = {
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
+    enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
-    communityWorkspaceUserBudget: (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
-    enterpriseWorkspaceUserBudget: (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    communityWorkspaceUserBudget:
+      (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    enterpriseWorkspaceUserBudget:
+      (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
     litellmManagementBaseUrl:
       (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
     litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
     litellmChangedBy: envVars.LITELLM_CHANGED_BY as string,
+    orgDefaultModels: (envVars.ORG_DEFAULT_MODELS as string)
+      .split(',')
+      .map((m: string) => m.trim())
+      .filter(Boolean),
   },
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
@@ -600,8 +642,8 @@ export const config = {
     : [],
   slackIgnoredBotIds: envVars.SLACK_IGNORED_BOT_IDS
     ? envVars.SLACK_IGNORED_BOT_IDS.split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean)
+        .map((id: string) => id.trim())
+        .filter(Boolean)
     : [],
   slackMigrationFinalMessage: envVars.SLACK_MIGRATION_FINAL_MESSAGE
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
@@ -655,10 +697,12 @@ export const config = {
     url: envVars.Y_SWEET_URL,
   },
   entityExtraction: {
+    enabled: envVars.ENABLE_ENTITY_EXTRACTION,
     model: envVars.ENTITY_EXTRACTION_MODEL,
     // A single extraction call takes 20-75s on this endpoint. Raising this
     // makes calls contend and time out rather than finish faster.
     concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
+    debounceMs: envVars.ENTITY_EXTRACTION_DEBOUNCE_MS,
     orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
   },
 
@@ -737,6 +781,7 @@ export const config = {
     token: envVars.SUPERPOSITION_TOKEN,
     orgId: envVars.SUPERPOSITION_ORG_ID,
     workspaceId: envVars.SUPERPOSITION_WORKSPACE_ID,
+    lotusWorkspaceId: envVars.SUPERPOSITION_LOTUS_WORKSPACE_ID,
     pollingInterval: envVars.SUPERPOSITION_POLLING_INTERVAL,
     timeout: envVars.SUPERPOSITION_TIMEOUT,
   },
@@ -767,6 +812,7 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
+  messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,
@@ -794,6 +840,9 @@ export const config = {
     redisKeyPrefix: 'pendingauth:oauth:',
     ttlSeconds: 10 * 60,
   },
+  recentVisitedConversations: {
+    lookbackDays: envVars.RECENT_VISITED_LOOKBACK_DAYS,
+  },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
     enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)
@@ -802,6 +851,19 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  threadSummary: {
+    // Comma-separated channel IDs that have the AI thread catch-up summary enabled, or "all" for every channel (empty = disabled everywhere)
+    enabledChannels: (envVars.THREAD_SUMMARY_ENABLED_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    minMessages: envVars.THREAD_SUMMARY_MIN_MESSAGES as number,
+    messageLimit: envVars.THREAD_SUMMARY_MESSAGE_LIMIT as number,
+    llmTimeoutMs: envVars.THREAD_SUMMARY_LLM_TIMEOUT_MS as number,
+    minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
+    maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
+    transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
@@ -824,6 +886,13 @@ export const config = {
     migrationFallbackEmail: envVars.CONFLUENCE_MIGRATION_FALLBACK_EMAIL as string,
     importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
     importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
+  },
+  enc: {
+    clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
+    apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
+    enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
+    orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
+    workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {
@@ -852,9 +921,15 @@ export const config = {
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },
+  internal: {
+    encryptionS2sKey: envVars.ENC_S2S_KEY as string,
+    encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    encryptionRequestTimeoutMs: envVars.ENCRYPTION_REQUEST_TIMEOUT_MS as number,
+  },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
+    gmailWebhookMaxBatch: envVars.GMAIL_WEBHOOK_MAX_BATCH as number,
   },
   emailMergeModeDefault: envVars.EMAIL_MERGE_MODE_DEFAULT as 'DISABLED' | 'ENABLED',
   docling: {

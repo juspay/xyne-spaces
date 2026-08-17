@@ -69,6 +69,15 @@ schema ticket {
       index: enable-bm25
     }
 
+    # Pre-chunked description supplied by the backend. The title remains in
+    # its scalar field and is added only when each chunk is embedded below.
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
     field description_clean type string {
       indexing: index | summary
       index: enable-bm25
@@ -277,6 +286,14 @@ schema ticket {
       distance-metric: angular
     }
   }
+  # Per-chunk embeddings (one vector per `chunks` element). The title is
+  # prepended to each chunk so short chunks keep their ticket context at embed time.
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | for_each { (input title || "") . " " . (_ || "") } | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
   field title_fuzzy type string {
     indexing: input title |tokenize | lowercase | index | summary
     index: enable-bm25
@@ -309,7 +326,7 @@ schema ticket {
   }
 
   fieldset default {
-    fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
+    fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, chunks, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
   }
 
   rank-profile initial {
@@ -331,7 +348,7 @@ schema ticket {
     }
 
     function vector_score() {
-      expression: max(max(closeness(field, combined_embeddings), closeness(field, description_embeddings)), closeness(field, description_clean_embeddings))
+      expression: max(max(max(closeness(field, combined_embeddings), closeness(field, description_embeddings)), closeness(field, description_clean_embeddings)), closeness(field, chunk_embeddings))
     }
 
     function combined_nativeRank() {
@@ -390,6 +407,7 @@ schema ticket {
     summary description {
       bolding: on
     }
+    summary chunks {}
     summary description_clean {
       bolding: on
     }

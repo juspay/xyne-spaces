@@ -1,8 +1,9 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
+import { ActivityType } from '@xyne/shared';
 import {
   getUsersToNotifyForTicket,
   getTicketBotActorId,
@@ -191,13 +192,12 @@ class StageEtaDeadlineWorker {
         });
 
         if (ticket.conversationId) {
-          await runWithContext(
-            { userId: 'stage-eta-deadline-worker', workspaceId: ticket.workspaceId },
+          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId,
             () => createEtaSystemMessage({
               conversationId: ticket.conversationId!,
               content: message,
               createdAt: now,
-              activityType: 'STAGE_ETA',
+              activityType: ActivityType.STAGE_ETA,
               stageId: stage.id,
             }),
           );

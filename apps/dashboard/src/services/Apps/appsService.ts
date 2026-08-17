@@ -1,4 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
+import { AppIncomingWebhookAction, CommandType, CommandAccessibility } from '@xyne/shared';
 
 export interface CreateAppRequest {
   name: string;
@@ -46,8 +47,8 @@ export interface IncomingWebhook {
   channelVisibility: string;
   boardId?: string | null;
   boardName?: string | null;
-  type: 'SLACK' | 'SENTINELONE';
-  action: 'MESSAGE' | 'TICKET';
+  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP';
+  action: AppIncomingWebhookAction;
   isActive: boolean;
   createdAt: string;
   webhookUrl: string;
@@ -58,12 +59,11 @@ export interface CreateIncomingWebhookRequest {
   channelId: string;
   boardId?: string;
   name: string;
-  type: 'SLACK' | 'SENTINELONE';
-  action?: 'MESSAGE' | 'TICKET';
+  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP';
+  action?: AppIncomingWebhookAction;
 }
 
-export type CommandType = 'COMMAND' | 'SHORTCUT';
-export type CommandAccessibility = 'CHAT' | 'THREAD' | 'BOTH' | 'MESSAGE' | 'GLOBAL';
+export type { CommandType, CommandAccessibility };
 
 export interface AppCommand {
   id: string;
@@ -275,7 +275,7 @@ export class AppsService {
 
   async getCommands(appId: string): Promise<AppCommand[]> {
     const response = await apiInstance.get<AppCommand[]>(`/apps/${appId}/commands`, {
-      params: { commandType: 'COMMAND' },
+      params: { commandType: CommandType.COMMAND },
     });
     return response.data;
   }
@@ -294,7 +294,7 @@ export class AppsService {
 
   async deleteCommand(appId: string, commandName: string): Promise<void> {
     await apiInstance.delete(`/apps/${appId}/commands/${commandName}`, {
-      params: { commandType: 'COMMAND' },
+      params: { commandType: CommandType.COMMAND },
     });
   }
 
@@ -302,7 +302,7 @@ export class AppsService {
     channelId: string,
     filter?: { commandAccessibility?: CommandAccessibility },
   ): Promise<AppCommand[]> {
-    const params: Record<string, string> = { commandType: 'COMMAND' };
+    const params: Record<string, string> = { commandType: CommandType.COMMAND };
     if (filter?.commandAccessibility) params['commandAccessibility'] = filter.commandAccessibility;
     const response = await apiInstance.get<AppCommand[]>(`/apps/channel/${channelId}/commands`, {
       params,
@@ -318,7 +318,7 @@ export class AppsService {
   ): Promise<void> {
     await apiInstance.post(`/apps/channel/${channelId}/command`, {
       commandName,
-      commandType: 'COMMAND',
+      commandType: CommandType.COMMAND,
       conversationId: conversationId ?? null,
       text: text ?? null,
     });
@@ -330,7 +330,7 @@ export class AppsService {
 
   async getShortcuts(appId: string): Promise<AppShortcut[]> {
     const response = await apiInstance.get<AppShortcut[]>(`/apps/${appId}/commands`, {
-      params: { commandType: 'SHORTCUT' },
+      params: { commandType: CommandType.SHORTCUT },
     });
     return response.data;
   }
@@ -339,14 +339,15 @@ export class AppsService {
   // shortcutType → commandAccessibility).
   private toShortcutPayload(data: UpsertShortcutRequest): UpsertCommandRequest {
     const accessibilityMap: Record<string, CommandAccessibility> = {
-      GLOBAL: 'GLOBAL',
-      MESSAGE: 'MESSAGE',
+      GLOBAL: CommandAccessibility.GLOBAL,
+      MESSAGE: CommandAccessibility.MESSAGE,
     };
     return {
       commandName: data.commandName,
       description: data.description,
-      commandType: 'SHORTCUT',
-      commandAccessibility: accessibilityMap[data.shortcutType ?? 'GLOBAL'] ?? 'GLOBAL',
+      commandType: CommandType.SHORTCUT,
+      commandAccessibility:
+        accessibilityMap[data.shortcutType ?? 'GLOBAL'] ?? CommandAccessibility.GLOBAL,
     };
   }
 
@@ -370,7 +371,7 @@ export class AppsService {
 
   async deleteShortcut(appId: string, callbackId: string): Promise<void> {
     await apiInstance.delete(`/apps/${appId}/commands/${callbackId}`, {
-      params: { commandType: 'SHORTCUT' },
+      params: { commandType: CommandType.SHORTCUT },
     });
   }
 
@@ -378,7 +379,7 @@ export class AppsService {
     channelId: string,
     filter?: { type?: ShortcutType },
   ): Promise<AppShortcutWithApp[]> {
-    const params: Record<string, string> = { commandType: 'SHORTCUT' };
+    const params: Record<string, string> = { commandType: CommandType.SHORTCUT };
     if (filter?.type) params['commandAccessibility'] = filter.type; // GLOBAL | MESSAGE maps 1:1
     const response = await apiInstance.get<AppShortcutWithApp[]>(
       `/apps/channel/${channelId}/commands`,
@@ -396,7 +397,7 @@ export class AppsService {
   ): Promise<void> {
     await apiInstance.post(`/apps/channel/${channelId}/command`, {
       commandName: callbackId,
-      commandType: 'SHORTCUT',
+      commandType: CommandType.SHORTCUT,
       conversationId: conversationId ?? null,
       messageText: messageText ?? '',
       messageId,
@@ -474,7 +475,7 @@ export class AppsService {
   /** Read-only snapshot of the install's commands/shortcuts. */
   async getInstalledCommands(
     installedAppId: string,
-    commandType: CommandType = 'COMMAND',
+    commandType: CommandType = CommandType.COMMAND,
   ): Promise<AppCommand[]> {
     const response = await apiInstance.get<AppCommand[]>(
       `/apps/installed/${installedAppId}/commands`,

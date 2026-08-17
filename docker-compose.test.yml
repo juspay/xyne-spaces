@@ -13,8 +13,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      common-postgres:
-        condition: service_healthy
 
   # Backend API for testing - builds from Dockerfile.test
   # Loads .env.local as base, then .env.test overrides container-specific values

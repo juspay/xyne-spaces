@@ -1,7 +1,7 @@
-import { AuthProvider, Status, User, UserStatus, WorkspaceRole } from '@prisma/client';
-import {
-  CommunityJoinResultStatus,
+import { User } from '@prisma/client';
+import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
+  ChannelRole,
   OrgRole,
   WorkspaceJoinPolicy,
   WorkspaceJoinRequestAction,
@@ -9,7 +9,10 @@ import {
   WorkspaceJoinRequestStatus,
   type WorkspaceJoinRequestStatus as WorkspaceJoinRequestStatusType,
   WorkspaceType,
-} from '@xyne/shared';
+  AuthProvider,
+  Status,
+  UserStatus,
+  WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -19,6 +22,8 @@ import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
+import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -370,7 +375,7 @@ export class CommunityWorkspaceService {
         await repositories.channelParticipants.addParticipant(
           landingChannelId,
           result.workspaceUser.id,
-          'MEMBER',
+          ChannelRole.MEMBER,
         );
       } catch (error) {
         logger.error('[CommunityWorkspaceService] Failed to add user to landing channel', {
@@ -389,8 +394,24 @@ export class CommunityWorkspaceService {
       params.workspace.id
     );
 
+    // Join the community workspace's general channel (idempotent)
     try {
-      await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);
+      await joinUserToGeneralChannel(
+        this.prisma,
+        params.workspace.id,
+        result.workspaceUser.id,
+        ChannelRole.MEMBER
+      );
+    } catch (error) {
+      logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {
+        workspaceId: params.workspace.id,
+        userId: result.workspaceUser.id,
+        error,
+      });
+    }
+
+    try {
+      await aiProvisioningService.enqueueUserSync(result.workspaceUser.orgMemberId);
     } catch (error) {
       logger.error('[CommunityWorkspaceService] Failed to enqueue AI provisioning job', {
         workspaceId: params.workspace.id,
@@ -685,24 +706,29 @@ export class CommunityWorkspaceService {
       return;
     }
 
-    const existingOrgMember = await this.prisma.orgMember.findUnique({
-      where: { email: request.email },
-      select: { memberId: true, role: true },
-    });
+    // Provisions the approved requester's membership, not the reviewer's.
+    const existingOrgMember = await withWorkspaceScope(async () => {
+      const current = await this.prisma.orgMember.findUnique({
+        where: { email: request.email },
+        select: { memberId: true, role: true },
+      });
 
-    await this.prisma.orgMember.upsert({
-      where: { email: request.email },
-      create: {
-        orgId: workspace.orgId,
-        email: request.email,
-        role: OrgRole.MEMBER,
-        leftAt: null,
-      },
-      update: {
-        orgId: workspace.orgId,
-        role: OrgRole.MEMBER,
-        leftAt: null,
-      },
+      await this.prisma.orgMember.upsert({
+        where: { email: request.email },
+        create: {
+          orgId: workspace.orgId,
+          email: request.email,
+          role: OrgRole.MEMBER,
+          leftAt: null,
+        },
+        update: {
+          orgId: workspace.orgId,
+          role: OrgRole.MEMBER,
+          leftAt: null,
+        },
+      });
+
+      return current;
     });
 
     if (existingOrgMember?.role === OrgRole.COMMUNITY_MEMBER) {

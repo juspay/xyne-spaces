@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { WorkflowRepository } from '@/database/repositories/workflowRepository';
 import { WorkflowExecutionStatus } from '@/workflows/types/workflow-enums';
 import { createExecutionState, getExecutionState } from '@/database/repositories/workflowExecutionStateUtils';
@@ -12,6 +13,7 @@ interface RerunResult {
   message: string;
 }
 import {logger} from '@/utils/logger';
+import { MessageType } from '@xyne/shared';
 
 /**
  * Service for handling workflow rerun operations
@@ -187,45 +189,47 @@ export class WorkflowRerunService {
 
       const conversationId = ticket.conversationId;
 
-      // Find existing SYSTEM message for this workflow
-      const existingMessage = await this.db.message.findFirst({
-        where: {
-          conversationId,
-          msgType: 'SYSTEM',
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      await withWorkspaceScope(async () => {
+        // Find existing SYSTEM message for this workflow
+        const existingMessage = await this.db.message.findFirst({
+          where: {
+            conversationId,
+            msgType: MessageType.SYSTEM,
+          },
+          orderBy: { createdAt: 'desc' }
+        });
 
-      if (!existingMessage) {
-        logger.info(`[RerunService] No SYSTEM message found for workflow ${workflowId}`);
-        return;
-      }
-
-      // Check if this message belongs to our workflow by checking metadata
-      const metadata = existingMessage.metadata as any;
-      if (metadata?.workflowId !== workflowId) {
-        logger.info(`[RerunService] Message ${existingMessage.messageId} does not belong to workflow ${workflowId}`);
-        return;
-      }
-
-      // Update message metadata to show RUNNING status and clear completed/pending steps
-      const updatedMetadata = {
-        ...metadata,
-        workflowStatus: 'RUNNING',
-        completedSteps: [],
-        pendingSteps: [],
-        rerunStartTime: new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      };
-
-      await this.db.message.update({
-        where: { messageId: existingMessage.messageId },
-        data: {
-          metadata: updatedMetadata
+        if (!existingMessage) {
+          logger.info(`[RerunService] No SYSTEM message found for workflow ${workflowId}`);
+          return;
         }
-      });
 
-      logger.info(`[RerunService] Updated message ${existingMessage.messageId} metadata to RUNNING status for workflow ${workflowId}`);
+        // Check if this message belongs to our workflow by checking metadata
+        const metadata = existingMessage.metadata as any;
+        if (metadata?.workflowId !== workflowId) {
+          logger.info(`[RerunService] Message ${existingMessage.messageId} does not belong to workflow ${workflowId}`);
+          return;
+        }
+
+        // Update message metadata to show RUNNING status and clear completed/pending steps
+        const updatedMetadata = {
+          ...metadata,
+          workflowStatus: 'RUNNING',
+          completedSteps: [],
+          pendingSteps: [],
+          rerunStartTime: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
+        };
+
+        await this.db.message.update({
+          where: { messageId: existingMessage.messageId },
+          data: {
+            metadata: updatedMetadata
+          }
+        });
+
+        logger.info(`[RerunService] Updated message ${existingMessage.messageId} metadata to RUNNING status for workflow ${workflowId}`);
+      });
 
     } catch (error) {
       logger.error(`[RerunService] Error updating message metadata for workflow ${workflowId}:`, error);

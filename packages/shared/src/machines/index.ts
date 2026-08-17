@@ -44,6 +44,7 @@ export {
 export type {
   DraftMessage,
   DraftMessages,
+  TwinDraftDB,
   User,
   Bookmarks,
   VisibleChannel,

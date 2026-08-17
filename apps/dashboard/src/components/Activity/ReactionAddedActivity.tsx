@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -23,6 +24,7 @@ export const ReactionAddedActivity = ({
 
   if (!reaction || !message || !reaction.userId || !message.conversation) return null;
 
+  const reactionPreview = getReactionMessagePreview(message.content);
   const actionText = activity.actorAction === 'added' ? 'reacted' : 'removed reaction';
   const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
   const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
@@ -50,10 +52,9 @@ export const ReactionAddedActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
-        <RenderMessageWithHTML
-          message={getReactionMessagePreview(message.content)}
-          showEdited={message.edited}
-        />
+        (getFlowJsonPreviewText(reactionPreview) ?? (
+          <RenderMessageWithHTML message={reactionPreview} showEdited={message.edited} />
+        ))
       )}
     </ActivityItemCard>
   );

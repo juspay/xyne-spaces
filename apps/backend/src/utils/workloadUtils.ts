@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
+import { TicketStatusV2 } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
-import { TicketStatusV2 } from '@prisma/client';
 import { logger } from './logger';
 
 const db = DatabaseClient.getInstance();
@@ -110,28 +111,31 @@ export async function syncUserWorkload(
     db.ticket.count({ where: ticketWhere }),
   ]);
 
-  await repositories.userWorkloadMapping.upsert({
-    where: {
-      userId_userGroupId_boardId: {
+  // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
+  await withWorkspaceScope(() =>
+    repositories.userWorkloadMapping.upsert({
+      where: {
+        userId_userGroupId_boardId: {
+          userId,
+          userGroupId,
+          boardId,
+        },
+      },
+      create: {
         userId,
         userGroupId,
         boardId,
+        workspaceId: board.workspaceId,
+        activeTasks,
+        totalTasks,
+        createdBy,
       },
-    },
-    create: {
-      userId,
-      userGroupId,
-      boardId,
-      workspaceId: board.workspaceId,
-      activeTasks,
-      totalTasks,
-      createdBy,
-    },
-    update: {
-      activeTasks,
-      totalTasks,
-    },
-  });
+      update: {
+        activeTasks,
+        totalTasks,
+      },
+    }),
+  );
 }
 
 /**

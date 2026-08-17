@@ -44,6 +44,8 @@ import { linkOpenPrefIsRelevant } from '../../../utils/openLink';
 import { logger } from '../../../utils/logger';
 
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
+import { MenuBarIconToggle } from '../MenuBarIconToggle';
+import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
@@ -62,6 +64,8 @@ import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { RecordingLayout } from '../../../stores/recordingStore';
+import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
@@ -551,107 +555,171 @@ const LAYOUT_OPTIONS: LayoutOption[] = [
   },
 ];
 
-const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-6'>
-    <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
+const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Join with microphone turned off</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>Mute your mic when joining a call</p>
+  const handleDisconnectCalendar = async () => {
+    setIsDisconnecting(true);
+    try {
+      await disconnectCalendar('GOOGLE');
+      toast.success('Calendar disconnected. Reconnect to grant updated permissions.');
+    } catch {
+      toast.error('Failed to disconnect calendar. Please try again.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
+  return (
+    <div className='space-y-6'>
+      <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
+
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Join with microphone turned off</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>Mute your mic when joining a call</p>
+        </div>
+        <Switch
+          id='call-join-muted'
+          checked={state.callJoinMuted}
+          onCheckedChange={state.setCallJoinMuted}
+        />
       </div>
-      <Switch
-        id='call-join-muted'
-        checked={state.callJoinMuted}
-        onCheckedChange={state.setCallJoinMuted}
-      />
-    </div>
 
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Join with camera turned off</p>
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Join with camera turned off</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Disable your camera when joining a call
+          </p>
+        </div>
+        <Switch
+          id='call-join-without-video'
+          checked={state.callJoinWithoutVideo}
+          onCheckedChange={state.setCallJoinWithoutVideo}
+        />
+      </div>
+
+      <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Call media quality</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Target capture quality for new camera and screen-share tracks.
+          </p>
+        </div>
+        <QualitySelect
+          id='call-video-quality'
+          label='Video'
+          value={state.callVideoQuality}
+          onChange={state.setCallVideoQuality}
+        />
+        <QualitySelect
+          id='call-screen-share-quality'
+          label='Screen share'
+          value={state.callScreenShareQuality}
+          onChange={state.setCallScreenShareQuality}
+        />
+      </div>
+
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            {state.canSwitchRecordingVersion
+              ? 'Switch between the classic and redesigned recording interface on this device.'
+              : 'Stop the active recording before switching experiences.'}
+          </p>
+        </div>
+        <Switch
+          id='recording-version-v2'
+          aria-label='Use new recording experience'
+          checked={state.recordingVersion === 'v2'}
+          disabled={!state.canSwitchRecordingVersion}
+          onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+        />
+      </div>
+
+      <MenuBarIconToggle />
+
+      <RecordingPillToggle />
+
+      {/* Recording section divider */}
+      <div className='pt-2'>
+        <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
+          Recording tab view
+        </p>
         <p className='text-xs text-muted-foreground mt-0.5'>
-          Disable your camera when joining a call
+          Which view opens by default when notes are created during a recording
         </p>
       </div>
-      <Switch
-        id='call-join-without-video'
-        checked={state.callJoinWithoutVideo}
-        onCheckedChange={state.setCallJoinWithoutVideo}
-      />
-    </div>
 
-    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Call media quality</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          Target capture quality for new camera and screen-share tracks.
-        </p>
-      </div>
-      <QualitySelect
-        id='call-video-quality'
-        label='Video'
-        value={state.callVideoQuality}
-        onChange={state.setCallVideoQuality}
-      />
-      <QualitySelect
-        id='call-screen-share-quality'
-        label='Screen share'
-        value={state.callScreenShareQuality}
-        onChange={state.setCallScreenShareQuality}
-      />
-    </div>
-
-    {/* Recording section divider */}
-    <div className='pt-2'>
-      <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
-        Recording tab view
-      </p>
-      <p className='text-xs text-muted-foreground mt-0.5'>
-        Which view opens by default when notes are created during a recording
-      </p>
-    </div>
-
-    {/* Layout options */}
-    <div className='space-y-3' role='radiogroup' aria-labelledby='recording-tab-view-label'>
-      {LAYOUT_OPTIONS.map(option => {
-        const isSelected = state.recordingDefaultLayout === option.value;
-        return (
-          <button
-            key={option.value}
-            type='button'
-            role='radio'
-            aria-checked={isSelected}
-            onClick={() => state.setRecordingDefaultLayout(option.value)}
-            className={cn(
-              'w-full flex items-center gap-4 p-3 rounded-xl border transition-all duration-150',
-              isSelected
-                ? 'border-action-primary bg-action-primary/5'
-                : 'border-border bg-muted/30 hover:bg-muted/50',
-            )}
-            data-track-category='PREFERENCES'
-            data-track-name={`SelectRecordingLayout_${option.value}`}
-          >
-            <option.Preview />
-            <div className='flex-1 text-left min-w-0'>
-              <p className='text-sm font-medium text-foreground'>{option.title}</p>
-              <p className='text-xs text-muted-foreground mt-0.5'>{option.description}</p>
-            </div>
-            {/* Radio indicator */}
-            <div
+      {/* Layout options */}
+      <div className='space-y-3' role='radiogroup' aria-labelledby='recording-tab-view-label'>
+        {LAYOUT_OPTIONS.map(option => {
+          const isSelected = state.recordingDefaultLayout === option.value;
+          return (
+            <button
+              key={option.value}
+              type='button'
+              role='radio'
+              aria-checked={isSelected}
+              onClick={() => state.setRecordingDefaultLayout(option.value)}
               className={cn(
-                'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors duration-150',
-                isSelected ? 'border-action-primary' : 'border-border',
+                'w-full flex items-center gap-4 p-3 rounded-xl border transition-all duration-150',
+                isSelected
+                  ? 'border-action-primary bg-action-primary/5'
+                  : 'border-border bg-muted/30 hover:bg-muted/50',
               )}
+              data-track-category='PREFERENCES'
+              data-track-name={`SelectRecordingLayout_${option.value}`}
             >
-              {isSelected && <div className='w-2.5 h-2.5 rounded-full bg-action-primary' />}
-            </div>
-          </button>
-        );
-      })}
+              <option.Preview />
+              <div className='flex-1 text-left min-w-0'>
+                <p className='text-sm font-medium text-foreground'>{option.title}</p>
+                <p className='text-xs text-muted-foreground mt-0.5'>{option.description}</p>
+              </div>
+              {/* Radio indicator */}
+              <div
+                className={cn(
+                  'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors duration-150',
+                  isSelected ? 'border-action-primary' : 'border-border',
+                )}
+              >
+                {isSelected && <div className='w-2.5 h-2.5 rounded-full bg-action-primary' />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Calendar connection */}
+      <div className='pt-2'>
+        <p className='text-sm font-semibold text-foreground'>Calendar</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Disconnect to revoke access and reconnect with updated permissions.
+        </p>
+      </div>
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Disconnect Calendar</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Stops calendar sync and clears the stored connection.
+          </p>
+        </div>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={isDisconnecting}
+          onClick={() => void handleDisconnectCalendar()}
+          data-track-category='PREFERENCES'
+          data-track-name='DisconnectCalendar'
+        >
+          {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+        </Button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -675,6 +743,19 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
     </div>
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
+        <p className='text-sm font-medium text-foreground'>Open formatting by default</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Show the formatting toolbar automatically in channel and thread message composers
+        </p>
+      </div>
+      <Switch
+        id='default-formatting-toolbar-open'
+        checked={state.defaultFormattingToolbarOpen}
+        onCheckedChange={state.setDefaultFormattingToolbarOpen}
+      />
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
         <p className='text-sm font-medium text-foreground'>
           Allow @channel/@here in thread replies
         </p>
@@ -686,6 +767,20 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         id='allow-thread-broadcast-mentions'
         checked={state.allowThreadBroadcastMentions}
         onCheckedChange={state.setAllowThreadBroadcastMentions}
+      />
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Show thread tags</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Display what kind of thread each conversation is — issue, question, request — beside the
+          message
+        </p>
+      </div>
+      <Switch
+        id='show-thread-tags'
+        checked={state.showThreadTags}
+        onCheckedChange={state.setShowThreadTags}
       />
     </div>
     {linkOpenPrefIsRelevant() && (

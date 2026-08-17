@@ -26,6 +26,15 @@ interface SearchParticipantsProps {
     isSelectAll?: boolean,
     allUserIds?: string[],
   ) => void;
+  exclusiveSelection?: boolean;
+  /**
+   * Skip the built-in `label.includes(query)` substring filter. Set this when the
+   * caller has already ranked `options` with the shared participant matcher
+   * (`rankParticipantOptions`) so the fuzzy/prefix results are not re-filtered
+   * (and dropped) by substring matching. The exclusive-selection filtering below
+   * still applies.
+   */
+  disableClientFiltering?: boolean;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -41,6 +50,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   excludedChannelMembers,
   hoistSelectedChannelMembers = false,
   toggleExcludedChannelMember,
+  exclusiveSelection = true,
+  disableClientFiltering = false,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -73,28 +84,36 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   }, [selectedValues, options]);
 
   const hasGroupSelected = useMemo(() => {
-    return selectedValues.some(v => v.startsWith('user_group:'));
-  }, [selectedValues]);
+    return exclusiveSelection && selectedValues.some(v => v.startsWith('user_group:'));
+  }, [selectedValues, exclusiveSelection]);
 
   // Filter options based on search query
   const filteredOptions = useMemo(() => {
     let opts = options;
 
     // Filter out channels, user groups if a user or user group is already selected
-    if (hasUserSelected || hasGroupSelected) {
+    // (only applies in exclusive mode — non-exclusive mode allows any mix).
+    if (exclusiveSelection && (hasUserSelected || hasGroupSelected)) {
       opts = opts.filter(
         opt => !opt.value.startsWith('channel:') && !opt.value.startsWith('user_group:'),
       );
     }
 
-    if (!searchQuery.trim()) return opts;
+    if (disableClientFiltering || !searchQuery.trim()) return opts;
 
     return opts.filter(
       opt =>
         opt.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opt.subtitle?.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-  }, [options, searchQuery, hasUserSelected, hasGroupSelected]);
+  }, [
+    options,
+    searchQuery,
+    hasUserSelected,
+    hasGroupSelected,
+    exclusiveSelection,
+    disableClientFiltering,
+  ]);
 
   const selectedOptions = useMemo(() => {
     return selectedValues
@@ -109,8 +128,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   }, [options, selectedValues, selectedOptionsMap]);
 
   const hasChannelSelected = useMemo(() => {
-    return selectedValues.some(v => v.startsWith('channel:'));
-  }, [selectedValues]);
+    return exclusiveSelection && selectedValues.some(v => v.startsWith('channel:'));
+  }, [selectedValues, exclusiveSelection]);
 
   const isEmailLikeQuery = useMemo(() => {
     const query = searchQuery.trim();
@@ -152,7 +171,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       return;
     }
 
-    if (isChannel && !selectedValues.includes(value)) {
+    if (exclusiveSelection && isChannel && !selectedValues.includes(value)) {
       const option = options.find(opt => opt.value === value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
@@ -163,7 +182,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       return;
     }
 
-    if (isUserGroup && !selectedValues.includes(value)) {
+    if (exclusiveSelection && isUserGroup && !selectedValues.includes(value)) {
       const option = options.find(opt => opt.value === value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
@@ -277,7 +296,9 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   };
 
   const renderTrigger = () => {
-    const selectedGroupOrChannel = selectedOptions.find(opt => opt.value.startsWith('channel:'));
+    const selectedGroupOrChannel = exclusiveSelection
+      ? selectedOptions.find(opt => opt.value.startsWith('channel:'))
+      : undefined;
 
     if (selectedGroupOrChannel) {
       const allSelected = excludedChannelMembers && excludedChannelMembers.size === 0;

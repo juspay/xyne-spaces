@@ -10,10 +10,10 @@
  */
 
 import Bull from 'bull';
+import { AuthProvider } from '@xyne/shared';
 import { createHash } from 'crypto';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { AuthProvider } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
 import { runWithContext } from '@/database/tenant/context';
@@ -25,6 +25,7 @@ import {
 import { storeMsCalEventsAsCallsForUser } from '@/services/microsoftCalendarCallStore';
 import { MicrosoftCalendarSubscriptionService } from '@/services/microsoftCalendarSubscriptionService';
 import {
+  CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
   CALENDAR_SYNC_LOOKAHEAD_DAYS,
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
@@ -45,6 +46,30 @@ type MicrosoftIncrementalContinuation = {
 function continuationJobId(sourceId: string, deltaLink: string): string {
   const cursorHash = createHash('sha1').update(deltaLink).digest('hex');
   return `microsoft-calendar-incremental-${sourceId}-${cursorHash}`;
+}
+
+/**
+ * Bull refuses to create a new job when a job with the same jobId already
+ * exists in a terminal state (failed/completed) that hasn't been removed.
+ * Since our jobIds are deterministic per sourceId (by design, to serialize
+ * access to the Microsoft delta cursor), a single exhausted-retries failure
+ * would otherwise permanently block every future sync for that source.
+ * Clear out any dead job for this id before adding a fresh one.
+ */
+async function clearDeadJobForReenqueue(queue: Bull.Queue, jobId: string): Promise<void> {
+  try {
+    const existing = await queue.getJob(jobId);
+    if (!existing) return;
+    if ((await existing.isFailed()) || (await existing.isCompleted())) {
+      await existing.remove();
+      logger.warn(`${TAG} Cleared stale job before re-enqueue`, { jobId });
+    }
+  } catch (err) {
+    logger.warn(`${TAG} Failed to check/clear stale job before re-enqueue`, {
+      jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function resolveSourceId(jobData: CalendarSyncJobData): Promise<string> {
@@ -319,9 +344,15 @@ class MicrosoftCalendarSyncQueue {
         throw err;
       }
       if (continuation) {
+        const continuationId = continuationJobId(continuation.sourceId, continuation.deltaLink);
+        await clearDeadJobForReenqueue(queue, continuationId);
+        logger.info(`${TAG} Scheduling incremental continuation`, {
+          sourceId: continuation.sourceId,
+          delayMs: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
+        });
         await queue.add('incremental-sync', continuation, {
-          jobId: continuationJobId(continuation.sourceId, continuation.deltaLink),
-          delay: 0,
+          jobId: continuationId,
+          delay: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
         });
       }
     });
@@ -341,23 +372,23 @@ class MicrosoftCalendarSyncQueue {
 
   async enqueueManualSync(sourceId: string): Promise<void> {
     const queue = await this.ensureQueue();
+    const jobId = `microsoft-calendar-manual-${sourceId}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'manual-sync',
       { sourceId },
-      {
-        jobId: `microsoft-calendar-manual-${sourceId}`,
-      }
+      { jobId }
     );
   }
 
   async enqueueIncrementalSync(sourceId: string): Promise<void> {
     const queue = await this.ensureQueue();
+    const jobId = `microsoft-calendar-incremental-${sourceId}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'incremental-sync',
       { sourceId },
-      {
-        jobId: `microsoft-calendar-incremental-${sourceId}`,
-      }
+      { jobId }
     );
   }
 

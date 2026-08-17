@@ -2,8 +2,11 @@
  * Recording Detail Screen - View individual recording with transcript and summary
  */
 
-import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -26,16 +29,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
-import ForwardMessageForm from '../../components/Chat/ForwardMessageModal/ForwardMessageModal';
 import Dialog from '../../components/ui/Dialog';
 import { formatRecordingDuration, logRecordingError } from '../../utils/recordingUtils';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
-import { usePlatform } from '../../hooks/usePlatform';
 import { CanvasEditor } from '../../components/Canvas/CanvasEditor/CanvasEditor';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { removeRecordingsFromCache } from '../../hooks/usePaginatedRecordings';
+import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
 
 interface RecordingNavState {
   recordingIds?: string[];
@@ -112,6 +114,7 @@ function RecordingNotesSection({ notesCanvasId }: { notesCanvasId: string }): Re
 }
 
 export default function RecordingDetailScreen(): ReactElement {
+  const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -123,8 +126,6 @@ export default function RecordingDetailScreen(): ReactElement {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [isShareOpen, setIsShareOpen] = useState(false);
-  const forwardFocusRef = useRef<HTMLElement | null>(null);
-  const { isMobile } = usePlatform();
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -165,7 +166,8 @@ export default function RecordingDetailScreen(): ReactElement {
     enabled: canNavigatePrevious,
   });
 
-  // Query the message for sharing using Zero - same pattern as ShareRecordingHandler
+  // The legacy Ask AI flow still uses attachment ids from the recording message
+  // when one exists. Recording sharing itself no longer depends on this message.
   const [message] = useCachedQuery(
     queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
     { enabled: !!recording?.messageId },
@@ -189,7 +191,13 @@ export default function RecordingDetailScreen(): ReactElement {
       setEditedTitle(data.title);
     } catch (err) {
       logRecordingError('RecordingDetailScreen.loadRecording', err);
-      setError('Failed to load recording. Please try again.');
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setError('You no longer have access to this recording.');
+      } else if (axios.isAxiosError(err) && err.response?.status === 404) {
+        setError('Recording not found.');
+      } else {
+        setError('Failed to load recording. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -306,6 +314,15 @@ export default function RecordingDetailScreen(): ReactElement {
 
   return (
     <div className='h-full overflow-auto bg-muted'>
+      {/* This root is itself the scroll container, so a zero-height sticky wrapper
+          pins the navigator without contributing layout height. */}
+      {!isMobile && (
+        <div className='sticky left-0 top-0 z-30 hidden h-0 w-fit md:block'>
+          <div className='h-[52px] w-fit'>
+            <AppNavigator />
+          </div>
+        </div>
+      )}
       <div className='max-w-4xl mx-auto p-6'>
         {/* Header */}
         <div className='mb-6'>
@@ -418,15 +435,8 @@ export default function RecordingDetailScreen(): ReactElement {
               </button>
             )}
             <button
-              onClick={() => {
-                if (!recording?.messageId) {
-                  toast.error('Recording message not found');
-                  return;
-                }
-                setIsShareOpen(true);
-              }}
-              disabled={!recording?.messageId}
-              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              onClick={() => setIsShareOpen(true)}
+              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors'
               data-track-category='RecordingDetail'
               data-track-name='share_recording'
             >
@@ -512,20 +522,10 @@ export default function RecordingDetailScreen(): ReactElement {
       <Dialog
         open={isShareOpen}
         onOpenChange={open => !open && setIsShareOpen(false)}
-        {...(!isMobile ? { focusRef: forwardFocusRef } : {})}
+        title='Share recording'
+        data-testid='recording-share-modal'
       >
-        {message && (
-          <ForwardMessageForm
-            channelId={recording?.channelId ?? ''}
-            message={message}
-            {...(!isMobile ? { initialFocusRef: forwardFocusRef } : {})}
-            onCancel={() => setIsShareOpen(false)}
-            onSuccess={() => {
-              setIsShareOpen(false);
-              toast.success('Recording shared successfully');
-            }}
-          />
-        )}
+        <RecordingShareModal recording={recording} onClose={() => setIsShareOpen(false)} />
       </Dialog>
 
       {/* Delete Confirmation Dialog */}

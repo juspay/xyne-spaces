@@ -291,6 +291,29 @@ export class LiveKitService {
     }
   }
 
+  /**
+   * Tell a connected note-taker client that its backing Call row could not be
+   * created. The client consumes this before the room is terminated.
+   */
+  async notifyRecordingStartFailure(roomName: string): Promise<void> {
+    const rooms = await this.roomService.listRooms([roomName]);
+    if (!rooms || rooms.length === 0) return;
+
+    const existingMetadata = parseRoomMetadata(
+      roomName,
+      rooms[0].metadata,
+      'recording_start_failure',
+    );
+    await this.roomService.updateRoomMetadata(
+      roomName,
+      JSON.stringify({
+        ...existingMetadata,
+        recordingStartFailure: true,
+        recordingStartFailureVersion: Date.now(),
+      }),
+    );
+  }
+
   async updateParticipantPublishSources(
     roomName: string,
     identity: string,
@@ -338,6 +361,34 @@ export class LiveKitService {
     } catch (error) {
       logger.error(`[LiveKit] Failed to set host controls for room ${roomName}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Publish the transcription on/off state into room metadata so late joiners see
+   * it (LiveKit data messages aren't delivered to participants who join later — the
+   * same H4 fix used for recording state). Present participants also react to the
+   * live data-channel toggle; this is what keeps late joiners in sync.
+   */
+  async setRoomTranscriptionEnabled(roomName: string, enabled: boolean): Promise<void> {
+    try {
+      const rooms = await this.roomService.listRooms([roomName]);
+      if (!rooms || rooms.length === 0) {
+        logger.debug(`[LiveKit] Room ${roomName} not found, skipping transcription-state update`);
+        return;
+      }
+      const existingMetadata = rooms[0].metadata ? JSON.parse(rooms[0].metadata) : {};
+      const updatedMetadata = {
+        ...existingMetadata,
+        transcriptionEnabled: enabled,
+        transcriptionVersion: Date.now(),
+      };
+      await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
+      logger.info(`[LiveKit] Updated transcription state for room ${roomName}`, { enabled });
+    } catch (error) {
+      // Non-critical — present participants already got the live toggle; this only
+      // drives late-joiner sync.
+      logger.warn(`[LiveKit] Failed to set transcription state for room ${roomName}:`, error);
     }
   }
 

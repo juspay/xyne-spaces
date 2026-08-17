@@ -1,5 +1,5 @@
-import { ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -7,7 +7,7 @@ const formatCustomFieldValue = (value: unknown): string | null => {
   if (value === undefined || value === null) return null;
   if (Array.isArray(value)) {
     const normalized = value
-      .map(item => formatCustomFieldValue(item))
+      .map((item) => formatCustomFieldValue(item))
       .filter((item): item is string => Boolean(item));
     return normalized.length > 0 ? normalized.join(', ') : null;
   }
@@ -33,8 +33,9 @@ export async function createTicketCustomFieldActivity(params: {
   newValue: unknown;
   updatedBy: string;
   timestamp?: Date;
+  contextName?: string;
 }): Promise<void> {
-  const { ticketId, fieldName, oldValue, newValue, updatedBy, timestamp } = params;
+  const { ticketId, fieldName, oldValue, newValue, updatedBy, timestamp, contextName } = params;
   const normalizedOldValue = formatCustomFieldValue(oldValue);
   const normalizedNewValue = formatCustomFieldValue(newValue);
 
@@ -63,6 +64,7 @@ export async function createTicketCustomFieldActivity(params: {
         fieldName,
         oldValue: normalizedOldValue,
         newValue: normalizedNewValue,
+        ...(contextName && { contextName }),
       },
     },
   });
