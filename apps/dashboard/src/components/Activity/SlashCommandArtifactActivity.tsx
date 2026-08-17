@@ -1,11 +1,11 @@
 import { ReactElement } from 'react';
-import type { FlowComponent } from '@xyne/shared';
+import { parseSlashCommandArtifactMessage, type FlowComponent } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ActivityItemCard } from './ActivityItemCard';
-import { getSlashCommandArtifact } from '../Chat/SlashCommandArtifacts';
+import { buildSlashCommandArtifactRoute } from '../Chat/SlashCommandArtifacts';
 import { TextNode } from '../flowUI/nodes/TextNode';
 
 export const SlashCommandArtifactActivity = ({
@@ -18,17 +18,19 @@ export const SlashCommandArtifactActivity = ({
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
   const { baseRoute } = useRouteContext();
-  const artifact = getSlashCommandArtifact(message?.content);
+  const artifact = parseSlashCommandArtifactMessage(message?.content);
 
   if (!message || !sender || !message.conversation || !artifact) return null;
 
   const conversation = message.conversation;
-  const isThreadReply = conversation.initialMessageId !== message.messageId;
-  const targetPath = `${baseRoute}/${conversation.channelId}${
-    isThreadReply ? `/${conversation.conversationId}` : ''
-  }#origin=${conversation.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
-  const banner = artifact.props.sideEffects.find(sideEffect => sideEffect.type === 'banner');
-  const badge = banner?.badge ?? `/${artifact.type}`;
+  const isInitialMessage = conversation.initialMessageId === message.messageId;
+  const targetPath = buildSlashCommandArtifactRoute({
+    baseRoute,
+    channelId: conversation.channelId,
+    conversationId: conversation.conversationId,
+    messageId: message.messageId,
+    isInitialMessage,
+  });
   const bodyNode: FlowComponent = {
     id: `${message.messageId}:activity-body`,
     type: 'text',
@@ -45,16 +47,16 @@ export const SlashCommandArtifactActivity = ({
       badgeColorClass='border-background bg-orange-500'
       titlePrefix={
         <span className='rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white'>
-          {badge}
+          {artifact.definition.badge}
         </span>
       }
       description={
         <span className='text-sm text-muted-foreground'>
-          {artifact.definition.activity.actionLabel}
+          {artifact.definition.activityActionLabel}
         </span>
       }
       targetPath={targetPath}
-      focusThread={isThreadReply}
+      focusThread={!isInitialMessage}
       linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}

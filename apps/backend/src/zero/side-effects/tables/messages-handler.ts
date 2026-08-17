@@ -35,10 +35,11 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType, getSlashCommandMessageArtifact, parseSlashCommandArtifactMessage, resolveSlashCommandArtifactAudience } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { syncMessageArtifact } from '@/database/repositories/messageArtifactRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
@@ -155,10 +156,7 @@ function getFlowCardNotificationLabel(content: string): string | null {
 
   const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
   if (slashCommandArtifact) {
-    const banner = slashCommandArtifact.props.sideEffects.find(
-      sideEffect => sideEffect.type === 'banner',
-    );
-    const label = banner?.badge ?? `/${slashCommandArtifact.props.command}`;
+    const label = slashCommandArtifact.definition.badge;
     const body = cleanNotificationText(slashCommandArtifact.body);
     return body ? `${label}: ${body}` : `${label} slash command posted`;
   }
@@ -264,14 +262,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: {
         messageId: true,
         senderId: true,
-        workspaceId: true,
         content: true,
         conversationId: true,
         msgType: true,
         hasAttachment: true,
         createdAt: true,
         isDeleted: true,
-        visibleTo: true,
       },
     });
 
@@ -325,8 +321,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
-        initialMessageId: true,
-        createdAt: true,
+        initialMessageId: true
       },
     });
 
@@ -435,51 +430,37 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const channelName = channel?.name || 'Unknown Channel';
     const senderName = sender?.displayName || sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
-    const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
-    const artifactRecord = getSlashCommandMessageArtifact(content);
-    if (artifactRecord && !message.isDeleted) {
-      const projection = {
-        workspaceId: message.workspaceId,
-        messageId,
-        channelId,
-        conversationId,
-        conversationCreatedAt: conversation.createdAt,
-        messagePreview: artifactRecord.messagePreview,
-        isInitialMessage: conversation.initialMessageId === messageId,
-        visibleTo: message.visibleTo,
-        type: artifactRecord.type,
-        command: artifactRecord.command,
-        status: artifactRecord.status,
-        callExternalId: artifactRecord.callExternalId,
-      };
-      await db.messageArtifact.upsert({
-        where: { messageId },
-        create: projection,
-        update: projection,
-      });
+    // Which commands may address the whole channel is decided by the server-side
+    // registry keyed on the command id — never by anything the sending client
+    // wrote into message content.
+    const artifactDefinition = parseSlashCommandArtifactMessage(content)?.definition ?? null;
+    const artifactBroadcastsToChannel = artifactDefinition?.notifiesChannel ?? false;
+    if (artifactDefinition) {
+      await syncMessageArtifact(db, messageId);
     }
-    const hasChannelArtifactActivity =
-      slashCommandArtifact?.props.sideEffects.some(
-        sideEffect =>
-          sideEffect.type === 'banner' && sideEffect.activity?.audience === 'channel',
-      ) ?? false;
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
-    const {
-      activityUserIds: slashCommandActivityUserIds,
-      notificationUserIds: slashCommandNotificationUserIds,
-    } = resolveSlashCommandArtifactAudience(users, senderId, hasChannelArtifactActivity);
     const allowThreadBroadcastMentions = userPreference?.allowThreadBroadcastMentions ?? false;
 
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
     const contentForMentions = flowRawText ?? content;
-    const specialMentions =
-      isReply && !allowThreadBroadcastMentions
-        ? { hasChannel: false, hasHere: false }
-        : extractSpecialMentions(contentForMentions);
-    const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
+    // Channel-addressing artifacts reach the channel from inside a thread too:
+    // an incident is the case the thread-broadcast restriction exists to allow.
+    const allowBroadcastExpansion =
+      artifactBroadcastsToChannel || !isReply || allowThreadBroadcastMentions;
+    const specialMentions = allowBroadcastExpansion
+      ? extractSpecialMentions(contentForMentions)
+      : { hasChannel: false, hasHere: false };
+    // Reuses the @channel pipeline wholesale: mention-tier notification
+    // filtering, per-user activities, and thread-aware action URLs all follow.
+    const mentionType =
+      artifactBroadcastsToChannel || specialMentions.hasChannel
+        ? '@channel'
+        : specialMentions.hasHere
+          ? '@here'
+          : undefined;
 
     if (channel?.projectId && !isDMChannel) {
       // Emit a synthetic MESSAGE/SENT activity event.
@@ -561,27 +542,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
-    // The Activity row is the per-user audience record used by the global
-    // active-artifact subscription. Create it before the DM branch so slash
-    // artifacts behave consistently in channels, group DMs, and one-to-one DMs.
-    if (slashCommandActivityUserIds.length > 0) {
-      const isThreadActivity = conversation.initialMessageId !== messageId;
-      await activityService.createActivities(
-        slashCommandActivityUserIds.map(userId => ({
-          id: uuidv4(),
-          userId,
-          actorId: senderId,
-          actorAction: 'slash_command_artifact' as const,
-          actionSource: 'message' as const,
-          actionSourceId: messageId,
-          messageId,
-          channelId,
-          isThreadActivity,
-          classification: ActivityClassification.FYI,
-        })),
-      );
-    }
-
     if (isDMChannel && channel) {
       const memberNames = channelParticipants
         .filter(p => channel.scopeType === ChannelScopeType.DM ? p.userId !== senderId : true)
@@ -623,7 +583,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,
-      isReply && !allowThreadBroadcastMentions ? undefined : channelId
+      allowBroadcastExpansion ? channelId : undefined
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
 
@@ -703,21 +663,25 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
 
-    const notificationUserIds = hasChannelArtifactActivity
-      ? []
-      : [
-          ...new Set(
-            mentionedUsers
-              .map(u => u.userId)
-              .filter(
-                userId =>
-                  channelParticipantIds.has(userId) &&
-                  userId !== senderId
-              )
-          ),
-        ];
+    const notificationUserIds = [
+      ...new Set(
+        [
+          ...mentionedUsers.map(u => u.userId),
+          // An artifact that addresses the channel has no @channel token in its
+          // body, so expand the audience here. Downstream this is indistinguishable
+          // from a typed @channel: same recipients, same mention-tier filtering.
+          ...(artifactBroadcastsToChannel
+            ? (await getChannelParticipantsForMention(channelId)).map(u => u.userId)
+            : []),
+        ].filter(
+          userId =>
+            channelParticipantIds.has(userId) &&
+            userId !== senderId
+        )
+      ),
+    ];
 
-    if (!hasChannelArtifactActivity && validMentionedUsers.length > 0) {
+    if (validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
       const activities = validMentionedUsers.map(user => ({
         id: uuidv4(),
@@ -758,7 +722,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // subscription. DM channels never reach this point (early return above).
     const keywordScanText = getKeywordScanText(content);
     let keywordMatchesByUser = new Map<string, string[]>();
-    if (!hasChannelArtifactActivity && keywordScanText && prefetchedData) {
+    if (keywordScanText && prefetchedData) {
       const candidateKeywords = new Map<string, string[]>();
       for (const participant of channelParticipants) {
         const userId = participant.userId;
@@ -774,14 +738,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const keywordUserIds = [...keywordMatchesByUser.keys()];
     const keywordUserIdSet = new Set(keywordUserIds);
 
-    if (hasChannelArtifactActivity || !isReply) {
-      const channelMessageRecipientIds = hasChannelArtifactActivity
-        ? slashCommandNotificationUserIds
-        : channelParticipants
-            .map(participant => participant.userId)
-            // Keyword-matched users get the stronger mention-style notification
-            // instead of the channel-message one.
-            .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId) && !keywordUserIdSet.has(userId));
+    if (!isReply) {
+      const channelMessageRecipientIds = channelParticipants
+        .map(participant => participant.userId)
+        // Keyword-matched users get the stronger mention-style notification
+        // instead of the channel-message one.
+        .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId) && !keywordUserIdSet.has(userId));
 
       if (channelMessageRecipientIds.length > 0) {
         try {
@@ -797,10 +759,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             this.ctx.workspaceId,
             sender?.picture ?? '',
             prefetchedData,
-            {
-              channelWide: hasChannelArtifactActivity,
-              isThreadMessage: !!isReply,
-            },
           );
         } catch (error) {
           logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
@@ -925,16 +883,20 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     }
 
-    if (!hasChannelArtifactActivity) {
-      await this.handleSpecialMentionActivities(
-        channelId,
-        messageId,
-        senderId,
-        mentionType,
-        finalMentionedUserIds,
-        conversation.initialMessageId !== messageId,
-      );
-    }
+    await this.handleSpecialMentionActivities(
+      channelId,
+      messageId,
+      senderId,
+      mentionType,
+      finalMentionedUserIds,
+      conversation.initialMessageId !== messageId,
+      // Artifacts render their own activity card, so they claim a distinct
+      // action and skip audience classification — the audience is the command's
+      // by definition, not something to infer.
+      artifactBroadcastsToChannel
+        ? { actorAction: 'slash_command_artifact', classification: ActivityClassification.FYI }
+        : undefined,
+    );
 
     // Handle bot mentions in channels - trigger bot execution when @mentioned
     await this.handleBotMentions(
@@ -945,7 +907,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       channelParticipants
     );
 
-    if (isReply && conversationId && !hasChannelArtifactActivity) {
+    if (isReply && conversationId) {
       // Exclude already-notified mention recipients from thread replies.
       const replyExcludedUserIds = [
         ...new Set([
@@ -1992,6 +1954,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     mentionType: '@channel' | '@here' | undefined,
     mentionedUserIds: string[] = [],
     isThreadActivity: boolean = false,
+    /**
+     * Lets a message that reaches the channel through this path render its own
+     * activity card (slash-command artifacts) instead of the generic group
+     * mention. Omitted for ordinary @channel/@here mentions.
+     */
+    activityOverride?: { actorAction: string; classification: ActivityClassification },
   ): Promise<void> {
     if (!mentionType) {
       return;
@@ -2010,15 +1978,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         id: uuidv4(),
         userId,
         actorId: senderId,
-        actorAction: 'group_mention' as const,
+        actorAction: activityOverride?.actorAction ?? ('group_mention' as const),
         // Dual-write: populate both old and new columns
         actionSource: 'message' as const,
         actionSourceId: messageId,
         messageId: messageId,
         channelId,
         isThreadActivity,
-        classification: ActivityClassification.PENDING,
-        classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
+        classification: activityOverride?.classification ?? ActivityClassification.PENDING,
+        // Audience classification only applies to inferred broadcast audiences.
+        ...(activityOverride
+          ? {}
+          : { classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE }),
       }));
       await activityService.createActivities(activities);
     };
@@ -2040,7 +2011,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
     const previousValue = job.previousValue as MessagePreviousValue | undefined;
-    await db.messageArtifact.deleteMany({ where: { messageId } });
+    if (!previousValue || parseSlashCommandArtifactMessage(previousValue.content)) {
+      await syncMessageArtifact(db, messageId);
+    }
     // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
     // We need conversation/channel/project context; fetch what's still available.
     try {
@@ -2220,12 +2193,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }
     const currentMessage = await db.message.findUnique({
       where: { messageId: previousValue.messageId },
-      select: { isDeleted: true, content: true, edited: true, visibleTo: true },
+      select: { isDeleted: true, content: true, edited: true },
     });
     if (!currentMessage) return;
 
+    const touchesArtifact =
+      !!parseSlashCommandArtifactMessage(currentMessage.content) ||
+      !!parseSlashCommandArtifactMessage(previousValue.content);
+
     if (!previousValue.isDeleted && currentMessage.isDeleted) {
-      await db.messageArtifact.deleteMany({ where: { messageId: previousValue.messageId } });
+      if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_DELETED,
         previousValue.messageId,
@@ -2233,13 +2210,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.conversationId,
         previousValue.isThreadReply,
       );
-    } else if (
-      !currentMessage.isDeleted &&
-      (currentMessage.content !== previousValue.content ||
-        currentMessage.visibleTo !== previousValue.visibleTo)
-    ) {
-      await this.syncSlashCommandArtifactProjection(previousValue.messageId);
-      if (!currentMessage.edited || currentMessage.content === previousValue.content) return;
+    } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+      if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_EDITED,
         previousValue.messageId,
@@ -2249,52 +2221,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         currentMessage.content,
       );
     }
-  }
-
-  private async syncSlashCommandArtifactProjection(messageId: string): Promise<void> {
-    const message = await db.message.findUnique({
-      where: { messageId },
-      select: {
-        messageId: true,
-        workspaceId: true,
-        conversationId: true,
-        content: true,
-        isDeleted: true,
-        visibleTo: true,
-        conversation: {
-          select: {
-            channelId: true,
-            initialMessageId: true,
-            createdAt: true,
-          },
-        },
-      },
-    });
-    const artifactRecord = getSlashCommandMessageArtifact(message?.content);
-    if (!message || message.isDeleted || !artifactRecord || !message.conversation.channelId) {
-      await db.messageArtifact.deleteMany({ where: { messageId } });
-      return;
-    }
-
-    const projection = {
-      workspaceId: message.workspaceId,
-      messageId: message.messageId,
-      channelId: message.conversation.channelId,
-      conversationId: message.conversationId,
-      conversationCreatedAt: message.conversation.createdAt,
-      messagePreview: artifactRecord.messagePreview,
-      isInitialMessage: message.conversation.initialMessageId === message.messageId,
-      visibleTo: message.visibleTo,
-      type: artifactRecord.type,
-      command: artifactRecord.command,
-      status: artifactRecord.status,
-      callExternalId: artifactRecord.callExternalId,
-    };
-    await db.messageArtifact.upsert({
-      where: { messageId },
-      create: projection,
-      update: projection,
-    });
   }
 
   private async sendMessageChangeNotifications(

@@ -54,7 +54,7 @@ import {
   stripCitationMarks,
 } from '../TipTapExtensions/CitationMark';
 import { registerClawIcons } from '../../Chat/XyneAISidebar/utils/clawCitationUrl';
-import { isSev2SlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts';
+import { isSlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts';
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
@@ -752,9 +752,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   // For mobile "my" messages, use the specialized mobile component
-  const isSev2Message = isSev2SlashCommandArtifactMessage(message.content);
+  const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
 
-  if (isMobile && isMe && !isSev2Message) {
+  if (isMobile && isMe && !isSlashCommandArtifact) {
     return (
       <MobileMessageMyBubble
         message={message}

@@ -75,7 +75,7 @@ export interface InputBoxProps {
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
   dockSlot?: React.ReactNode;
-  slashCommandArtifactType?: import('../../Chat/SlashCommandArtifacts').SlashCommandArtifactType;
+  slashCommandArtifactCommand?: string;
   slashCommandArtifactChannelLabel?: string;
   onCancelSlashCommandArtifact?: () => void;
 }

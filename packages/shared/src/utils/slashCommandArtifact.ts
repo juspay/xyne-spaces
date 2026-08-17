@@ -1,13 +1,8 @@
 import type { FlowComponent, FlowDefinition } from "../types/flowUI";
 import {
-  MessageArtifactStatus,
-  MessageArtifactType,
-} from "../zero/types";
-import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
   type SlashCommandArtifactProps,
-  type SlashCommandArtifactSideEffect,
 } from "../validation/flowSchema";
 
 const FLOW_JSON_ATTRIBUTE_PATTERN = /data-flow-json="([^"]+)"/i;
@@ -31,6 +26,68 @@ export const getSlashCommandArtifactDiagnosticKey = (
   }
   return hash.toString(16).padStart(16, "0");
 };
+
+// ── Command registry ──────────────────────────────────────────────────────
+// Everything a slash-command artifact does — how it is labelled and, more
+// importantly, who it is allowed to notify — is defined here and keyed by
+// command. Message content only carries the command identifier, so a client
+// cannot hand-craft FlowJSON that grants itself a channel-wide audience.
+
+export interface SlashCommandArtifactDefinition {
+  /** Identifier persisted in message content; matches the `/name` typed by the user. */
+  command: string;
+  /** Short label rendered on the card, banner, and activity row. */
+  badge: string;
+  title: string;
+  description: string;
+  category: string;
+  viewActionLabel: string;
+  /** Composer header while the artifact is being drafted: "<composerLabel> in #channel". */
+  composerLabel: string;
+  /** Noun used in composer validation copy: "Describe the <bodyNoun> before sending". */
+  bodyNoun: string;
+  /** Placeholder shown in the composer while drafting the artifact body. */
+  composerPlaceholder: string;
+  /** Verb phrase used in the activity feed: "<actor> <activityActionLabel> <channel>". */
+  activityActionLabel: string;
+  /**
+   * Server-authoritative. When true the message is delivered to the whole
+   * channel through the existing `@channel` broadcast pipeline, including in
+   * thread replies where broadcasts are otherwise suppressed.
+   */
+  notifiesChannel: boolean;
+  /** Whether the artifact exposes call controls and tracks a linked call. */
+  linksCall: boolean;
+}
+
+export const SEV2_SLASH_COMMAND = "sev2";
+
+export const SLASH_COMMAND_ARTIFACT_DEFINITIONS: Record<
+  string,
+  SlashCommandArtifactDefinition
+> = {
+  [SEV2_SLASH_COMMAND]: {
+    command: SEV2_SLASH_COMMAND,
+    badge: "SEV2",
+    title: "Active incident",
+    description: "Declare a SEV2 incident in this conversation",
+    category: "Incident",
+    viewActionLabel: "View incident",
+    composerLabel: "Declaring an incident",
+    bodyNoun: "incident",
+    composerPlaceholder: "What broke? Impact, scope, current status…",
+    activityActionLabel: "declared a SEV2 in",
+    notifiesChannel: true,
+    linksCall: true,
+  },
+};
+
+export const getSlashCommandArtifactDefinition = (
+  command: string | null | undefined,
+): SlashCommandArtifactDefinition | null =>
+  command
+    ? (SLASH_COMMAND_ARTIFACT_DEFINITIONS[command] ?? null)
+    : null;
 
 const decodeHtmlAttribute = (value: string): string =>
   value
@@ -63,58 +120,24 @@ export interface ParsedSlashCommandArtifact {
   flow: FlowDefinition;
   component: FlowComponent;
   props: SlashCommandArtifactProps;
+  definition: SlashCommandArtifactDefinition;
   body: string;
 }
-
-export interface SlashCommandMessageArtifact {
-  type: MessageArtifactType.SLASH_COMMAND;
-  command: string;
-  status: MessageArtifactStatus;
-  callExternalId: string | null;
-  messagePreview: string;
-}
-
-interface SlashCommandArtifactAudienceUser {
-  id: string;
-  status: string;
-  userType: string;
-}
-
-export interface SlashCommandArtifactAudience {
-  activityUserIds: string[];
-  notificationUserIds: string[];
-}
-
-/** Include the creator in banner visibility without notifying them about their own message. */
-export const resolveSlashCommandArtifactAudience = (
-  users: readonly SlashCommandArtifactAudienceUser[],
-  senderId: string,
-  enabled: boolean,
-): SlashCommandArtifactAudience => {
-  if (!enabled) return { activityUserIds: [], notificationUserIds: [] };
-
-  const activityUserIds = users
-    .filter((user) => user.userType !== "APP" && user.status === "ACTIVE")
-    .map((user) => user.id);
-
-  return {
-    activityUserIds,
-    notificationUserIds: activityUserIds.filter((userId) => userId !== senderId),
-  };
-};
 
 export interface BuildSlashCommandArtifactFlowMessageInput {
   command: string;
   body: string;
-  sideEffects: SlashCommandArtifactSideEffect[];
   screenId: string;
 }
 
-/** Build the standard FlowJSON message envelope used by plan and app flows. */
+/**
+ * Build the standard FlowJSON message envelope used by plan and app flows.
+ * Only the command identifier and the body are persisted — presentation and
+ * side-effect policy are resolved from the registry at render/handle time.
+ */
 export const buildSlashCommandArtifactFlowMessage = ({
   command,
   body,
-  sideEffects,
   screenId,
 }: BuildSlashCommandArtifactFlowMessageInput): string => {
   const flow: FlowDefinition = {
@@ -124,10 +147,7 @@ export const buildSlashCommandArtifactFlowMessage = ({
       {
         id: `${screenId}:artifact`,
         type: "slash_command_artifact",
-        props: {
-          command,
-          sideEffects,
-        },
+        props: { command },
         children: [
           {
             id: `${screenId}:body`,
@@ -181,7 +201,11 @@ const findSlashCommandArtifactComponent = (
   return null;
 };
 
-/** Return the typed slash-command artifact encoded in a FlowJSON message. */
+/**
+ * Return the typed slash-command artifact encoded in a FlowJSON message.
+ * Unregistered commands resolve to null so an unknown identifier renders as a
+ * plain flow message instead of an unhandled card.
+ */
 export const parseSlashCommandArtifactMessage = (
   content: string | null | undefined,
 ): ParsedSlashCommandArtifact | null => {
@@ -195,6 +219,9 @@ export const parseSlashCommandArtifactMessage = (
     component.props,
   );
   if (!propsResult.success) return null;
+  const definition = getSlashCommandArtifactDefinition(propsResult.data.command);
+  if (!definition) return null;
+
   const bodyComponent = component.children?.[0];
   const body =
     bodyComponent?.type === "text" &&
@@ -206,88 +233,42 @@ export const parseSlashCommandArtifactMessage = (
     flow,
     component,
     props: propsResult.data,
+    definition,
     body,
   };
 };
 
+export interface SlashCommandArtifactProjection {
+  command: string;
+  messagePreview: string;
+}
+
 /**
- * Return the normalized dynamic state stored in message_artifacts. Static
- * banner presentation remains code-defined; the compact preview lets global
- * subscriptions render without loading the source message.
+ * Fields the `message_artifacts` row copies from message content. Lifecycle
+ * (status / linked call) is never read from content — it lives only on the
+ * artifact row, which is the single source of truth for it.
  */
-export const getSlashCommandMessageArtifact = (
+export const getSlashCommandArtifactProjection = (
   content: string | null | undefined,
-): SlashCommandMessageArtifact | null => {
+): SlashCommandArtifactProjection | null => {
   const artifact = parseSlashCommandArtifactMessage(content);
   if (!artifact) return null;
 
-  const banner = artifact.props.sideEffects.find(
-    (sideEffect) => sideEffect.type === "banner",
-  );
   return {
-    type: MessageArtifactType.SLASH_COMMAND,
     command: artifact.props.command,
-    status:
-      banner?.status === "completed"
-        ? MessageArtifactStatus.COMPLETED
-        : MessageArtifactStatus.ACTIVE,
-    callExternalId: banner?.callExternalId ?? null,
     messagePreview: artifact.body.replace(/\s+/g, " ").trim(),
   };
 };
 
-export type SlashCommandArtifactSideEffectLifecycleStatus =
-  | "active"
-  | "completed";
-
-/**
- * Update the rendering snapshot stored in FlowJSON. The queryable lifecycle is
- * persisted atomically in message_artifacts by the backend lifecycle repository.
- */
-export const updateSlashCommandArtifactBannerLifecycle = (
-  content: string,
-  status: SlashCommandArtifactSideEffectLifecycleStatus,
-  callExternalId: string,
+/** One-line label used in channel/DM lists and notification previews. */
+export const getSlashCommandArtifactPreviewText = (
+  content: string | null | undefined,
 ): string | null => {
-  const parsed = parseSlashCommandArtifactMessage(content);
-  if (!parsed) return null;
+  const artifact = parseSlashCommandArtifactMessage(content);
+  if (!artifact) return null;
 
-  let updated = false;
-  const patchComponents = (components: FlowComponent[]): FlowComponent[] =>
-    components.map((component) => {
-      if (component.type === "slash_command_artifact") {
-        const propsResult = slashCommandArtifactPropsSchema.safeParse(
-          component.props,
-        );
-        if (!propsResult.success) return component;
-        const sideEffects = propsResult.data.sideEffects.map((sideEffect) => {
-          if (sideEffect.type !== "banner") return sideEffect;
-          // A restarted call replaces the previous call link. Late participant-
-          // leave/room-finished events from that previous call must not complete
-          // the newer call's side effect.
-          if (
-            status === "completed" &&
-            sideEffect.callExternalId &&
-            sideEffect.callExternalId !== callExternalId
-          ) {
-            return sideEffect;
-          }
-          updated = true;
-          return { ...sideEffect, status, callExternalId };
-        });
-        return {
-          ...component,
-          props: { ...propsResult.data, sideEffects },
-        };
-      }
-      return component.children
-        ? { ...component, children: patchComponents(component.children) }
-        : component;
-    });
-
-  const flow = {
-    ...parsed.flow,
-    components: patchComponents(parsed.flow.components),
-  };
-  return updated ? serializeFlowDefinitionMessageContent(flow) : null;
+  const body = artifact.body.replace(/\s+/g, " ").trim();
+  return body
+    ? `${artifact.definition.badge} · ${body}`
+    : artifact.definition.title;
 };

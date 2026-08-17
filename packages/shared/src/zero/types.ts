@@ -384,14 +384,9 @@ export enum ActivityClassificationJobType {
   SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
 }
 
-// Queryable metadata for structured messages whose lifecycle drives UI outside
-// the message bubble. These remain strings in Postgres so adding a future
-// lifecycle state does not require altering a database enum.
-// @ts-ignore TS1294
-export enum MessageArtifactType {
-  SLASH_COMMAND = 'slash_command',
-}
-
+// Lifecycle of a structured message whose state drives UI outside the message
+// bubble. Stored as a string in Postgres so adding a future lifecycle state
+// does not require altering a database enum.
 // @ts-ignore TS1294
 export enum MessageArtifactStatus {
   ACTIVE = 'active',

@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, getSlashCommandArtifactDiagnosticKey } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -12,11 +12,25 @@ import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 import {
-  updateArtifactBannerLifecycle,
-  type SlashCommandArtifactCallMetadata,
-} from './slashCommandArtifactLifecycle';
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 
 export type { Call, CallParticipant };
+
+/**
+ * Shape of `calls.metadata` as written by this repository.
+ * `artifactMessageId` is set only for calls started from a slash-command
+ * artifact card, and links the call back to the message that owns it.
+ */
+export interface CallMetadata {
+  systemMessageId?: string;
+  conversationId?: string;
+  artifactMessageId?: string;
+}
+
+const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
+  (metadata as CallMetadata | null)?.artifactMessageId;
 
 export interface CreateCallParticipantInput {
   id: string;
@@ -211,25 +225,35 @@ export class CallRepository {
 
   async update(id: string, data: UpdateCallInput): Promise<Call> {
     const client = DatabaseClient.getInstance();
-    const result =
-      data.status === CallStatus.ENDED
-        ? await client.$transaction(async tx => {
-            const call = await tx.call.update({ where: { id }, data });
-            const metadata = call.metadata as SlashCommandArtifactCallMetadata | null;
-            if (metadata?.artifactMessageId) {
-              await updateArtifactBannerLifecycle(
-                tx,
-                metadata.artifactMessageId,
-                call.externalId,
-                'completed',
-                'call_repository_update',
-              );
-            }
-            return call;
-          })
-        : await client.call.update({ where: { id }, data });
+    const result = await client.call.update({
+      where: { id },
+      data
+    });
+    if (data.status === CallStatus.ENDED) {
+      await this.syncArtifactLifecycle(client, result, MessageArtifactStatus.COMPLETED);
+    }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
+  }
+
+  /**
+   * Mirror a call transition onto the slash-command artifact that started it.
+   * A no-op for every other call, which is why it can sit directly on the
+   * shared end-of-call paths without altering their behavior.
+   */
+  private async syncArtifactLifecycle(
+    tx: Prisma.TransactionClient,
+    call: { externalId: string; metadata: Prisma.JsonValue | null },
+    status: MessageArtifactLifecycleStatus
+  ): Promise<void> {
+    const artifactMessageId = getArtifactMessageId(call.metadata);
+    if (!artifactMessageId) return;
+
+    await setSlashCommandArtifactLifecycle(tx, {
+      messageId: artifactMessageId,
+      status,
+      callExternalId: call.externalId,
+    });
   }
 
   async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
@@ -768,11 +792,7 @@ export class CallRepository {
     endedAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<void> {
-    const call = await tx.call.findUnique({
-      where: { id: callId },
-      select: { externalId: true, metadata: true },
-    });
-    await tx.call.update({
+    const call = await tx.call.update({
       where: { id: callId },
       data: {
         status: CallStatus.ENDED,
@@ -780,16 +800,7 @@ export class CallRepository {
       }
     });
     await refreshCallParticipantPreview(tx, callId);
-    const metadata = call?.metadata as SlashCommandArtifactCallMetadata | null;
-    if (call?.externalId && metadata?.artifactMessageId) {
-      await updateArtifactBannerLifecycle(
-        tx,
-        metadata.artifactMessageId,
-        call.externalId,
-        'completed',
-        'end_call',
-      );
-    }
+    await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -860,16 +871,7 @@ export class CallRepository {
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
-          const metadata = call.metadata as SlashCommandArtifactCallMetadata | null;
-          if (metadata?.artifactMessageId) {
-            await updateArtifactBannerLifecycle(
-              tx,
-              metadata.artifactMessageId,
-              callExternalId,
-              'completed',
-              'participant_leave',
-            );
-          }
+          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
         }
 
         // Update system message whether the call is fully ended or just rescheduled
@@ -946,34 +948,21 @@ export class CallRepository {
         });
       }
 
-      const callMetadata = call.metadata as SlashCommandArtifactCallMetadata | null;
-      const callEnded = call.status === CallStatus.ENDED || shouldEndCall;
-      if (callEnded && callMetadata?.artifactMessageId) {
-        await updateArtifactBannerLifecycle(
-          tx,
-          callMetadata.artifactMessageId,
-          callExternalId,
-          'completed',
-          'room_finished',
-        );
+      if (call.status === CallStatus.ENDED || shouldEndCall) {
+        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
       }
+
       // Clear conversation.callId when call ends (for conversation calls)
+      const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
           await tx.conversation.update({
             where: { conversationId: callMetadata.conversationId },
             data: { callId: null },
           });
-          logger.info('call_conversation_link_cleared', {
-            conversationKey: getSlashCommandArtifactDiagnosticKey(callMetadata.conversationId),
-            source: 'room_finished',
-          });
+          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
         } catch (err) {
-          logger.error('call_conversation_link_clear_failed', {
-            conversationKey: getSlashCommandArtifactDiagnosticKey(callMetadata.conversationId),
-            source: 'room_finished',
-            errorType: err instanceof Error ? err.name : 'unknown',
-          });
+          logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
         }
       }
 
@@ -1282,15 +1271,7 @@ export class CallRepository {
         },
       });
 
-      if (artifactMessageId) {
-        await updateArtifactBannerLifecycle(
-          tx,
-          artifactMessageId,
-          roomName,
-          'active',
-          'call_created',
-        );
-      }
+      await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.ACTIVE);
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
       const invitedParticipantIds: string[] = [];

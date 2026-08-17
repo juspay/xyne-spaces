@@ -7,6 +7,7 @@ import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { useRouteContext } from '../../hooks/useRouteContext';
 import { formatElapsedTime as formatMessageAge } from '../../utils/dateUtils';
 import { roomActor } from '../../machines/roomMachine';
 import { Event, logger } from '../../utils/logger';
@@ -14,6 +15,7 @@ import {
   useSlashCommandArtifactSideEffects,
   type SlashCommandArtifactBannerItem,
 } from './SlashCommandArtifactSideEffects';
+import { buildSlashCommandArtifactRoute } from './SlashCommandArtifacts';
 import { isDMChannel } from './ChatDirectory/ChatDirectory.utils';
 
 export const getVisibleSlashCommandArtifactBanners = (
@@ -21,13 +23,9 @@ export const getVisibleSlashCommandArtifactBanners = (
   activeChannelId: string | undefined,
 ): SlashCommandArtifactBannerItem[] => items.filter(item => item.channelId !== activeChannelId);
 
-export const getSlashCommandArtifactRoute = (item: SlashCommandArtifactBannerItem): string =>
-  item.isInitialMessage
-    ? `/chat/dir/${item.channelId}#origin=${item.conversationId}`
-    : `/chat/dir/${item.channelId}/${item.conversationId}#origin=${item.conversationId}&messageId=${item.messageId}`;
-
 export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
   const routeMatches = useMatches();
   const activeChannelId = useMemo(
     () =>
@@ -88,7 +86,13 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   };
 
   const viewArtifact = (): void => {
-    const path = getSlashCommandArtifactRoute(item);
+    const path = buildSlashCommandArtifactRoute({
+      baseRoute,
+      channelId: item.channelId,
+      conversationId: item.conversationId,
+      messageId: item.messageId,
+      isInitialMessage: item.isInitialMessage,
+    });
     setIsOpen(false);
     logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
       action: 'view_artifact',
@@ -99,7 +103,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
     void navigate(path, {
       state: {
         activityNavigationNonce: Date.now(),
-        linkedItemCreatedAt: item.conversationCreatedAt,
+        linkedItemCreatedAt: item.messageCreatedAt,
       },
     });
   };
@@ -129,7 +133,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
         <section
           id='slash-command-artifact-banner-popover'
           role='dialog'
-          aria-label={`${item.banner.badge} alert in ${channelLabel}`}
+          aria-label={`${item.definition.badge} alert in ${channelLabel}`}
           className='fixed bottom-4 left-[58px] z-[100] hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
         >
           <div className='flex min-w-0 items-center gap-2'>
@@ -138,11 +142,11 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
               <span className='relative inline-flex size-2 rounded-full bg-orange-500' />
             </span>
             <span className='shrink-0 rounded-md bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white'>
-              {item.banner.badge}
+              {item.definition.badge}
             </span>
             <span className='min-w-0 flex-1 truncate text-sm font-semibold'>{channelLabel}</span>
             <span className='shrink-0 text-xs text-orange-700/80 dark:text-orange-300/80'>
-              {formatMessageAge(item.createdAt)}
+              {formatMessageAge(item.messageCreatedAt)}
             </span>
             <button
               type='button'
@@ -173,7 +177,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                   channelKey: getSlashCommandArtifactDiagnosticKey(item.channelId),
                 })}
               >
-                {item.banner.viewActionLabel}
+                {item.definition.viewActionLabel}
                 <ArrowRight className='size-3' />
               </button>
 

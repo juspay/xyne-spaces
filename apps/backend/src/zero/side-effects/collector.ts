@@ -53,7 +53,6 @@ export async function collectSideEffectJobs(
         msgType: message.msgType,
         content: message.content,
         isDeleted: message.isDeleted,
-        visibleTo: message.visibleTo,
         channelId: conversation?.channelId ?? undefined,
         isThreadReply: !!conversation && conversation.initialMessageId !== message.messageId,
       };

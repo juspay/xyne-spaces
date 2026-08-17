@@ -79,7 +79,7 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
-import { CanvasVisibility } from '@xyne/shared';
+import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { VoiceInput } from './VoiceInput';
@@ -196,7 +196,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
-      slashCommandArtifactType,
+      slashCommandArtifactCommand,
       slashCommandArtifactChannelLabel,
       onCancelSlashCommandArtifact,
     },
@@ -364,10 +364,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [isVoiceRecording]);
 
-    const isSev2SlashCommandArtifactComposer = slashCommandArtifactType === 'sev2';
+    const artifactComposerDefinition = getSlashCommandArtifactDefinition(
+      slashCommandArtifactCommand,
+    );
 
     useEffect(() => {
-      if (!slashCommandArtifactType || !onCancelSlashCommandArtifact) return;
+      if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
       const onKeyDown = (event: KeyboardEvent): void => {
         if (event.key !== 'Escape') return;
         event.preventDefault();
@@ -376,7 +378,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [slashCommandArtifactType, onCancelSlashCommandArtifact]);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
 
     const handleTyping = onTyping;
 
@@ -1503,7 +1505,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             overflow-hidden transition-all flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
-              !isMobile && isSev2SlashCommandArtifactComposer
+              !isMobile && artifactComposerDefinition
                 ? 'border-orange-500 ring-1 ring-orange-500'
                 : !isMobile && isFocused
                   ? 'border-chat-composer-border-active'
@@ -1514,14 +1516,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
           >
-            {isSev2SlashCommandArtifactComposer && (
+            {artifactComposerDefinition && (
               <div className='flex h-11 items-center justify-between border-b border-orange-200 bg-orange-50/80 px-3 text-orange-700 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300'>
                 <div className='flex min-w-0 items-center gap-2 text-sm font-semibold'>
                   <span className='rounded bg-orange-500 px-2 py-0.5 text-xs font-bold text-white'>
-                    SEV2
+                    {artifactComposerDefinition.badge}
                   </span>
                   <span className='truncate'>
-                    Declaring an incident
+                    {artifactComposerDefinition.composerLabel}
                     {slashCommandArtifactChannelLabel
                       ? ` in ${slashCommandArtifactChannelLabel}`
                       : ''}
@@ -1531,7 +1533,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   type='button'
                   onClick={onCancelSlashCommandArtifact}
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
-                  aria-label='Cancel incident declaration'
+                  aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >
                   <span className='hidden sm:inline'>esc to cancel</span>
                   <X className='size-3.5' />
@@ -1946,7 +1948,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
-                              ? isSev2SlashCommandArtifactComposer
+                              ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white hover:bg-orange-600'
                                 : 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
@@ -2027,7 +2029,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
-                              ? isSev2SlashCommandArtifactComposer
+                              ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white hover:bg-orange-600'
                                 : 'bg-primary text-white hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'

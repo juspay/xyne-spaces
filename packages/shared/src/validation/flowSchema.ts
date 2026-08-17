@@ -649,37 +649,18 @@ export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
 // ── Slash-command artifact ────────────────────────────────────────────────
-// A slash command can emit a persistent, structured message card. The command
-// identity and every requested side effect live in this FlowJSON payload so
-// consumers never have to infer behavior from ad-hoc HTML attributes or
-// message metadata. `command` intentionally remains an identifier string: new
-// commands can be registered by the dashboard without widening this schema.
-export const slashCommandArtifactBannerSideEffectSchema = z
-  .object({
-    type: z.literal('banner'),
-    badge: z.string().min(1),
-    title: z.string().min(1),
-    viewActionLabel: z.string().min(1),
-    tone: z.literal('orange'),
-    status: z.enum(['active', 'completed']).default('active'),
-    callExternalId: z.string().min(1).optional(),
-    activity: z
-      .object({
-        audience: z.literal('channel'),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-
-export const slashCommandArtifactSideEffectSchema = slashCommandArtifactBannerSideEffectSchema;
-
-export const slashCommandArtifactPropsSchema = z
-  .object({
-    command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
-    sideEffects: z.array(slashCommandArtifactSideEffectSchema),
-  })
-  .strict();
+// A slash command can emit a persistent, structured message card. Message
+// content carries ONLY the command identifier and the body: presentation and
+// side-effect policy (badge, labels, who gets notified) are resolved from the
+// registry in utils/slashCommandArtifact.ts. Message content is authored by
+// the client, so anything it declared about its own audience would be
+// self-granted privilege. Lifecycle state (active/completed, linked call)
+// likewise lives only on the `message_artifacts` row.
+// Unknown props are stripped rather than rejected so artifacts written by an
+// older client still render.
+export const slashCommandArtifactPropsSchema = z.object({
+  command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+});
 
 export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
   type: z.literal('slash_command_artifact'),
@@ -689,12 +670,6 @@ export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
   children: z.array(textComponentSchema).min(1).max(1),
 });
 
-export type SlashCommandArtifactBannerSideEffect = z.infer<
-  typeof slashCommandArtifactBannerSideEffectSchema
->;
-export type SlashCommandArtifactSideEffect = z.infer<
-  typeof slashCommandArtifactSideEffectSchema
->;
 export type SlashCommandArtifactProps = z.infer<
   typeof slashCommandArtifactPropsSchema
 >;

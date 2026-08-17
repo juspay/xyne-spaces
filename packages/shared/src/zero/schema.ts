@@ -60,7 +60,6 @@ import {
   LookupType,
   MailboxState,
   MessageArtifactStatus,
-  MessageArtifactType,
   MeetingStatus,
   MessageType,
   NotificationLevel,
@@ -935,6 +934,10 @@ export const messageTable = table('messages')
   })
   .primaryKey('messageId');
 
+// Deliberately self-contained: the global artifact subscription must not relate
+// to `messages`, or every message delta in the workspace would flow through its
+// IVM pipeline. Each column below is either lifecycle state or the minimum
+// needed to route to the artifact without that join.
 export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
   .columns({
     id: string(),
@@ -942,15 +945,18 @@ export const messageArtifactTable = table('message_artifacts') // Prisma model: 
     messageId: string(),
     channelId: string(),
     conversationId: string(),
-    conversationCreatedAt: number(),
-    messagePreview: string(),
+    // Whether the artifact is the conversation's initial message decides
+    // between the channel route and the thread route. It cannot be derived
+    // without joining messages/conversations, so it is projected here.
     isInitialMessage: boolean(),
-    visibleTo: string().optional(),
-    type: enumeration<MessageArtifactType>(),
+    messagePreview: string(),
+    // The source message's createdAt — drives the banner's age label and the
+    // channel-list load anchor. Equal to the conversation's createdAt when the
+    // artifact is the initial message, which is the case the anchor is used for.
+    messageCreatedAt: number(),
     command: string(),
     status: enumeration<MessageArtifactStatus>(),
     callExternalId: string().optional(),
-    createdAt: number(),
     updatedAt: number(),
   })
   .primaryKey('id');

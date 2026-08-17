@@ -34,7 +34,7 @@ import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
-import { isSev2SlashCommandArtifactMessage } from '../SlashCommandArtifacts';
+import { isSlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
@@ -801,7 +801,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
-  const canEditMessage = canModifyMessage && !isSev2SlashCommandArtifactMessage(message.content);
+  const canEditMessage = canModifyMessage && !isSlashCommandArtifactMessage(message.content);
   const canDeleteMessage = canModifyMessage && !hasTicket;
 
   // Check if message has meaningful text content (not just attachments).

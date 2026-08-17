@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Phone, Users } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
@@ -6,14 +6,14 @@ import {
   CallStatus,
   InvitationResponse,
   MessageArtifactStatus,
+  SLASH_COMMAND_ARTIFACT_DEFINITIONS,
   buildSlashCommandArtifactFlowMessage,
+  getSlashCommandArtifactDefinition,
   getSlashCommandArtifactDiagnosticKey,
   parseSlashCommandArtifactMessage,
   slashCommandArtifactPropsSchema,
   type FlowComponent,
-  type SlashCommandArtifactBannerSideEffect,
-  type SlashCommandArtifactProps,
-  type SlashCommandArtifactSideEffect,
+  type SlashCommandArtifactDefinition,
 } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useCallDuration } from '../../hooks/useCalls';
@@ -34,99 +34,92 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 
-export type SlashCommandArtifactType = 'sev2';
+/**
+ * Composer entry for a slash-command artifact. Presentation and side-effect
+ * policy come from the shared registry; this only adds what the command
+ * selector needs.
+ */
+export const getSlashCommandArtifactCommandItem = (
+  definition: SlashCommandArtifactDefinition,
+): {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  badge: string;
+  kind: 'slash-command-artifact';
+  slashCommandArtifactCommand: string;
+} => ({
+  id: `builtin-${definition.command}`,
+  name: definition.command,
+  description: definition.description,
+  category: definition.category,
+  badge: definition.badge,
+  kind: 'slash-command-artifact',
+  slashCommandArtifactCommand: definition.command,
+});
 
-export interface SlashCommandArtifactDefinition {
-  type: SlashCommandArtifactType;
-  command: {
-    id: string;
-    name: string;
-    description: string;
-    category: string;
-    badge: string;
-    kind: 'slash-command-artifact';
-    slashCommandArtifactType: SlashCommandArtifactType;
-  };
-  activity: {
-    actionLabel: string;
-  };
-  sideEffects: SlashCommandArtifactSideEffect[];
-}
+/** Every registered artifact command, offered in the composer's `/` selector. */
+export const SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS = Object.values(
+  SLASH_COMMAND_ARTIFACT_DEFINITIONS,
+).map(getSlashCommandArtifactCommandItem);
 
-export const SEV2_COMMAND_NAME = 'sev2';
-
-export const SLASH_COMMAND_ARTIFACT_DEFINITIONS: Record<
-  SlashCommandArtifactType,
-  SlashCommandArtifactDefinition
-> = {
-  sev2: {
-    type: 'sev2',
-    command: {
-      id: 'builtin-sev2',
-      name: SEV2_COMMAND_NAME,
-      description: 'Declare a SEV2 incident in this conversation',
-      category: 'Incident',
-      badge: 'Incident',
-      kind: 'slash-command-artifact',
-      slashCommandArtifactType: 'sev2',
-    },
-    activity: {
-      actionLabel: 'declared a SEV2 in',
-    },
-    sideEffects: [
-      {
-        type: 'banner',
-        badge: 'SEV2',
-        title: 'Active incident',
-        viewActionLabel: 'View incident',
-        tone: 'orange',
-        status: 'active',
-        activity: {
-          audience: 'channel',
-        },
-      },
-    ],
-  },
-};
-
-export const SEV2_COMMAND = SLASH_COMMAND_ARTIFACT_DEFINITIONS.sev2.command;
-
-const isSlashCommandArtifactType = (value: string): value is SlashCommandArtifactType =>
-  Object.prototype.hasOwnProperty.call(SLASH_COMMAND_ARTIFACT_DEFINITIONS, value);
-
-export const getSlashCommandArtifactDefinition = (
-  command: string,
-): SlashCommandArtifactDefinition | null =>
-  isSlashCommandArtifactType(command) ? SLASH_COMMAND_ARTIFACT_DEFINITIONS[command] : null;
-
-export interface ParsedSupportedSlashCommandArtifact {
-  type: SlashCommandArtifactType;
-  props: SlashCommandArtifactProps;
+export interface SlashCommandArtifactDraft {
   definition: SlashCommandArtifactDefinition;
-  body: string;
+  /** The user typed `/command …` inline instead of picking it from the selector. */
+  typedInline: boolean;
 }
 
-export const getSlashCommandArtifact = (
-  content: string | null | undefined,
-): ParsedSupportedSlashCommandArtifact | null => {
-  const parsed = parseSlashCommandArtifactMessage(content);
-  if (!parsed) return null;
-  const definition = getSlashCommandArtifactDefinition(parsed.props.command);
-  if (!definition) return null;
-  return {
-    type: definition.type,
-    props: parsed.props,
-    definition,
-    body: parsed.body,
-  };
+/**
+ * Resolve which artifact — if any — the composer is currently drafting, whether
+ * it was picked from the selector or typed inline.
+ */
+export const detectSlashCommandArtifact = (
+  activeCommand: string | null,
+  plainText: string,
+): SlashCommandArtifactDraft | null => {
+  const typedCommand = plainText.trim().match(/^\/([a-z0-9][a-z0-9_-]*)(?:\s|$)/i)?.[1];
+  const typedDefinition = getSlashCommandArtifactDefinition(typedCommand?.toLowerCase());
+  if (typedDefinition) return { definition: typedDefinition, typedInline: true };
+
+  const activeDefinition = getSlashCommandArtifactDefinition(activeCommand);
+  return activeDefinition ? { definition: activeDefinition, typedInline: false } : null;
 };
 
-export const getSlashCommandArtifactType = (
-  content: string | null | undefined,
-): SlashCommandArtifactType | null => getSlashCommandArtifact(content)?.type ?? null;
+/** The artifact body: the composer text minus any inline `/command` prefix. */
+export const getSlashCommandArtifactBodyText = (
+  draft: SlashCommandArtifactDraft,
+  plainText: string,
+): string =>
+  draft.typedInline
+    ? plainText
+        .trim()
+        .replace(new RegExp(`^/${draft.definition.command}(?:\\s+|$)`, 'i'), '')
+        .trim()
+    : plainText.trim();
 
-export const isSev2SlashCommandArtifactMessage = (content: string | null | undefined): boolean =>
-  getSlashCommandArtifactType(content) === 'sev2';
+export const isSlashCommandArtifactMessage = (content: string | null | undefined): boolean =>
+  !!parseSlashCommandArtifactMessage(content);
+
+/**
+ * Route to the artifact message. The banner and the activity feed share this so
+ * the two entry points can never disagree about where an artifact lives.
+ */
+export const buildSlashCommandArtifactRoute = ({
+  baseRoute,
+  channelId,
+  conversationId,
+  messageId,
+  isInitialMessage,
+}: {
+  baseRoute: string;
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+  isInitialMessage: boolean;
+}): string =>
+  `${baseRoute}/${channelId}${isInitialMessage ? '' : `/${conversationId}`}` +
+  `#origin=${conversationId}${isInitialMessage ? '' : `&messageId=${messageId}`}`;
 
 const wrapInline = (marker: string, content: string): string =>
   content.trim() ? `${marker}${content}${marker}` : content;
@@ -207,26 +200,28 @@ export const messageHtmlToFlowText = (html: string): string => {
     .trim();
 };
 
-export const buildSev2SlashCommandArtifactFlowMessage = (
+export const buildSlashCommandArtifactMessage = (
+  command: string,
   bodyHtml: string,
   screenId: string,
 ): string =>
   buildSlashCommandArtifactFlowMessage({
-    command: 'sev2',
+    command,
     body: messageHtmlToFlowText(bodyHtml),
-    sideEffects: SLASH_COMMAND_ARTIFACT_DEFINITIONS.sev2.sideEffects,
     screenId,
   });
 
-export const stripSev2SlashCommandFromHtml = (html: string): string => {
+/** Remove the leading `/command` the user typed, leaving the incident body. */
+export const stripSlashCommandFromHtml = (command: string, html: string): string => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
+  const pattern = new RegExp(`^\\s*/${command}(?:\\s+|$)`, 'i');
 
   while (node) {
     const value = node.textContent ?? '';
     if (value.trim()) {
-      node.textContent = value.replace(/^\s*\/sev2(?:\s+|$)/i, '');
+      node.textContent = value.replace(pattern, '');
       break;
     }
     node = walker.nextNode();
@@ -235,82 +230,58 @@ export const stripSev2SlashCommandFromHtml = (html: string): string => {
   return doc.body.innerHTML;
 };
 
-export const getSev2SlashCommandArtifactPreviewText = (content: string): string | null => {
-  const artifact = getSlashCommandArtifact(content);
-  if (artifact?.type !== 'sev2') return null;
-  const body = artifact.body.replace(/\s+/g, ' ').trim();
-  return body ? `SEV2 · ${body}` : 'SEV2 incident';
-};
-
-interface Sev2SlashCommandArtifactProps {
+interface SlashCommandArtifactCardProps {
   children: React.ReactNode;
+  definition: SlashCommandArtifactDefinition;
   messageId?: string;
   conversationId?: string;
   channelId?: string;
   senderId?: string;
   createdAt?: number;
   surface?: 'channel' | 'thread';
-  bannerSideEffect?: SlashCommandArtifactBannerSideEffect;
 }
 
-export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> = ({
+export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> = ({
   children,
+  definition,
   messageId,
   conversationId,
   channelId,
   senderId,
   createdAt,
   surface,
-  bannerSideEffect,
 }) => {
   const sender = useUser(senderId ?? '');
   const { user } = useAuthContext();
   const [messageArtifact] = useCachedQuery(
     queries.slashCommandArtifactByMessageId({ messageId: messageId ?? '' }),
   );
-  const canonicalBannerSideEffect = useMemo(
-    () =>
-      messageArtifact && bannerSideEffect
-        ? {
-            ...bannerSideEffect,
-            status:
-              messageArtifact.status === MessageArtifactStatus.ACTIVE
-                ? ('active' as const)
-                : ('completed' as const),
-            callExternalId: messageArtifact.callExternalId ?? undefined,
-          }
-        : undefined,
-    [bannerSideEffect, messageArtifact],
-  );
-  const effectiveBannerSideEffect = canonicalBannerSideEffect ?? bannerSideEffect;
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
   const { initiateCall, joinCall, isInCall } = useCallJoinOrInitiate();
   const [isCopying, setIsCopying] = useState(false);
   const lastStateDiagnosticSignature = useRef<string | null>(null);
 
-  const latestCall = messageArtifact?.call;
-  const lifecycleCompleted = effectiveBannerSideEffect?.status === 'completed';
-  const activeCall =
-    !lifecycleCompleted && latestCall?.status === CallStatus.ACTIVE ? latestCall : undefined;
-  const endedCall = latestCall && latestCall.status !== CallStatus.ACTIVE ? latestCall : undefined;
-  const activeCallExternalIdFallback =
-    !latestCall &&
-    effectiveBannerSideEffect?.status === 'active' &&
-    effectiveBannerSideEffect.callExternalId
-      ? effectiveBannerSideEffect.callExternalId
-      : undefined;
-  const activeCallExternalId = activeCall?.externalId ?? activeCallExternalIdFallback;
+  // `message_artifacts` is the only source of lifecycle truth: a linked call
+  // while the artifact is still ACTIVE is a live call, and COMPLETED means that
+  // call has ended. Message content carries neither.
+  const isCompleted = messageArtifact?.status === MessageArtifactStatus.COMPLETED;
+  const linkedCall = messageArtifact?.call;
+  const activeCallExternalId = isCompleted
+    ? undefined
+    : (messageArtifact?.callExternalId ?? undefined);
   const hasActiveCall = !!activeCallExternalId;
-  const showEndedState =
-    !hasActiveCall &&
-    (lifecycleCompleted || (!!latestCall && latestCall.status !== CallStatus.ACTIVE));
-  const isInSev2Call = hasActiveCall && currentCallId === activeCallExternalId;
-  const activeDuration = useCallDuration(activeCall?.startedAt, !!activeCall);
+  const endedCall = isCompleted ? linkedCall : undefined;
+  const isInArtifactCall = hasActiveCall && currentCallId === activeCallExternalId;
+  const activeDuration = useCallDuration(
+    linkedCall?.startedAt,
+    hasActiveCall && linkedCall?.status === CallStatus.ACTIVE,
+  );
   const senderName = getUserDisplayName(sender) || 'Someone';
-  const activeResponderCount =
-    activeCall?.participants?.filter(
-      participant => participant.response === InvitationResponse.ACCEPTED,
-    ).length ?? 0;
+  const activeResponderCount = hasActiveCall
+    ? (linkedCall?.participants?.filter(
+        participant => participant.response === InvitationResponse.ACCEPTED,
+      ).length ?? 0)
+    : 0;
   const joinedCount = endedCall
     ? (endedCall.participantCount ??
       endedCall.participants?.filter(
@@ -334,7 +305,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
       return;
     }
     logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
-      action: showEndedState ? 'start_new_call' : 'start_call',
+      action: isCompleted ? 'start_new_call' : 'start_call',
       artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
       channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
     });
@@ -349,7 +320,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
 
   const handlePrimaryCallAction = (): void => {
     if (activeCallExternalId) {
-      if (!isInSev2Call) {
+      if (!isInArtifactCall) {
         logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
           action: 'join_call_from_card',
           artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
@@ -366,7 +337,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     if (!activeCallExternalId || isCopying) return;
     setIsCopying(true);
     try {
-      const inviteUrl = activeCall?.roomLink;
+      const inviteUrl = linkedCall?.roomLink;
       if (!inviteUrl) throw new Error('Call invite link is unavailable');
       await navigator.clipboard.writeText(inviteUrl);
       logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
@@ -387,10 +358,10 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     }
   };
 
-  const resolvedState = hasActiveCall ? 'active' : showEndedState ? 'completed' : 'pending';
+  const resolvedState = hasActiveCall ? 'active' : isCompleted ? 'completed' : 'pending';
   const artifactKey = getSlashCommandArtifactDiagnosticKey(messageId);
   const trackingMetadata = JSON.stringify({
-    slashCommandArtifactType: 'sev2',
+    slashCommandArtifactCommand: definition.command,
     artifactKey,
     conversationKey: getSlashCommandArtifactDiagnosticKey(conversationId),
     channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
@@ -400,14 +371,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     const diagnosticSignature = JSON.stringify({
       resolvedState,
       surface: surface ?? 'unknown',
-      canonicalStatus: canonicalBannerSideEffect?.status ?? 'missing',
-      snapshotStatus: bannerSideEffect?.status ?? 'missing',
-      canonicalCallKey: getSlashCommandArtifactDiagnosticKey(
-        canonicalBannerSideEffect?.callExternalId,
-      ),
-      snapshotCallKey: getSlashCommandArtifactDiagnosticKey(bannerSideEffect?.callExternalId),
-      callRecordStatus: latestCall?.status ?? 'missing',
-      activeCallResolvedFromLinkedId: !!activeCallExternalIdFallback,
+      callRecordStatus: linkedCall?.status ?? 'missing',
     });
     if (lastStateDiagnosticSignature.current === diagnosticSignature) return;
     lastStateDiagnosticSignature.current = diagnosticSignature;
@@ -419,40 +383,9 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
       surface: surface ?? 'unknown',
       resolvedState,
       artifactLifecycleAvailable: !!messageArtifact,
-      callLinkAvailable: !!effectiveBannerSideEffect?.callExternalId,
-      callRecordAvailable: !!latestCall,
-      activeCallResolvedFromLinkedId: !!activeCallExternalIdFallback,
+      callRecordAvailable: !!linkedCall,
     });
-
-    if (
-      canonicalBannerSideEffect &&
-      bannerSideEffect &&
-      (canonicalBannerSideEffect.status !== bannerSideEffect.status ||
-        canonicalBannerSideEffect.callExternalId !== bannerSideEffect.callExternalId)
-    ) {
-      logger.warn(Event.SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED, {
-        artifactKey,
-        surface: surface ?? 'unknown',
-        reason: 'message_and_render_snapshot_lifecycle_mismatch',
-        canonicalStatus: canonicalBannerSideEffect.status,
-        snapshotStatus: bannerSideEffect.status,
-        callLinkMatches:
-          canonicalBannerSideEffect.callExternalId === bannerSideEffect.callExternalId,
-      });
-    }
-  }, [
-    artifactKey,
-    bannerSideEffect,
-    canonicalBannerSideEffect,
-    channelId,
-    conversationId,
-    effectiveBannerSideEffect?.callExternalId,
-    activeCallExternalIdFallback,
-    latestCall,
-    messageArtifact,
-    resolvedState,
-    surface,
-  ]);
+  }, [artifactKey, channelId, conversationId, linkedCall, messageArtifact, resolvedState, surface]);
 
   return (
     <section
@@ -461,13 +394,13 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     >
       <div className='flex items-center gap-2 px-4 pt-4 text-xs'>
         <span className='rounded border border-orange-200 bg-orange-50 px-2 py-0.5 font-bold text-orange-600 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-400'>
-          SEV2
+          {definition.badge}
         </span>
         <span className='min-w-0 truncate text-muted-foreground'>
           <span>{senderName}</span> declared an incident
           {createdAt ? ` · ${formatTimeAmPm(createdAt)}` : ''}
         </span>
-        {(hasActiveCall || showEndedState) && (
+        {(hasActiveCall || isCompleted) && (
           <span className='ml-auto inline-flex shrink-0 items-center gap-1.5 text-muted-foreground'>
             <Users className='size-3.5' />
             {hasActiveCall
@@ -480,7 +413,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
       <div className='px-4 py-3 text-sm leading-6 text-foreground'>{children}</div>
 
       <div className='flex flex-wrap items-center gap-2 px-4 pb-4'>
-        {showEndedState ? (
+        {isCompleted ? (
           <>
             <div className='inline-flex h-10 items-center gap-2 rounded-lg bg-muted px-3 text-sm font-medium text-muted-foreground'>
               <Phone className='size-4' />
@@ -517,7 +450,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
               }}
               disabled={!hasActiveCall && isInCall}
               className='inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60'
-              aria-label={hasActiveCall && !isInSev2Call ? 'Join call' : undefined}
+              aria-label={hasActiveCall && !isInArtifactCall ? 'Join call' : undefined}
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
               data-track-name={hasActiveCall ? 'JOIN_CALL' : 'START_CALL'}
@@ -575,29 +508,22 @@ export const SlashCommandArtifactNode: React.FC<{
 }> = ({ node, children }) => {
   const parsedProps = slashCommandArtifactPropsSchema.safeParse(node.props);
   const { messageId, conversationId, messageContext } = useFlow();
-  if (!parsedProps.success || !isSlashCommandArtifactType(parsedProps.data.command)) return null;
+  const definition = parsedProps.success
+    ? getSlashCommandArtifactDefinition(parsedProps.data.command)
+    : null;
+  if (!definition) return null;
 
-  switch (parsedProps.data.command) {
-    case 'sev2': {
-      const bannerSideEffect = parsedProps.data.sideEffects.find(
-        (sideEffect): sideEffect is SlashCommandArtifactBannerSideEffect =>
-          sideEffect.type === 'banner',
-      );
-      return (
-        <Sev2SlashCommandArtifact
-          messageId={messageId}
-          conversationId={conversationId}
-          {...(messageContext?.channelId && { channelId: messageContext.channelId })}
-          {...(messageContext?.senderId && { senderId: messageContext.senderId })}
-          {...(messageContext?.createdAt !== undefined && { createdAt: messageContext.createdAt })}
-          {...(messageContext?.surface && { surface: messageContext.surface })}
-          {...(bannerSideEffect && { bannerSideEffect })}
-        >
-          {children}
-        </Sev2SlashCommandArtifact>
-      );
-    }
-  }
+  return (
+    <SlashCommandArtifactCard
+      definition={definition}
+      messageId={messageId}
+      conversationId={conversationId}
+      {...(messageContext?.channelId && { channelId: messageContext.channelId })}
+      {...(messageContext?.senderId && { senderId: messageContext.senderId })}
+      {...(messageContext?.createdAt !== undefined && { createdAt: messageContext.createdAt })}
+      {...(messageContext?.surface && { surface: messageContext.surface })}
+    >
+      {children}
+    </SlashCommandArtifactCard>
+  );
 };
-
-export type { SlashCommandArtifactBannerSideEffect };

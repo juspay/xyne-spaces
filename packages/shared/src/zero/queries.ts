@@ -36,7 +36,6 @@ import {
   TicketStageRequestStatus,
   MailboxState,
   MessageArtifactStatus,
-  MessageArtifactType,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -535,13 +534,12 @@ export const queries = defineQueries({
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
-      .where('type', MessageArtifactType.SLASH_COMMAND)
       .where('status', MessageArtifactStatus.ACTIVE)
       // Banner delivery is participant-only even when public channel messages are readable.
       .whereExists('channelParticipants', participant =>
         participant.where('userId', ctx.userID),
       )
-      .orderBy('updatedAt', 'desc'),
+      .orderBy('messageCreatedAt', 'desc'),
   ),
 
   slashCommandArtifactByMessageId: defineQuery(

@@ -23,7 +23,7 @@ import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMe
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { getSev2SlashCommandArtifactPreviewText } from '../SlashCommandArtifacts';
+import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
 
 interface DmListItemProps {
   channel: Channel;
@@ -101,8 +101,7 @@ export const DmListItem = ({
     [lastMessage?.content],
   );
   const slashCommandArtifactPreviewText = useMemo(
-    () =>
-      lastMessage?.content ? getSev2SlashCommandArtifactPreviewText(lastMessage.content) : null,
+    () => (lastMessage?.content ? getSlashCommandArtifactPreviewText(lastMessage.content) : null),
     [lastMessage?.content],
   );
 

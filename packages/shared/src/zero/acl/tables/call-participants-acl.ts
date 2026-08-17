@@ -1,5 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
+import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
@@ -33,6 +34,7 @@ export class CallParticipantsACL extends BaseQueryACL<'call_participants'> {
           exists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
+              .where('visibility', '=', ChannelVisibility.PUBLIC)
               .whereExists('participants', (p) => p.where('userId', this.ctx.userID))
           )
         )

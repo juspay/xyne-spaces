@@ -499,6 +499,8 @@ export class CallController {
         return;
       }
 
+      // A call may only be linked to an artifact that lives in the conversation
+      // being called, and only when its command actually owns a call.
       if (artifactMessageId) {
         if (typeof artifactMessageId !== 'string' || !conversationId) {
           res.status(400).json({
@@ -516,7 +518,8 @@ export class CallController {
           },
           select: { content: true },
         });
-        if (!parseSlashCommandArtifactMessage(artifactMessage?.content)) {
+        const artifact = parseSlashCommandArtifactMessage(artifactMessage?.content);
+        if (!artifact?.definition.linksCall) {
           res.status(400).json({ success: false, error: 'Invalid slash-command artifact' });
           return;
         }
