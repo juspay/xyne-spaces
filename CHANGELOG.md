@@ -1,3 +1,11 @@
+## [1.189.1](https://github.com/juspay/xyne-spaces/compare/v1.189.0...v1.189.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* stop the recording pill from claiming its own macOS full-screen Space ([#636](https://github.com/juspay/xyne-spaces/issues/636)) ([6dc1a45](https://github.com/juspay/xyne-spaces/commit/6dc1a452edc0bac50a3eb941217af8664c1648d9))
+* unify AI screen background styles across components ([#635](https://github.com/juspay/xyne-spaces/issues/635)) ([8202dd9](https://github.com/juspay/xyne-spaces/commit/8202dd9df67f2f5ea87c1e109664a4c17d4e28ff))
+
 ## [1.189.0](https://github.com/juspay/xyne-spaces/compare/v1.188.0...v1.189.0) (2026-08-17)
 
 
