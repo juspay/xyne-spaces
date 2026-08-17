@@ -1,7 +1,19 @@
 /**
  * Web Worker for XyneAI Streaming
  * Runs API calls on a separate thread to avoid blocking the main UI thread
+ *
+ * The wire-body serialization and SSE framing now live in the platform-agnostic
+ * Ask AI stream core (`@xyne/shared/askAI`) so the dashboard (web) and the native
+ * mobile app share ONE serializer + parser and can't drift. This worker keeps the
+ * web-specific transport concerns: `fetch`, cookie credentials, the read loop,
+ * abort handling, and the worker<->main postMessage protocol.
  */
+
+import {
+  buildAskAIRequestBody,
+  createAskAISSEParser,
+  type AskAIRequestInput,
+} from '@xyne/shared/askAI';
 
 // Worker message types
 export interface WorkerStartStreamMessage {
@@ -9,59 +21,8 @@ export interface WorkerStartStreamMessage {
   payload: {
     streamId: string;
     url: string;
-    requestBody: {
-      query: string;
-      displayQuery?: string;
-      channelIds: string[];
-      collectionIds?: string[];
-      fileIds?: string[];
-      canvasIds?: string[];
-      ticketIds?: string[];
-      callIds?: string[];
-      attachedContext?: Array<{
-        type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
-        id: string;
-        title: string;
-        threadId?: string;
-        eventName?: string;
-        eventCategory?: string;
-        timestamp?: string;
-        metadata?: Record<string, unknown>;
-        relatedData?: Record<string, unknown>;
-      }>;
-      conversationId: string;
-      sessionId: string;
-      webSearchEnabled: boolean;
-      deepResearchEnabled?: boolean;
-      createCanvasEnabled?: boolean;
-      /** Single search + single answer pass instead of the full agentic tool
-       *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
-      instant?: boolean;
-      researchContext?: { type: string; id?: string; name: string } | null;
-      canvasId?: string;
-      messageAttachmentIds?: string[];
-      attachments?: Array<{
-        data: string;
-        mimeType: string;
-        filename: string;
-      }>;
-      parentMessageId?: string;
-      isRegenerate?: boolean;
-      // Branching: edit-user signals that the new user message is a sibling
-      // of `editedUserMessageId` under `parentAssistantMessageId` (the
-      // assistant parent the original lived under). claw-auth uses these to
-      // clone the PI session BEFORE the original user msg so the LLM session
-      // doesn't include the old turn as context.
-      isEditUserMessage?: boolean;
-      editedUserMessageId?: string;
-      parentAssistantMessageId?: string;
-      draftMode?: boolean;
-      version?: 'v1' | 'v2';
-      disableTools?: boolean;
-      agentSlug?: string;
-      /** Per-run model pin from the composer's model picker. */
-      model?: string;
-    };
+    // The camelCase Ask AI request shape is defined once in the shared core.
+    requestBody: AskAIRequestInput;
   };
 }
 
@@ -112,7 +73,7 @@ const activeStreams = new Map<string, AbortController>();
 async function executeStream(
   streamId: string,
   url: string,
-  requestBody: WorkerStartStreamMessage['payload']['requestBody'],
+  requestBody: AskAIRequestInput,
 ): Promise<void> {
   const abortController = new AbortController();
   activeStreams.set(streamId, abortController);
@@ -127,68 +88,8 @@ async function executeStream(
         Accept: 'text/event-stream',
       },
       credentials: 'include',
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      body: JSON.stringify({
-        query: requestBody.query,
-        ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
-        /* eslint-disable @typescript-eslint/naming-convention */
-        channel_ids: requestBody.channelIds,
-        ...(requestBody.collectionIds &&
-          requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
-        ...(requestBody.fileIds &&
-          requestBody.fileIds.length > 0 && { file_ids: requestBody.fileIds }),
-        ...(requestBody.canvasIds &&
-          requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
-        ...(requestBody.ticketIds &&
-          requestBody.ticketIds.length > 0 && { ticket_ids: requestBody.ticketIds }),
-        ...(requestBody.callIds &&
-          requestBody.callIds.length > 0 && { call_ids: requestBody.callIds }),
-        ...(requestBody.attachedContext &&
-          requestBody.attachedContext.length > 0 && {
-            attached_context: requestBody.attachedContext,
-          }),
-        conversation_id: requestBody.conversationId,
-        session_id: requestBody.sessionId,
-        web_search_enabled: requestBody.webSearchEnabled,
-        deep_research_enabled: requestBody.deepResearchEnabled ?? false,
-        create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
-        instant: requestBody.instant ?? false,
-        research_context: requestBody.researchContext ?? null,
-        ...(requestBody.canvasId && {
-          canvas_id: requestBody.canvasId,
-        }),
-        ...(requestBody.messageAttachmentIds &&
-          requestBody.messageAttachmentIds.length > 0 && {
-            message_attachment_ids: requestBody.messageAttachmentIds,
-          }),
-        ...(requestBody.attachments &&
-          requestBody.attachments.length > 0 && {
-            attachments: requestBody.attachments.map(a => ({
-              data: a.data,
-              mime_type: a.mimeType,
-              filename: a.filename,
-            })),
-          }),
-        ...(requestBody.parentMessageId && {
-          parent_message_id: requestBody.parentMessageId,
-        }),
-        ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
-        ...(requestBody.isEditUserMessage && {
-          is_edit_user_message: requestBody.isEditUserMessage,
-        }),
-        ...(requestBody.editedUserMessageId && {
-          edited_user_message_id: requestBody.editedUserMessageId,
-        }),
-        ...(requestBody.parentAssistantMessageId && {
-          parent_assistant_message_id: requestBody.parentAssistantMessageId,
-        }),
-        ...(requestBody.draftMode && { draft_mode: true }),
-        ...(requestBody.version && { version: requestBody.version }),
-        ...(requestBody.disableTools && { disable_tools: true }),
-        ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
-        ...(requestBody.model && { model: requestBody.model }),
-        /* eslint-enable @typescript-eslint/naming-convention */
-      }),
+      // Serialization is shared with native via @xyne/shared/askAI.
+      body: JSON.stringify(buildAskAIRequestBody(requestBody)),
       signal: abortController.signal,
     });
 
@@ -202,7 +103,8 @@ async function executeStream(
       throw new Error('No response body');
     }
 
-    let buffer = '';
+    // SSE framing/JSON/heartbeat handling is shared with native.
+    const parser = createAskAISSEParser();
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
     while (true) {
@@ -215,35 +117,21 @@ async function executeStream(
       if (done) break;
 
       const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const events = parser.push(chunk, err => {
+        // eslint-disable-next-line no-console
+        console.error('[XyneAIWorker] Failed to parse SSE event:', err);
+      });
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const parsed: unknown = JSON.parse(line.slice(6));
-            if (typeof parsed !== 'object' || parsed === null) continue;
-
-            const data = parsed as Record<string, unknown>;
-
-            // Ignore heartbeat pings sent to keep the connection alive
-            if (data['type'] === 'ping') continue;
-
-            // Send chunk to main thread
-            const message: WorkerStreamChunkMessage = {
-              type: 'STREAM_CHUNK',
-              payload: {
-                streamId,
-                data,
-              },
-            };
-            self.postMessage(message);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[XyneAIWorker] Failed to parse SSE event:', err);
-          }
-        }
+      for (const data of events) {
+        // Send chunk to main thread
+        const message: WorkerStreamChunkMessage = {
+          type: 'STREAM_CHUNK',
+          payload: {
+            streamId,
+            data: data as Record<string, unknown>,
+          },
+        };
+        self.postMessage(message);
       }
     }
 

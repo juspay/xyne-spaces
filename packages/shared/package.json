@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./askAI": {
+      "types": "./dist/askAI/index.d.ts",
+      "import": "./dist/askAI/index.js",
+      "default": "./dist/askAI/index.js"
+    },
     "./zero": {
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",
