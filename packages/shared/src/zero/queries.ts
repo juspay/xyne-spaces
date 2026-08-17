@@ -3511,6 +3511,13 @@ export const queries = defineQueries({
       return zql.board_complexity_scores.where('userGroupId', userGroupId).related('board');
     },
   ),
+  // Query for user workload mappings (activeTasks/totalTasks per user per board)
+  getUserWorkloadMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_workload_mappings.where('userGroupId', userGroupId);
+    },
+  ),
   // Query for user expertise mappings for a board
   getUserExpertiseMappings: defineQuery(
     z.object({ userGroupId: z.string(), boardId: z.string() }),

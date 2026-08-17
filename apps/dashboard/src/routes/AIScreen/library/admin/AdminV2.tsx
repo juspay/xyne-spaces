@@ -171,7 +171,7 @@ export default function AdminV2(): ReactElement {
 
   return (
     <div className='max-w-ai-content mx-auto flex h-full min-h-0 w-full flex-col px-6'>
-      <div className='flex shrink-0 flex-col bg-background'>
+      <div className='bg-background flex shrink-0 flex-col'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-tight tracking-tight text-foreground'>
@@ -281,7 +281,7 @@ export default function AdminV2(): ReactElement {
         </AdminFooterSlotProvider>
       </AdminToolbarSlotProvider>
 
-      <div ref={setFooterSlot} className='mt-auto shrink-0 bg-background py-3 empty:hidden' />
+      <div ref={setFooterSlot} className='bg-background mt-auto shrink-0 py-3 empty:hidden' />
     </div>
   );
 }

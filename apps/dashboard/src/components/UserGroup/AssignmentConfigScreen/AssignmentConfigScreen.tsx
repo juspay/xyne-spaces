@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { formatExpiryTime } from '../../../utils/statusUtils';
 import { OnCallRotationModal } from '../OnCallRotationModal/OnCallRotationModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { VisibilityTab } from './VisibilityTab';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -53,6 +54,7 @@ export const AssignmentConfigScreen = ({
   const [percentageError, setPercentageError] = useState<string | null>(null);
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
+  const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
 
   // Current time for active set calculation (updates every 5 minutes)
   const [currentTime, setCurrentTime] = useState(Date.now());
@@ -86,6 +88,8 @@ export const AssignmentConfigScreen = ({
   const [userAssignmentStates] = useCachedQuery(queries.getUserAssignmentStates({ userGroupId }));
 
   const [boardComplexityScores] = useCachedQuery(queries.getBoardComplexityScores({ userGroupId }));
+
+  const [userWorkloadMappings] = useCachedQuery(queries.getUserWorkloadMappings({ userGroupId }));
 
   const [expertiseMappings] = useCachedQuery(
     selectedBoardId
@@ -273,7 +277,7 @@ export const AssignmentConfigScreen = ({
     userGroup?.reassignOnUnavailable,
   ]);
 
-  const boards = allBoards || [];
+  const boards = useMemo(() => allBoards || [], [allBoards]);
 
   const handleToggleOnCall = (userId: string): void => {
     const currentState = localUserStates.get(userId);
@@ -852,299 +856,352 @@ export const AssignmentConfigScreen = ({
       {/* Main Content */}
       <div className='flex-1 overflow-y-auto'>
         <div className='mx-auto w-full max-w-[1040px] space-y-4 px-4 pb-8 pt-8'>
-          {/* Group-Level Rotation Configuration */}
-          <div className='rounded-2xl border border-border bg-card p-4'>
-            <div className='mb-4'>
-              <h2 className='text-sm font-semibold text-foreground'>On-call rotation</h2>
-              <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
-                Rotate on-call status across team sets automatically.
-              </p>
-            </div>
+          {/* Tabs */}
+          <div className='flex gap-1 rounded-xl border border-border bg-muted/40 p-1'>
+            <button
+              type='button'
+              onClick={() => setActiveTab('availability')}
+              className={cn(
+                'flex-1 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
+                activeTab === 'availability'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              data-track-category='UserGroups'
+              data-track-name='AssignmentTabAvailability'
+            >
+              Availability
+            </button>
+            <button
+              type='button'
+              onClick={() => setActiveTab('visibility')}
+              className={cn(
+                'flex-1 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
+                activeTab === 'visibility'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              data-track-category='UserGroups'
+              data-track-name='AssignmentTabVisibility'
+            >
+              Visibility
+            </button>
+          </div>
 
-            <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
-              <div className='min-w-0'>
-                <span className='block text-[13px] font-medium text-foreground'>
-                  Enable auto-rotation
-                </span>
-                <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
-                  On-call status moves to the next set on the interval you choose.
-                </p>
-              </div>
-              <Switch
-                checked={localAutoRotationEnabled}
-                onCheckedChange={checked => {
-                  setLocalAutoRotationEnabled(checked);
-                  setHasChanges(true);
-                }}
-              />
-            </div>
+          {activeTab === 'availability' && (
+            <>
+              {/* Group-Level Rotation Configuration */}
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-sm font-semibold text-foreground'>On-call rotation</h2>
+                  <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                    Rotate on-call status across team sets automatically.
+                  </p>
+                </div>
 
-            {localAutoRotationEnabled && (
-              <div className='mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4'>
-                <div className='flex flex-col gap-2'>
-                  <span className='text-[13px] font-medium text-foreground'>Rotation interval</span>
-                  <Select
-                    value={localRotationInterval}
-                    onValueChange={value => {
-                      setLocalRotationInterval(value as RotationInterval);
+                <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
+                  <div className='min-w-0'>
+                    <span className='block text-[13px] font-medium text-foreground'>
+                      Enable auto-rotation
+                    </span>
+                    <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                      On-call status moves to the next set on the interval you choose.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={localAutoRotationEnabled}
+                    onCheckedChange={checked => {
+                      setLocalAutoRotationEnabled(checked);
                       setHasChanges(true);
                     }}
+                  />
+                </div>
+
+                {localAutoRotationEnabled && (
+                  <div className='mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4'>
+                    <div className='flex flex-col gap-2'>
+                      <span className='text-[13px] font-medium text-foreground'>
+                        Rotation interval
+                      </span>
+                      <Select
+                        value={localRotationInterval}
+                        onValueChange={value => {
+                          setLocalRotationInterval(value as RotationInterval);
+                          setHasChanges(true);
+                        }}
+                      >
+                        <SelectTrigger
+                          className='w-[200px]'
+                          aria-label='Rotation interval'
+                          data-track-category='UserGroups'
+                          data-track-name='ChangeRotationInterval'
+                        >
+                          <SelectValue placeholder='Select an interval' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ROTATION_INTERVAL_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <Button variant='outline' onClick={() => setIsRotationModalOpen(true)}>
+                      <Settings02 size={16} />
+                      Configure on-call sets
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Allow reassignment on unavailability */}
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-sm font-semibold text-foreground'>
+                    Allow reassignment on unavailability
+                  </h2>
+                  <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                    Let members of this group choose whether to hand off their existing open tickets
+                    when they pause ticket assignment.
+                  </p>
+                </div>
+
+                <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
+                  <div className='min-w-0'>
+                    <span className='block text-[13px] font-medium text-foreground'>
+                      Allow existing-ticket reassignment
+                    </span>
+                    <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                      Members can opt in from the pause dialog. If no eligible replacement exists,
+                      their tickets stay assigned to them.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={localReassignOnUnavailable}
+                    onCheckedChange={checked => {
+                      setLocalReassignOnUnavailable(checked);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Board Filter */}
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='flex flex-col gap-2'>
+                  <span className='text-[13px] font-medium text-foreground'>Filter by board</span>
+                  <Select
+                    value={selectedBoardId ?? ALL_BOARDS_VALUE}
+                    onValueChange={value =>
+                      setSelectedBoardId(value === ALL_BOARDS_VALUE ? null : value)
+                    }
                   >
                     <SelectTrigger
-                      className='w-[200px]'
-                      aria-label='Rotation interval'
+                      className='w-full max-w-[320px]'
+                      aria-label='Filter by board'
                       data-track-category='UserGroups'
-                      data-track-name='ChangeRotationInterval'
+                      data-track-name='SelectBoardFilter'
                     >
-                      <SelectValue placeholder='Select an interval' />
+                      <SelectValue placeholder='All boards' />
                     </SelectTrigger>
                     <SelectContent>
-                      {ROTATION_INTERVAL_OPTIONS.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
+                      <SelectItem value={ALL_BOARDS_VALUE}>All boards</SelectItem>
+                      {boards.map((board: Board) => (
+                        <SelectItem key={board.id} value={board.id}>
+                          {board.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                <Button variant='outline' onClick={() => setIsRotationModalOpen(true)}>
-                  <Settings02 size={16} />
-                  Configure on-call sets
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Allow reassignment on unavailability */}
-          <div className='rounded-2xl border border-border bg-card p-4'>
-            <div className='mb-4'>
-              <h2 className='text-sm font-semibold text-foreground'>
-                Allow reassignment on unavailability
-              </h2>
-              <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
-                Let members of this group choose whether to hand off their existing open tickets
-                when they pause ticket assignment.
-              </p>
-            </div>
-
-            <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
-              <div className='min-w-0'>
-                <span className='block text-[13px] font-medium text-foreground'>
-                  Allow existing-ticket reassignment
-                </span>
-                <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
-                  Members can opt in from the pause dialog. If no eligible replacement exists, their
-                  tickets stay assigned to them.
-                </p>
-              </div>
-              <Switch
-                checked={localReassignOnUnavailable}
-                onCheckedChange={checked => {
-                  setLocalReassignOnUnavailable(checked);
-                  setHasChanges(true);
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Board Filter */}
-          <div className='rounded-2xl border border-border bg-card p-4'>
-            <div className='flex flex-col gap-2'>
-              <span className='text-[13px] font-medium text-foreground'>Filter by board</span>
-              <Select
-                value={selectedBoardId ?? ALL_BOARDS_VALUE}
-                onValueChange={value =>
-                  setSelectedBoardId(value === ALL_BOARDS_VALUE ? null : value)
-                }
-              >
-                <SelectTrigger
-                  className='w-full max-w-[320px]'
-                  aria-label='Filter by board'
-                  data-track-category='UserGroups'
-                  data-track-name='SelectBoardFilter'
-                >
-                  <SelectValue placeholder='All boards' />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_BOARDS_VALUE}>All boards</SelectItem>
-                  {boards.map((board: Board) => (
-                    <SelectItem key={board.id} value={board.id}>
-                      {board.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className='text-xs leading-[1.4] text-muted-foreground'>
-                Pick a board to set per-board weight, expertise and share.
-              </p>
-            </div>
-          </div>
-
-          {/* Board Weight Configuration - Only shown when a specific board is selected */}
-          {selectedBoardId && (
-            <div className='rounded-2xl border border-border bg-card p-4'>
-              <div className='flex flex-col gap-2'>
-                <label htmlFor='board-weight' className='text-[13px] font-medium text-foreground'>
-                  Board weight
-                </label>
-                <p className='text-xs leading-[1.4] text-muted-foreground'>
-                  Higher weights increase how much this board&apos;s tickets count towards a
-                  person&apos;s workload. Range: 1 to 100.
-                </p>
-                <Input
-                  type='text'
-                  inputMode='numeric'
-                  id='board-weight'
-                  value={boardWeight}
-                  onChange={e => handleBoardWeightChange(e.target.value)}
-                  onBlur={() => {
-                    // Reset to 1 if empty or invalid on blur
-                    const numValue = parseInt(boardWeight);
-                    if (isNaN(numValue) || numValue < 1) {
-                      setBoardWeight('1');
-                      setLocalBoardWeight(1);
-                      setHasChanges(true);
-                    }
-                  }}
-                  placeholder='1'
-                  className='mt-1 w-24 text-sm'
-                  data-track-event='change'
-                  data-track-category='UserGroups'
-                  data-track-name='SetBoardWeight'
-                />
-              </div>
-
-              <div className='mt-4 flex items-center justify-between gap-4 border-t border-border pt-4'>
-                <div className='min-w-0'>
-                  <span className='block text-[13px] font-medium text-foreground'>
-                    Use percentage assignment
-                  </span>
-                  <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
-                    Distribute tickets by % share instead of standard workload balancing.
+                  <p className='text-xs leading-[1.4] text-muted-foreground'>
+                    Pick a board to set per-board weight, expertise and share.
                   </p>
                 </div>
-                <Switch
-                  checked={localUsePercentage}
-                  onCheckedChange={checked => {
-                    setLocalUsePercentage(checked);
-                    setHasChanges(true);
-                  }}
-                />
               </div>
-            </div>
-          )}
 
-          {/* User Assignment Table - Grouped by Set when rotation is enabled */}
-          {localAutoRotationEnabled ? (
-            // Render users grouped by set
-            <div className='space-y-6'>
-              {Array.from({ length: currentMaxSet }, (_, i) => i + 1).map(renderSetSection)}
-            </div>
-          ) : (
-            // Render flat user list when rotation is disabled
-            <div className='overflow-hidden rounded-2xl border border-border bg-card'>
-              <table className='min-w-full divide-y divide-border'>
-                <thead className='bg-muted/50'>
-                  <tr>
-                    <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
-                    <th className={cn(TABLE_HEAD_CELL, 'text-center')}>On-Call</th>
-                    <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Active</th>
-                    {selectedBoardId && (
-                      <>
-                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
-                          Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
-                        </th>
-                        {localUsePercentage && (
+              {/* Board Weight Configuration - Only shown when a specific board is selected */}
+              {selectedBoardId && (
+                <div className='rounded-2xl border border-border bg-card p-4'>
+                  <div className='flex flex-col gap-2'>
+                    <label
+                      htmlFor='board-weight'
+                      className='text-[13px] font-medium text-foreground'
+                    >
+                      Board weight
+                    </label>
+                    <p className='text-xs leading-[1.4] text-muted-foreground'>
+                      Higher weights increase how much this board&apos;s tickets count towards a
+                      person&apos;s workload. Range: 1 to 100.
+                    </p>
+                    <Input
+                      type='text'
+                      inputMode='numeric'
+                      id='board-weight'
+                      value={boardWeight}
+                      onChange={e => handleBoardWeightChange(e.target.value)}
+                      onBlur={() => {
+                        // Reset to 1 if empty or invalid on blur
+                        const numValue = parseInt(boardWeight);
+                        if (isNaN(numValue) || numValue < 1) {
+                          setBoardWeight('1');
+                          setLocalBoardWeight(1);
+                          setHasChanges(true);
+                        }
+                      }}
+                      placeholder='1'
+                      className='mt-1 w-24 text-sm'
+                      data-track-event='change'
+                      data-track-category='UserGroups'
+                      data-track-name='SetBoardWeight'
+                    />
+                  </div>
+
+                  <div className='mt-4 flex items-center justify-between gap-4 border-t border-border pt-4'>
+                    <div className='min-w-0'>
+                      <span className='block text-[13px] font-medium text-foreground'>
+                        Use percentage assignment
+                      </span>
+                      <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                        Distribute tickets by % share instead of standard workload balancing.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={localUsePercentage}
+                      onCheckedChange={checked => {
+                        setLocalUsePercentage(checked);
+                        setHasChanges(true);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* User Assignment Table - Grouped by Set when rotation is enabled */}
+              {localAutoRotationEnabled ? (
+                // Render users grouped by set
+                <div className='space-y-6'>
+                  {Array.from({ length: currentMaxSet }, (_, i) => i + 1).map(renderSetSection)}
+                </div>
+              ) : (
+                // Render flat user list when rotation is disabled
+                <div className='overflow-hidden rounded-2xl border border-border bg-card'>
+                  <table className='min-w-full divide-y divide-border'>
+                    <thead className='bg-muted/50'>
+                      <tr>
+                        <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
+                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>On-Call</th>
+                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Active</th>
+                        {selectedBoardId && (
                           <>
                             <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
-                              % Share
-                              <span
-                                className={cn(
-                                  'mt-1 block text-xs font-normal normal-case tracking-normal',
-                                  totalPercentage === 100
-                                    ? 'text-status-success'
-                                    : 'text-status-failure',
-                                )}
-                              >
-                                Total: {totalPercentage}%
-                              </span>
+                              Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
                             </th>
-                            <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Max Tickets</th>
+                            {localUsePercentage && (
+                              <>
+                                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                                  % Share
+                                  <span
+                                    className={cn(
+                                      'mt-1 block text-xs font-normal normal-case tracking-normal',
+                                      totalPercentage === 100
+                                        ? 'text-status-success'
+                                        : 'text-status-failure',
+                                    )}
+                                  >
+                                    Total: {totalPercentage}%
+                                  </span>
+                                </th>
+                                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Max Tickets</th>
+                              </>
+                            )}
                           </>
                         )}
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className='divide-y divide-border'>
-                  {users.map(renderUserRow)}
-                  {users.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
-                        className='px-6 py-8 text-center text-[13px] text-muted-foreground'
-                      >
-                        This group has no members yet. Add people to the group to configure
-                        assignment.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-border'>
+                      {users.map(renderUserRow)}
+                      {users.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
+                            className='px-6 py-8 text-center text-[13px] text-muted-foreground'
+                          >
+                            This group has no members yet. Add people to the group to configure
+                            assignment.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Percentage Error Message */}
+              {percentageError && (
+                <div
+                  role='alert'
+                  className='rounded-2xl border border-destructive/30 bg-destructive/10 p-4'
+                >
+                  <p className='text-[13px] text-destructive'>{percentageError}</p>
+                </div>
+              )}
+
+              {/* Info Section */}
+              <div className='rounded-2xl border border-border bg-muted/40 p-4'>
+                <h3 className='mb-2 text-sm font-semibold text-foreground'>
+                  How auto-assignment works
+                </h3>
+                <ul className='list-inside list-disc space-y-1 text-[13px] leading-[1.5] text-muted-foreground'>
+                  <li>
+                    <strong className='font-medium text-foreground'>Eligibility</strong>: people
+                    must be Active. On-Call is preferred but not required. Where expertise is set,
+                    experts go first.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>Score</strong>: the lowest score
+                    gets the ticket —{' '}
+                    <code className='font-mono text-xs'>
+                      weightedActiveTasks − expertiseBonus − percentDiff
+                    </code>
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>Expertise bonus</strong>:
+                    experts get −10 points, which moves them up the queue.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>% Share</strong>: anyone below
+                    their target share gets priority, which evens out distribution.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>Max tickets</strong>: people at
+                    their limit are skipped. Leave it empty for no limit.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>Board weight</strong>:
+                    multiplies ticket impact. A weight of 2 makes one ticket count as two.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>On-call rotation</strong>: only
+                    the active set receives tickets, and it advances on the interval you set.
+                  </li>
+                </ul>
+              </div>
+            </>
           )}
 
-          {/* Percentage Error Message */}
-          {percentageError && (
-            <div
-              role='alert'
-              className='rounded-2xl border border-destructive/30 bg-destructive/10 p-4'
-            >
-              <p className='text-[13px] text-destructive'>{percentageError}</p>
-            </div>
+          {activeTab === 'visibility' && (
+            <VisibilityTab
+              users={users}
+              boards={boards}
+              selectedBoardId={selectedBoardId}
+              onSelectBoard={setSelectedBoardId}
+              workloadMappings={userWorkloadMappings}
+              boardComplexityScores={boardComplexityScores}
+              expertiseMappings={expertiseMappings}
+            />
           )}
-
-          {/* Info Section */}
-          <div className='rounded-2xl border border-border bg-muted/40 p-4'>
-            <h3 className='mb-2 text-sm font-semibold text-foreground'>
-              How auto-assignment works
-            </h3>
-            <ul className='list-inside list-disc space-y-1 text-[13px] leading-[1.5] text-muted-foreground'>
-              <li>
-                <strong className='font-medium text-foreground'>Eligibility</strong>: people must be
-                Active. On-Call is preferred but not required. Where expertise is set, experts go
-                first.
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>Score</strong>: the lowest score
-                gets the ticket —{' '}
-                <code className='font-mono text-xs'>
-                  weightedActiveTasks − expertiseBonus − percentDiff
-                </code>
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>Expertise bonus</strong>: experts
-                get −10 points, which moves them up the queue.
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>% Share</strong>: anyone below their
-                target share gets priority, which evens out distribution.
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>Max tickets</strong>: people at
-                their limit are skipped. Leave it empty for no limit.
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>Board weight</strong>: multiplies
-                ticket impact. A weight of 2 makes one ticket count as two.
-              </li>
-              <li>
-                <strong className='font-medium text-foreground'>On-call rotation</strong>: only the
-                active set receives tickets, and it advances on the interval you set.
-              </li>
-            </ul>
-          </div>
         </div>
       </div>
 

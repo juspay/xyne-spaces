@@ -2,6 +2,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 
 export const CALENDAR_SYNC_LOOKAHEAD_DAYS = 30;
 export const MAX_CALENDAR_EVENTS_PER_SYNC = 100;
+export const CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS = 5_000;
 
 const XYNE_TEAM_ELIGIBILITY_FLAG_KEY = 'xyne-team-domains';
 
@@ -66,4 +67,3 @@ export async function isTeamEligible(params: {
 
   return false;
 }
-

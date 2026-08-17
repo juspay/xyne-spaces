@@ -96,7 +96,7 @@ const LibraryV2 = (): ReactElement => {
 
   return (
     <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
-      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+      <div className='bg-background sticky top-0 z-10 flex flex-col'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
