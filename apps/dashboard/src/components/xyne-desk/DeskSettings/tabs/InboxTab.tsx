@@ -1,22 +1,16 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Check, Search, Pencil, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/Select/Select';
 import Avatar from '../../../ui/Avatar/Avatar';
+import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
-import { useUser, useUsers } from '../../../../hooks/useUsers';
+import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
@@ -37,46 +31,6 @@ function filterUsersByQuery(
   const q = query.trim().toLowerCase();
   if (!q) return [];
   return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
-}
-
-/**
- * Only mounted while the owner picker is open, so `useUsers()` (and the org-wide
- * re-renders it brings on every presence/status change) isn't subscribed to at all
- * until the user actually opens the dropdown.
- */
-function OwnerOptions({ search }: { search: string }) {
-  const allUsers = useUsers();
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return allUsers;
-    return allUsers.filter(
-      u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
-    );
-  }, [allUsers, search]);
-
-  if (filtered.length === 0) {
-    return (
-      <div className='px-3 py-4 text-center text-sm text-muted-foreground'>No users found</div>
-    );
-  }
-
-  return (
-    <>
-      {filtered.map(user => (
-        <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
-          <div className='flex items-center gap-2'>
-            <Avatar
-              userId={user.id}
-              size='sm'
-              showActiveStatus={false}
-              className='!size-5 !text-[10px]'
-            />
-            <span>{user.name}</span>
-          </div>
-        </SelectItem>
-      ))}
-    </>
-  );
 }
 
 interface InboxTabProps {
@@ -109,10 +63,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
 
   const [ccInputValue, setCcInputValue] = useState('');
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
-  const [ownerSearch, setOwnerSearch] = useState('');
-  const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
-  const selectedOwner = useUser(ownerId);
-  const ownerSearchInputRef = useRef<HTMLInputElement>(null);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
   const [signatureAutoAppendEnabled, setSignatureAutoAppendEnabled] = useState(
@@ -153,57 +103,18 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               : 'This user will be used to create tickets in this channel'}
           </div>
         </div>
-        <Select
-          value={ownerId}
-          onValueChange={setOwner}
+        <fieldset
           disabled={!canManage}
-          onOpenChange={open => {
-            setOwnerPickerOpen(open);
-            if (!open) setOwnerSearch('');
-          }}
+          className={`w-full max-w-[300px] border-0 p-0 m-0 min-w-0 ${!canManage ? 'opacity-50' : ''}`}
         >
-          <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
-            <SelectValue placeholder='Select owner'>
-              {selectedOwner && (
-                <div className='flex items-center gap-2'>
-                  <Avatar
-                    userId={selectedOwner.id}
-                    size='sm'
-                    showActiveStatus={false}
-                    className='!size-5 !text-[10px]'
-                  />
-                  <span>{selectedOwner.name}</span>
-                </div>
-              )}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent
-            className='rounded-[10px]'
-            header={
-              <div className='flex items-center gap-2 border-b border-border bg-popover px-2 py-1.5'>
-                <Search size={14} className='text-muted-foreground shrink-0' />
-                <input
-                  ref={ownerSearchInputRef}
-                  type='text'
-                  value={ownerSearch}
-                  onChange={e => {
-                    setOwnerSearch(e.target.value);
-                    requestAnimationFrame(() => ownerSearchInputRef.current?.focus());
-                  }}
-                  onKeyDown={e => e.stopPropagation()}
-                  onPointerDown={e => e.stopPropagation()}
-                  placeholder='Search users…'
-                  autoFocus
-                  className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                  data-track-category='DeskSettings'
-                  data-track-name='SearchInboxOwner'
-                />
-              </div>
-            }
-          >
-            {ownerPickerOpen && <OwnerOptions search={ownerSearch} />}
-          </SelectContent>
-        </Select>
+          <UserSelector
+            selectedUserId={ownerId || null}
+            onUserSelect={userId => {
+              if (userId) setOwner(userId);
+            }}
+            channelId={channelId}
+          />
+        </fieldset>
       </div>
 
       {isEmail && (
