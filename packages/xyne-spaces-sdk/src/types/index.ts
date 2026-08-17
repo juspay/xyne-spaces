@@ -847,6 +847,64 @@ export interface SearchOptions {
   sortOrder?: 'asc' | 'desc';
 }
 
+// ----- Claw Types (remote agents) -----
+
+/** A remote agent that can be dispatched to. */
+export interface ClawAgent {
+  slug: string;
+  name?: string;
+  description?: string;
+}
+
+/** A past or in-flight agent run, as listed. */
+export interface ClawSession {
+  sessionId: string;
+  agentSlug?: string;
+  status?: string;
+  title?: string;
+  createdAt?: string;
+}
+
+/** The outcome of one agent run. */
+export interface ClawRun {
+  sessionId: string;
+  status: string;
+  result?: string;
+  error?: string;
+}
+
+export interface ClawRunInput {
+  /** Agent slug, from `listAgents()`. */
+  agent: string;
+  /** The task or prompt to send. */
+  task: string;
+  /**
+   * Reuse an existing conversation to continue a thread. One is generated when
+   * omitted — the run is not pollable without it.
+   */
+  conversationId?: string;
+  /** Post the agent's reply into this Spaces channel or DM. */
+  channelId?: string;
+  /** Ask the server to deliver the reply to the caller's own Spaces DM. */
+  deliverTo?: 'dm';
+}
+
+/** What the user must see to complete a device-flow login. */
+export interface ClawDevicePrompt {
+  /** URL the user opens to authorize. */
+  verifyUrl: string;
+  /** Code the user confirms on that page. */
+  userCode: string;
+  /** Seconds until the request expires. */
+  expiresIn: number;
+}
+
+export interface ClawLoginResult {
+  token: string;
+  userId?: string;
+  email?: string;
+}
+
 // ----- Pagination Types -----
 
 export interface PaginatedResponse<T> {

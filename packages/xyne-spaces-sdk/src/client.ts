@@ -30,6 +30,8 @@ import { IncidentsResource } from './resources/incidents.js';
 import { PreferencesResource } from './resources/preferences.js';
 import { WorkspaceResource } from './resources/workspace.js';
 import { AttachmentsResource } from './resources/attachments.js';
+import { ClawResource } from './resources/claw.js';
+import { ClawAuth, type ClawTokenStore } from './core/claw-auth.js';
 
 export interface SpacesClientOptions {
   /**
@@ -49,6 +51,41 @@ export interface SpacesClientOptions {
    * @default 30000
    */
   timeout?: number;
+
+  /**
+   * Base URL of the Claw service.
+   *
+   * Claw normally shares the Spaces deployment, so this defaults to `baseUrl`.
+   * Override it only when remote agents live somewhere else.
+   */
+  clawBaseUrl?: string;
+
+  /**
+   * Claw access token — a **separate credential** from `token`.
+   *
+   * Claw is served by a different service whose verifier accepts only its own
+   * `xyne_cli_` / `xyne_svc_` tokens, so the Spaces token cannot be reused. Obtain
+   * one with `sdk.claw.login()`, or pass a previously stored value here.
+   */
+  clawToken?: string;
+
+  /**
+   * Where to keep the Claw token between processes.
+   *
+   * The SDK stays browser-safe and dependency-free, so it does not read or write
+   * files itself. Supply a store and `sdk.claw` will load a saved token on first
+   * use and persist a new one after `login()`.
+   *
+   * @example
+   * // Node: share the credential file with the Xyne CLI
+   * const path = join(homedir(), '.xyne', 'agent', 'claw.json');
+   * const store = {
+   *   get: () => existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).token : undefined,
+   *   set: (token) => writeFileSync(path, JSON.stringify({ token }, null, 2)),
+   *   clear: () => rmSync(path, { force: true }),
+   * };
+   */
+  clawTokenStore?: ClawTokenStore;
 }
 
 /**
@@ -74,6 +111,13 @@ export interface SpacesClientOptions {
 export class SpacesClient {
   private readonly http: HttpClient;
   private readonly transport: Transport;
+
+  /**
+   * Claw's own HTTP client. Separate from `http` because Claw carries a different
+   * credential — see `core/claw-auth.ts`.
+   */
+  private readonly clawHttp: HttpClient;
+  private readonly clawAuth: ClawAuth;
 
   /** User operations */
   readonly users: UsersResource;
@@ -147,14 +191,28 @@ export class SpacesClient {
   /** Shared links, repositories, emoji, and reference data */
   readonly workspace: WorkspaceResource;
 
+  /** Remote agents: dispatch, poll, and their own login */
+  readonly claw: ClawResource;
+
   constructor(options: SpacesClientOptions = {}) {
+    const baseUrl = options.baseUrl ?? 'https://spaces.xyne.app';
+
     this.http = new HttpClient({
-      baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
+      baseUrl,
       token: options.token,
       timeout: options.timeout,
     });
 
     this.transport = new Transport(this.http);
+
+    // Claw gets its own client so its credential stays independent of the Spaces
+    // token: refreshing one must never disturb the other.
+    this.clawHttp = new HttpClient({
+      baseUrl: options.clawBaseUrl ?? baseUrl,
+      token: options.clawToken,
+      timeout: options.timeout,
+    });
+    this.clawAuth = new ClawAuth(this.clawHttp, options.clawTokenStore);
 
     // Initialize resources
     this.users = new UsersResource(this.transport);
@@ -181,28 +239,52 @@ export class SpacesClient {
     this.incidents = new IncidentsResource(this.transport);
     this.preferences = new PreferencesResource(this.transport);
     this.workspace = new WorkspaceResource(this.transport);
+    this.claw = new ClawResource(new Transport(this.clawHttp), this.clawAuth);
   }
 
   /**
-   * Set the access token for authentication.
-   * Useful for token refresh scenarios.
+   * Set the Spaces access token.
+   * Useful for token refresh scenarios. Does not affect Claw.
    */
   setToken(token: string): void {
     this.http.setToken(token);
   }
 
   /**
-   * Clear the access token.
+   * Clear the Spaces access token. Does not affect Claw.
    */
   clearToken(): void {
     this.http.clearToken();
   }
 
   /**
-   * Check if the client has an access token set.
+   * Check if the client has a Spaces access token set.
    */
   hasToken(): boolean {
     return this.http.getToken() !== undefined;
+  }
+
+  /**
+   * Set the Claw access token directly, skipping `claw.login()`.
+   *
+   * Separate from `setToken` on purpose: Claw is a different service with a
+   * different credential, and neither token is valid at the other.
+   */
+  setClawToken(token: string): void {
+    this.clawAuth.setToken(token);
+  }
+
+  /**
+   * Clear the Claw access token in memory. Does not affect the Spaces token, and
+   * does not touch a configured token store — use `claw.logout()` for that.
+   */
+  clearClawToken(): void {
+    this.clawHttp.clearToken();
+  }
+
+  /** Check if a Claw token is set. Does not consult the token store. */
+  hasClawToken(): boolean {
+    return this.clawHttp.getToken() !== undefined;
   }
 }
 

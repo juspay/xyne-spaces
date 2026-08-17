@@ -25,6 +25,12 @@
 export { createClient, SpacesClient } from './client.js';
 export type { SpacesClientOptions } from './client.js';
 
+// ----- Claw (remote agents; separate login from Spaces) -----
+export { ClawResource } from './resources/claw.js';
+export type { ClawRunAndWaitInput } from './resources/claw.js';
+export { ClawAuth } from './core/claw-auth.js';
+export type { ClawTokenStore, ClawLoginOptions } from './core/claw-auth.js';
+
 // ----- Error Types -----
 export { decodeAccessToken, isTokenExpired } from './core/token.js';
 export type { CurrentUser } from './core/token.js';
@@ -119,6 +125,13 @@ export type {
   SearchResult,
   SearchResponse,
   SearchOptions,
+  // Claw
+  ClawAgent,
+  ClawSession,
+  ClawRun,
+  ClawRunInput,
+  ClawDevicePrompt,
+  ClawLoginResult,
   // Pagination
   PaginatedResponse,
   PaginationOptions,

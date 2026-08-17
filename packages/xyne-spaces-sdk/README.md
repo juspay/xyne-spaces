@@ -357,6 +357,7 @@ allows data that the approving user can access normally.
 | `sdk.automations` | 13 |
 | `sdk.boards` | 22 |
 | `sdk.calls` | 24 |
+| `sdk.claw` | 7 · [separate login](#claw-remote-agents) |
 | `sdk.canvases` | 38 |
 | `sdk.channels` | 41 |
 | `sdk.collections` | 11 |
@@ -375,6 +376,61 @@ allows data that the approving user can access normally.
 | `sdk.userGroups` | 18 |
 | `sdk.users` | 6 |
 | `sdk.workspace` | 20 |
+
+## Claw: remote agents
+
+`sdk.claw` dispatches tasks to Xyne Claw agents. It is the one resource with **its own login** —
+Claw is served by a different service whose verifier accepts only its own `xyne_cli_` tokens, so
+your Spaces token is not valid there and vice versa. `setToken()` and `setClawToken()` never affect
+each other.
+
+The SDK stays browser-safe and dependency-free, so it cannot open a browser or write a credential
+file. Login runs the device flow and hands you the parts a human has to see:
+
+```typescript
+await sdk.claw.login({
+  onPrompt: ({ verifyUrl, userCode }) =>
+    console.log(`Open ${verifyUrl} and enter ${userCode}`),
+});
+
+const agents = await sdk.claw.listAgents();
+const { run } = await sdk.claw.runAgentAndWait({
+  agent: 'ask-ai',
+  task: 'Summarise yesterday in #deploys',
+  timeoutMs: 600_000,
+});
+if (run.status === 'completed') console.log(run.result);
+```
+
+**Persisting the token** is up to the host, via a small store. In Node, point it at the same file
+the Xyne CLI uses and one login covers both:
+
+```typescript
+const path = join(homedir(), '.xyne', 'agent', 'claw.json');
+
+const sdk = createClient({
+  token: process.env.XYNE_SPACES_TOKEN,
+  clawTokenStore: {
+    get: () => (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).token : undefined),
+    set: (token) => writeFileSync(path, JSON.stringify({ token }, null, 2)),
+    clear: () => rmSync(path, { force: true }),
+  },
+});
+```
+
+With a store configured, `sdk.claw` picks up a saved token on first use — no `login()` needed.
+
+**Runs are asynchronous.** `runAgent` returns as soon as the run exists; `runAgentAndWait` polls for
+you with backoff. A timeout does not cancel the run, so pick it up later:
+
+```typescript
+const { sessionId } = await sdk.claw.runAgent({ agent: 'ask-ai', task: '…' });
+const { run, detail } = await sdk.claw.getRun(sessionId);   // detail = tool calls, timing, tokens
+```
+
+**Replies can land in Spaces.** Pass a `channelId` from `sdk.channels.list()` and the agent posts
+its answer into that thread, or `deliverTo: 'dm'` for your own DM. This is the only place the two
+surfaces meet.
 
 ## Things worth knowing
 
@@ -499,6 +555,9 @@ join(channelId: string): Promise<void> {
 Operations route to one of three backends, chosen per operation and invisible to
 callers: OAuth-protected catalog queries for reads, OAuth-protected catalog
 mutators for writes, and direct API calls for anything outside the catalog.
+`sdk.claw` is the exception that is *not* invisible: it targets a different
+service under `/claw/api/v1` through its own `HttpClient`, because it carries a
+different credential.
 Search established the direct API pattern; server-side channel/ticket creation
 and multipart uploads now use it too. Moving an operation between transports
 does not change the resource method callers use.
