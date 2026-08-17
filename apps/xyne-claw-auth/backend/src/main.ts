@@ -63,6 +63,7 @@ import { settingsRouter } from "./routes/settings.js";
 import { runsRouter } from "./routes/runs.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { memoryRouter } from "./routes/memory.js";
+import { kbRouter } from "./routes/kb.js";
 import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
 import { evalsRouter } from "./routes/evals/index.js";
@@ -95,6 +96,8 @@ import { bootstrapCustomTools } from "./bootstrap-tools.js";
 import { initMemoryCron } from "./services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "./surfaces/slack/config-token-cron.js";
 import { initDigitalTwinDaily } from "./services/digitalTwinDaily.js";
+import { initKbExtractDaily } from "./services/kbExtractDaily.js";
+import { initKbMergeDaily } from "./services/kbMergeDaily.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -300,6 +303,8 @@ app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
 // (not requireUserAuth) because /recall-hits is an S2S callback from xyne-claw.
 // The per-request memoization in require-auth.ts makes the second layer free.
 app.use(`${BASE}/memory`, requireAuth, requireNoAccessToken, memoryRouter);
+// KB filesystem for the curator agent. S2S only — xyne-claw holds no Spaces session.
+app.use(`${BASE}/kb`, requireAuth, kbRouter);
 app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
 app.use(`${BASE}/control-center`, requireAuth, requireNoAccessToken, controlCenterRouter);
 app.use(`${BASE}/research-agent`, requireAuth, requireNoAccessToken, researchAgentRouter);
@@ -360,6 +365,10 @@ listen(CONFIG.port, () => {
     initMemoryCron();
     initSlackConfigTokenCron();
     initDigitalTwinDaily();
+    // People-KB extraction. No-op unless ENABLE_KB_EXTRACT_DAILY=true.
+    initKbExtractDaily();
+    // Findings -> KB pages. No-op unless ENABLE_KB_MERGE_DAILY=true.
+    initKbMergeDaily();
     // Daily Brief: bounded worker (caps concurrent LLM runs) + leader-locked
     // enqueue cron (fans out opted-in users once/day). See services/dailyBrief*.
     initDailyBriefWorker();

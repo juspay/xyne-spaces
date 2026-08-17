@@ -14,6 +14,7 @@ import { buildTwinDeliverMandate } from "./twin-deliver.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
+import { createKbToolMap, type KbTarget } from "./kb-tools.js";
 import { metric } from "./metrics.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
@@ -1282,6 +1283,17 @@ export interface RunTaskOptions {
   userName?: string | undefined;
   userEmail?: string | undefined;
   customTools?: ToolDefinition[] | undefined;
+  /**
+   * When set, read/ls/grep/write/edit operate on this KB collection instead of the
+   * session working directory. The agent sees the same tool names it always
+   * does; only the backing store differs.
+   * Comes from the agent's own `knowledgeBase[]` grant, so the collection is
+   * decided by configuration and the model cannot reach past it. Set only for
+   * agents whose row asks for file-style KB access (`kbAccess: "files"`) —
+   * retrieval agents read the same collection through Vespa and must not get these tools.
+   */
+  kbTarget?: KbTarget | undefined;
+  
   systemPromptOverride?: string | undefined;
   cwd?: string | undefined;
   /** Session key — `${userId}_${rawConversationId}_${agentSlug}` (see progressMeta). */
@@ -1752,7 +1764,30 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // tool registry (agent-session.js:1844-1847 — customTools win on name
   // collision at execution time). The names stay in the allowlist below so they
   // remain active.
-  const scopedFileTools = Object.values(createScopedToolMap(workingDir, fileToolReadRoots));
+  //
+  // KB SESSIONS: when kbTarget is set, these names are backed by a Spaces KB
+  // collection instead of the filesystem (see kb-tools.ts). Two deliberate
+  // differences from the filesystem set:
+  //
+  //   - `find` is NOT provided. Leaving it in the allowlist without a KB
+  //     implementation would let pi's UNSCOPED built-in through, and it walks
+  //     the pod's real disk — the exact hole the comment above describes.
+  //   - `edit` IS provided, because exact-snippet replacement on a page is the
+  //     curator's main operation. It must appear in the allowlist below or pi
+  //     silently drops it.
+  //
+  // Set only for KB-curating agents. Agents that merely answer from a KB use
+  // Vespa retrieval and never reach here, so this map always includes write.
+  const kbTools = opts.kbTarget ? createKbToolMap(opts.kbTarget) : null;
+  const scopedFileTools = Object.values(
+    kbTools ?? createScopedToolMap(workingDir, fileToolReadRoots),
+  );
+  if (kbTools) {
+    log.info(
+      `[agent] KB-scoped session: [${Object.keys(kbTools).join(", ")}] -> collection ` +
+        `${opts.kbTarget?.collectionId} (filesystem tools disabled, find withheld)`,
+    );
+  }
   //
   // "bash" is EXCLUDED from the allowlist (and we never register a scoped bash)
   // — preserves the pre-migration security model. Pi would otherwise enable it.
@@ -1765,7 +1800,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // include every customTool name. We enumerate them right before building
   // the options.
   // (Ref: pi-coding-agent/dist/core/sdk.js:157 — `allowedToolNames = options.tools`)
-  const builtinAllow = ["read", "write", "grep", "find", "ls"];
+  // A KB session swaps `find` (no KB equivalent — see above) for `edit`.
+  // Anything absent from this list is dropped silently by pi, so the two sets
+  // must match exactly what was registered above.
+  // Derived from what was actually built, so the allowlist cannot drift from
+  // the registered set — a read-only KB session lists no write/edit at all.
+  const builtinAllow = kbTools
+    ? Object.keys(kbTools)
+    : ["read", "write", "grep", "find", "ls"];
   const customToolNames = (customTools ?? []).map((t) => t.name);
   // Proof that the mandatory twin_deliver tool is actually in the pi payload
   // (allowlist + registered customTools) — logged for the Twin mention flow so a

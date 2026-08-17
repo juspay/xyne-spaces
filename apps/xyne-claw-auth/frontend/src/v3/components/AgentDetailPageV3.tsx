@@ -171,6 +171,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // Plan mode opt-in (agent.config.planMode). When on, non-twin thread mentions
   // propose a plan and wait for approval before multi-step work. Default false.
   const [draftPlanMode, setDraftPlanMode] = useState(false);
+  /* KB curation: swaps Vespa retrieval for path-based read/ls/grep/write/edit
+   * over the attached collection. Admin-only — the server strips `kbAccess`
+   * for non-admins, so the control is hidden rather than silently ignored. */
+  const [draftKbAccess, setDraftKbAccess] = useState(false);
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
@@ -291,6 +295,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
+        setDraftKbAccess((agentData.config as { kbAccess?: string }).kbAccess === "files");
         {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
@@ -394,6 +399,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
+    const baseKbAccess = (agent.config as { kbAccess?: string }).kbAccess === "files";
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
     const basePlanModePrompt =
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
@@ -436,6 +442,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPostTodos !== basePostTodos ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
+      draftKbAccess !== baseKbAccess ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
@@ -450,7 +457,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftKbAccess, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -559,6 +566,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.autoGoal;
       }
+      if (draftKbAccess) {
+        nextConfig.kbAccess = "files";
+      } else {
+        delete nextConfig.kbAccess;
+      }
       if (draftPlanMode) {
         nextConfig.planMode = true;
         // Persist a CUSTOM plan-mode prompt only (empty or unchanged-from-default ⇒
@@ -658,7 +670,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftKbAccess, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1020,6 +1032,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftKbResourcesChange={setDraftKbResources}
             draftKbScope={draftKbScope}
             onDraftKbScopeChange={setDraftKbScope}
+            draftKbAccess={draftKbAccess}
+            onDraftKbAccessChange={setDraftKbAccess}
+            isAdmin={isAdmin}
             skillTriggers={skillTriggers}
             onSkillTriggersChange={setSkillTriggers}
             draftPromptInjection={draftPromptInjection}
