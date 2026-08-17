@@ -27,6 +27,8 @@ import {
   isSummaryRequested,
   markSummaryRequested,
 } from '../../utils/recordingSummaryRequest';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
@@ -120,6 +122,7 @@ function isSameRecordingSnapshot(a: RecordingDetail, b: RecordingDetail): boolea
 }
 
 export default function RecordingDetailV2Screen(): ReactElement {
+  const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -768,6 +771,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
       data-testid='recording-detail-v2-page'
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
     >
+      {/* Outside the scroller below, so it stays pinned. z-30 clears the sticky
+          header's z-20 at widths where the centred column reaches the left edge. */}
+      {!isMobile && (
+        <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
+          <AppNavigator />
+        </div>
+      )}
       {/* layoutScroll: the tab indicator animates inside this scroller, so Motion has
           to account for its scroll offset when measuring positions. */}
       <motion.div

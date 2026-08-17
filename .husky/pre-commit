@@ -121,6 +121,17 @@ bash scripts/change-analysis.sh || exit 1
 echo "Running schema-migration validation..."
 bash scripts/validate-schema-migrations.sh || exit 1
 
+# Zero <> Prisma column parity: block a column that exists in the shared Zero
+# client schema but not in schema.prisma. Pure-Node, no deps; --staged so it
+# validates the index rather than the working tree.
+ZERO_SCHEMA_CHANGED=$(echo "$CHANGED_FILES" | grep -E '^(apps/backend/prisma/schema\.prisma|packages/shared/src/zero/schema\.ts)$' || true)
+if [ -n "$ZERO_SCHEMA_CHANGED" ]; then
+  echo "Running Zero <> Prisma column parity check..."
+  node scripts/validate-zero-column-parity.mjs --staged || exit 1
+else
+  echo "⏭️  Skipping Zero column parity check (no Zero/Prisma schema files changed)"
+fi
+
 # Enum guard: block new Postgres enums / CREATE TYPE / ALTER TYPE (XYNE-16525)
 echo "Running enum guard..."
 npm run test:enum || exit 1

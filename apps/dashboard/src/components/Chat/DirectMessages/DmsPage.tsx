@@ -328,7 +328,9 @@ const DmsPage = (): ReactElement => {
   }, [directMessages]);
 
   const handleAddDirectMessage = (): void => {
-    setShowAddDmForm(true);
+    if (isMobile) {
+      setShowAddDmForm(true);
+    } else void navigate('/chat/search?mode=dm', { replace: true });
   };
 
   const handleAddDmSubmit = (data: CreateDmFormData): void => {

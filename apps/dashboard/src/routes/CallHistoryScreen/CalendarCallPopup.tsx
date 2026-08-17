@@ -30,7 +30,7 @@ import {
   getPreviewParticipantUserIds,
   isGoogleCalendarCall,
   isMicrosoftCalendarCall,
-  isScheduledCallJoinable,
+  canJoinCall,
   isScheduledCallManageable,
 } from './callHistoryItem.utils';
 import Button from '../../components/ui/Button';
@@ -588,8 +588,9 @@ const CalendarCallPopup = ({
   const liveStartedLabel =
     isLive && startedAtTime !== null ? formatRelativeTime(startedAtTime) : null;
 
-  const isUnavailableUntilScheduledStart = !isScheduledCallJoinable(call, now);
-  const isJoinDisabled = isCurrentUserInCall || isUnavailableUntilScheduledStart;
+  const isCallUnavailable = !canJoinCall(call);
+  const isJoinDisabled = isCurrentUserInCall || isCallUnavailable;
+  const shouldUsePrimaryJoinStyle = isLive;
   const isManageableScheduledCall = isScheduledCallManageable(call, currentUserId);
 
   const canEdit = isManageableScheduledCall && !!onEditClick;
@@ -880,12 +881,14 @@ const CalendarCallPopup = ({
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
                 isJoinDisabled
                   ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                  : 'bg-action-primary text-action-primary-foreground hover:opacity-90 cursor-pointer',
+                  : shouldUsePrimaryJoinStyle
+                    ? 'bg-primary text-action-primary-foreground hover:opacity-90 cursor-pointer'
+                    : 'border border-border text-foreground hover:bg-muted cursor-pointer',
               )}
             >
               {isCurrentUserInCall ? (
                 <AudioLines className='size-4' />
-              ) : isUnavailableUntilScheduledStart ? (
+              ) : isCallUnavailable ? (
                 <CalendarFold className='size-4' />
               ) : (
                 <Headset className='size-4' />
@@ -894,8 +897,8 @@ const CalendarCallPopup = ({
               <span>
                 {isCurrentUserInCall
                   ? 'Already joined'
-                  : isUnavailableUntilScheduledStart
-                    ? 'Available at scheduled time'
+                  : isCallUnavailable
+                    ? 'Unavailable'
                     : 'Join Call'}
               </span>
             </button>

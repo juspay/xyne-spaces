@@ -236,7 +236,7 @@ generate_compose() {
   # fast on the essential ones so we never bake empty auth secrets into a sandbox.
   local _env_local="$PROJECT_ROOT/backend/.env.local"
   local _v _line
-  for _v in ZERO_AUTH_SECRET JWT_SECRET VAPID_PRIVATE_KEY GOOGLE_CLIENT_SECRET; do
+  for _v in ZERO_AUTH_SECRET JWT_SECRET GOOGLE_CLIENT_SECRET; do
     if [ -z "$(eval "printf '%s' \"\${$_v:-}\"")" ] && [ -f "$_env_local" ]; then
       _line=$(grep -m1 "^$_v=" "$_env_local" || true)
       if [ -n "$_line" ]; then export "$_v=${_line#*=}"; fi
@@ -334,9 +334,6 @@ services:
       - GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - DEFAULT_ADMIN_EMAIL=sandbox@xyne.ai
-      - VAPID_PUBLIC_KEY=BNjTYZx-16c9N4G-i19jChp1entqMf8mBZyqla0pn-TgxjdHbrX-2yhSWA8JFkXJAkqTHpTV2MkuslELIVfHW3w
-      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
-      - VAPID_SUBJECT=mailto:admin@xyne.ai
       - JWT_EXPIRATION_SECONDS=1800
     labels:
       - "traefik.enable=true"

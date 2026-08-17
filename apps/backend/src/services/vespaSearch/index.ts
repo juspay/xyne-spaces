@@ -7,6 +7,7 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
@@ -82,7 +83,7 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 }
 
 const MAX_FILTER_VALUES = 50;
-const MAX_VESPA_RESULT_WINDOW = 1000;
+const MAX_VESPA_HITS = 400;
 
 /**
  * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
@@ -311,9 +312,36 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             cluster: config.cluster,
           });
           const fields = (raw?.fields ?? {}) as Record<string, any>;
-          // Enforce the same per-user gate the YQL-based search does.
+          // Access rule:
+          //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
+          //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
+          //     OR a participant of the doc's chat channel (`channelRef`).
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
-          if (perms.length > 0 && !perms.includes(userId)) {
+          const isOwner = fields.ownerId === userId;
+          const isShared = perms.includes(userId);
+          const isPublic = fields.isPrivate === false;
+          // Private docs: owner or explicit `permissions` only.
+          // Public docs: owner, `permissions`, OR a participant of the doc's
+          // chat channel (via `channelRef`).
+          let allowed = isOwner || isShared;
+          // Channel-participant access: a doc may belong to a chat channel via
+          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
+          // Only consulted for public docs, and only when the cheaper checks
+          // above didn't already pass.
+          if (!allowed && isPublic) {
+            const channelRef =
+              typeof fields.channelRef === 'string' ? fields.channelRef : '';
+            const channelId = channelRef ? (channelRef.split('::').pop() ?? '') : '';
+            if (channelId) {
+              const participant =
+                await repositories.channelParticipants.findParticipant(
+                  channelId,
+                  userId,
+                );
+              allowed = participant !== null;
+            }
+          }
+          if (!allowed) {
             res.status(403).json({ success: false, error: 'Forbidden' });
             return;
           }
@@ -880,16 +908,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const isMailOnlySearch =
       searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
-    const effectiveGroupBy =
-      options.groupBy === undefined ? 'docType' : options.groupBy;
-    const isFlatMultiAppMailSearch =
-      effectiveGroupBy === '' &&
-      searchApps.length > 1 &&
-      searchApps.some(app => app.trim().toLowerCase() === 'mail');
     const mailGroupOffset = isMailOnlySearch
-      ? Math.max(Number(offset) || 0, 0)
-      : 0;
-    const flatSearchOffset = isFlatMultiAppMailSearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
 
@@ -898,19 +917,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // slice the requested page after parsing the grouping response.
     if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
-      options.limit = mailGroupOffset + effectiveLimit;
-    }
-
-    // For flat All-tab searches, fetch from the start so mail threads can be
-    // deduplicated consistently across pages. Over-fetch to compensate for
-    // conversations that have several matching mail documents.
-    if (isFlatMultiAppMailSearch) {
-      const requestedUniquePrefix = flatSearchOffset + effectiveLimit;
-      options.offset = 0;
-      options.limit = Math.min(
-        MAX_VESPA_RESULT_WINDOW,
-        requestedUniquePrefix * 4,
-      );
+      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
     }
 
     // Call vespa search
@@ -984,19 +991,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Return flat results (backward compatible)
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
-      const transformedResults = dedupeMailResults(
-        await transformVespaResults(
-          dedupeMailHits(parsedResults.hits || []),
-          db,
-          wantDebugInfo,
-        ),
+      const pageResults = await transformVespaResults(
+        parsedResults.hits || [],
+        db,
+        wantDebugInfo,
       );
-      const pageResults = isFlatMultiAppMailSearch
-        ? transformedResults.slice(
-            flatSearchOffset,
-            flatSearchOffset + effectiveLimit,
-          )
-        : transformedResults;
 
       res.json({
         success: true,

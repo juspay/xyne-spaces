@@ -2664,6 +2664,7 @@ model Call {
   summaryTemplateId String?
   labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
   markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
+  xyneManaged       Boolean     @default(false) // True when Xyne owns this Call's conference link on the source Calendar event (Xyne Call Link Auto-Injection)
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -2899,6 +2900,7 @@ model Canvas {
   editAccessId String? @unique // Random ID for edit access
   visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
+  isArchived   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
   createdAt    DateTime         @default(now())
@@ -3780,6 +3782,7 @@ model Recap {
   @@index([recapDate])
   @@index([userId])
   @@index([entityType])
+  @@index([entityType, recapDate, entityId], map: "recaps_entityType_recapDate_entityId_idx")
   @@map("recaps")
   @@schema("public")
 }

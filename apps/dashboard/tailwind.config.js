@@ -23,6 +23,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
+        serif: ['"Libre Baskerville"', 'Georgia', 'serif'],
       },
       maxWidth: {
         'ai-content': '50rem',

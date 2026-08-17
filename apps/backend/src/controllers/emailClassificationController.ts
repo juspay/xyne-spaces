@@ -152,4 +152,27 @@ export class EmailClassificationController {
       res.status(500).json({ error: 'Failed to override classification values' });
     }
   };
+
+  /**
+   * GET /channels/:channelId/classification/ai-categories
+   * Distinct AI categories present on this channel's tickets — powers the AI Category
+   * filter options. ACL: channel member.
+   */
+  getAiCategories = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+
+    try {
+      const access = await this.assertChannelAccess(req, channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
+      const categories = await this.repo.findDistinctAiCategoriesByChannelId(channelId);
+      res.status(200).json({ categories });
+    } catch (error) {
+      logger.error('[ClassificationController] getAiCategories failed', { channelId, error });
+      res.status(500).json({ error: 'Failed to load AI categories' });
+    }
+  };
 }

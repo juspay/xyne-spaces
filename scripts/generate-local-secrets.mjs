@@ -14,7 +14,6 @@ const backendDir = existsSync(join(repoRoot, "apps", "backend"))
   ? join(repoRoot, "apps", "backend")
   : join(repoRoot, "backend");
 const backendPath = join(backendDir, ".env.local");
-const webPushPath = join(backendDir, "node_modules", "web-push", "src", "index.js");
 
 for (const envPath of [backendPath]) {
   if (!existsSync(envPath)) {
@@ -62,20 +61,6 @@ setValue(backendPath, "JWT_SECRET", randomHex(48));
 
 setValue(backendPath, "ZERO_AUTH_SECRET", randomHex(48));
 setValue(backendPath, "ENCRYPTION_KEY", randomHex(32));
-
-let vapidKeys = null;
-try {
-  const webPush = await import(webPushPath);
-  const generateVAPIDKeys = webPush.default?.generateVAPIDKeys || webPush.generateVAPIDKeys;
-  vapidKeys = generateVAPIDKeys();
-} catch (err) {
-  console.warn(`Could not generate VAPID keys: ${err instanceof Error ? err.message : String(err)}`);
-}
-
-if (vapidKeys) {
-  setValue(backendPath, "VAPID_PUBLIC_KEY", vapidKeys.publicKey);
-  setValue(backendPath, "VAPID_PRIVATE_KEY", vapidKeys.privateKey);
-}
 
 for (const [envPath, contents] of files) {
   writeFileSync(envPath, contents);

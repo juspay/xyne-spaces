@@ -31,6 +31,7 @@ import {
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -441,8 +442,13 @@ export const mapMessage = async (
     }),
   ])
 
+  // Bot messages carry FlowJSON, whose text lives in the component tree — the
+  // HTML only holds a fallback label ("Flow JSON"), so html-to-text would index
+  // that instead of the message. Reuses the same extraction the notification
+  // path uses; plain HTML content falls through unchanged.
   const messageContent =
-    extractPlainTextFromHtml(args.content || '') || ''
+    getFlowJsonContentForNotification(args.content || '') ||
+    extractPlainTextFromHtml(args.content || '') || '';
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
@@ -634,7 +640,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     }),
     db.project.findUnique({
       where: { id: args.projectId },
-      select: { name: true }
+      select: { name: true, code: true }
     }),
     db.user.findUnique({
       where: { id: args.createdBy },
@@ -732,6 +738,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedToName: assignedToUser?.name || '',
     closedByName: closedByUser?.name || '',
     projectName: project?.name || '',
+    projectCode: project?.code || '',
     ticketMentions: descriptionMentions?.map(v => v.username) || [],
     threadMentions: threadMentions,
     threadSenders: threadSenders,
