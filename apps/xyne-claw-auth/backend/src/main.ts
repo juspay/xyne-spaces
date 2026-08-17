@@ -95,6 +95,8 @@ import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
+import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
+import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 
 import { requireAuth, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
@@ -284,6 +286,9 @@ app.use(`${BASE}/entity-extraction`, requireAuth, requireClawAdmin, entityExtrac
 // MCP Gateway routes (for backend service registration)
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
 
+initializeOpenTelemetry();
+registerDailyBriefGauges();
+
 const server = app.
 listen(CONFIG.port, () => {
   log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
@@ -369,6 +374,7 @@ async function shutdown(signal: string): Promise<void> {
     await closeAgentBackfillQueue().catch(() => {});
   }
   await redisService.disconnect().catch(() => {});
+  await shutdownOpenTelemetry().catch(() => {});
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
 }

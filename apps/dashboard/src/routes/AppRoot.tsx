@@ -25,6 +25,7 @@ import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
+import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
 import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
 import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
 import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
@@ -222,11 +223,12 @@ import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
 import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
+import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
-import DailyBriefScreen from './DailyBriefScreen';
+import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
@@ -873,6 +875,8 @@ export const router = createBrowserRouter([
                 children: [
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
+                  { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                  { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
                   {
                     path: 'admin',
@@ -892,6 +896,14 @@ export const router = createBrowserRouter([
                   { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                   { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                  {
+                    path: 'organization',
+                    element: (
+                      <RequireOrgManager>
+                        <AIOrganizationScreen />
+                      </RequireOrgManager>
+                    ),
+                  },
                   {
                     element: <AISectionLayout />,
                     children: [
@@ -1521,10 +1533,6 @@ export const router = createBrowserRouter([
               {
                 path: 'guide',
                 element: <UserGuideScreen />,
-              },
-              {
-                path: 'daily-brief',
-                element: <DailyBriefScreen />,
               },
             ],
           },

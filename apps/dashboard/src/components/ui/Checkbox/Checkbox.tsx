@@ -4,6 +4,7 @@ interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
+  ariaLabel?: string;
   indeterminate?: boolean;
   /** Non-interactive state. Dims the whole control (label + box) and blocks toggling,
       while keeping the checked glyph/fill visible so the current value still reads clearly. */
@@ -19,6 +20,7 @@ export function Checkbox({
   checked,
   onChange,
   label = 'Edit entire series',
+  ariaLabel,
   indeterminate = false,
   disabled = false,
   size = 'md',
@@ -57,6 +59,10 @@ export function Checkbox({
           type='checkbox'
           checked={checked}
           disabled={disabled}
+          {
+            /* eslint-disable-next-line @typescript-eslint/naming-convention */
+            ...(ariaLabel ? { 'aria-label': ariaLabel } : {})
+          }
           onChange={e => onChange(e.target.checked)}
           className={`absolute inset-0 w-full h-full opacity-0 m-0 p-0 ${
             disabled ? 'cursor-not-allowed' : 'cursor-pointer'

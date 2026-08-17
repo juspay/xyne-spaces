@@ -68,6 +68,7 @@ type ActivityValue = Partial<
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      isAiClassification?: boolean;
     }
 >;
 
@@ -783,6 +784,7 @@ export const ActivityComponent = ({
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
+  const isAiActivity = (activity.value as ActivityValue | null)?.isAiClassification === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -831,9 +833,11 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (isAutomationActivity
-                ? 'Automation'
-                : getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAiActivity
+                ? 'AI classification'
+                : isAutomationActivity
+                  ? 'Automation'
+                  : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
