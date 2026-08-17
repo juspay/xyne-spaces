@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest } from '@/services/commitAnalysisService';
-import { BitbucketService } from '@/services/bitbucketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
@@ -8,25 +7,138 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
-import { BitbucketConfig } from '@/types/bitbucket';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
-import { createCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
-import { parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
-import { ReleaseTrackingMode, VCSProviderType } from '@xyne/shared';
+import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
+import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
+import { escapeHtml } from '@/utils/htmlEscape';
+import { isSameCommit } from '@/utils/commitIds';
+import { buildVcsClient } from '@/services/release/buildVcsClient';
+import { ReleaseTrackingMode, VCSProviderType, MessageType } from '@xyne/shared';
+
+// Shared HTML for the release and parent-ticket analysis summary cards.
+function buildAnalysisSummaryHtml(opts: {
+  header: string;
+  // already-escaped extra line after the header (e.g. the sub-ticket link)
+  prefaceHtml?: string;
+  workspace: string;
+  repoSlug: string;
+  totalCommits: number;
+  commitsWithPR: number;
+  commitsWithTicket: number;
+  affectedApplications: AffectedApplicationInfo[];
+  servicesLabel: string;
+  // per-app regex match table (main card only)
+  appMatchSummary?: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>;
+  hasMigrationChange: boolean;
+  hasEnvChange: boolean;
+  canvasUrl?: string;
+}): string {
+  const {
+    header, prefaceHtml, workspace, repoSlug, totalCommits, commitsWithPR, commitsWithTicket,
+    affectedApplications, servicesLabel, appMatchSummary, hasMigrationChange, hasEnvChange, canvasUrl,
+  } = opts;
+
+  let html = `<p><strong>${header}</strong></p>`;
+  if (prefaceHtml) html += prefaceHtml;
+  html += `<p class="m-0 leading-6"><em class="text-gray-600">${escapeHtml(workspace)}/${escapeHtml(repoSlug)}</em></p>`;
+  html += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
+
+  if (affectedApplications.length > 0) {
+    html += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">${servicesLabel}</strong></p>`;
+    html += `<blockquote class="border-l-4 border-gray-400 pl-4 text-gray-700">`;
+    for (const app of affectedApplications.slice(0, 5)) {
+      html += `<p class="m-0 leading-6"><strong class="font-semibold">${escapeHtml(app.name)}</strong></p>`;
+    }
+    if (affectedApplications.length > 5) {
+      html += `<p class="m-0 leading-6"><em class="text-gray-600">... and ${affectedApplications.length - 5} more</em></p>`;
+    }
+    html += `</blockquote>`;
+  }
+
+  // distinguish regex-matched-0-files from matched-but-no-changes
+  if (appMatchSummary && appMatchSummary.length > 0) {
+    const matchedCount = appMatchSummary.filter(a => a.matchCount > 0).length;
+    const invalid = appMatchSummary.filter(a => !a.regexValid);
+    html += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Applications matched: ${matchedCount}/${appMatchSummary.length}</strong></p>`;
+    html += `<blockquote class="border-l-4 border-gray-300 pl-4 text-gray-700">`;
+    for (const row of appMatchSummary) {
+      const icon = row.matchCount > 0 ? '✅' : (row.regexValid ? '⚠️' : '❌');
+      // user-configured — escape before HTML
+      const safeRegex = escapeHtml(row.regex);
+      const note = !row.regexValid
+        ? ` <em class="text-red-600">(invalid regex: <code>${safeRegex}</code>)</em>`
+        : row.matchCount === 0
+          ? ` <em class="text-amber-600">(regex <code>${safeRegex}</code> matched 0 files — check config)</em>`
+          : '';
+      html += `<p class="m-0 leading-6">${icon} <strong>${escapeHtml(row.name)}</strong>: ${row.matchCount} file${row.matchCount === 1 ? '' : 's'}${note}</p>`;
+    }
+    html += `</blockquote>`;
+    if (invalid.length > 0) {
+      html += `<p class="m-0 leading-6 text-red-600 text-sm"><em>⚠️ Fix the invalid regex above — those apps will never match.</em></p>`;
+    }
+  }
+
+  html += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Migration Change: ${hasMigrationChange ? 'Yes' : 'No'}</strong></p>`;
+  html += `<p class="m-0 leading-6"><strong class="font-semibold">Env Change: ${hasEnvChange ? 'Yes' : 'No'}</strong></p>`;
+
+  if (canvasUrl) {
+    html += `<p class="m-0 leading-6 mt-3"><a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${canvasUrl}">📄 View Full Analysis Report →</a></p>`;
+  }
+  return html;
+}
+
+// Subtypes that mark THE single release-analysis message in a conversation.
+const ANALYSIS_MESSAGE_SUBTYPES = [
+  'commit_analysis_report',
+  'commit_analysis_loading',
+  'commit_analysis_error',
+];
 
 async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
+  const loadingContent = `<p><strong>Analyzing commits...</strong></p><p><em>Please wait while we analyze the commits and detect affected applications.</em></p>`;
+  const loadingMeta = { messageSubtype: 'commit_analysis_loading', isLoading: true };
+
+  // One analysis message per release conversation: reuse and update the existing
+  // one in place instead of posting a fresh card each run (avoids duplicates).
+  const existing = await db.message.findMany({
+    where: {
+      conversationId,
+      isDeleted: false,
+      OR: ANALYSIS_MESSAGE_SUBTYPES.map((s) => ({
+        metadata: { path: ['messageSubtype'], equals: s },
+      })),
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { messageId: true },
+  });
+
+  if (existing.length > 0) {
+    const canonicalId = existing[0].messageId;
+    // Collapse any duplicates left by earlier runs (before this dedup existed)
+    // into the single canonical message.
+    const dupeIds = existing.slice(1).map((m) => m.messageId);
+    if (dupeIds.length > 0) {
+      await db.message.updateMany({
+        where: { messageId: { in: dupeIds } },
+        data: { isDeleted: true },
+      });
+    }
+    await conversationService.updateMessageContent({
+      messageId: canonicalId,
+      content: loadingContent,
+      metadata: loadingMeta,
+    });
+    return canonicalId;
+  }
+
   const message = await conversationService.addMessageToConversation({
     conversationId,
     userId,
-    content: `<p><strong>Analyzing commits...</strong></p><p><em>Please wait while we analyze the commits and detect affected applications.</em></p>`,
-    msgType: 'SYSTEM',
-    metadata: {
-      messageSubtype: 'commit_analysis_loading',
-      isLoading: true,
-    },
+    content: loadingContent,
+    msgType: MessageType.SYSTEM,
+    metadata: loadingMeta,
   });
-
   return message.message.messageId;
 }
 
@@ -45,6 +157,11 @@ export interface CommitAnalysisParams {
   userName?: string;
   isHotFix?: boolean;
   workspaceId: string;
+  // Set by the webhook release-sync path. When true, deployedCommitId/newCommitId
+  // carry the HOTFIX DELTA range (frozen release head → new branch head), the
+  // per-app sub-tickets are tagged as hotfixes, and the canvas is upserted into
+  // the "🔥 Hotfix PRs" section instead of rebuilding the main analysis.
+  hotfixSync?: boolean;
 }
 
 // Analysis result type
@@ -56,9 +173,10 @@ export interface CommitAnalysisResponse {
 }
 
 export class CommitAnalysisController {
-  private commitAnalysisService: CommitAnalysisService | null = null;
-  private bitbucketService: BitbucketService | null = null;
-  private releaseService: ReleaseService | null = null;
+  // VCS client + analysis/release services are now constructed per-request in
+  // analyzeCommits() so the right provider (Bitbucket Server vs GitHub) can be
+  // selected from board.vcsProvider. Repositories are still cached on the
+  // instance — they don't depend on the VCS provider.
   private ticketRepository: TicketRepository | null = null;
   private applicationRepository: ApplicationRepository | null = null;
   private conversationRepository: ConversationRepository | null = null;
@@ -73,8 +191,6 @@ export class CommitAnalysisController {
 
   private initializeServices(): void {
     if (
-      this.bitbucketService &&
-      this.commitAnalysisService &&
       this.ticketRepository &&
       this.applicationRepository &&
       this.conversationRepository &&
@@ -87,36 +203,6 @@ export class CommitAnalysisController {
     this.applicationRepository = new ApplicationRepository();
     this.conversationRepository = new ConversationRepository();
     this.releaseRepository = new ReleaseRepository();
-    const bitbucketConfig = config.bitbucket;
-    const hasToken = Boolean(bitbucketConfig.apiToken);
-    const hasBasicAuth =
-      Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
-
-    if (!hasToken && !hasBasicAuth) {
-      const missing: string[] = [];
-      if (!bitbucketConfig.baseUrl) missing.push('BITBUCKET_BASE_URL');
-      if (!bitbucketConfig.apiToken) missing.push('BITBUCKET_API_TOKEN');
-      if (!bitbucketConfig.apiUsername) missing.push('BITBUCKET_USERNAME');
-      if (!bitbucketConfig.password) missing.push('BITBUCKET_PASSWORD');
-      logger.warn(
-        `Bitbucket integration not configured — set BITBUCKET_API_TOKEN, or BITBUCKET_USERNAME + BITBUCKET_PASSWORD. ` +
-        `Currently missing: ${missing.join(', ') || '(none — values look set, check env loader)'}`,
-      );
-    }
-
-    const configObj: BitbucketConfig = {
-      baseUrl: bitbucketConfig.baseUrl
-        ? (bitbucketConfig.baseUrl.endsWith('/rest/api/latest')
-          ? bitbucketConfig.baseUrl
-          : `${bitbucketConfig.baseUrl}/rest/api/latest`)
-        : 'https://bitbucket.example.com/rest/api/latest',
-      username: bitbucketConfig.apiUsername || '',
-      password: bitbucketConfig.password || '',
-      token: bitbucketConfig.apiToken || '',
-    };
-    this.bitbucketService = new BitbucketService(configObj);
-    this.commitAnalysisService = new CommitAnalysisService(this.bitbucketService);
-    this.releaseService = new ReleaseService(this.commitAnalysisService);
   }
 
   private async deriveReleaseContext(
@@ -127,6 +213,7 @@ export class CommitAnalysisController {
     projectKey: string;
     repoSlug: string;
     code: string | null;
+    vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   } | null> {
     const ticket = await db.ticket.findUnique({
       where: { id: releaseTicketId },
@@ -155,9 +242,10 @@ export class CommitAnalysisController {
       return null;
     }
 
-    if (ticket.board.vcsProvider !== VCSProviderType.BITBUCKET_SERVER) {
+    const provider = ticket.board.vcsProvider;
+    if (provider !== VCSProviderType.BITBUCKET_SERVER && provider !== VCSProviderType.GITHUB) {
       logger.warn(
-        `[ReleaseTrigger] skipped: board ${ticket.boardId} vcsProvider=${ticket.board.vcsProvider ?? 'null'} — only BITBUCKET_SERVER supported in v1`,
+        `[ReleaseTrigger] skipped: board ${ticket.boardId} vcsProvider=${provider ?? 'null'} — only BITBUCKET_SERVER and GITHUB are wired`,
       );
       return null;
     }
@@ -179,18 +267,35 @@ export class CommitAnalysisController {
       return null;
     }
 
-    const parsed = parseBitbucketRepoUrl(repoUrls[0]);
-    if (!parsed) {
-      logger.warn(`[ReleaseTrigger] skipped: cannot parse Bitbucket repoUrl ${repoUrls[0]}`);
-      return null;
+    let projectKey: string;
+    let repoSlug: string;
+    if (provider === VCSProviderType.GITHUB) {
+      const parsed = parseGitHubRepoUrl(repoUrls[0]);
+      if (!parsed) {
+        logger.warn(`[ReleaseTrigger] skipped: cannot parse GitHub repoUrl ${repoUrls[0]}`);
+        return null;
+      }
+      // For GitHub, owner→projectKey and repo→repoSlug. The strings flow through
+      // the analysis pipeline unchanged; only the upstream API differs.
+      projectKey = parsed.owner;
+      repoSlug = parsed.repo;
+    } else {
+      const parsed = parseBitbucketRepoUrl(repoUrls[0]);
+      if (!parsed) {
+        logger.warn(`[ReleaseTrigger] skipped: cannot parse Bitbucket repoUrl ${repoUrls[0]}`);
+        return null;
+      }
+      projectKey = parsed.projectKey;
+      repoSlug = parsed.repoSlug;
     }
 
     return {
       projectId: ticket.projectId,
       mainReleaseBoardId: ticket.boardId,
-      projectKey: parsed.projectKey,
-      repoSlug: parsed.repoSlug,
+      projectKey,
+      repoSlug,
       code: ticket.project.code,
+      vcsProvider: provider,
     };
   }
 
@@ -206,6 +311,7 @@ export class CommitAnalysisController {
       currentTicketId,
       userName,
       isHotFix,
+      hotfixSync,
     } = params;
 
     let loadingMessageId: string | null = null;
@@ -224,10 +330,11 @@ export class CommitAnalysisController {
         projectKey: derivedProjectKey,
         repoSlug: derivedRepoSlug,
         code: projectCode,
+        vcsProvider: derivedVcsProvider,
       } = derived;
 
       logger.info(
-        `Commit analysis request: ${derivedProjectKey}/${derivedRepoSlug} by user ${userId} (derived from Application.repoUrl)`,
+        `Commit analysis request: ${derivedProjectKey}/${derivedRepoSlug} (provider=${derivedVcsProvider}) by user ${userId} (derived from Application.repoUrl)`,
       );
 
       // Post loading indicator
@@ -245,14 +352,31 @@ export class CommitAnalysisController {
         ...(projectCode && { ticketPrefix: projectCode }),
       };
 
-      const results = await this.commitAnalysisService!.analyzeCommits(analysisRequest);
+      // Build a provider-specific VCS client + downstream services per request
+      // so board.vcsProvider picks between BitbucketService and GitHubService.
+      const vcsClient = buildVcsClient(derivedVcsProvider as VCSProviderType);
+      const commitAnalysisService = new CommitAnalysisService(vcsClient);
+      const releaseService = new ReleaseService(commitAnalysisService);
+
+      const results = await commitAnalysisService.analyzeCommits(analysisRequest);
+
+      // getCommitsBetween() appends the boundary (deployedCommitId) commit to the
+      // range. For a hotfix sync that boundary is the FROZEN release head — a
+      // main PR — so drop it from the view: the "🔥 Hotfix PRs" section and the
+      // hotfix summary must not list the last main PR as a hotfix. Persistence is
+      // unaffected (release() dedups the boundary against the existing release).
+      // prefix compare — deployedCommitId may be an abbreviated SHA
+      const viewResults = hotfixSync
+        ? results.filter((r) => !isSameCommit(r.commitId, deployedCommitId))
+        : results;
 
       let affectedApplications: AffectedApplicationInfo[] = [];
       let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-      let envChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
+      let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+      let appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
 
       if (projectId && currentTicketId) {
-        const releaseResult = await this.releaseService!.release(
+        const releaseResult = await releaseService.release(
           analysisRequest,
           {
             workspace: derivedProjectKey,
@@ -264,18 +388,20 @@ export class CommitAnalysisController {
             userId,
             userName: userName || userId,
             currentTicketId,
-            isHotFix,
+            // A hotfix sync tags the delta's per-app sub-tickets as hotfixes.
+            isHotFix: hotfixSync ? true : isHotFix,
           }
         );
 
         affectedApplications = releaseResult.affectedApplications;
         migrationLinks = releaseResult.migrationLinks;
         envChanges = releaseResult.envChanges;
+        appMatchSummary = releaseResult.appMatchSummary;
 
         // Update deployed commits if we have a new commit ID
         if (newCommitId && affectedApplications.length > 0) {
           const applicationIds = affectedApplications.map((app) => app.id);
-          await this.releaseService!.updateDeployedCommits(applicationIds, newCommitId);
+          await releaseService.updateDeployedCommits(applicationIds, newCommitId);
         }
 
         // Post to parent ticket conversation if this is a sub-ticket
@@ -299,16 +425,21 @@ export class CommitAnalysisController {
 
       // Create canvas for detailed analysis
       let canvasUrl: string | undefined;
-      const shouldCreateCanvas = results.length > 0;
+      const shouldCreateCanvas = viewResults.length > 0;
 
       if (shouldCreateCanvas) {
-        const canvasId = await createCommitAnalysisCanvas(
-          results,
+        // One canvas per release: upsert (locate by conversationId + source and
+        // update in place) instead of minting a new canvas each run. A hotfix
+        // sync writes into the "🔥 Hotfix PRs" section and preserves the main
+        // analysis; a main run preserves any existing hotfix section.
+        const canvasId = await upsertCommitAnalysisCanvas({
+          section: hotfixSync ? 'hotfix' : 'main',
+          results: viewResults,
           affectedApplications,
           envChanges,
           migrationLinks,
-          userId,
-          {
+          createdByUserId: userId,
+          metadata: {
             projectId,
             conversationId,
             channelId,
@@ -320,8 +451,8 @@ export class CommitAnalysisController {
             migrationCount: migrationLinks.length,
             envChangeCount: envChanges.length,
             workspaceId: params.workspaceId,
-          }
-        );
+          },
+        });
 
         if (canvasId) {
           canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
@@ -329,34 +460,24 @@ export class CommitAnalysisController {
       }
 
       // Create a concise summary for the message
-      const totalCommits = results.length;
-      const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
-      const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
+      const totalCommits = viewResults.length;
+      const commitsWithPR = viewResults.filter((r) => r.pullRequest !== null).length;
+      const commitsWithTicket = viewResults.filter((r) => r.ticket !== null).length;
 
-      let summaryContent = `<p><strong>📦 Release Analysis Complete</strong></p>`;
-      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${derivedProjectKey}/${derivedRepoSlug}</em></p>`;
-      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
-
-      if (affectedApplications.length > 0) {
-        summaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Services to be deployed:</strong></p>`;
-        summaryContent += `<blockquote class="border-l-4 border-gray-400 pl-4 text-gray-700">`;
-        for (const app of affectedApplications.slice(0, 5)) {
-          summaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">${app.name}</strong></p>`;
-        }
-        if (affectedApplications.length > 5) {
-          summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">... and ${affectedApplications.length - 5} more</em></p>`;
-        }
-        summaryContent += `</blockquote>`;
-      }
-
-      // Add migration and env change indicators
-      summaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Migration Change: ${migrationLinks.length > 0 ? 'Yes' : 'No'}</strong></p>`;
-      summaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">Env Change: ${envChanges.length > 0 ? 'Yes' : 'No'}</strong></p>`;
-
-      // Add canvas link if created
-      if (canvasUrl) {
-        summaryContent += `<p class="m-0 leading-6 mt-3"><a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${canvasUrl}">📄 View Full Analysis Report →</a></p>`;
-      }
+      const summaryContent = buildAnalysisSummaryHtml({
+        header: hotfixSync ? '🔥 Hotfix Analysis Complete' : '📦 Release Analysis Complete',
+        workspace: derivedProjectKey,
+        repoSlug: derivedRepoSlug,
+        totalCommits,
+        commitsWithPR,
+        commitsWithTicket,
+        affectedApplications,
+        servicesLabel: 'Services to be deployed:',
+        appMatchSummary,
+        hasMigrationChange: migrationLinks.length > 0,
+        hasEnvChange: envChanges.length > 0,
+        canvasUrl,
+      });
 
       await conversationService.updateMessageContent({
         messageId: loadingMessageId,
@@ -437,43 +558,33 @@ export class CommitAnalysisController {
       const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
       const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
-      let parentSummaryContent = `<p><strong>📦 Release Analysis - Sub-ticket Update</strong></p>`;
+      const subTicketPreface = currentTicket && channelId
+        ? (() => {
+            const subTicketUrl = `${config.slackFrontendUrl}/chat/${channelId}?tab=tickets&ticketId=${currentTicket.id}&conversationId=${conversationId}`;
+            return `<p class="m-0 leading-6"><em class="text-gray-600">Sub-Ticket: <a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${subTicketUrl}">${escapeHtml(currentTicket.xyneId)}</a></em></p>`;
+          })()
+        : undefined;
 
-      // Add sub-ticket link if available
-      if (currentTicket && channelId) {
-        const subTicketUrl = `${config.slackFrontendUrl}/chat/${channelId}?tab=tickets&ticketId=${currentTicket.id}&conversationId=${conversationId}`;
-        parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">Sub-Ticket: <a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${subTicketUrl}">${currentTicket.xyneId}</a></em></p>`;
-      }
-
-      parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${workspace}/${repoSlug}</em></p>`;
-      parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
-
-      if (affectedApplications.length > 0) {
-        parentSummaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Services affected:</strong></p>`;
-        parentSummaryContent += `<blockquote class="border-l-4 border-gray-400 pl-4 text-gray-700">`;
-        for (const app of affectedApplications.slice(0, 5)) {
-          parentSummaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">${app.name}</strong></p>`;
-        }
-        if (affectedApplications.length > 5) {
-          parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">... and ${affectedApplications.length - 5} more</em></p>`;
-        }
-        parentSummaryContent += `</blockquote>`;
-      }
-
-      parentSummaryContent += `
-      <p class="m-0 leading-6 mt-2"><strong class="font-semibold">Migration Change: ${migrationLinks && migrationLinks.length > 0 ? 'Yes' : 'No'}</strong></p>
-      `;
-      parentSummaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">Env Change: ${envChanges && envChanges.length > 0 ? 'Yes' : 'No'}</strong></p>`;
-
-      if (canvasUrl) {
-        parentSummaryContent += `<p class="m-0 leading-6 mt-3"><a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${canvasUrl}">📄 View Full Analysis Report →</a></p>`;
-      }
+      const parentSummaryContent = buildAnalysisSummaryHtml({
+        header: '📦 Release Analysis - Sub-ticket Update',
+        prefaceHtml: subTicketPreface,
+        workspace,
+        repoSlug,
+        totalCommits,
+        commitsWithPR,
+        commitsWithTicket,
+        affectedApplications,
+        servicesLabel: 'Services affected:',
+        hasMigrationChange: Boolean(migrationLinks && migrationLinks.length > 0),
+        hasEnvChange: Boolean(envChanges && envChanges.length > 0),
+        canvasUrl,
+      });
 
       await conversationService.addMessageToConversation({
         conversationId: parentTicket.conversationId,
         userId,
         content: parentSummaryContent,
-        msgType: 'SYSTEM',
+        msgType: MessageType.SYSTEM,
         metadata: {
           messageSubtype: 'commit_analysis_report',
           fromSubTicket: true,
@@ -498,9 +609,11 @@ export class CommitAnalysisController {
 
     try {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      // error text can echo user input — escape before HTML
+      const safeError = escapeHtml(errorMessage);
       const isErrorContent = errorMessage.includes('404') && errorMessage.toLowerCase().includes('bitbucket')
-        ? `<p><strong>Error: Repository or commit not found</strong></p><p><em>${errorMessage}</em></p>`
-        : `<p><strong>Commit analysis failed</strong></p><p><em>${errorMessage}</em></p>`;
+        ? `<p><strong>Error: Repository or commit not found</strong></p><p><em>${safeError}</em></p>`
+        : `<p><strong>Commit analysis failed</strong></p><p><em>${safeError}</em></p>`;
 
       await conversationService.updateMessageContent({
         messageId: loadingMessageId,

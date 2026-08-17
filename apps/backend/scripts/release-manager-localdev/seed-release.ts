@@ -22,16 +22,16 @@
  * Run via:  npx tsx backend/scripts/release-manager/seed-release.ts
  */
 
+import { PrismaClient } from '@prisma/client';
 import {
-  PrismaClient,
+  BaseTicketType,
   LookupType,
   FormFieldType,
   FormContextType,
   FormEntityType,
   BoardType,
   ReleaseTrackingMode,
-} from '@prisma/client';
-import { BaseTicketType } from '@xyne/shared';
+} from '@xyne/shared';
 import { XyneFormSchemaProvider, XyneChangeType } from '../../src/services/release/xyne/xyneReleaseForm';
 import { v4 as uuidv4 } from 'uuid';
 

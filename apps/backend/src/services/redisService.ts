@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { logger } from '@/utils/logger';
+import { createRedisClient, getBaseRedisOptions, connectWithRetryForever } from './redisFactory';
 
 export interface ChatMessage {
   messageId: string;
@@ -65,57 +66,26 @@ class RedisService {
   }
 
   public getRedisConfig() {
-    return {
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-      ...(process.env.REDIS_TLS === 'true' && {
-        tls: {
-          rejectUnauthorized: false
-        }
-      })
-    };
+    return getBaseRedisOptions('default');
   }
 
   private initializeRedis(): void {
     try {
-      const config = this.getRedisConfig();
-
-      // Main Redis instance for data operations
-      this.redis = new Redis(config);
-
-      // Publisher instance for broadcasting messages
-      this.publisher = new Redis(config);
-
-      // Subscriber instance for listening to messages
-      this.subscriber = new Redis(config);
-
-      this.redis.on('connect', () => {
-        logger.info('🔴 [REDIS-CONNECTION] Redis connected successfully');
-        logger.info('Redis connected successfully');
-      });
-
-      this.redis.on('error', (error) => {
-        logger.info('❌ [REDIS-CONNECTION] Redis connection error:', error);
-        logger.error('Redis connection error:', error);
-      });
-
+      this.redis = createRedisClient('main');
+      this.publisher = createRedisClient('publisher');
+      this.subscriber = createRedisClient('subscriber');
     } catch (error) {
       logger.error('Failed to initialize Redis:', error);
     }
   }
 
   async connect(): Promise<void> {
-    try {
-      if (this.redis) await this.redis.connect();
-      if (this.publisher) await this.publisher.connect();
-      if (this.subscriber) await this.subscriber.connect();
-      logger.info('All Redis connections established');
-    } catch (error) {
-      logger.error('Failed to connect to Redis:', error);
-    }
+    await Promise.all([
+      this.redis ? connectWithRetryForever(this.redis, 'main') : Promise.resolve(),
+      this.publisher ? connectWithRetryForever(this.publisher, 'publisher') : Promise.resolve(),
+      this.subscriber ? connectWithRetryForever(this.subscriber, 'subscriber') : Promise.resolve(),
+    ]);
+    logger.info('All Redis connections established');
   }
 
   async disconnect(): Promise<void> {
@@ -127,6 +97,22 @@ class RedisService {
     } catch (error) {
       logger.error('Error disconnecting from Redis:', error);
     }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot srem - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.srem(key, ...members);
+  }
+
+  async scard(key: string): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot scard - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.scard(key);
   }
 
   // Session participant management

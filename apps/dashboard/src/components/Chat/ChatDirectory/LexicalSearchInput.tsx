@@ -261,6 +261,11 @@ function ClearEditorPlugin({ value }: { value: string | undefined }) {
       const hasChip = (node: LexicalNode): boolean =>
         $isFilterChipNode(node) || ($isElementNode(node) && node.getChildren().some(hasChip));
       if (hasChip(root)) return;
+      // Slash-command text ('/chat ', '/call ') lives in this same editor but reports value=''
+      // (the search hook consumes it in command mode). The ⌥↵ Actions → Message path seeds the
+      // editor with '/chat ' AND drives searchText to '' in one go; without this bail we'd clear
+      // that seed, fire onChange(''), drop out of command mode and reset the palette. Keep it.
+      if (root.getTextContent().startsWith('/')) return;
       root.clear();
     });
   }, [value, editor]);

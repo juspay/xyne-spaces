@@ -67,8 +67,12 @@ export interface InputBoxProps {
   hasTicket?: boolean;
   disableEnterToSend?: boolean;
   hideSendButton?: boolean;
+  hideComposerTools?: boolean;
+  hideVoiceInput?: boolean;
+  compact?: boolean;
   sendDisabled?: boolean;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
+  dockSlot?: React.ReactNode;
 }

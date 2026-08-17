@@ -1,4 +1,5 @@
-import { Activity, ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { Activity } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { activityClassificationService } from '@/services/activity/activityClassificationService';
 import { logger } from '@/utils/logger';
@@ -98,14 +99,14 @@ class ActivityClassificationWorkerService {
       WITH cte AS (
         SELECT "id"
         FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}::"ActivityClassification"
-          AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE}::"ActivityClassificationJobType")
+        WHERE "classification" = ${ActivityClassification.PENDING}
+          AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE})
         ORDER BY "createdAt" ASC
         LIMIT ${BATCH_SIZE}
         FOR UPDATE SKIP LOCKED
       )
       UPDATE "activities" a
-      SET "classification" = ${ActivityClassification.PROCESSING}::"ActivityClassification"
+      SET "classification" = ${ActivityClassification.PROCESSING}
       FROM cte
       WHERE a."id" = cte."id"
       RETURNING a.*;
@@ -117,8 +118,8 @@ class ActivityClassificationWorkerService {
       WITH batch AS (
         SELECT "actionSourceId", "channelId"
         FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}::"ActivityClassification"
-          AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}::"ActivityClassificationJobType"
+        WHERE "classification" = ${ActivityClassification.PENDING}
+          AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
         ORDER BY "createdAt" ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -129,12 +130,12 @@ class ActivityClassificationWorkerService {
         JOIN batch b
           ON a."actionSourceId" = b."actionSourceId"
          AND a."channelId" = b."channelId"
-        WHERE a."classification" = ${ActivityClassification.PENDING}::"ActivityClassification"
-          AND a."classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}::"ActivityClassificationJobType"
+        WHERE a."classification" = ${ActivityClassification.PENDING}
+          AND a."classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
         FOR UPDATE SKIP LOCKED
       )
       UPDATE "activities" a
-      SET "classification" = ${ActivityClassification.PROCESSING}::"ActivityClassification"
+      SET "classification" = ${ActivityClassification.PROCESSING}
       FROM claimed
       WHERE a."id" = claimed."id"
       RETURNING a.*;

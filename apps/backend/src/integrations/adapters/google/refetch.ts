@@ -1,7 +1,5 @@
 /**
  * Google Gmail fetch.
- * Fetch message ids (history since cursor, or latest 10 fallback),
- * ingest each through the existing sync pipeline, persist the new cursor.
  */
 
 import { ExternalSource } from '@prisma/client';
@@ -16,12 +14,18 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
+import { externalSourceCore } from '../../core/core';
+import { advanceSyncCursor } from '@/services/syncCursorRecovery';
+import { ExternalSourceAdapter } from '../../core/types';
+import { MessageDirection } from '@xyne/shared';
 
 const TAG = '[GoogleRefetch]';
 const transformer = new GoogleTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
 const channelRepo = new ChannelRepository();
 const emailRepo = new EmailRepository();
+const externalMessageRepo = new ExternalMessageRepository();
 
 export class GoogleRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
@@ -251,4 +255,111 @@ export class GoogleRefetch extends BaseRefetch {
       logger.warn(`${TAG} RFC Message-ID backfill for skipped emails failed`, { error });
     }
   }
+}
+
+export async function catchUpFromCursor(
+  source: ExternalSource,
+  adapter: ExternalSourceAdapter,
+  startHistoryId: string,
+): Promise<RefetchResult> {
+  const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+  const { messages, historyId } = await google.listMessageRefsFromHistory(startHistoryId);
+  const existing = await externalMessageRepo.findByExternalIds(
+    source.id,
+    messages.map(m => m.id),
+  );
+  const pending = messages.filter(
+    m => !existing.some(e => e.externalId === m.id && e.direction === MessageDirection.INCOMING),
+  );
+
+  const grouped = new Map<string, string[]>();
+  for (const m of pending) {
+    const ids = grouped.get(m.threadId);
+    if (ids) ids.push(m.id);
+    else grouped.set(m.threadId, [m.id]);
+  }
+  const threadGroups = Array.from(grouped.entries());
+
+  logger.info(
+    `${TAG} [CATCHUP] history returned ${messages.length}, ${pending.length} pending across ${threadGroups.length} threads`,
+    { sourceName: source.name, startHistoryId, resolvedHistoryId: historyId },
+  );
+
+  let processed = 0;
+  let newTickets = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  const ingestThread = async (messageIds: string[]): Promise<void> => {
+    for (const messageId of messageIds) {
+      try {
+        const messageData = await google.getMessageById(messageId);
+        if (!messageData) {
+          skipped += 1;
+          continue;
+        }
+        if ((messageData.labelIds ?? []).includes('DRAFT')) {
+          skipped += 1;
+          continue;
+        }
+
+        const parsedEmail = google.parseEmailData(messageData);
+        const preDownloadedAttachments = await preDownloadGmailAttachments({
+          googleService: google,
+          messageId,
+          messageData,
+          sourceName: source.name,
+        });
+
+        const parsed = await transformer.transform({
+          parsedEmail: { ...parsedEmail, attachments: [] },
+          ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+        });
+        if (!parsed.success || !parsed.data) throw new Error(parsed.error);
+
+        const results = await externalSourceCore.sync(adapter, source.name, parsed.data, source);
+        for (const result of results) {
+          if (result.action === 'created') {
+            processed += 1;
+            if (result.isNew) newTickets += 1;
+          } else if (result.action === 'updated') {
+            processed += 1;
+          } else {
+            skipped += 1;
+          }
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.warn(`${TAG} [CATCHUP] message ${messageId} ingest failed`, { error: msg });
+        errors.push(msg);
+      }
+    }
+  };
+
+  const { batchSize, batchDelayMs } = config.emailFetch;
+  for (let i = 0; i < threadGroups.length; i += batchSize) {
+    const batch = threadGroups.slice(i, i + batchSize);
+    await Promise.all(batch.map(([, ids]) => ingestThread(ids)));
+
+    if (batchDelayMs > 0 && i + batchSize < threadGroups.length) {
+      await new Promise(resolve => setTimeout(resolve, batchDelayMs));
+    }
+  }
+
+  if (historyId) {
+    if (errors.length > 0) {
+      logger.warn(`${TAG} [CURSOR_HELD] ${errors.length} message(s) failed — not advancing`, {
+        sourceName: source.name,
+        heldAt: source.lastSyncCursor,
+        wouldHaveAdvancedTo: historyId,
+      });
+    } else {
+      await advanceSyncCursor(source.id, historyId);
+    }
+  }
+
+  logger.info(
+    `${TAG} [CATCHUP] ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`,
+  );
+  return { processed, newTickets, skipped, errors };
 }

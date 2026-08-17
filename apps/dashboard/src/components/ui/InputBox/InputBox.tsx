@@ -10,7 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
 const VoiceShimmerMark = Mark.create({
@@ -69,6 +69,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
@@ -188,9 +189,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
+      hideComposerTools = false,
+      hideVoiceInput = false,
+      compact = false,
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      dockSlot,
     },
 
     ref,
@@ -202,6 +207,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
+    const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
@@ -298,10 +304,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-    const [showFormatToolbar, setShowFormatToolbar] = useState(false);
+    const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
-    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
+    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(
+      defaultFormattingToolbarOpen,
+    );
+
+    useEffect(() => {
+      setShowFormatToolbar(defaultFormattingToolbarOpen);
+      setShowMobileFormattingToolbar(defaultFormattingToolbarOpen);
+    }, [defaultFormattingToolbarOpen]);
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -577,10 +590,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           lowlight,
           defaultLanguage: 'plaintext',
-          HTMLAttributes: {
-            class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-            style: 'padding: 0.75rem;',
-          },
         }),
         LinkExtension.extend({
           inclusive: false,
@@ -737,6 +746,50 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
+          // Empty-table cleanup. prosemirror-tables refuses to delete a table
+          // via Backspace from inside a cell, so once a user erases all the text
+          // from a pasted table they are left with an empty, undeletable table
+          // box (editor.isEmpty is even true, so the placeholder/empty logic
+          // treats the input as empty while the table node lingers). Detect that
+          // state and remove the whole table on Backspace.
+          if (event.key === 'Backspace' && editor) {
+            const { selection } = view.state;
+            const { $from } = selection;
+
+            // Case A: the cursor/selection sits inside a table whose cells are
+            // all blank -> delete the entire table. Guarded on the whole table
+            // being empty so normal editing of a populated table is untouched.
+            for (let depth = $from.depth; depth > 0; depth--) {
+              const ancestor = $from.node(depth);
+              if (ancestor.type.spec['tableRole'] === 'table') {
+                if (ancestor.textContent.trim() === '') {
+                  event.preventDefault();
+                  editor.chain().focus().deleteTable().run();
+                  return true;
+                }
+                break;
+              }
+            }
+
+            // Case B: the cursor is at the very start of the block immediately
+            // after an empty table (e.g. the trailing paragraph a pasted table
+            // leaves behind) -> remove that empty table.
+            if (selection.empty && $from.parentOffset === 0) {
+              const blockStart = $from.before($from.depth);
+              const nodeBefore = view.state.doc.resolve(blockStart).nodeBefore;
+              if (
+                nodeBefore &&
+                nodeBefore.type.spec['tableRole'] === 'table' &&
+                nodeBefore.textContent.trim() === ''
+              ) {
+                event.preventDefault();
+                const from = blockStart - nodeBefore.nodeSize;
+                editor.chain().focus().deleteRange({ from, to: blockStart }).run();
+                return true;
+              }
+            }
+          }
+
           if (event.key === 'Escape' && onCancel) {
             event.preventDefault();
             onCancel();
@@ -879,7 +932,30 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             const tableNode = tableType.createChecked(null, pmRows);
             const prevScrollTop = view.dom.scrollTop;
-            dispatch(state.tr.replaceSelectionWith(tableNode));
+            const transaction = state.tr.replaceSelectionWith(tableNode);
+            const findInsertedTablePosition = (): number | null => {
+              let position: number | null = null;
+              transaction.doc.descendants((node, nodePosition) => {
+                if (position === null && node === tableNode) {
+                  position = nodePosition;
+                  return false;
+                }
+                return position === null;
+              });
+              return position;
+            };
+            const tablePosition = findInsertedTablePosition();
+
+            if (tablePosition !== null) {
+              const paragraphType = schema.nodes['paragraph'];
+              if (paragraphType) {
+                const afterTable = tablePosition + tableNode.nodeSize;
+                transaction.insert(afterTable, paragraphType.create());
+                transaction.setSelection(TextSelection.create(transaction.doc, afterTable + 1));
+              }
+            }
+
+            dispatch(transaction);
             view.dom.scrollTop = prevScrollTop;
           };
 
@@ -888,54 +964,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             event.preventDefault();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlContent, 'text/html');
-            const topLevel = Array.from(doc.body.childNodes);
-            if (topLevel.length === 0) return false;
+            doc.querySelectorAll<HTMLElement>('.xyne-code-block').forEach(codeBlock => {
+              const pre = codeBlock.querySelector(':scope > pre');
+              if (pre) codeBlock.replaceWith(pre);
+            });
 
-            const extractTable = (
-              table: HTMLTableElement,
-            ): { rows: string[][]; hasHeader: boolean } => {
-              const hasHeader = !!table.querySelector('thead') || !!table.querySelector('th');
-              const rows = Array.from(table.querySelectorAll('tr'))
-                .map(tr =>
-                  Array.from(tr.querySelectorAll('td, th')).map(
-                    cell => cell.textContent?.trim() ?? '',
-                  ),
-                )
-                .filter(row => row.length > 0);
-              return { rows, hasHeader };
-            };
-            let inserted = false;
-            for (const node of topLevel) {
-              if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent ?? '';
-                if (text.trim()) {
-                  editor?.commands.insertContent(text);
-                  inserted = true;
-                }
-                continue;
-              }
-              if (node.nodeType !== Node.ELEMENT_NODE) continue;
-              const el = node as HTMLElement;
-
-              if (el.tagName.toLowerCase() === 'table') {
-                const { rows, hasHeader } = extractTable(el as HTMLTableElement);
-                if (rows.length === 0 || rows[0]?.length === 0) continue;
-                if (rows.reduce((sum, row) => sum + row.length, 0) > 500) {
-                  toast.error('Table content is too large', {
-                    description: 'Please paste a smaller table or copy the data as text.',
-                  });
-                  return true;
-                }
-                insertTableAtCursor(rows, hasHeader);
-                inserted = true;
-                continue;
-              }
-
-              editor?.commands.insertContent(el.outerHTML);
-              inserted = true;
+            const cellCount = Array.from(doc.querySelectorAll('table')).reduce(
+              (count, table) => count + table.querySelectorAll('td, th').length,
+              0,
+            );
+            if (cellCount > 500) {
+              toast.error('Table content is too large', {
+                description: 'Please paste a smaller table or copy the data as text.',
+              });
+              return true;
             }
 
-            return inserted;
+            editor?.commands.insertContent(doc.body.innerHTML);
+            return true;
           }
 
           const pastedText = clipboard?.getData('text');
@@ -988,8 +1034,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               convertedExtension: getFileExtension(fileName),
             });
             void addDraftAttachments([file]);
-            editor?.commands.setContent('');
-            setContent('');
             return true;
           }
           return false;
@@ -1052,6 +1096,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        getHtml: (): string => editor?.getHTML() ?? '',
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1410,6 +1455,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           </div>
         </div>
 
+        {dockSlot}
+
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
@@ -1429,7 +1476,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           `}
           >
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
-            {isMobile && (
+            {isMobile && !hideVoiceInput && (
               <VoiceInput
                 ref={voiceInputRef}
                 headless
@@ -1478,7 +1525,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 onEmojiSelect={handleEmojiSelect}
                 hideSendButton={hideSendButton}
                 showAttachButton={!!features.fileAttachments}
-                showVoiceInput={true}
+                showVoiceInput={!hideVoiceInput}
                 isVoiceRecording={isVoiceRecording}
                 isVoiceTranscribing={isVoiceTranscribing}
                 onVoiceToggle={() => voiceInputRef.current?.toggle()}
@@ -1507,7 +1554,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             ) : (
               <div
                 className={`
-                relative pt-1 pb-1 px-3
+                relative ${compact ? 'py-0.5 pl-3 pr-11' : 'px-3 pt-1 pb-1'}
                 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
               `}
               >
@@ -1527,7 +1574,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   !editor?.isActive('orderedList') &&
                   !editor?.isActive('blockquote') &&
                   (isVoiceRecording ? (
-                    <div className='absolute inset-0 px-3 py-2 pointer-events-none select-none flex items-center gap-3 h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 pointer-events-none select-none flex items-center gap-3 h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
                         {([0, 120, 60, 180, 90] as const).map((delay, i) => (
                           <div
@@ -1543,7 +1594,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <span className='text-[13px] text-muted-foreground'>Listening...</span>
                     </div>
                   ) : (
-                    <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       {placeholder}
                     </div>
                   ))}
@@ -1624,13 +1679,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Desktop Footer Actions */}
             {!isMobile && (
-              <div className='flex items-center justify-between gap-2 px-2 pb-2 pt-1'>
+              <div
+                className={`flex items-center justify-between gap-2 ${
+                  compact ? 'absolute right-2 top-1/2 -translate-y-1/2 px-0 py-0' : 'px-2 pb-2 pt-1'
+                }`}
+              >
                 {/* min-w-0 lets this group shrink below its content width so the
                     "Send to channel" label ellipsizes instead of pushing the send
                     controls out of the row. The icon buttons keep their size via
                     min-width:auto (fixed-size svg children). */}
                 <div className='flex min-w-0 items-center gap-1'>
-                  {features.fileAttachments && (
+                  {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -1695,7 +1754,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   </Dialog>
 
-                  {features.emojiPicker && (
+                  {!hideComposerTools && features.emojiPicker && (
                     // Inside InputBox.tsx -> EmojiPickerButton component
                     <EmojiPickerButton
                       onEmojiSelect={handleEmojiSelect}
@@ -1703,7 +1762,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   )}
 
-                  {features.mentions && (
+                  {!hideComposerTools && features.mentions && (
                     <Tooltip
                       content='Mention user (@)'
                       side='top'
@@ -1725,26 +1784,28 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <Tooltip
-                    content='Mention channel (#)'
-                    side='top'
-                    delayDuration={1000}
-                    skipDelayDuration={1000}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => {
-                        editor?.chain().focus().insertContent('#').run();
-                      }}
-                      className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                      aria-label='Mention channel'
-                      disabled={disabled || isSending}
+                  {!hideComposerTools && (
+                    <Tooltip
+                      content='Mention channel (#)'
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
                     >
-                      <Hashtag className='h-4 w-4 text-muted-foreground' />
-                    </button>
-                  </Tooltip>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          editor?.chain().focus().insertContent('#').run();
+                        }}
+                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        aria-label='Mention channel'
+                        disabled={disabled || isSending}
+                      >
+                        <Hashtag className='h-4 w-4 text-muted-foreground' />
+                      </button>
+                    </Tooltip>
+                  )}
 
-                  {features.richText && (
+                  {!hideComposerTools && features.richText && (
                     <Tooltip
                       content={showFormatToolbar ? 'Hide formatting' : 'Show formatting'}
                       side='top'
@@ -1782,7 +1843,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </div>
                   )}
 
-                  {bottomLeftSlot}
+                  {!hideComposerTools && bottomLeftSlot}
                 </div>
 
                 <div className='flex shrink-0 items-center gap-2'>
@@ -1804,15 +1865,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <VoiceInput
-                    ref={voiceInputRef}
-                    editor={editor}
-                    mentionItems={mentionItems}
-                    voiceMentionItems={voiceMentionItems}
-                    disabled={disabled}
-                    isSending={isSending}
-                    onStateChange={handleVoiceStateChange}
-                  />
+                  {!hideVoiceInput && (
+                    <VoiceInput
+                      ref={voiceInputRef}
+                      editor={editor}
+                      mentionItems={mentionItems}
+                      voiceMentionItems={voiceMentionItems}
+                      disabled={disabled}
+                      isSending={isSending}
+                      onStateChange={handleVoiceStateChange}
+                    />
+                  )}
 
                   {!hideSendButton && (
                     <div className='relative flex items-center'>
@@ -1975,7 +2038,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             type='button'
                             onClick={() => void handleSend()}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'

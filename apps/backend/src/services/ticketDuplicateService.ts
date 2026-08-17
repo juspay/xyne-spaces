@@ -1,10 +1,10 @@
 import { logger } from '@/utils/logger';
+import { TicketReferenceRelation } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
-import { TicketReferenceRelation } from '@prisma/client';
 import { RankProfile } from '@/vespa/src/types';
 import type {
   TicketDuplicateCandidate,

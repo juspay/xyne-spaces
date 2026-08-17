@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowUpDown,
   Calendar,
+  CircleCheck,
   FileText,
   SquareKanban,
   Tag,
@@ -40,6 +41,8 @@ interface TicketActivityProps {
   boards?: { id: string; name: string }[];
   userGroups: UserGroup[] | undefined;
   stageVisitFormValues?: StageVisitFormValues[];
+  /** FLOW form values are scoped by planNodeId rather than a persisted stage id. */
+  flowFormContextId?: string;
 }
 
 /**
@@ -53,14 +56,19 @@ type ActivityValue = Partial<
     ReferenceTicketActivityValue &
     SubticketActivityValue & {
       fieldName?: string;
+      contextName?: string;
       reason?: string;
       stageName?: string;
+      prompt?: string;
+      confirmationText?: string;
+      stepTitle?: string;
       oldFilename?: string;
       newFilename?: string;
       emailType?: string;
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      isAiClassification?: boolean;
     }
 >;
 
@@ -89,7 +97,7 @@ const formatExactTimestamp = (timestamp: number | Date): string => {
   }
 };
 
-const getActivityDescription = (
+export const getActivityDescription = (
   activity: TicketActivityType,
   users: User[] | undefined,
   boards?: { id: string; name: string }[],
@@ -295,6 +303,16 @@ const getActivityDescription = (
     }
 
     case ActivityType.METADATA:
+      if (value?.field === 'flowConfirmation') {
+        const confirmationText = value.confirmationText || value.prompt;
+        return {
+          description: confirmationText
+            ? `confirmed “${confirmationText}”`
+            : 'completed the confirmation',
+          details: '',
+        };
+      }
+
       if (value?.field === 'emailReply') {
         return {
           description: 'replied to the email',
@@ -305,7 +323,8 @@ const getActivityDescription = (
       if (value?.field === 'stageFormFile') {
         const fieldLabel = value.fieldName || 'file';
         const filename = value.newFilename || value.oldFilename || 'file';
-        const stageSuffix = value.stageName ? ` in ${value.stageName} form` : '';
+        const contextName = value.contextName ?? value.stageName;
+        const stageSuffix = contextName ? ` in ${contextName} form` : '';
         const action = value.action;
 
         if (action === 'removed') {
@@ -330,6 +349,7 @@ const getActivityDescription = (
 
       if (value?.field === 'customField') {
         const fieldLabel = value?.fieldName || 'custom field';
+        const contextSuffix = value?.contextName ? ` in ${value.contextName} form` : '';
         const oldValue =
           typeof value?.oldValue === 'string'
             ? (customFieldAttachmentFilenameById?.get(value.oldValue) ?? value.oldValue)
@@ -341,7 +361,7 @@ const getActivityDescription = (
 
         if (oldValue && newValue) {
           return {
-            description: `updated ${fieldLabel}`,
+            description: `updated ${fieldLabel}${contextSuffix}`,
             details: (
               <>
                 from <span className='font-semibold'>{oldValue}</span> to{' '}
@@ -353,13 +373,13 @@ const getActivityDescription = (
 
         if (newValue) {
           return {
-            description: `set ${fieldLabel}`,
+            description: `set ${fieldLabel}${contextSuffix}`,
             details: <span className='font-semibold'>{newValue}</span>,
           };
         }
 
         return {
-          description: `cleared ${fieldLabel}`,
+          description: `cleared ${fieldLabel}${contextSuffix}`,
           details: oldValue ? <span className='font-semibold'>{oldValue}</span> : '',
         };
       }
@@ -594,6 +614,9 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
   if (activity.activityType === ActivityType.METADATA && value?.field === 'stageFormFile') {
     return <FileText size={12} className='text-blue-600' />;
   }
+  if (activity.activityType === ActivityType.METADATA && value?.field === 'flowConfirmation') {
+    return <CircleCheck size={12} className='text-emerald-600' />;
+  }
 
   switch (activity.activityType) {
     case ActivityType.PRIORITY:
@@ -632,6 +655,7 @@ export const TicketActivity = ({
   userGroups,
   boards,
   stageVisitFormValues = [],
+  flowFormContextId,
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [showExactTime, setShowExactTime] = useState(false);
@@ -720,6 +744,7 @@ export const TicketActivity = ({
               activities={sortedActivities}
               showExactTime={showExactTime}
               stageVisitFormValues={stageVisitFormValues}
+              {...(flowFormContextId ? { flowFormContextId } : {})}
               customFieldAttachmentFilenameById={customFieldAttachmentFilenameById}
             />
           ))}
@@ -743,6 +768,7 @@ export const ActivityComponent = ({
   activities,
   showExactTime,
   stageVisitFormValues = [],
+  flowFormContextId,
   customFieldAttachmentFilenameById,
 }: {
   activity: TicketActivityType;
@@ -753,10 +779,12 @@ export const ActivityComponent = ({
   activities: TicketActivityType[];
   showExactTime: boolean;
   stageVisitFormValues?: StageVisitFormValues[];
+  flowFormContextId?: string;
   customFieldAttachmentFilenameById?: ReadonlyMap<string, string>;
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
+  const isAiActivity = (activity.value as ActivityValue | null)?.isAiClassification === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -772,10 +800,20 @@ export const ActivityComponent = ({
     (activity.activityType === ActivityType.STAGE_NAME ||
       activity.activityType === ActivityType.STATUS) &&
     activityValue?.field === 'stageName';
+  const isFlowFormCompletion =
+    !!flowFormContextId &&
+    activity.activityType === ActivityType.STATUS &&
+    activityValue?.field === 'statusV2' &&
+    activityValue.newValue === 'COMPLETED';
 
-  const matchedFormVisit = isStageMove
-    ? matchFormVisit(stageVisitFormValues, activityValue?.newValue, activity.timestamp)
-    : undefined;
+  const matchedFormVisit = isFlowFormCompletion
+    ? stageVisitFormValues
+        .filter(sv => sv.stageId === flowFormContextId)
+        .filter(sv => sv.enteredAt <= new Date(activity.timestamp).getTime() + 60_000)
+        .sort((a, b) => b.enteredAt - a.enteredAt)[0]
+    : isStageMove
+      ? matchFormVisit(stageVisitFormValues, activityValue?.newValue, activity.timestamp)
+      : undefined;
 
   return (
     <div
@@ -795,9 +833,11 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (isAutomationActivity
-                ? 'Automation'
-                : getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAiActivity
+                ? 'AI classification'
+                : isAutomationActivity
+                  ? 'Automation'
+                  : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

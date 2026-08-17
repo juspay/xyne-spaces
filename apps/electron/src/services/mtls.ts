@@ -44,7 +44,7 @@ export function selectClientCertificate<T>(
 
 // The device identity client certificate must only be presented to the Xyne backend/auth hosts —
 // never to an arbitrary server that requests one, which would leak the device identity to a foreign
-// origin (secops #345). The allowlist is derived from the mTLS-protected endpoints in config.
+// origin. The allowlist is derived from the mTLS-protected endpoints in config.
 function allowedMtlsHosts(): Set<string> {
     const hosts = new Set<string>();
     for (const u of [config.BACKEND_URL, config.MTLS_BACKEND_URL, config.MTLS_FRONTEND_URL, config.FRONTEND_URL]) {
@@ -75,7 +75,7 @@ export async function setupMTLS() {
     app.on('select-client-certificate', (event, _webContents, url, list, callback) => {
         log.info(`[mTLS] Server requested client certificate for ${url}`);
 
-        // Only present the device identity certificate to allowlisted Xyne hosts (secops #345).
+        // Only present the device identity certificate to allowlisted Xyne hosts.
         const allowlist = allowedMtlsHosts();
         const requestHost = normalizeCertificateRequestHostname(url);
         if (!requestHost || !allowlist.has(requestHost)) {
@@ -88,7 +88,11 @@ export async function setupMTLS() {
 
         log.info(`[mTLS] Candidates found: ${list.length}`);
 
-        // Both app.spaces and auth.spaces require mTLS.
+        // INVARIANT: only first-party hosts reach this point — the allowedMtlsHosts()
+        // gate at the top of this handler has already declined (preventDefault +
+        // callback(undefined)) every non-allowlisted host, and selectClientCertificate()
+        // below re-checks the allowlist. Do not add a selection path here that bypasses
+        // either check.
         event.preventDefault();
 
         if (list.length > 0) {

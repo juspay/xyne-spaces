@@ -1,6 +1,5 @@
 import { db } from '@/database/client';
-import { CanvasRole, WorkspaceRole } from '@prisma/client';
-import { resolveCanvasHierarchy, GuestEntity } from '@xyne/shared';
+import { resolveCanvasHierarchy, GuestEntity, CanvasRole, WorkspaceRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -135,7 +134,7 @@ class CanvasAuthService {
     for (const participant of channelParticipants) {
       if (!participant.channelId) continue;
       if (await this.hasEffectiveChannelAccess(userId, context, participant.channelId)) {
-        strongestRole = this.strongerRole(strongestRole, { role: participant.role });
+        strongestRole = this.strongerRole(strongestRole, { role: participant.role as CanvasRole });
       }
     }
 
@@ -281,7 +280,7 @@ class CanvasAuthService {
         currentUserContext,
       );
 
-      const entityRole = this.strongerRole(groupParticipant, channelParticipant);
+      const entityRole = this.strongerRole(groupParticipant as Parameters<typeof this.strongerRole>[0], channelParticipant);
       const effectiveRole = participant?.role ?? entityRole?.role;
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
       const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
@@ -315,7 +314,7 @@ class CanvasAuthService {
         hasAccess,
         canEdit,
         canView,
-        role: effectiveRole,
+        role: effectiveRole as CanvasRole,
         canvas: {
           id: canvas.id,
           createdBy: canvas.createdBy,
@@ -446,7 +445,7 @@ class CanvasAuthService {
             id: canvasId,
             createdBy: userId,
             workspaceId,
-            visibility: 'PRIVATE',
+            visibility: CanvasVisibility.PRIVATE,
             title: options?.title || 'Untitled Canvas',
             content: [],
             isCollaborative: true,
@@ -460,7 +459,7 @@ class CanvasAuthService {
             canvasId,
             userId,
             workspaceId,
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
           },
         }),
       ]);

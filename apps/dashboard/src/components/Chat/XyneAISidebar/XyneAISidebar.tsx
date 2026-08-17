@@ -7,6 +7,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -29,6 +30,8 @@ import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAs
 import {
   deleteV2Conversation,
   fetchV2ConversationMessages,
+  deskAutoDraftMessagesUrl,
+  forkDeskAutoDraft,
 } from '../../../services/XyneAI/XyneAISessionsV2Service';
 import type {
   Message,
@@ -78,6 +81,7 @@ import {
   type ThreadInfo,
   type CanvasInfo,
   type XyneAIContext,
+  type AskAIInitialContextSelections,
   type SelectionInfo,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
@@ -107,6 +111,10 @@ interface XyneAISidebarProps {
   threadInfo?: ThreadInfo | null;
   startFreshChat?: boolean;
   canvasInfo?: CanvasInfo | null;
+  /** Context supplied by the surface that opened this Ask AI conversation. */
+  initialContextSelections?: AskAIInitialContextSelections | null;
+  /** Re-applies the supplied context on every explicit Ask AI open. */
+  contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
   onDebuggerOpenChange?: (open: boolean) => void;
@@ -135,6 +143,8 @@ const XyneAISidebar = ({
   channelId,
   threadInfo,
   canvasInfo,
+  initialContextSelections,
+  contextOpenNonce,
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
@@ -264,6 +274,15 @@ const XyneAISidebar = ({
     timestamp: number;
   } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
+
+  // A recording page already knows the exact call and notes canvas that should
+  // scope the conversation. Seed the normal picker state so its visible pills
+  // and the request payload use the same source of truth.
+  useEffect(() => {
+    if (!initialContextSelections) return;
+    setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedRecordings(initialContextSelections.recordings);
+  }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
   const [conversationChannelId, setConversationChannelId] = useState<string | null>(null);
@@ -749,13 +768,12 @@ const XyneAISidebar = ({
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
-    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    // `block: 'nearest'` ALWAYS — not just for forced/embedded instances.
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth',
-      ...(isAgentForced && { block: 'nearest' }),
+      block: 'nearest',
     });
-  }, [isAgentForced]);
+  }, []);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -1000,9 +1018,13 @@ const XyneAISidebar = ({
       if (isV2) {
         setDebugEvents([]);
         setDebugArtifactsReadyVersion(0);
+        const deskDraft = deskAutoDraftRef.current;
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
           effectiveAgentSlug,
+          deskDraft && deskDraft.conversationId === conversation.sessionId
+            ? deskAutoDraftMessagesUrl(deskDraft.conversationId, deskDraft.channelId)
+            : undefined,
         );
         // Overlay any local-only messages from the manager. If the user sent a
         // message in this conversation, switched away, came back AFTER the
@@ -1187,8 +1209,13 @@ const XyneAISidebar = ({
       void handleLoadConversationRef.current(stub);
       xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
     };
-    processFocus(xyneAIActor.getSnapshot().context.focusSessionId);
-    const sub = xyneAIActor.subscribe(snapshot => processFocus(snapshot.context.focusSessionId));
+    const snap = xyneAIActor.getSnapshot().context;
+    if (snap.deskAutoDraft) deskAutoDraftRef.current = snap.deskAutoDraft;
+    processFocus(snap.focusSessionId);
+    const sub = xyneAIActor.subscribe(snapshot => {
+      if (snapshot.context.deskAutoDraft) deskAutoDraftRef.current = snapshot.context.deskAutoDraft;
+      processFocus(snapshot.context.focusSessionId);
+    });
     return () => sub.unsubscribe();
   }, [conversationId]);
 
@@ -1552,11 +1579,24 @@ const XyneAISidebar = ({
     },
     [messages],
   );
+  const deskAutoDraftRef = useRef<{ conversationId: string; channelId: string } | null>(null);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     // Allow submission if there's input, activities, OR selection contexts
     if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
       return;
+
+    const deskDraft = deskAutoDraftRef.current;
+    if (deskDraft && deskDraft.conversationId === conversationId) {
+      try {
+        const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
+        deskAutoDraftRef.current = null;
+        setConversationId(forked.conversationId);
+      } catch {
+        toast.error('Could not continue this draft conversation');
+        return;
+      }
+    }
 
     // Store the display content (what the user typed, without hidden context)
     const displayContent = inputValue.trim();

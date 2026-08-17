@@ -6,12 +6,16 @@ import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
+import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
+import { useShowThreadTags } from './useShowThreadTags';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import { useRecordingDefaultLayout } from './useRecordingDefaultLayout';
+import { useRecordingVersion } from './useRecordingVersion';
+import { useRecordingStore } from './useRecordingStore';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -40,6 +44,9 @@ export function usePreferencesState(enabled: boolean) {
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
+  const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
+    useDefaultFormattingToolbarOpen();
+  const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { searchMode, setSearchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
@@ -57,6 +64,9 @@ export function usePreferencesState(enabled: boolean) {
     setScreenShareQuality: setCallScreenShareQuality,
   } = useCallMediaQualitySettings();
   const { recordingDefaultLayout, setRecordingDefaultLayout } = useRecordingDefaultLayout();
+  const { recordingVersion, setRecordingVersion } = useRecordingVersion();
+  const recordingStatus = useRecordingStore(context => context.status);
+  const canSwitchRecordingVersion = recordingStatus === 'idle' || recordingStatus === 'error';
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -129,6 +139,10 @@ export function usePreferencesState(enabled: boolean) {
     debugSettings,
     toggleSendIndicators,
     enterSendsMessage,
+    defaultFormattingToolbarOpen,
+    setDefaultFormattingToolbarOpen,
+    showThreadTags,
+    setShowThreadTags,
     setEnterSendsMessage,
     searchMode,
     setSearchMode,
@@ -162,6 +176,9 @@ export function usePreferencesState(enabled: boolean) {
     setCallScreenShareQuality,
     recordingDefaultLayout,
     setRecordingDefaultLayout,
+    recordingVersion,
+    setRecordingVersion,
+    canSwitchRecordingVersion,
   };
 }
 

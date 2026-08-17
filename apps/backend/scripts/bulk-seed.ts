@@ -18,14 +18,28 @@
  *   CHANNELS=400 MSGS_PER_CONV=25 CONVS_PER=4 DMS=80 GROUP_DMS=20 npx tsx scripts/bulk-seed.ts
  *   BULK_WIPE=1 npx tsx scripts/bulk-seed.ts   # remove previous bulk data, then reseed
  *
+ * Seeds for whoever last logged in locally; SEED_USER_EMAIL=you@example.com overrides.
+ *
  * All generated entities are name-prefixed `bulk-` so BULK_WIPE can find them.
  * Tables here have no FK constraints (per schema comments) so children are
  * deleted explicitly by collected ids.
  */
 
-import { PrismaClient, ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, MessageType, AuthProvider, UserStatus, OrgRole, WorkspaceRole, ActivityClassification } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
-import { serializeInitialMessageMd } from '@xyne/shared';
+import {
+  serializeInitialMessageMd,
+  ChannelType,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelRole,
+  MessageType,
+  AuthProvider,
+  UserStatus,
+  OrgRole,
+  WorkspaceRole,
+  ActivityClassification,
+} from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -63,29 +77,60 @@ const SAMPLE = [
 const now = Date.now();
 const minsAgo = (m: number) => new Date(now - m * 60_000);
 let meId = ''; // logged-in user id, set in main() — the activity receiver
+let meName = ''; // display name, used in the @-mention markup
+let wsId = ''; // workspace id, set in main() — every table below denormalizes it
 const pick = <T,>(arr: T[], i: number): T => arr[i % arr.length];
 
 type U = { id: string; email: string };
+type Me = U & { name: string | null };
+
+// Same markup the chat input emits (ChatInput.utils). The renderer only treats a span
+// as a mention when data-mention AND data-mention-type="user" are both present, so a
+// plain "@name" string would show up as ordinary text.
+const mentionMe = (): string =>
+  `<span data-mention="" data-mention-type="user" data-user-id="${meId}" data-username="${meName}" class="chat-input-mention">@${meName}</span> `;
+
+async function resolveUser(): Promise<Me | null> {
+  const targetEmail = process.env.SEED_USER_EMAIL;
+  if (targetEmail) {
+    const hit = await prisma.user.findFirst({ where: { email: targetEmail }, select: { id: true, email: true, name: true } });
+    if (hit) return hit;
+    console.log(`  ⚠️  SEED_USER_EMAIL "${targetEmail}" not found — falling back to the last logged-in user.`);
+  }
+  const session = await prisma.userSession.findFirst({
+    where: { status: 'ACTIVE' },
+    orderBy: { lastActivity: 'desc' },
+    select: { user: { select: { id: true, email: true, name: true } } },
+  });
+  if (session?.user) return session.user;
+  console.log('  ⚠️  No active session found — falling back to the first human user. Set SEED_USER_EMAIL to target another.');
+  return prisma.user.findFirst({
+    where: {
+      NOT: [
+        { email: { contains: '@app.xyne.ai' } },
+        { email: { contains: '@bot.xyne.ai' } },
+        { email: { startsWith: USER_EMAIL_PREFIX } },
+      ],
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, email: true, name: true },
+  });
+}
 
 async function getFoundation() {
-  // The user whose sidebar gets the channels — override with SEED_USER_EMAIL to
-  // match whoever you log in as locally. Falls back to the first user in the DB.
-  const targetEmail = process.env.SEED_USER_EMAIL ?? 'john.developer@xyne.ai';
-
-  let me = await prisma.user.findFirst({ where: { email: targetEmail }, select: { id: true, email: true } });
-  if (!me) {
-    me = await prisma.user.findFirst({ select: { id: true, email: true } });
-    if (me) console.log(`  ⚠️  "${targetEmail}" not found — using first user "${me.email}". Set SEED_USER_EMAIL to target another.`);
-  }
+  const me = await resolveUser();
   if (!me) throw new Error('No users in DB. Run `npm run db:seed` (and optionally dummy-seed.ts) first.');
 
-  const project = await prisma.project.findFirst({ select: { id: true, workspaceId: true } });
+  const project =
+    (await prisma.project.findFirst({ where: { type: 'DEFAULT' }, select: { id: true, workspaceId: true } })) ??
+    (await prisma.project.findFirst({ select: { id: true, workspaceId: true } }));
   if (!project) throw new Error('No project found. Run a base seed first.');
+  const dmProject = (await prisma.project.findFirst({ where: { type: 'DM' }, select: { id: true } })) ?? { id: project.id };
 
   const orgMember = await prisma.orgMember.findFirst({ select: { orgId: true } });
   if (!orgMember) throw new Error('No org member found. Run a base seed first.');
 
-  return { me, project, orgId: orgMember.orgId };
+  return { me, project, dmProject, orgId: orgMember.orgId };
 }
 
 /**
@@ -179,17 +224,21 @@ const reactions: any[] = [];
 const reactionCounts: any[] = [];
 const activities: any[] = [];
 
+type ConvInfo = { createdAt: Date; createdBy: string; rootActivity: boolean };
+
 function addConversationWithMessages(
   channelId: string,
   members: U[],
   convIndex: number,
   baseMinutes: number,
-) {
+): ConvInfo {
   const conversationId = createId();
   const msgIds: string[] = [];
   const total = MSGS_PER_CONV + REPLIES_PER_CONV;
   // capture the initial (k=0) message so we can denormalize it onto the conversation
   let initialMd: string | null = null;
+  let initialSender = members[0].id;
+  let rootActivity = false;
   for (let k = 0; k < total; k++) {
     const messageId = createId();
     msgIds.push(messageId);
@@ -197,9 +246,19 @@ function addConversationWithMessages(
     // channel feed — rotates across members instead of always being members[0] (me)
     const sender = pick(members, convIndex + k);
     const isReply = k >= MSGS_PER_CONV;
-    const content = pick(SAMPLE, convIndex + k);
+    // Mention the seeded user on the conversation's INITIAL message: the channel feed
+    // renders only initial messages (thread replies live behind "N replies"), and the
+    // backend only counts an activity toward unreadCount when its message is the
+    // conversation's initialMessageId. conv 1 is used because conv 0's k=0 sender is
+    // always members[0] — me — and you can't be mentioned by yourself.
+    const isMention =
+      k === 0 && convIndex === 1 && sender.id !== meId && activities.length < ACTIVITIES;
+    const content = isMention
+      ? `${mentionMe()}${pick(SAMPLE, convIndex + k)}`
+      : pick(SAMPLE, convIndex + k);
     const createdAt = minsAgo(baseMinutes - k);
     messages.push({
+      workspaceId: wsId,
       messageId,
       conversationId,
       senderId: sender.id,
@@ -209,6 +268,7 @@ function addConversationWithMessages(
       createdAt,
     });
     if (k === 0) {
+      initialSender = sender.id;
       // The chat view renders message bubbles from conversation.initial_message_md
       // (a denormalized summary), NOT from the messages table directly. The backend
       // mutation handler writes this on send; a raw insert must replicate it or the
@@ -231,13 +291,15 @@ function addConversationWithMessages(
     if (k % REACT_EVERY === 0) {
       const emoji = pick(EMOJIS, k);
       const reactor = pick(members, k + 1);
-      reactions.push({ messageId, userId: reactor.id, emojiName: emoji });
-      reactionCounts.push({ messageId, emojiName: emoji, count: 1 });
+      reactions.push({ workspaceId: wsId, messageId, userId: reactor.id, emojiName: emoji });
+      reactionCounts.push({ workspaceId: wsId, messageId, emojiName: emoji, count: 1 });
     }
-    // Mention activity: one per channel (conv 0, k=1 — sender is a dummy, not me),
-    // up to ACTIVITIES. Shows in the Activity page as "<dummy> mentioned you".
-    if (convIndex === 0 && k === 1 && sender.id !== meId && activities.length < ACTIVITIES) {
+    // Mention activity — Activity page shows "<dummy> mentioned you", and the message
+    // it points at really does contain the mention.
+    if (isMention) {
+      rootActivity = true;
       activities.push({
+        workspaceId: wsId,
         userId: meId, // receiver = me
         actorId: sender.id, // who mentioned me
         actorAction: 'mentioned_user',
@@ -253,22 +315,27 @@ function addConversationWithMessages(
       });
     }
   }
+  const createdAt = minsAgo(baseMinutes);
   conversations.push({
+    workspaceId: wsId,
     conversationId,
     channelId,
-    createdBy: members[0].id,
+    // whoever sent the initial message started the conversation — the DM unread count
+    // is "conversations since lastViewedAt not created by me", so this must be truthful
+    createdBy: initialSender,
     initialMessageId: msgIds[0],
     // MUST set a distinct createdAt. Prisma createMany is a single INSERT and the
     // column default now() returns the transaction timestamp — identical for every
     // row. The channel feed paginates with a cursor keyed on createdAt
     // (channelConversationsPaginatedV3 .start({createdAt})); tied timestamps make the
     // cursor return nothing → no messages render. baseMinutes is unique per conv.
-    createdAt: minsAgo(baseMinutes),
+    createdAt,
     lastActivityAt: minsAgo(baseMinutes - (total - 1)),
     replyCount: REPLIES_PER_CONV,
     pinned: convIndex === 0,
     initial_message_md: initialMd, // denormalized initial message — drives the chat-view bubble
   });
+  return { createdAt, createdBy: initialSender, rootActivity };
 }
 
 function addChannel(
@@ -299,22 +366,36 @@ function addChannel(
   // channel_stats — the DM list (dmChannelsLatestMessagesPaginated) queries this table,
   // NOT channels. No stats row → DM never appears in the DM page list.
   channelStats.push({
+    workspaceId: opts.workspaceId,
     channelId,
     lastActivityAt: minsAgo(idx),
     participantCount: opts.members.length,
   });
+  const convs: ConvInfo[] = [];
+  for (let c = 0; c < CONVS_PER; c++) {
+    convs.push(addConversationWithMessages(channelId, opts.members, c, idx * 100 + c * 30));
+  }
+  // Mirror how the backend derives unreadCount when you open a channel (mutators.ts
+  // channel.markAsRead): DMs count conversations since lastViewedAt that someone else
+  // started; channels count root activities (an activity on a conversation's initial
+  // message). Anything else — e.g. a random number — puts a badge on a channel with
+  // nothing new in it, so opening it shows no mention and the badge just disappears.
+  const unreadConvs = convs.filter(c => (isDm ? c.createdBy !== meId : c.rootActivity));
+  const allRead = unreadConvs.length === 0 || idx % 3 === 0; // leave some channels fully read
+  const oldestUnread = unreadConvs.reduce((min, c) => Math.min(min, c.createdAt.getTime()), Infinity);
+  const myLastViewedAt = allRead ? new Date(now) : new Date(oldestUnread - 1000);
   opts.members.forEach((u, mi) => {
-    participants.push({ channelId, userId: u.id, role: mi === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER });
+    const isMe = u.id === meId;
+    participants.push({ workspaceId: opts.workspaceId, channelId, userId: u.id, role: mi === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER });
     statuses.push({
+      workspaceId: opts.workspaceId,
       channelId,
       userId: u.id,
-      unreadCount: u.id === opts.createdBy ? Math.floor(Math.random() * 6) : 0,
+      lastViewedAt: isMe ? myLastViewedAt : new Date(now),
+      unreadCount: isMe && !allRead ? unreadConvs.length : 0,
       isStarred: mi === 0 && idx % 9 === 0,
     });
   });
-  for (let c = 0; c < CONVS_PER; c++) {
-    addConversationWithMessages(channelId, opts.members, c, idx * 100 + c * 30);
-  }
 }
 
 async function flush() {
@@ -349,9 +430,11 @@ async function main() {
     console.log('🧹 Wiping previous bulk data...');
     await wipe();
   }
-  const { me, project, orgId } = await getFoundation();
+  const { me, project, dmProject, orgId } = await getFoundation();
   meId = me.id; // activity receiver
-  console.log(`  using user=${me.email} project=${project.id} workspace=${project.workspaceId} org=${orgId}`);
+  meName = me.name ?? me.email;
+  wsId = project.workspaceId;
+  console.log(`  using user=${me.email} project=${project.id} dmProject=${dmProject.id} workspace=${project.workspaceId} org=${orgId}`);
   console.log(`  config: DUMMY_USERS=${DUMMY_USERS} CHANNELS=${CHANNELS} CONVS_PER=${CONVS_PER} MSGS_PER_CONV=${MSGS_PER_CONV} DMS=${DMS} GROUP_DMS=${GROUP_DMS}\n`);
 
   console.log('  Ensuring dummy users...');
@@ -385,7 +468,7 @@ async function main() {
       scopeType: ChannelScopeType.DM,
       visibility: ChannelVisibility.PRIVATE,
       members: [me, other],
-      projectId: project.id,
+      projectId: dmProject.id,
       workspaceId: project.workspaceId,
       createdBy: me.id,
     }, CHANNELS + i);
@@ -398,7 +481,7 @@ async function main() {
       scopeType: ChannelScopeType.GROUP_DM,
       visibility: ChannelVisibility.PRIVATE,
       members: everyone.slice(0, 3 + (i % 2)),
-      projectId: project.id,
+      projectId: dmProject.id,
       workspaceId: project.workspaceId,
       createdBy: me.id,
     }, CHANNELS + DMS + i);

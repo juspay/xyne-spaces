@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';
@@ -33,6 +33,28 @@ const FieldTransitionSchema = z.object({
   newValue: z.union([z.string(), z.number()]).nullable().optional(),
 });
 
+export const FormFieldConditionMatchSchema = z.enum(['changed', 'contains']);
+
+export const FormFieldConditionSchema = z
+  .object({
+    fieldId: z.string().min(1),
+    match: FormFieldConditionMatchSchema.default('changed'),
+    value: z
+      .string()
+      .optional()
+      .describe('Substring to look for in the new field value when match is "contains".'),
+  })
+  .superRefine((val, ctx) => {
+    if (val.match === 'contains' && !(val.value ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A contains value is required when match is "contains".',
+        path: ['value'],
+      });
+    }
+  });
+export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
+
 const TicketUpdatedConfigSchema = z.object({
   boardIds: z
     .array(z.string())
@@ -56,11 +78,17 @@ const TicketUpdatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Fire only when any of these form fields changed. Leave empty to skip form field tracking entirely.',
+      'Fire only when any of these form fields changed. Leave empty to skip form field tracking entirely. Prefer formFieldConditions for contains matching.',
+    ),
+  formFieldConditions: z
+    .array(FormFieldConditionSchema)
+    .optional()
+    .describe(
+      'Fire when form fields change and optional value filters match. Prefer this over formFieldIds.',
     ),
 });
 
-const TicketChangeSchema = z.object({
+export const TicketChangeSchema = z.object({
   previousValue: z.union([z.string(), z.number(), z.null()]).optional(),
   newValue: z.union([z.string(), z.number(), z.null()]).optional(),
 });
@@ -79,6 +107,37 @@ type TicketChange = z.infer<typeof TicketChangeSchema>;
 
 export type TicketChanges = Partial<Record<TicketUpdatedField, TicketChange>>;
 export type FormFieldChanges = Record<string, TicketChange>;
+
+/** Normalize legacy formFieldIds into formFieldConditions (match: changed). */
+export function resolveFormFieldConditions(cfg: TicketUpdatedConfig): FormFieldCondition[] {
+  if (cfg.formFieldConditions && cfg.formFieldConditions.length > 0) {
+    return cfg.formFieldConditions.map(c => ({
+      fieldId: c.fieldId,
+      match: c.match ?? 'changed',
+      value: c.value,
+    }));
+  }
+  if (cfg.formFieldIds && cfg.formFieldIds.length > 0) {
+    return cfg.formFieldIds.map(fieldId => ({ fieldId, match: 'changed' as const }));
+  }
+  return [];
+}
+
+export function matchesFormFieldCondition(
+  condition: FormFieldCondition,
+  formFieldChanges: FormFieldChanges | undefined,
+): boolean {
+  const change = formFieldChanges?.[condition.fieldId];
+  if (!change) return false;
+
+  const match = condition.match ?? 'changed';
+  if (match === 'changed') return true;
+
+  const needle = (condition.value ?? '').trim();
+  if (!needle) return false;
+  if (change.newValue === null || change.newValue === undefined) return false;
+  return String(change.newValue).toLowerCase().includes(needle.toLowerCase());
+}
 
 export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfigSchema> {
   readonly type = TICKET_UPDATED_EVENT;
@@ -150,7 +209,8 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
     if (!matchTicketScopeFilters(cfg, p.ticket)) return false;
 
     const hasTransitionConfig = cfg.transitions && cfg.transitions.length > 0;
-    const hasFormFieldConfig = cfg.formFieldIds && cfg.formFieldIds.length > 0;
+    const formFieldConditions = resolveFormFieldConditions(cfg);
+    const hasFormFieldConfig = formFieldConditions.length > 0;
     const changedFormFieldIds = new Set(Object.keys(p.formFieldChanges ?? {}));
     const hasStaticChanges = Object.keys(p.changes).length > 0;
     const hasFormFieldChanges = changedFormFieldIds.size > 0;
@@ -173,24 +233,34 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
       return true;
     };
 
-    // Empty transitions = fire on any static field change.
-    if (hasStaticChanges && !hasFormFieldChanges) {
-      if (hasTransitionConfig && !cfg.transitions!.some(matchesTransition)) return false;
-      return true;
+    const formFieldMatches =
+      hasFormFieldConfig &&
+      hasFormFieldChanges &&
+      formFieldConditions.some(c => matchesFormFieldCondition(c, p.formFieldChanges));
+
+    const staticMatches = (() => {
+      if (!hasStaticChanges) return false;
+      if (!hasTransitionConfig) return true;
+      return cfg.transitions!.some(matchesTransition);
+    })();
+
+    // Neither configured → legacy: fire on any static field update; skip pure form events.
+    if (!hasTransitionConfig && !hasFormFieldConfig) {
+      return hasStaticChanges;
     }
 
-    // Form field event — requires explicit opt-in via formFieldIds.
-    if (hasFormFieldChanges && !hasStaticChanges) {
-      if (!hasFormFieldConfig) return false;
-      if (!cfg.formFieldIds!.some(id => changedFormFieldIds.has(id))) return false;
-      return true;
+    // Form-field-only rule (e.g. Desk auto-label): never fire on unrelated static updates.
+    if (!hasTransitionConfig && hasFormFieldConfig) {
+      return !!formFieldMatches;
     }
 
-    // Mixed event (both static and form field changes in same payload).
-    // Fire if either the static change matches OR the form field matches.
-    const staticMatches = !hasTransitionConfig || cfg.transitions!.some(matchesTransition);
-    const formFieldMatches = !!(hasFormFieldConfig && cfg.formFieldIds?.some(id => changedFormFieldIds.has(id))); 
-    return staticMatches || formFieldMatches;
+    // Transition-only rule.
+    if (hasTransitionConfig && !hasFormFieldConfig) {
+      return staticMatches;
+    }
+
+    // Both configured: fire if either side matches.
+    return staticMatches || !!formFieldMatches;
   }
 }
 

@@ -27,6 +27,7 @@ type ThreadListProps = {
   initialScrollOffset?: number;
   onScrollPositionChange?: (position: number) => void;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
@@ -54,6 +55,7 @@ const ThreadList = ({
   initialScrollOffset,
   onScrollPositionChange,
   isTicketThread = false,
+  isFlowStep = false,
   messagesWithSeparators,
   channelScopeType,
   conversation,
@@ -89,7 +91,11 @@ const ThreadList = ({
     const result = threadMessages.flatMap(msg => {
       if (!msg.hasAttachment || !msg.attachments?.length) return [];
 
-      return msg.attachments.map(att => ({
+      const ordered = [...msg.attachments].sort(
+        (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+      );
+
+      return ordered.map(att => ({
         attachmentId: att.id,
         fileName: att.originalFilename,
         fileUrl: `/attachments/${att.id}/download`,
@@ -136,6 +142,10 @@ const ThreadList = ({
   const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
+  const isNearBottomRef = useRef(isNearBottom);
+  useEffect(() => {
+    isNearBottomRef.current = isNearBottom;
+  }, [isNearBottom]);
 
   const threadTicketId = useMemo(() => {
     if (!isTicketThread || !conversation) return '';
@@ -338,7 +348,12 @@ const ThreadList = ({
     };
 
     const observer = new ResizeObserver(() => {
+      const wasNearBottom = isNearBottomRef.current;
       recomputeOverflow();
+      if (wasNearBottom) {
+        container.scrollTop = container.scrollHeight - container.clientHeight;
+        setIsNearBottom(true);
+      }
     });
 
     observer.observe(container);
@@ -410,7 +425,7 @@ const ThreadList = ({
   // Render with date separators for ticket threads
   if (isTicketThread && messagesWithSeparators) {
     return (
-      <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+      <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
         <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
         <div
@@ -484,6 +499,7 @@ const ThreadList = ({
                       context='thread'
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
+                      isFlowStep={isFlowStep}
                       isThreadTicketSubTicket={isThreadTicketSubTicket}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
@@ -537,7 +553,7 @@ const ThreadList = ({
 
   // Default render without date separators
   return (
-    <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+    <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
       <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
       <div
@@ -582,6 +598,7 @@ const ThreadList = ({
                     context='thread'
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
+                    isFlowStep={isFlowStep}
                     isThreadTicketSubTicket={isThreadTicketSubTicket}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}

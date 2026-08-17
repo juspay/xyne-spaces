@@ -1,4 +1,5 @@
-import { PrismaClient, Collection, CollectionRole, IngestionStatus } from '@prisma/client';
+import { PrismaClient, Collection } from '@prisma/client';
+import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 
 /**
@@ -104,11 +105,13 @@ export async function resolveCollectionAccess(
 
 /**
  * Return every root collection (parentId IS NULL) the user can access — owner,
- * direct grant, group grant, or public (non-private). Returns the row PLUS the
- * resolved `effectiveRole` so the caller doesn't need to re-derive it.
+ * direct grant, group grant, or public (non-private), scoped to the caller's
+ * workspace. Returns the row PLUS the resolved `effectiveRole` so the caller
+ * doesn't need to re-derive it.
  */
 export async function listAccessibleRootCollections(
     userId: string,
+    workspaceId: string,
     options?: { scopeType?: string; scopeId?: string }
 ): Promise<Array<AccessibleCollectionNode>> {
     const db = DatabaseClient.getInstance();
@@ -118,6 +121,7 @@ export async function listAccessibleRootCollections(
         where: {
             parentId: null,
             deletedAt: null,
+            workspaceId,
             ...(options?.scopeType ? { scopeType: options.scopeType } : {}),
             ...(options?.scopeId ? { scopeId: options.scopeId } : {}),
             OR: [
@@ -195,7 +199,7 @@ export async function listAccessibleRootCollections(
     for (const row of rows) {
         const { role } = await resolveCollectionAccess(
             userId,
-            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions },
+            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions as Array<{ userId: string | null; userGroupId: string | null; role: CollectionRole }> },
             { userGroupIds }
         );
         if (!role) continue;
@@ -277,7 +281,7 @@ export async function expandCollectionTrees(
             name: file.name,
             itemType: 'file',
             fileId: file.fileId,
-            ingestionStatus: file.ingestionStatus,
+            ingestionStatus: file.ingestionStatus as IngestionStatus,
             createdAt: file.createdAt,
             updatedAt: file.updatedAt,
         });

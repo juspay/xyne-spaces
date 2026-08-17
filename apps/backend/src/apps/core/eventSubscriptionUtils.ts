@@ -3,12 +3,13 @@ import { isValidUrl } from '@/utils/urlUtils';
 import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
+import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
 
 const installedAppsRepository = new InstalledAppsRepository();
 
 
-function signWebhookPayload(payload: string, signingSecret: string): string {
+export function signWebhookPayload(payload: string, signingSecret: string): string {
     return crypto
         .createHmac('sha256', signingSecret)
         .update(payload)
@@ -23,6 +24,10 @@ export async function sendWebhookNotification(
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
+    // SSRF guard: require a host that does not resolve to an internal/private
+    // address before every dispatch.
+    await assertWebhookUrlSafe(webhookUrl);
+
     try {
         const response = await fetch(webhookUrl, {
             method: 'POST',
@@ -32,6 +37,8 @@ export async function sendWebhookNotification(
                 'X-Source': 'XyneSpaces'
             },
             body: payload,
+            // 'manual' so a 3xx to an internal host cannot bypass the guard above.
+            redirect: 'manual',
         });
 
         const text = await response.text().catch(() => '');
@@ -138,4 +145,3 @@ export async function emitEventToWorkspaceApps(
         // Don't throw - event emission failures should not break the main flow
     }
 }
-

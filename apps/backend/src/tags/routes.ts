@@ -4,6 +4,7 @@ import { validateZod } from '@/middleware/validation';
 import {
   CreateTagBodySchema,
   CreateTagsConfigBodySchema,
+  ConfirmTagBodySchema,
   DeleteTagBodySchema,
   SetManualTagsBodySchema,
   UpdateTagBodySchema,
@@ -14,9 +15,11 @@ import {
   createTag,
   updateTag,
   deleteTag,
+  confirmTag,
   setManualTags,
   getCategoriesCatalog,
   getUniqueTagValues,
+  getTagsByIds,
   getConfig,
   listConfigs,
   createConfig,
@@ -30,10 +33,12 @@ const deskCtrl = new DeskTagsConfigController();
 export const tagRoutes = Router();
 
 tagRoutes.get('/unique-values', authMiddleware.authenticate, getUniqueTagValues);
+tagRoutes.get('/by-ids', authMiddleware.authenticate, getTagsByIds);
 tagRoutes.get('/', authMiddleware.authenticate, listTags);
 tagRoutes.post('/', authMiddleware.authenticate, validateZod(CreateTagBodySchema), createTag);
 tagRoutes.put('/', authMiddleware.authenticate, validateZod(SetManualTagsBodySchema), setManualTags);
 tagRoutes.patch('/', authMiddleware.authenticate, validateZod(UpdateTagBodySchema), updateTag);
+tagRoutes.patch('/confirm', authMiddleware.authenticate, validateZod(ConfirmTagBodySchema), confirmTag);
 tagRoutes.delete('/', authMiddleware.authenticate, validateZod(DeleteTagBodySchema), deleteTag);
 
 const tagsConfigRoutes = Router();

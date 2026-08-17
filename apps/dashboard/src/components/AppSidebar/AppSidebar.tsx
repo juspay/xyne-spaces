@@ -1,12 +1,4 @@
-import {
-  ReactElement,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
@@ -35,6 +27,7 @@ import {
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
 import SettingsContent from '../Settings/Settings';
+import ProfileModal from '../ProfileSidebar/ProfileModal';
 import Preferences, { type PreferenceSection } from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
 import { isStatusExpired } from '../../utils/statusUtils';
@@ -203,6 +196,7 @@ const AppSidebar = (): ReactElement => {
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
@@ -246,10 +240,6 @@ const AppSidebar = (): ReactElement => {
   const handleStatusModalClose = (): void => {
     setIsStatusModalOpen(false);
   };
-
-  const navListRef = useRef<HTMLUListElement | null>(null);
-  const navItemRefs = useRef<Record<string, HTMLLIElement | null>>({});
-  const [activeMarkerY, setActiveMarkerY] = useState<number | null>(null);
 
   // Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
   const hasChannelOrThreadId =
@@ -307,39 +297,15 @@ const AppSidebar = (): ReactElement => {
     e.preventDefault();
   };
 
-  const updateActiveMarker = useCallback((): void => {
-    if (window.innerWidth < 500) return;
-    const listEl = navListRef.current;
-    if (!listEl) return;
-
-    const activeItemEl = navItemRefs.current[activeRoute];
-    // Active route isn't a rail item (e.g. it lives in the "More" menu) — hide
-    // the sliding marker so only the "More" button reads as active.
-    if (!activeItemEl) {
-      setActiveMarkerY(null);
-      return;
-    }
-
-    const containerRect = listEl.getBoundingClientRect();
-    const itemRect = activeItemEl.getBoundingClientRect();
-
-    setActiveMarkerY(itemRect.top - containerRect.top);
-  }, [activeRoute]);
-
   useEffect(() => {
     const handleResize = (): void => {
       setWindowWidth(window.innerWidth);
-      updateActiveMarker();
     };
     window.addEventListener('resize', handleResize);
     return (): void => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [updateActiveMarker]);
-
-  useLayoutEffect(() => {
-    updateActiveMarker();
-  }, [updateActiveMarker, toolbarItems, aiLandingDefault, windowWidth]);
+  }, []);
 
   if (isMobile || windowWidth < 500) {
     return (
@@ -372,23 +338,10 @@ const AppSidebar = (): ReactElement => {
             />
           ) : (
             <nav>
-              <ul ref={navListRef} className='relative flex flex-col gap-4'>
-                {activeMarkerY !== null && (
-                  <div
-                    aria-hidden='true'
-                    className='absolute left-0 z-0 h-8 w-8 rounded-lg border border-sidebar-border bg-sidebar-accent transition-transform duration-200 ease-out pointer-events-none'
-                    style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
-                  />
-                )}
+              <ul className='relative flex flex-col gap-4'>
                 {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
                 {aiLandingDefault && (
-                  <li
-                    key='/ai'
-                    ref={el => {
-                      navItemRefs.current['/ai'] = el;
-                    }}
-                    className='relative z-10'
-                  >
+                  <li key='/ai' className='relative'>
                     <Tooltip content='Xyne AI' side='right' delayDuration={0}>
                       <Link
                         to={prefixWs('/ai')}
@@ -398,9 +351,9 @@ const AppSidebar = (): ReactElement => {
                         data-track-name='Sidebar_Nav_Item'
                         data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
                         className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                           activeRoute === '/ai'
-                            ? 'text-sidebar-accent-foreground'
+                            ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                             : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                         )}
                       >
@@ -421,13 +374,7 @@ const AppSidebar = (): ReactElement => {
                   const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
 
                   return (
-                    <li
-                      key={item.path}
-                      ref={el => {
-                        navItemRefs.current[item.path] = el;
-                      }}
-                      className='relative z-10'
-                    >
+                    <li key={item.path} className='relative'>
                       <Tooltip content={item.label} side='right' delayDuration={0}>
                         <Link
                           to={prefixWs(item.path)}
@@ -441,9 +388,9 @@ const AppSidebar = (): ReactElement => {
                             label: item.label,
                           })}
                           className={cn(
-                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                             isActive
-                              ? 'text-sidebar-accent-foreground'
+                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                               : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                           )}
                         >
@@ -474,7 +421,7 @@ const AppSidebar = (): ReactElement => {
                 })}
 
                 {/* More menu — overflow items + customize toolbar (Slack-style) */}
-                <li className='relative z-10'>
+                <li className='relative'>
                   <Popover
                     open={isMoreOpen}
                     onOpenChange={setIsMoreOpen}
@@ -565,12 +512,12 @@ const AppSidebar = (): ReactElement => {
             trigger={
               hasValidStatus ? (
                 <div
-                  className='relative w-[32px] h-16 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
+                  className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-0.5 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0 left-1/2 -translate-x-1/2'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -581,7 +528,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative'>
+                  <div className='relative flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (
@@ -597,7 +544,7 @@ const AppSidebar = (): ReactElement => {
                   data-testid='profile-icon'
                 >
                   {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
-                  <div className='relative'>
+                  <div className='relative flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-md' />
                     ) : (
@@ -622,6 +569,7 @@ const AppSidebar = (): ReactElement => {
               onClose={() => setIsSettingsPopoverOpen(false)}
               onOpenPreferences={handleOpenPreferences}
               onOpenStatusModal={handleStatusClick}
+              onOpenProfileModal={userId => setProfileModalUserId(userId)}
             />
           </Popover>
 
@@ -629,6 +577,14 @@ const AppSidebar = (): ReactElement => {
             open={isPreferencesOpen}
             onClose={() => setIsPreferencesOpen(false)}
             {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
+          />
+
+          {/* Profile modal — used on non-chat pages where the routed profile
+              sidebar (`/chat/dir/.../profile/...`) is not mounted. */}
+          <ProfileModal
+            userId={profileModalUserId}
+            isOpen={profileModalUserId !== null}
+            onClose={() => setProfileModalUserId(null)}
           />
         </div>
 

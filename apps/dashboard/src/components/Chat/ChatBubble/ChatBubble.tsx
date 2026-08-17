@@ -39,6 +39,8 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
+import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -96,6 +98,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { parseRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 export interface ThreadData {
   replyCount: number;
@@ -118,6 +121,7 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -147,6 +151,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
+  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -289,6 +294,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
+
+  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
@@ -818,11 +825,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const msgContent = message?.content as string | undefined;
   const canvasIdMatch = msgContent?.match(/\/chat\/canvas\/([a-zA-Z0-9-]+)/);
   const canvasId = canvasIdMatch ? canvasIdMatch[1] : null;
+  const recordingShare = useMemo(() => {
+    if (!msgContent) return null;
+    const recordingContent =
+      message.msgType === MessageType.FORWARDED
+        ? parseForwardedMessageXml(msgContent)?.content
+        : msgContent;
+    return recordingContent ? parseRecordingShareMessage(recordingContent) : null;
+  }, [message.msgType, msgContent]);
   const shouldShowStandaloneLinkPreview =
     variant !== 'pinned' &&
     showLinkPreview &&
     !!previewResult &&
     !canvasId &&
+    !recordingShare &&
     !(isMobile && message.senderId === user?.id) &&
     !isMessageDeleted;
 
@@ -903,7 +919,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // bubble only keeps its current per-message capabilities/handlers registered
   // (keyed by a per-instance id stamped on the root node as data-hover-key) so
   // the overlay can derive them at show time. Hover never sets state here.
+
   const hoverToolbarKey = useId();
+  const appliedThreadTypes = useMemo(
+    () => parseThreadTypes(conversation?.threadType),
+    [conversation?.threadType],
+  );
+  const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
+  const { showThreadTags } = useShowThreadTags();
+
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
@@ -935,6 +959,24 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }),
       reactionsMd: message.reactions_md,
       onCopyLink,
+      // Channel rows only: inside a thread the panel header already carries this, and the
+      // tag is the thread's — one entry point per thread, not one per reply.
+      ...(showThreadTags &&
+        context === 'channel' &&
+        !isSystemMessage &&
+        !isMessageDeleted &&
+        conversation?.conversationId && {
+          threadTags: {
+            applied: appliedThreadTypes,
+            onToggle: (name: string) => {
+              void setThreadTypes(
+                appliedThreadTypes.includes(name)
+                  ? appliedThreadTypes.filter(value => value !== name)
+                  : [...appliedThreadTypes, name],
+              );
+            },
+          },
+        }),
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
@@ -951,7 +993,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         !isFirstInThread && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
@@ -1200,6 +1242,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(context === 'channel' &&
+              !isSystemMessage &&
+              !isMessageDeleted && {
+                headerContent: (
+                  <ThreadTags
+                    conversationId={conversation?.conversationId}
+                    threadType={conversation?.threadType}
+                    canEdit
+                  />
+                ),
+              })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
@@ -1390,7 +1443,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {conversation &&
         context === 'thread' &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         isSubTicketModalOpen && (
           <SubTicketModal
             isOpen

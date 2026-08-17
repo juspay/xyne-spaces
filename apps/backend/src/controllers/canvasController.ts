@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
+import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
-import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { canvasAuthService } from '../services/canvasAuthService.js';
 import { config } from '../config/env.js';
@@ -14,7 +14,6 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification } from '@prisma/client';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 
@@ -73,7 +72,7 @@ export class CanvasController {
             canvasId,
             workspaceId: req.user!.workspaceId!,
             userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
           },
@@ -164,6 +163,9 @@ export class CanvasController {
       const finalWidth = parsedWidth || uploadedFile.width;
       const finalHeight = parsedHeight || uploadedFile.height;
 
+      if (!req.user?.workspaceId) {
+        throw new Error('workspaceId required: no authenticated workspace');
+      }
       const attachment = await this.messageAttachmentRepository.create({
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
@@ -178,7 +180,7 @@ export class CanvasController {
         uploadedByUserId: userId,
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
-        workspaceId: req.user?.workspaceId ?? '',
+        workspaceId: req.user.workspaceId,
         metadata: {
           ...uploadedFile.metadata,
           canvasId,
@@ -221,7 +223,9 @@ export class CanvasController {
       mentionType: z.enum(['user', 'group']),
       mentionId: z.string().min(1),
       blockId: z.string().min(1),
+      commentThreadId: z.string().optional(),
       canvasTitle: z.string().optional(),
+      mentionContext: z.enum(['canvas', 'comment']).optional(),
       slackUrl: z.string().url().optional().or(z.literal('')),
     });
 
@@ -238,7 +242,8 @@ export class CanvasController {
         return;
       }
 
-      const { mentionType, mentionId, blockId, canvasTitle, slackUrl } = validatedBody.data;
+      const { mentionType, mentionId, blockId, commentThreadId, canvasTitle, mentionContext, slackUrl } =
+        validatedBody.data;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -337,8 +342,8 @@ export class CanvasController {
         userId: u.userId,
         actorId: userId,
         actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
-        actionSource: 'canvas',
-        actionSourceId: canvasId,
+        actionSource: mentionContext === 'comment' ? 'canvas_comment' : 'canvas',
+        actionSourceId: mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
         channelId: canvasChannelId ?? undefined,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
@@ -371,7 +376,9 @@ export class CanvasController {
           req.user?.workspaceId ?? '',
           channelName,
           blockId,
+          commentThreadId,
           canvasChannelId ?? undefined,
+          mentionContext,
         );
 
         slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
@@ -422,7 +429,7 @@ export class CanvasController {
 
       // Check read permission
       try {
-        await canvasAuthService.requireEditAccess(canvas.id, userId);
+        await canvasAuthService.requireViewAccess(canvas.id, userId);
       } catch (error) {
         logger.warn(`[CANVAS-READ] Permission denied for user ${userId} on canvas ${canvas.id}`);
         res.status(403).json({ error: 'Permission denied' });

@@ -6,6 +6,8 @@ interface ArtRowInput {
   readonly ticketId: string;
   readonly testedBy?: string | null | undefined;
   readonly failureReason?: string | null | undefined;
+  // Release-scoped: this dev ticket entered the release as a hotfix.
+  readonly isHotfix?: boolean | null | undefined;
   devTicket?:
     | {
         readonly id: string;
@@ -18,6 +20,9 @@ interface ArtRowInput {
         readonly conversationId: string;
         readonly boardId: string;
         readonly stageName: string;
+        readonly priority?: string | null | undefined;
+        readonly eta?: number | null | undefined;
+        readonly merchantId?: string | null | undefined;
         readonly pullRequests?:
           | readonly {
               readonly prId: number;
@@ -25,10 +30,34 @@ interface ArtRowInput {
             }[]
           | null
           | undefined;
+        readonly workflows?:
+          | readonly { readonly workflowType?: string | null | undefined }[]
+          | null
+          | undefined;
+        readonly tags?: readonly { readonly name?: string | null | undefined }[] | null | undefined;
+        readonly formEntityValues?:
+          | readonly {
+              readonly fieldId: string;
+              readonly fieldValue?: string | null | undefined;
+              readonly actualFieldValue?: unknown;
+            }[]
+          | null
+          | undefined;
       }
     | null
     | undefined;
 }
+
+// Addable (optional) columns exposed by the "Add column" picker for CORE ticket
+// fields. Fields already shown as base columns (Dev Owner=assignedTo, Type,
+// Status) are intentionally excluded. Custom fields are appended at runtime.
+export const CORE_ADDABLE_DEV_TICKET_COLUMNS: readonly { key: string; label: string }[] = [
+  { key: 'core:priority', label: 'Priority' },
+  { key: 'core:eta', label: 'Due Date' },
+  { key: 'core:workflowType', label: 'Workflow' },
+  { key: 'core:merchantId', label: 'Merchant ID' },
+  { key: 'core:tags', label: 'Labels' },
+];
 
 interface UserInput {
   readonly id: string;
@@ -46,6 +75,33 @@ export interface ReleaseDetailDevTicketRow extends ReleaseReportDevTicket {
   testedBy: string | null;
   prId: number | null;
   changeCounts: ChangeCounts | undefined;
+  isHotfix: boolean;
+  // Addable-column values (see CORE_ADDABLE_DEV_TICKET_COLUMNS + custom fields).
+  priority: string;
+  dueDate: string;
+  workflow: string;
+  merchantId: string;
+  labels: string;
+  customValuesByFieldId: Map<string, string>;
+}
+
+// Resolves the display string for any addable column key (core:* or custom:<fieldId>).
+export function devTicketAddableCellValue(row: ReleaseDetailDevTicketRow, key: string): string {
+  if (key.startsWith('custom:')) return row.customValuesByFieldId.get(key.slice(7)) || '—';
+  switch (key) {
+    case 'core:priority':
+      return row.priority || '—';
+    case 'core:eta':
+      return row.dueDate || '—';
+    case 'core:workflowType':
+      return row.workflow || '—';
+    case 'core:merchantId':
+      return row.merchantId || '—';
+    case 'core:tags':
+      return row.labels || '—';
+    default:
+      return '—';
+  }
 }
 
 // Produces table text such as 2 env, 1 mig, or —.
@@ -84,6 +140,21 @@ export function buildReleaseDetailDevTicketRows(
     const devTicket = artRow.devTicket;
     const ticketId = devTicket?.xyneId ?? artRow.ticketId;
     const changeCounts = changeCountsByDevTicket.get(ticketId);
+    const customValuesByFieldId = new Map<string, string>();
+    for (const fev of devTicket?.formEntityValues ?? []) {
+      const actual = fev.actualFieldValue;
+      const actualStr =
+        typeof actual === 'string'
+          ? actual
+          : actual === null || actual === undefined
+            ? ''
+            : JSON.stringify(actual);
+      // actualFieldValue is the source of truth the ticket UI reads/writes;
+      // fieldValue is a legacy column kept empty by the form mutators, used
+      // only as a fallback for older rows.
+      const value = actualStr || fev.fieldValue;
+      if (value) customValuesByFieldId.set(fev.fieldId, value);
+    }
     // Dev owner precedence: assignee -> creator (reporter) -> 'Unknown'.
     // Only 'Unknown' when neither the assignee nor the creator resolves to a user.
     const assignedOwner = resolveUser(devTicket?.assignedTo);
@@ -106,15 +177,39 @@ export function buildReleaseDetailDevTicketRows(
       failureReason: artRow.failureReason ?? null,
       testedBy: artRow.testedBy ?? null,
       changeCounts,
+      isHotfix: artRow.isHotfix ?? false,
+      priority: devTicket?.priority ?? '',
+      dueDate: devTicket?.eta ? new Date(devTicket.eta).toLocaleDateString() : '',
+      workflow: (devTicket?.workflows ?? []).find(w => w.workflowType)?.workflowType ?? '',
+      merchantId: devTicket?.merchantId ?? '',
+      labels: (devTicket?.tags ?? [])
+        .map(t => t.name)
+        .filter((n): n is string => !!n)
+        .join(', '),
+      customValuesByFieldId,
     });
   }
 
   return rows;
 }
 
-export function buildDevTicketsCsv(rows: ReleaseDetailDevTicketRow[]): string {
+export function buildDevTicketsCsv(
+  rows: ReleaseDetailDevTicketRow[],
+  addedColumns: readonly { key: string; label: string }[] = [],
+): string {
   return serializeCsv(
-    ['Ticket Id', 'Title', 'Dev Owner', 'Type', 'Status', 'Changes', 'QA Owner', 'PR URL'],
+    [
+      'Ticket Id',
+      'Title',
+      'Dev Owner',
+      'Type',
+      'Status',
+      'Changes',
+      'QA Owner',
+      'PR URL',
+      'Is Hotfix',
+      ...addedColumns.map(col => col.label),
+    ],
     rows.map(row => [
       row.ticketId,
       row.title,
@@ -124,6 +219,8 @@ export function buildDevTicketsCsv(rows: ReleaseDetailDevTicketRow[]): string {
       row.changes,
       row.qaOwner,
       row.prUrl ?? '',
+      row.isHotfix ? 'Yes' : 'No',
+      ...addedColumns.map(col => devTicketAddableCellValue(row, col.key)),
     ]),
   );
 }

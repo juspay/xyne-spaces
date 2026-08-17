@@ -22,14 +22,13 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface DmListItemProps {
   channel: Channel;
   unreadCount?: number;
   isSelected?: boolean;
-  latestConversation?:
-    | { initial_message_md?: string | null; workspaceId: string | null }
-    | undefined;
+  latestConversation?: { initial_message_md?: string | null; workspaceId: string } | undefined;
 }
 
 const getSenderLabel = (isCurrentUser: boolean, isDM: boolean, senderName?: string): string => {
@@ -108,7 +107,7 @@ export const DmListItem = ({
     const senderFirstName = getSenderLabel(
       lastMessage.senderId === context.userID,
       isDM,
-      lastMessageSender?.name,
+      lastMessageSender ? getUserDisplayName(lastMessageSender) : undefined,
     );
 
     const prefix = senderFirstName ? `${senderFirstName}: ` : '';
@@ -261,7 +260,7 @@ export const DmListItem = ({
         className={cn(
           'flex w-full items-center gap-[12px] px-4 py-3 cursor-pointer transition-colors',
           'hover:bg-accent active:bg-accent',
-          isSelected && 'bg-accent',
+          isSelected && 'bg-input hover:bg-input active:bg-input',
         )}
         role='button'
         tabIndex={0}

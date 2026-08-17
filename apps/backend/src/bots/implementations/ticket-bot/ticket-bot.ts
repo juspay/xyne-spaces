@@ -17,7 +17,8 @@ import { workflowRegistry } from '@/workflows/registry/workflowRegistry';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, OrgRole, MessageType } from '@xyne/shared';
+import type { CreateMessageInput } from '@/database/repositories/messageRepository';
 
 // Define types for the bot
 type TicketBotInput = {
@@ -204,9 +205,8 @@ Provide a concise but informative summary:`;
     try {
       const { llmClient, summarizationService, modelContextWindow } = await this.createLlmRuntime(context);
       logger.info(`[TicketBot] Execution started with executionId: ${context.executionId}`, { input, context });
+      logger.info(`[TicketBot] Execution started with executionId: ${context.executionId}`);
       logger.info(`[TicketBot] Input product:`, input.product);
-      logger.info(`[TicketBot] Input userPrompt:`, input.userPrompt);
-      logger.info(`[TicketBot] Input botOutput:`, input.botOutput);
       logger.info(`Ticket Bot execution started: ${context.executionId}`);
 
       // Parse botOutput flag (default: false)
@@ -329,7 +329,7 @@ Provide a concise but informative summary:`;
               const botMessages: string[] = [];
 
               messages.forEach((msg: any) => {
-                if (msg.msgType === 'BOT' && isBotMessage(msg.content)) {
+                if (msg.msgType === MessageType.BOT && isBotMessage(msg.content)) {
                   const botContent = extractBotContent(msg.content);
                   const filteredBotContent = filterTicketBotCommands(botContent);
                   if (filteredBotContent) {
@@ -369,7 +369,7 @@ Provide a concise but informative summary:`;
                 .filter((text: string) => text.length > 0);         // Remove empty messages
 
               description = processedMessages.join('\n') || input.description || 'No conversation content found.';
-              logger.info(`[TicketBot] Extracted ${messages.length} messages (includeBotOutput: ${includeBotOutput}), processed to: ${(description || '').substring(0, 200)}...`);
+              logger.info(`[TicketBot] Extracted ${messages.length} messages (includeBotOutput: ${includeBotOutput})`);
             }
           } else {
             logger.info('[TicketBot] No messages found in conversation.');
@@ -423,7 +423,7 @@ Provide a concise but informative summary:`;
               );
 
               description = result.summary;
-              logger.info(`[TicketBot] ✅ Using summarized description. Preview: ${description.substring(0, 200)}...`);
+              logger.info(`[TicketBot] Using summarized description`);
             } catch (summarizeError) {
               logger.error(`[TicketBot] ⚠️ Description summarization failed, using original:`, summarizeError);
             }
@@ -527,7 +527,7 @@ Provide a concise but informative summary:`;
             data: {
               email: botEmail,
               orgId: workspace.orgId,
-              role: 'MEMBER',
+              role: OrgRole.MEMBER,
             }
           });
           logger.info(`[TicketBot] Created orgMember for bot: ${orgMember.memberId}`);
@@ -553,12 +553,16 @@ Provide a concise but informative summary:`;
         conversationId: context.conversationId,
         senderId: botId,
         content: JSON.stringify(ticketFlowJson),
-        msgType: 'BOT' as const,
+        msgType: MessageType.BOT as const,
         hasAttachment: false
       };
-      logger.info(`[TicketBot] Creating message with data:`, messageData);
+      logger.info(`[TicketBot] Creating message`, {
+        conversationId: messageData.conversationId,
+        senderId: messageData.senderId,
+        msgType: messageData.msgType,
+      });
 
-      const createdMessage = await repositories.messages.create(messageData);
+      const createdMessage = await repositories.messages.create(messageData as CreateMessageInput);
       logger.info(`[TicketBot] Message created in database:`, createdMessage.messageId);
 
       // Broadcast the message to frontend

@@ -84,7 +84,7 @@ const AddReactionDrawerMobile = ({
                 setEmojiPickerOpen(false);
               }}
               customEmojis={customEmojis || []}
-              previewConfig={{ showPreview: false }}
+              previewConfig={{ showPreview: true }}
               autoFocusSearch={false}
               className='!w-full !h-full !rounded-[inherit] ![--epr-picker-border-color:transparent]'
             />

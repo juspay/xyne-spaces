@@ -61,14 +61,11 @@ const REFINE_PRESETS: ReadonlyArray<{
   { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
 ];
 
-export type DraftAcceptAction = 'insert' | 'replace';
-
 interface DraftCardProps {
   draftContent: string;
   toolInvocations?: ToolInvocation[];
   isStreaming: boolean;
-  onAccept: (action: DraftAcceptAction) => void;
-  defaultAcceptAction?: DraftAcceptAction;
+  onAccept: () => void;
   onReject: () => void;
   onRefine: (instruction: string, options?: { selectedText?: string }) => void;
   /** Apply a one-tap rewrite preset (Polish / Formalize / Elaborate / Shorten) to the draft. */
@@ -104,7 +101,6 @@ export const DraftCard = ({
   draftContent,
   isStreaming,
   onAccept,
-  defaultAcceptAction = 'insert',
   onReject,
   onRefine,
   onQuickRefine,
@@ -129,8 +125,6 @@ export const DraftCard = ({
   const [selectionPopover, setSelectionPopover] = useState<SelectionPopoverState | null>(null);
   const [localSelectedText, setLocalSelectedText] = useState('');
   const [refineMenuOpen, setRefineMenuOpen] = useState(false);
-  const [acceptMenuOpen, setAcceptMenuOpen] = useState(false);
-  const acceptMenuRef = useRef<HTMLDivElement>(null);
 
   // Use external selectedTextForRefine if provided, otherwise use local state
   const selectedText = selectedTextForRefine || localSelectedText;
@@ -197,16 +191,6 @@ export const DraftCard = ({
     const el = contentRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [draftContent, isStreaming]);
-
-  // Close the accept split-button menu on outside click.
-  useEffect(() => {
-    if (!acceptMenuOpen) return;
-    const onDocMouseDown = (event: MouseEvent): void => {
-      if (!acceptMenuRef.current?.contains(event.target as Node)) setAcceptMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [acceptMenuOpen]);
 
   useEffect(() => {
     const handleWindowSelectionChange = (): void => {
@@ -514,70 +498,19 @@ export const DraftCard = ({
               See sources
             </button>
           )}
-          <div
-            className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}
-            ref={acceptMenuRef}
-          >
+          <div className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}>
             <button
               type='button'
-              onClick={() => onAccept(defaultAcceptAction)}
+              onClick={onAccept}
               disabled={!draftContent || isStreaming}
-              className='inline-flex items-center justify-center h-8 pl-4 pr-3 rounded-l-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-              aria-label={
-                defaultAcceptAction === 'insert'
-                  ? 'Insert — append the AI draft to your draft'
-                  : 'Replace your draft with the AI draft'
-              }
-              title={
-                defaultAcceptAction === 'insert' ? 'Append to your draft' : 'Replace your draft'
-              }
+              className='inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+              aria-label='Insert the AI draft into your reply'
+              title='Insert draft'
               data-track-category='AIDraft'
               data-track-name='AcceptDraft'
-              data-track-metadata={JSON.stringify({ action: defaultAcceptAction })}
             >
-              {defaultAcceptAction === 'insert' ? 'Insert' : 'Replace'}
+              Insert
             </button>
-            <button
-              type='button'
-              onClick={() => setAcceptMenuOpen(open => !open)}
-              disabled={!draftContent || isStreaming}
-              className='inline-flex items-center justify-center h-8 px-1.5 rounded-r-full bg-primary text-primary-foreground border-l border-primary-foreground/25 hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-              aria-haspopup='menu'
-              aria-expanded={acceptMenuOpen}
-              aria-label='More accept options'
-              data-track-category='AIDraft'
-              data-track-name='ToggleAcceptMenu'
-            >
-              <ChevronDown size={13} />
-            </button>
-            {acceptMenuOpen && (
-              <div
-                role='menu'
-                className='absolute bottom-full right-0 mb-1.5 z-50 w-56 rounded-xl border border-border bg-popover shadow-lg overflow-hidden py-1'
-              >
-                {(defaultAcceptAction === 'insert'
-                  ? ([['replace', 'Replace', 'Overwrite your draft']] as const)
-                  : ([['insert', 'Insert', 'Append to your draft']] as const)
-                ).map(([action, label, hint]) => (
-                  <button
-                    key={action}
-                    type='button'
-                    role='menuitem'
-                    onClick={() => {
-                      setAcceptMenuOpen(false);
-                      onAccept(action);
-                    }}
-                    className='w-full flex flex-col items-start px-3 py-1.5 text-left hover:bg-muted transition-colors'
-                    data-track-category='AIDraft'
-                    data-track-name='AcceptDraft'
-                    data-track-metadata={JSON.stringify({ action })}
-                  >
-                    <span className='text-sm text-foreground'>{label}</span>
-                    <span className='text-xs text-muted-foreground'>{hint}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>

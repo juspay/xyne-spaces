@@ -1,5 +1,5 @@
-import { ActivityClassification, PRStatus } from '@prisma/client';
 import { db } from '@/database/client';
+import { ActivityClassification, PRStatus } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 import { logger } from '@/utils/logger';
 import { BaseSideEffectHandler } from '../base-handler';

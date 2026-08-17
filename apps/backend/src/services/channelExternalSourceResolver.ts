@@ -12,8 +12,8 @@
  * (ZohoUploadController) paths so they can't drift apart.
  */
 
-import { DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { DeskType } from '@xyne/shared';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { logger } from '@/utils/logger';
 

@@ -16,6 +16,7 @@ import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
@@ -26,6 +27,7 @@ import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableH
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
 
@@ -306,22 +308,28 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     const toRemove = oldTagNames.filter(t => !newTags.includes(t));
 
     toAdd.forEach(tagName => {
-      zero.mutate(
-        mutators.ticketTagV2.create({
-          ticketId: ticket.id,
-          tagId: uuidv4(),
-          projectTagId: uuidv4(),
-          mappingId: uuidv4(),
-          projectId: ticket.projectId,
-          tagName,
-        }),
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticketTagV2.create({
+            ticketId: ticket.id,
+            tagId: uuidv4(),
+            projectTagId: uuidv4(),
+            mappingId: uuidv4(),
+            projectId: ticket.projectId,
+            tagName,
+          }),
+        ),
+        'Failed to add tag',
       );
     });
 
     toRemove.forEach(tagName => {
       const tag = tags?.find(t => t.name === tagName);
       if (tag?.id) {
-        zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
+        void surfaceMutationError(
+          zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id })),
+          'Failed to remove tag',
+        );
       }
     });
   };
@@ -340,23 +348,29 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           : assigneeUserId
             ? { assignedTo: null }
             : { assignedTo: null, userGroupId: '' };
-    zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        ...updates,
-        updatedAt: Date.now(),
-      }),
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          ...updates,
+          updatedAt: Date.now(),
+        }),
+      ),
+      'Failed to update assignee',
     );
     setIsEditingAssignee(false);
   };
 
   const handlePriorityChange = (value: string | null) => {
-    zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        priority: value as typeof ticket.priority,
-        updatedAt: Date.now(),
-      }),
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          priority: value as typeof ticket.priority,
+          updatedAt: Date.now(),
+        }),
+      ),
+      'Failed to update priority',
     );
     setIsEditingPriority(false);
   };
@@ -416,7 +430,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     }
 
     const assigneeDisplay = assignedUser ? (
-      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+      <Tooltip content={getUserDisplayName(assignedUser)}>
         <div className='relative group/assignee'>
           <Avatar
             userId={assignedUser.id}
@@ -529,7 +543,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   // views never pass `isConversation`, so they keep the full card.
   if (isConversation) {
     const conversationAssignee = assignedUser ? (
-      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+      <Tooltip content={getUserDisplayName(assignedUser)}>
         <Avatar
           userId={assignedUser.id}
           showActiveStatus={false}
@@ -545,11 +559,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         </div>
       </Tooltip>
     ) : (
-      <Tooltip content='Unassigned'>
-        <div className='w-5 h-5 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
-          <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
-        </div>
-      </Tooltip>
+      <div className='w-5 h-5 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+        <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
+      </div>
     );
 
     return (
@@ -723,7 +735,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   {!isCompact &&
                     showAssignee &&
                     (assignedUser ? (
-                      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+                      <Tooltip content={getUserDisplayName(assignedUser)}>
                         <div className='relative group/assignee'>
                           <Avatar
                             userId={assignedUser.id}

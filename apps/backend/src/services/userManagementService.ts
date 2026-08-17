@@ -1,8 +1,8 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
-import { AccessType, PrismaClient, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { PrismaClient } from '@prisma/client';
+import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -683,9 +683,10 @@ export class UserManagementService {
   async grantUserResourceAccess(
     userId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
-    return aclService.grantUserAccess(userId, resourceName, accessType);
+    return aclService.grantUserAccess(userId, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -694,9 +695,10 @@ export class UserManagementService {
   async grantGroupResourceAccess(
     groupId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
-    return aclService.grantGroupAccess(groupId, resourceName, accessType);
+    return aclService.grantGroupAccess(groupId, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -725,7 +727,8 @@ export class UserManagementService {
   async bulkGrantUserAccess(
     userIds: string[],
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{
     successful: string[];
     failed: { userId: string; error: string }[];
@@ -737,7 +740,7 @@ export class UserManagementService {
 
     for (const userId of userIds) {
       try {
-        const result = await this.grantUserResourceAccess(userId, resourceName, accessType);
+        const result = await this.grantUserResourceAccess(userId, resourceName, accessType, workspaceId);
         if (result.success) {
           results.successful.push(userId);
         } else {
@@ -760,7 +763,8 @@ export class UserManagementService {
   async grantGroupUsersAccess(
     groupId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{
     successful: string[];
     failed: { userId: string; error: string }[];
@@ -768,7 +772,7 @@ export class UserManagementService {
     const users = await this.getUsersByGroup(groupId);
     const userIds = users.map(user => user.id);
 
-    return this.bulkGrantUserAccess(userIds, resourceName, accessType);
+    return this.bulkGrantUserAccess(userIds, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -819,7 +823,7 @@ export class UserManagementService {
     // Add direct access (higher priority)
     directAccess.forEach(access => {
       resourceMap.set(access.resource.name, {
-        accessType: access.accessType,
+        accessType: access.accessType as AccessType,
         source: 'direct'
       });
     });
@@ -828,7 +832,7 @@ export class UserManagementService {
     groupAccess.forEach(access => {
       if (!resourceMap.has(access.resource.name)) {
         resourceMap.set(access.resource.name, {
-          accessType: access.accessType,
+          accessType: access.accessType as AccessType,
           source: 'group'
         });
       }
@@ -898,12 +902,15 @@ export class UserManagementService {
         return { success: false, message: 'User is already in this group' };
       }
 
-      // Create new mapping
+      // Create new mapping. Use the GROUP's workspace (the mapping belongs to the
+      // group's tenant), not user.workspaceId — users are multi-workspace and their
+      // workspaceId is only their home workspace, which would mis-scope/hide the
+      // mapping when assigning to a group in another workspace.
       await this.prisma.userGroupMapping.create({
         data: {
           userId,
           userGroupId: groupId,
-          workspaceId: user.workspaceId,
+          workspaceId: group.workspaceId,
         }
       });
 

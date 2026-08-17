@@ -1,6 +1,7 @@
-import { CallType } from '@xyne/shared';
+import { CallType, InvitationResponse } from '@xyne/shared';
 import type { CallChatMessage } from '@xyne/shared';
-import { apiInstance } from '../clients/apiClient';
+import axios from 'axios';
+import { apiInstance, BASE_URL } from '../clients/apiClient';
 
 export interface CallInfo {
   title: string | null;
@@ -16,7 +17,10 @@ export interface RequestToJoinResponse {
 }
 
 export interface LobbyStatusResponse {
-  response: 'REQUESTED' | 'ACCEPTED' | 'DECLINED';
+  response:
+    | InvitationResponse.REQUESTED
+    | InvitationResponse.ACCEPTED
+    | InvitationResponse.DECLINED;
 }
 
 export interface LobbyParticipant {
@@ -50,6 +54,10 @@ export interface ExternalJoinResponse {
   participantId: string;
 }
 
+export type InternalCallRouteResolution =
+  | { result: 'internal'; workspaceId: string }
+  | { result: 'external' };
+
 const BASE = '/call-lobby';
 
 export const callLobbyService = {
@@ -70,6 +78,22 @@ export const callLobbyService = {
       if (e?.status === 404 || e?.response?.status === 404) return 'not_found';
       throw err;
     }
+  },
+
+  /**
+   * Resolve against the auth cookie for the call's own workspace. This only
+   * chooses internal dashboard vs external lobby; /calls/join still enforces
+   * the call-specific host/invitee/channel membership rules.
+   */
+  async resolveInternalRoute(externalId: string): Promise<InternalCallRouteResolution> {
+    // Keep this public probe isolated from the dashboard client's global 401
+    // redirect behavior. Expected misses are normal external-lobby traffic.
+    const response = await axios.post<InternalCallRouteResolution>(
+      `${BASE_URL}${BASE}/${encodeURIComponent(externalId)}/resolve-internal`,
+      undefined,
+      { withCredentials: true },
+    );
+    return response.data;
   },
 
   /**
@@ -159,14 +183,5 @@ export const callLobbyService = {
       `${BASE}/${externalId}/recording-state`,
     );
     return response.data;
-  },
-
-  /**
-   * Get the external call invite URL from the backend.
-   * Returns the full URL (backend base URL + /call/:externalId).
-   */
-  async getInviteUrl(externalId: string): Promise<string> {
-    const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
-    return response.data.url;
   },
 };

@@ -12,10 +12,10 @@ import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { ActivityType } from '@prisma/client';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, ActivityType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
+import { resolveFormActivityContext } from './form-entity-value-activity-context';
 
 const getPreviousFormEntityValue = (
   previousValue: FormEntityValuePreviousValue | undefined,
@@ -62,6 +62,20 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     const fieldId = currentFormEntityValue?.fieldId ?? previousValue?.fieldId;
 
     if (entityType !== 'TICKET' || !ticketId || !fieldId) return;
+
+    // Confirm the target ticket belongs to the mutation's workspace before
+    // enqueueing Vespa feeds / broadcasting.
+    const targetTicket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+    if (!targetTicket || targetTicket.workspaceId !== this.ctx.workspaceId) {
+      logger.warn('[FormEntityValuesSideEffectHandler] Skipping counts update for cross-workspace or missing ticket', {
+        ticketId,
+        ctxWorkspaceId: this.ctx.workspaceId,
+      });
+      return;
+    }
 
     await this.queueTicketAndMailVespaFeeds(ticketId);
 
@@ -193,6 +207,16 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
+      // Confirm the target ticket belongs to the acting workspace before
+      // emitting app / automation events.
+      if (ticket.workspaceId !== this.ctx.workspaceId) {
+        logger.warn('[FormEntityValuesSideEffectHandler] Skipping event for cross-workspace ticket', {
+          ticketId,
+          ctxWorkspaceId: this.ctx.workspaceId,
+        });
+        return;
+      }
+
       // Get board name
       const board = await db.board.findUnique({
         where: { id: ticket.boardId },
@@ -297,10 +321,14 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       const ticket = await db.ticket.findUnique({
         where: { id: formEntityValue.entityId },
-        select: { boardId: true },
+        select: { boardId: true, metadata: true },
       });
 
-      if (!ticket || formEntityValue.contextId !== ticket.boardId) {
+      if (!ticket) {
+        return;
+      }
+      const activityContext = resolveFormActivityContext(ticket, formEntityValue.contextId);
+      if (!activityContext.allowed) {
         return;
       }
 
@@ -313,14 +341,13 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       const previousRawValue = operation === 'update'
         ? getPreviousFormEntityValue(previousValue)
         : null;
-
       if (fieldDefinition.fieldType === FormFieldType.DOC) {
         await this.createFileFieldActivity(
           formEntityValue.entityId,
-          formEntityValue.contextId,
           fieldDefinition.fieldName,
           stringFromFormValue(previousRawValue),
           stringFromFormValue(formEntityValue.actualFieldValue),
+          activityContext.name,
         );
         return;
       }
@@ -331,6 +358,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         oldValue: previousRawValue,
         newValue: formEntityValue.actualFieldValue ?? formEntityValue.fieldValue,
         updatedBy: this.ctx.userID,
+        contextName: activityContext.name,
       });
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to create form field activity:', {
@@ -343,21 +371,20 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
   private async createFileFieldActivity(
     ticketId: string,
-    contextId: string | null,
     fieldName: string,
     previousAttachmentId: string | null,
     nextAttachmentId: string | null,
+    contextName?: string,
   ): Promise<void> {
     if ((previousAttachmentId ?? null) === (nextAttachmentId ?? null)) return;
 
-    const [previousAttachment, nextAttachment, stage] = await Promise.all([
+    const [previousAttachment, nextAttachment] = await Promise.all([
       previousAttachmentId
         ? db.messageAttachment.findUnique({ where: { id: previousAttachmentId } })
         : null,
       nextAttachmentId
         ? db.messageAttachment.findUnique({ where: { id: nextAttachmentId } })
         : null,
-      contextId ? db.stage.findUnique({ where: { id: contextId }, select: { name: true } }) : null,
     ]);
 
     const action = previousAttachmentId && nextAttachmentId
@@ -365,7 +392,6 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       : nextAttachmentId
         ? 'added'
         : 'removed';
-
     await db.ticketActivity.create({
       data: {
         ticketId,
@@ -376,7 +402,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           field: 'stageFormFile',
           fieldName,
           action,
-          ...(stage?.name ? { stageName: stage.name } : {}),
+          ...(contextName ? { contextName } : {}),
           ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
           ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
           ...(previousAttachment?.originalFilename

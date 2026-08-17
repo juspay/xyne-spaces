@@ -40,11 +40,23 @@ export interface AffectedApplicationInfo {
 	matchedFiles: string[];
 }
 
+/** Per-app diagnostic surfaced in the release summary message so the user can
+ * distinguish "no env/migrations changed" from "my regex was broken". One row
+ * per configured application — including zero-match apps. */
+export interface ApplicationMatchSummaryRow {
+	name: string;
+	regex: string;
+	matchCount: number;
+	regexValid: boolean;
+}
+
 export interface ReleaseResult {
 	results: CommitAnalysisResult[];
 	affectedApplications: AffectedApplicationInfo[];
 	migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-	envChanges: Array<{ fileName: string; filePath: string; newValue: string }>;
+	envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+	/** Empty when commit range has no file changes; otherwise one row per app. */
+	appMatchSummary: ApplicationMatchSummaryRow[];
 }
 
 export class ReleaseService {
@@ -76,7 +88,54 @@ export class ReleaseService {
 			currentTicketId,
 			isHotFix,
 		} = context;
-		const empty: ReleaseResult = { results: [], affectedApplications: [], migrationLinks: [], envChanges: [] };
+		const empty: ReleaseResult = {
+			results: [],
+			affectedApplications: [],
+			migrationLinks: [],
+			envChanges: [],
+			appMatchSummary: [],
+		};
+
+		// Best-effort timeline event. Wrapped so a failure here never breaks the
+		// release flow (the event log is observability, not a hard dependency).
+		const emitEvent = (
+			eventType: ReleaseEventType,
+			eventName: string,
+			message: string,
+			applicationReleaseId?: string,
+			payload?: Prisma.InputJsonValue,
+		): void => {
+			void this.releaseRepository
+				.createReleaseEvent({
+					releaseId: currentTicketId,
+					applicationReleaseId,
+					eventType,
+					eventName,
+					message,
+					userId,
+					userName,
+					channelId,
+					conversationId,
+					payload,
+				})
+				.catch(err =>
+					logger.warn(
+						`[Release] failed to emit ${eventType}/${eventName} event: ${err instanceof Error ? err.message : String(err)}`,
+					),
+				);
+		};
+
+		// AnalyzeCommitsRequest is a union (commit-range vs version-mode). Probe
+		// the discriminator to build a useful start message either way.
+		const rangeLabel =
+			'deployedCommitId' in analyzeRequest && 'newCommitId' in analyzeRequest
+				? ` (${analyzeRequest.deployedCommitId.slice(0, 8)} → ${analyzeRequest.newCommitId.slice(0, 8)})`
+				: '';
+		emitEvent(
+			ReleaseEventType.RELEASE,
+			'COMMIT_ANALYSIS_STARTED',
+			`Commit analysis started for ${workspace}/${repoSlug}${rangeLabel}`,
+		);
 
 		// Step 1: analyze commits
 		logger.info(`[Release] Starting commit analysis for ${workspace}/${repoSlug}`);
@@ -88,8 +147,20 @@ export class ReleaseService {
 		}
 		if (allFilePaths.size === 0) {
 			logger.warn(`[Release] early return: no file paths in any commit (results=${results.length}) — analysis range may be empty or commits had no file diffs`);
+			emitEvent(
+				ReleaseEventType.RELEASE,
+				'COMMIT_ANALYSIS_COMPLETED',
+				`No file changes in this commit range — nothing to deploy`,
+			);
 			return { ...empty, results };
 		}
+
+		// Compute per-app diagnostic up-front so it's included in both the
+		// 0-apps-matched early return and the happy-path result.
+		const appMatchSummary = await this.commitAnalysisService.getApplicationMatchSummary(
+			mainReleaseBoardId,
+			Array.from(allFilePaths),
+		);
 
 		// Step 2: detect affected applications
 		logger.info(`[Release] Detecting affected applications for ${allFilePaths.size} files`);
@@ -99,13 +170,18 @@ export class ReleaseService {
 		);
 		if (apps.length === 0) {
 			logger.warn(`[Release] early return: no application regex matched any of the ${allFilePaths.size} file paths — check Application.regex configs for mainReleaseBoardId=${mainReleaseBoardId}`);
-			return { ...empty, results };
+			emitEvent(
+				ReleaseEventType.RELEASE,
+				'COMMIT_ANALYSIS_COMPLETED',
+				`No application regex matched any of the ${allFilePaths.size} changed files — check the Application config`,
+			);
+			return { ...empty, results, appMatchSummary };
 		}
 
 		const ticket = await this.ticketRepository.getTicketById(currentTicketId);
 		if (!ticket) {
 			logger.warn(`[Release] early return: parent ticket ${currentTicketId} not found via ticketRepository.getTicketById`);
-			return { ...empty, results };
+			return { ...empty, results, appMatchSummary };
 		}
 
 		// Step 3: provision per-app SubTickets/Tickets
@@ -121,6 +197,20 @@ export class ReleaseService {
 			prLinksByApplication,
 			isHotFix,
 		});
+
+		// Emit one SUBTICKET event per successfully-provisioned application.
+		for (const app of apps) {
+			const perApp = perAppByAppId.get(app.id);
+			if (perApp) {
+				emitEvent(
+					ReleaseEventType.SUBTICKET,
+					'SUBTICKET_PROVISIONED',
+					`Prepared ${app.name} (${app.matchedFiles.length} file${app.matchedFiles.length === 1 ? '' : 's'} matched)`,
+					perApp.subTicketId,
+					{ applicationId: app.id, applicationName: app.name } as Prisma.InputJsonValue,
+				);
+			}
+		}
 
 		// Keep EVERY affected app. Apps whose SubTicket provisioning failed have no
 		// perApp entry — they still capture env/migration changes (with a null
@@ -141,8 +231,25 @@ export class ReleaseService {
 		const provisionedCount = affectedApplications.filter(a => a.subTicketId).length;
 		logger.info(`[Release] Provisioned ${provisionedCount} of ${apps.length} affected applications`);
 
-		// Step 4: ART rows (only for app × dev-ticket pairs the PR actually touched)
-		const recordsToCreate = buildApplicationReleaseTicketMappings(results, affectedApplications, currentTicketId);
+		// Step 4: ART rows (only for app × dev-ticket pairs the PR actually touched).
+		// On a hotfix delta run, every non-boundary dev ticket is flagged isHotfix
+		// (the boundary = the frozen release head, a main PR). Release-scoped: the
+		// dev ticket's own type stays untouched.
+		const hotfixBoundaryCommits =
+			isHotFix && 'deployedCommitId' in analyzeRequest
+				? new Set(
+						analyzeRequest.deployedCommitId
+							.split(',')
+							.map(c => c.trim())
+							.filter(Boolean),
+					)
+				: null;
+		const recordsToCreate = buildApplicationReleaseTicketMappings(
+			results,
+			affectedApplications,
+			currentTicketId,
+			hotfixBoundaryCommits,
+		);
 		if (recordsToCreate.length > 0) {
 			try {
 				const createResult = await this.applicationRepository.createApplicationReleaseTicketMappings(recordsToCreate);
@@ -192,7 +299,41 @@ export class ReleaseService {
 			}
 		}
 
-		return { results, affectedApplications, migrationLinks, envChanges };
+		// Render the summary from ALL persisted release changes for this release (the
+		// source of truth the tabs/report read), not just the rows saved this run. The
+		// dedup guard skips re-inserting changes that already exist, so the run-accumulated
+		// arrays under-report on re-run; reading persisted facts makes analysis idempotent.
+		// Falls back to the run-accumulated arrays if the authoritative read fails.
+		let summaryMigrationLinks = migrationLinks;
+		let summaryEnvChanges = envChanges;
+		try {
+			const authoritative = await this.commitAnalysisService.buildReleaseChangeSummary(
+				workspace,
+				repoSlug,
+				currentTicketId,
+			);
+			summaryMigrationLinks = authoritative.migrationLinks;
+			summaryEnvChanges = authoritative.envChanges;
+		} catch (error) {
+			logger.error(
+				`[Release] Failed to build authoritative change summary for ${currentTicketId}, using run-accumulated:`,
+				error,
+			);
+		}
+
+		emitEvent(
+			ReleaseEventType.RELEASE,
+			'COMMIT_ANALYSIS_COMPLETED',
+			`Analysis complete: ${affectedApplications.length} app${affectedApplications.length === 1 ? '' : 's'} affected, ${summaryEnvChanges.length} env change${summaryEnvChanges.length === 1 ? '' : 's'}, ${summaryMigrationLinks.length} migration${summaryMigrationLinks.length === 1 ? '' : 's'}`,
+			undefined,
+			{
+				affectedAppCount: affectedApplications.length,
+				envChangeCount: summaryEnvChanges.length,
+				migrationCount: summaryMigrationLinks.length,
+			} as Prisma.InputJsonValue,
+		);
+
+		return { results, affectedApplications, migrationLinks: summaryMigrationLinks, envChanges: summaryEnvChanges, appMatchSummary };
 	}
 
 	// Surface ART-write failures as a SYSTEM release event so they aren't only in logs.

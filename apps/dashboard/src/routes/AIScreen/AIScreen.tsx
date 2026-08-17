@@ -165,6 +165,16 @@ const AIScreen = (): ReactElement => {
     lastContextRef.current = context;
   }, []);
 
+  // The thread has fired the landing query — drop it so it can never be
+  // auto-submitted twice. Without this the thread's `useRef` guard resets on any
+  // remount and the same query is sent again as a NEW conversation.
+  // `initialExtras` is deliberately kept: it seeds the chat composer's context
+  // selections for the whole conversation, not just the first turn.
+  const handleInitialQueryConsumed = useCallback((): void => {
+    setInitialQuery('');
+    setInitialAttachments(undefined);
+  }, []);
+
   const handleComposerSubmit = useCallback(
     (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
       setInitialQuery(text);
@@ -245,6 +255,7 @@ const AIScreen = (): ReactElement => {
               onConversationChange={handleConversationChange}
               onAgentChange={handleAgentChange}
               onContextChange={handleContextChange}
+              onInitialQueryConsumed={handleInitialQueryConsumed}
             />
           </ChatWithCitationDocs>
         ) : (

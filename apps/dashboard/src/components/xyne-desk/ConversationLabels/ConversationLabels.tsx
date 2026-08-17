@@ -15,6 +15,11 @@ interface ConversationLabelsProps {
   conversationId: string;
   channelId: string;
   slot: ConversationLabelSlot;
+  appliedMappings: ReadonlyArray<{
+    id: string;
+    labelId: string;
+    labelName: string;
+  }>;
 }
 
 // Fallback palette used when a label has no stored color. Deterministic per name
@@ -46,24 +51,20 @@ export const ConversationLabels = ({
   conversationId,
   channelId,
   slot,
+  appliedMappings,
 }: ConversationLabelsProps): JSX.Element | null => {
   const zero = useZero();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [appliedMappings] = useCachedQuery(
-    queries.conversationLabelMappingsByConversationId({ conversationId }),
-    { enabled: !!conversationId },
-  );
   const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
     enabled: !!channelId && pickerOpen,
   });
 
-  const applied = useMemo(() => appliedMappings ?? [], [appliedMappings]);
   const appliedNames = useMemo(
-    () => new Set(applied.map(m => m.labelName.toLowerCase())),
-    [applied],
+    () => new Set(appliedMappings.map(m => m.labelName.toLowerCase())),
+    [appliedMappings],
   );
 
   useEffect(() => {
@@ -118,7 +119,7 @@ export const ConversationLabels = ({
 
   const toggleByName = (labelId: string, name: string, color: string): void => {
     if (appliedNames.has(name.toLowerCase())) {
-      const mapping = applied.find(m => m.labelName.toLowerCase() === name.toLowerCase());
+      const mapping = appliedMappings.find(m => m.labelName.toLowerCase() === name.toLowerCase());
       if (mapping) void removeLabel(mapping.labelId);
     } else {
       void applyLabel(name, color, labelId);
@@ -198,10 +199,10 @@ export const ConversationLabels = ({
   );
 
   if (slot === 'chips') {
-    if (applied.length === 0) return null;
+    if (appliedMappings.length === 0) return null;
     return (
       <div className='flex items-center gap-1.5 flex-wrap min-w-0'>
-        {applied.map(mapping => {
+        {appliedMappings.map(mapping => {
           const color = colorForName(mapping.labelName);
           return (
             <span

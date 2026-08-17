@@ -19,6 +19,7 @@ import {
   Conversation,
   ChannelType,
   BaseTicketType,
+  CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
@@ -39,8 +40,8 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
-import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import type { MentionResult } from '@xyne/shared';
+import { sendMessage, type ConversationRef } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
@@ -61,15 +62,25 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
-import type { AppShortcutWithApp, CommandAccessibility } from '../../../services/Apps/appsService';
+import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 import { setThreadLastRead } from '../../../machines/stateMachine';
 import { BlockNoteEditor } from '@blocknote/core';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import type { TwinEditSession } from '../TwinReplyDraft/twinReplyDraftApi';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
+
+function draftTextToHtml(text: string): string {
+  const escape = (value: string): string =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .split('\n')
+    .map(line => `<p>${line ? escape(line) : '<br>'}</p>`)
+    .join('');
+}
 
 function dispatchChatMessageSentEvent(channelId: string): void {
   window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_SENT_EVENT, { detail: { channelId } }));
@@ -100,6 +111,8 @@ interface ChatInputProps {
   hasTicket?: boolean;
   isForwardedContent?: boolean;
   threadParticipantIds?: ReadonlySet<string>;
+  dockSlot?: React.ReactNode;
+  twinEdit?: TwinEditSession | undefined;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -119,6 +132,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       hasTicket = false,
       isForwardedContent = false,
       threadParticipantIds,
+      dockSlot,
+      twinEdit,
     },
     ref,
   ) => {
@@ -182,8 +197,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     useEffect(() => {
       const isThread = !!conversation?.conversationId;
       const filter: { commandAccessibility?: CommandAccessibility } = isThread
-        ? { commandAccessibility: 'THREAD' }
-        : { commandAccessibility: 'CHAT' };
+        ? { commandAccessibility: CommandAccessibility.THREAD }
+        : { commandAccessibility: CommandAccessibility.CHAT };
       appsService
         .getChannelCommands(channelId, filter)
         .then(cmds =>
@@ -269,47 +284,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Whether the agent-progress pill currently has content — lets InputBox flip
     // between the typing indicator and the agent pill when both are active.
     const [agentActive, setAgentActive] = useState(false);
-    // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)
-    const handleTicketCreated = (ticket: {
-      id: string;
-      conversationId?: string;
-      createdBy?: string;
-      assignedTo?: string;
-      workflowType?: string;
-      xyneId?: string;
-    }): void => {
-      // Workflow selection
-      const workflowType: string | undefined = ticket.workflowType;
-
-      // Only trigger workflow if one is selected
-      if (workflowType) {
-        // Base workflow data
-        const workflowData: CreateWorkflowRequest = {
-          title: `Ticket: ${ticketDescription.slice(0, 50)}${ticketDescription.length > 50 ? '...' : ''}`,
-          workflowType,
-          description: ticketDescription,
-          ticketId: ticket.id,
-          ...(ticket.conversationId && { conversationId: ticket.conversationId }),
-          ...(ticket.xyneId && { xyneId: ticket.xyneId }),
-        };
-
-        // Add BUG_WORKFLOW specific required fields
-        if (workflowType === 'BUG_WORKFLOW') {
-          const bugWorkflowData = {
-            ...workflowData,
-            bugId: ticket.id,
-            severity: 'medium', // Default severity
-            reportedBy: ticket.createdBy || 'unknown',
-            assignedTo: ticket.assignedTo || ticket.createdBy || 'unknown',
-          };
-
-          void createWorkflow(bugWorkflowData);
-        } else {
-          void createWorkflow(workflowData);
-        }
-      }
-
-      // Close the modal after workflow is triggered
+    // Handle post-ticket creation cleanup (close modal, clear input)
+    const handleTicketCreated = (): void => {
       setIsCreateTicketModalOpen(false);
       setTicketDescription('');
 
@@ -327,14 +303,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           senderId: string;
           senderName: string;
           content: string;
-          msgType: string;
+          msgType: MessageType;
           createdAt: Date;
         };
         type: string;
         timestamp: Date;
       }): void => {
         // Check if this is a SYSTEM message (typing, reactions, etc.)
-        if (data.message.msgType === 'SYSTEM') {
+        if (data.message.msgType === MessageType.SYSTEM) {
           try {
             const content = JSON.parse(data.message.content) as TypingUpdatedContent;
 
@@ -404,6 +380,26 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       }
       return undefined;
     }, [initialContent, messageId, draft]);
+
+    const twinEditDraftIdRef = useRef<string | null>(null);
+    const preTwinEditHtmlRef = useRef<string>('');
+    useEffect(() => {
+      const activeId = twinEdit?.draftId ?? null;
+      if (activeId === twinEditDraftIdRef.current) return;
+      const box = inputBoxRef.current;
+      if (activeId) {
+        preTwinEditHtmlRef.current = box?.getHtml?.() ?? '';
+        box?.clearTextOnly();
+        if (twinEdit?.message) box?.insertContent(draftTextToHtml(twinEdit.message));
+        box?.focus();
+      } else {
+        box?.clearTextOnly();
+        const restore = preTwinEditHtmlRef.current;
+        if (restore) box?.insertContent(restore);
+        preTwinEditHtmlRef.current = '';
+      }
+      twinEditDraftIdRef.current = activeId;
+    }, [twinEdit?.draftId, twinEdit?.message]);
 
     const { displayName: channelName, avatarUserId } = useChannelDisplayName(
       channel,
@@ -500,8 +496,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       (html: string, text: string): void => {
         try {
           const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
-          // Do not save drafts while editing a message
-          if (messageId) return;
+          if (messageId || twinEdit) return;
           // Save or remove draft
           if (text.trim()) {
             saveDraft(lookupId, processedHtml, text);
@@ -512,16 +507,31 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           // Unable to save draft
         }
       },
-      [lookupId, messageId],
+      [lookupId, messageId, twinEdit],
     );
 
     const handleSendMessage = useCallback(
       (_plainText: string, html: string, files: File[]): void => {
-        if (isOffline) {
+        if (twinEdit) {
+          if (isOffline) {
+            toast.warning("You're offline", {
+              description: 'You can send this reply once you reconnect.',
+            });
+            return;
+          }
+          const edited = _plainText.trim();
+          if (!edited) return;
+          twinEdit.onApprove(edited);
+          return;
+        }
+        // Edits and thread replies still require a live connection. New
+        // top-level channel messages are allowed offline: the pending-message
+        // framework queues them and auto-retries on reconnect.
+        if (isOffline && (messageId || conversationId)) {
           toast.warning("You're offline", {
             description: messageId
               ? "Edits can't be saved until you reconnect."
-              : 'Your message has been saved as a draft. It will be ready to send when you reconnect.',
+              : "Thread replies can't be sent until you reconnect.",
           });
           throw new Error('offline');
         }
@@ -738,28 +748,23 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // Scope the agent-progress spinner to this new conversation right away,
             // before the `conversationId` prop catches up (see pendingConversationId).
             setPendingConversationId(newConversationId);
-            const result = zero.mutate(
-              mutators.conversations.send({
-                channelId,
-                content: processedHtml,
-                type: MessageType.USER,
-                conversationId: newConversationId,
-                messageId: newMessageId,
-                timestamp: messageCreatedAt,
-              }),
-            );
+            // Route top-level channel sends through the shared pending-message
+            // framework. sendMessage writes a durable pending entry, fires
+            // mutators.conversations.send when Zero is connected (and queues it
+            // for auto-retry when it is not), and clears the entry once the
+            // server confirms the write. Failed sends stay queued and surface a
+            // retry/delete affordance instead of being restored to the composer.
+            const channelRef: ConversationRef = { kind: 'channel', channelId };
+            sendMessage(zero as Parameters<typeof sendMessage>[0], channelRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              conversationId: newConversationId,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+            });
 
             saveDraft(lookupId, '', '');
-            handleMutationResult(
-              result,
-              restoreDraft,
-              () => dispatchChatMessageSentEvent(channelId),
-              undefined,
-              {
-                channelId,
-                isNewConversation: true,
-              },
-            );
+            dispatchChatMessageSentEvent(channelId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -812,6 +817,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
+        twinEdit,
       ],
     );
 
@@ -892,6 +898,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
+            <AgentProgressIndicator
+              sessionId={agentProgressConversationId ?? currentSessionId}
+              conversationId={agentProgressConversationId}
+            />
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -969,10 +979,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
-              {...(editorValue !== undefined && { value: editorValue })}
+              {...(!twinEdit && editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}
               className={className}
+              dockSlot={dockSlot}
               features={{
                 richText: true,
                 commands: true,

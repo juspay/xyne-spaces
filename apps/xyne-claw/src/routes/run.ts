@@ -49,7 +49,7 @@ import {
   renderTemplate,
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
-import { fetchLiteLLMWithRetry } from "../litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -106,6 +106,8 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
+import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -119,7 +121,7 @@ import {
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
-import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
+import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
@@ -1097,6 +1099,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
+    pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -1452,6 +1455,14 @@ async function processTask(
   // — never the success path — and the plan is read from ref.value there and
   // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
+  // Hoisted for the same reason: propose-agent (agent-authoring's terminal tool)
+  // fires abortRun, so the drafted agent is recovered from ref.value in the catch
+  // block and shipped as `pendingAgentCard` on the callback.
+  const proposeAgentRef: ProposeAgentRef = {};
+  // describe-agent is NOT terminal, so this is read on the success path; hoisted
+  // alongside the others so the catch handler can still ship a queued card when
+  // the turn ends some other way.
+  const describeAgentRef: DescribeAgentRef = {};
   // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
   // fires abortRun, so the brief is recovered from ref.value in the catch block
   // and shipped as `dailyBrief` on the callback.
@@ -2493,6 +2504,42 @@ async function processTask(
       log("Daily brief mode — injected terminal emit_brief tool");
     }
 
+    // Agent authoring (agent.config.agentAuthoring): inject the terminal
+    // propose-agent tool so this agent can DRAFT another agent. Gated on the same
+    // interactive-surface conditions as the plan tools — a draft is worthless
+    // without a human to approve its card, so a scheduled/automation run (no one
+    // watching) must never get the tool. Never alongside the other terminal tools
+    // (plan / daily brief own turn termination in their modes).
+    const agentAuthoringEnabled =
+      agentConfig?.["agentAuthoring"] === true &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    if (agentAuthoringEnabled) {
+      allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
+      log("Agent authoring enabled — injected terminal propose-agent tool");
+    }
+
+    // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
+    // question any agent should answer from its real configuration rather than
+    // from prose the model invents. Gated only on there being somewhere to post
+    // the card — a scheduled/automation run has no one to show it to.
+    //
+    // Deliberately NOT excluded in plan mode: the tool writes nothing (plan
+    // mode's read-only filter passes it through untouched), and an agent
+    // configured to plan first should still be able to say what it is. Twin is
+    // excluded because that flow delivers through its own approval surface.
+    const describeAgentAvailable =
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isDailyBrief;
+    if (describeAgentAvailable) {
+      allTools.push(buildDescribeAgentTool(describeAgentRef));
+    }
+
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
     // guard, a caller dispatching `provider="copilot"` without copilot creds
@@ -2929,7 +2976,12 @@ async function processTask(
         "### Step 3 — cite with clf tokens",
         "Your tool results contain inline citation tokens like `[clf-abc123#14]`. After any factual claim you draw from a tool result, append the EXACT token(s) that appeared in that tool's output, verbatim — e.g. `... no reviewer has been assigned to any of them [clf-abc123#14].` Never invent a token; only use ones you actually saw. If a claim rests on several sources, include several tokens. These are the brief's only citation mechanism.",
         "",
-        "### Step 4 — emit",
+        "### Step 4 — mention people and channels by id",
+        "When you name a person whose id appears in a tool result, write them as `<@userId>` with the id copied EXACTLY. Ticket results render people as `Name <email> (id: cm…)`; activity rows carry `actorId:`; message lines carry the sender's id.",
+        "When you name a channel whose id appears in a tool result, write it as `<#channelId>` the same way. Channel listings render as `#name (id: …)`; activity rows carry `channelId:`.",
+        "Same discipline as citations — copy, never invent, never infer an id from a name, never reuse one id for another thing. If you have no id, write the plain name or `#channel-name` as text: an unlinked name is correct, a wrong id is a lie. Only people and channels take this form — never tickets or PRs.",
+        "",
+        "### Step 5 — emit",
         "Call `emit_brief` EXACTLY ONCE with each section as an array of your written lines. This ENDS your turn. Do NOT narrate, do NOT write a chat answer, do NOT call any tool after it. If a data source is unavailable, skip it gracefully rather than failing the whole brief.",
       ].join("\n");
       fullContext = fullContext ? `${fullContext}\n\n${briefPrimer}` : briefPrimer;
@@ -2963,7 +3015,7 @@ async function processTask(
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
         "- For URLs of the form `http://localhost:<port>` (dashboard :5173, backend :3001) use `sandbox-pw-*` tools, NOT `sandbox-run` with inline Playwright. The browser inside the sandbox can reach those addresses.",
-        "- Git/GitHub PRs: make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). The sandbox has NO `gh` CLI — do NOT try `gh pr create`. To OPEN the PR, hand it to the **github** subagent's `create_pull_request` tool (head=<your branch>, base=<default branch>); that runs against the GitHub API and needs no `gh`. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
+        "- Opening PRs (any git host): make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). There is NO `gh`/`glab`/host CLI — do NOT try `gh pr create`. The push only creates the branch; to OPEN the PR, hand it to the subagent that MATCHES the repo's host: for a **GitHub** repo use the **github** subagent's `create_pull_request` (`head`=<your branch>, `base`=<default branch>); for a **Bitbucket** repo use the **bitbucket** subagent's `create_pull_request` (`workspace`=<project key, e.g. XYNE>, `repository`=<repo slug>, `source_branch`=<your branch>, `destination_branch`=<default branch>). Do NOT use the github subagent for a Bitbucket repo (or vice-versa) — it hits the wrong API and fails. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
         "- NEVER claim a branch was pushed or a PR was opened from memory. Verify first: a push is only real if `git ls-remote --heads origin <branch>` shows the ref (or `git push` printed the upstream-tracking/'new branch' line). State exactly what the command returned — do not narrate a success or a failure you did not observe.",
       ];
       // Surface an active session for this conversation so the agent reuses
@@ -3764,6 +3816,11 @@ async function processTask(
         `[daily-brief] emit_brief was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the brief anyway; investigate abort wiring. session=${sessionId}`,
       );
     }
+    if (proposeAgentRef.value) {
+      logErr(
+        `[agent-authoring] propose-agent was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the draft anyway; investigate abort wiring. session=${sessionId}`,
+      );
+    }
 
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
@@ -3811,6 +3868,15 @@ async function processTask(
       // claw-auth's /webhook/result posts the plan card and (if trivial)
       // auto-continues into the auto-mode execution turn.
       ...(proposePlanRef.value ? { pendingPlan: proposePlanRef.value } : {}),
+      // Agent authoring: propose-agent normally aborts (→ catch branch below),
+      // but if the run finished cleanly with a draft proposed, carry it here too.
+      // claw-auth validates it, persists the AgentRequest and posts the agent card.
+      // A draft (terminal, normally recovered in the catch) wins over a profile
+      // card if a turn somehow produced both — the decision surface matters more
+      // than the description.
+      ...(proposeAgentRef.value || describeAgentRef.value
+        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
+        : {}),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -3969,6 +4035,9 @@ async function processTask(
           ? { automationResult: automationResultAtError }
           : {}),
         pendingResponses: pendingResponsesAtError,
+        // A queued capability card must survive the copilot terminal path too,
+        // or "what can you do?" silently loses its card on those agents.
+        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
@@ -4003,6 +4072,36 @@ async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      proposeAgentRef.value &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      // Agent authoring: propose-agent fired abortRun to end the turn, so the run
+      // lands HERE (RunCancelledError), not the success path — the SAME pattern as
+      // propose-plan above. This is a normal, successful draft, NOT a cancellation:
+      // emit status="completed" carrying it. claw-auth validates the requested
+      // tools, persists the draft as an AgentRequest and posts the agent card. The
+      // card is the deliverable, so there is no chat text on this turn — and the
+      // agent must not narrate a creation that has not been approved yet.
+      log(
+        `Session terminated by propose-agent (slug=${proposeAgentRef.value.agent.slug}, ${proposeAgentRef.value.agent.tools.length} tool(s)): ${sessionId}`,
+      );
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: "",
+        pendingAgentCard: proposeAgentRef.value,
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),

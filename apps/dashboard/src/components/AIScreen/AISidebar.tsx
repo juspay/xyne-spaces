@@ -1,22 +1,31 @@
 import { useState, type ComponentType, type SVGProps, type ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
+  BuildingApartmentTwo,
   ChatPlus,
   ChevronBigDown,
   DeleteDustbin01,
-  GitFork01,
   LayoutGridStackDown,
   Notebook,
   PencilEditBox,
   Piechart01,
+  Settings01,
   ThreeDotsMenuVertical,
+  UserShield,
   UserTwo,
+  File02Ai,
 } from '@xyne/icons';
+import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
+import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
+import { useAuth } from '../../hooks/useAuth';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
+import { Dialog } from '../ui/Dialog/Dialog';
+import { Button } from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
@@ -30,6 +39,8 @@ const NAV_ITEM_IDLE_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-f
 const NAV_ITEM_ACTIVE_CLASS =
   'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border';
 
+// Side padding lives on the row's children, not the row, so the title button can
+// own the full height *and* the left inset — no dead strip around the hit area.
 const LIST_ROW_CLASS =
   'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors';
 
@@ -46,43 +57,37 @@ interface AINavItem {
   label: string;
   icon: NavIcon;
   to: string;
-  /** Temporarily kept out of the sidebar. Drop the flag to show the item. */
-  hidden?: boolean | undefined;
+  /** Prefix for active matching when `to` points at one sub-route of a section. */
+  matchPath?: string;
+  /** Analytics name; emitted as data-track-* on the nav link when set. */
+  trackName?: string;
+  adminOnly?: boolean;
+  orgManagerOnly?: boolean;
 }
 
 const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
+  { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
-    key: 'library',
-    label: 'Library',
-    icon: LayoutGridStackDown as NavIcon,
-    to: '/ai/library',
-    hidden: true,
+    key: 'organization',
+    label: 'Organization',
+    icon: BuildingApartmentTwo as NavIcon,
+    to: '/ai/organization',
+    orgManagerOnly: true,
   },
+  { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
+  { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
+  { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
   {
-    key: 'digital-twin',
-    label: 'Digital twin',
-    icon: UserTwo as NavIcon,
-    to: '/ai/digital-twin',
-    hidden: true,
-  },
-  {
-    key: 'metrics',
-    label: 'Metrics',
-    icon: Piechart01 as NavIcon,
-    to: '/ai/metrics',
-    hidden: true,
-  },
-  {
-    key: 'workflow',
-    label: 'Workflow',
-    icon: GitFork01 as NavIcon,
-    to: '/ai/workflow',
-    hidden: true,
+    key: 'daily-brief',
+    label: 'Morning Brief',
+    icon: File02Ai as NavIcon,
+    to: '/ai/daily-brief/today',
+    matchPath: '/ai/daily-brief',
+    trackName: 'OPEN_DAILY_BRIEF',
   },
 ];
-
-const VISIBLE_NAV_ITEMS = NAV_ITEMS.filter(item => !item.hidden);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -151,12 +156,27 @@ function SessionHistory({
   // no title override or starred field, so those actions can't be implemented
   // here without a schema change. Delete is the only v2 mutation backed by an
   // existing claw-auth endpoint.
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
-  const handleDelete = async (sessionId: string): Promise<void> => {
-    await onDelete(sessionId);
-    setDeletingId(null);
+  const pendingSession = sessions.find(s => s.sessionId === pendingDeleteId) ?? null;
+
+  /** Ignored while the request is in flight so the dialog can't vanish mid-delete. */
+  const closeDeleteDialog = (): void => {
+    if (isDeleting) return;
+    setPendingDeleteId(null);
+  };
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDeleteId) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(pendingDeleteId);
+      setPendingDeleteId(null);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   if (sessions.length === 0) {
@@ -174,98 +194,130 @@ function SessionHistory({
   }
 
   return (
-    <ul className='flex flex-col'>
-      {sessions.map(session => {
-        const isActive = session.sessionId === activeSessionId;
-        const isDeleting = deletingId === session.sessionId;
+    <>
+      <ul className='flex flex-col'>
+        {sessions.map(session => {
+          const isActive = session.sessionId === activeSessionId;
 
-        if (isDeleting) {
           return (
             <li key={session.sessionId}>
-              <div className='flex h-9 items-center gap-3 rounded-[10px] px-3 text-sm text-sidebar-accent-foreground'>
-                <span className='min-w-0 flex-1 truncate'>
-                  Delete <span className='font-medium'>{session.title || 'Untitled'}</span>?
-                </span>
+              <div
+                className={cn(
+                  LIST_ROW_CLASS,
+                  isActive ? LIST_ROW_ACTIVE_CLASS : LIST_ROW_IDLE_CLASS,
+                )}
+              >
+                {/* self-stretch overrides the row's items-center, so the button fills
+                    the full 36px height instead of just wrapping its line box; pl-3
+                    pulls the row's old left inset inside the hit area too. */}
                 <button
                   type='button'
-                  onClick={(): void => setDeletingId(null)}
-                  className='shrink-0 rounded-md px-2 py-0.5 text-xs text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  onClick={() => onSelect(session.sessionId)}
+                  className='flex min-w-0 flex-1 items-center self-stretch pl-3 pr-1 text-left text-sm'
                   data-track-category='XyneAI'
-                  data-track-name='CANCEL_DELETE_SESSION'
+                  data-track-name='SELECT_SESSION'
                 >
-                  Cancel
+                  <span className='min-w-0 flex-1 truncate'>{session.title}</span>
                 </button>
-                <button
-                  type='button'
-                  onClick={(): void => {
-                    void handleDelete(session.sessionId);
-                  }}
-                  className='shrink-0 rounded-md bg-destructive px-2 py-0.5 text-xs text-destructive-foreground transition-opacity hover:opacity-90'
-                  data-track-category='XyneAI'
-                  data-track-name='CONFIRM_DELETE_SESSION'
+                <Popover
+                  open={openDropdownId === session.sessionId}
+                  onOpenChange={(open: boolean) =>
+                    setOpenDropdownId(open ? session.sessionId : null)
+                  }
+                  align='end'
+                  sideOffset={4}
+                  trigger={
+                    <button
+                      type='button'
+                      className={cn(
+                        'shrink-0 items-center justify-center rounded-md p-1 hover:bg-sidebar-accent',
+                        openDropdownId === session.sessionId ? 'flex' : 'hidden group-hover:flex',
+                      )}
+                      aria-label='Chat options'
+                      data-track-category='XyneAI'
+                      data-track-name='OPEN_SESSION_MENU'
+                    >
+                      <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
+                    </button>
+                  }
+                  className='w-48 rounded-lg border border-border bg-popover p-0 shadow-lg'
                 >
-                  Delete
-                </button>
+                  <button
+                    type='button'
+                    onClick={e => {
+                      e.stopPropagation();
+                      setOpenDropdownId(null);
+                      setPendingDeleteId(session.sessionId);
+                    }}
+                    className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
+                    data-track-category='XyneAI'
+                    data-track-name='DELETE_SESSION'
+                  >
+                    <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
+                    <span>Delete</span>
+                  </button>
+                </Popover>
               </div>
             </li>
           );
-        }
+        })}
+      </ul>
 
-        return (
-          <li key={session.sessionId}>
-            <div
-              className={cn(LIST_ROW_CLASS, isActive ? LIST_ROW_ACTIVE_CLASS : LIST_ROW_IDLE_CLASS)}
-            >
+      {pendingSession && (
+        <Dialog
+          open
+          onOpenChange={open => {
+            if (!open) closeDeleteDialog();
+          }}
+          title='Delete chat?'
+          description={`Delete the chat "${pendingSession.title || 'Untitled'}"? This can't be undone.`}
+          className='max-w-[420px] p-0'
+          testId='delete-session-dialog'
+        >
+          <div>
+            <div className='flex items-start justify-between gap-3 px-5 py-4'>
+              <h2 className='pr-2 text-base font-semibold leading-tight text-foreground'>
+                Delete chat?
+              </h2>
               <button
                 type='button'
-                onClick={() => onSelect(session.sessionId)}
-                className='min-w-0 flex-1 truncate text-left text-sm'
+                onClick={closeDeleteDialog}
+                className='shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                aria-label='Close'
                 data-track-category='XyneAI'
-                data-track-name='SELECT_SESSION'
+                data-track-name='CLOSE_DELETE_SESSION_DIALOG'
               >
-                {session.title}
+                <X className='size-4' aria-hidden />
               </button>
-              <Popover
-                open={openDropdownId === session.sessionId}
-                onOpenChange={(open: boolean) => setOpenDropdownId(open ? session.sessionId : null)}
-                align='end'
-                sideOffset={4}
-                trigger={
-                  <button
-                    type='button'
-                    className={cn(
-                      'shrink-0 items-center justify-center rounded-md p-1 hover:bg-sidebar-accent',
-                      openDropdownId === session.sessionId ? 'flex' : 'hidden group-hover:flex',
-                    )}
-                    aria-label='Chat options'
-                    data-track-category='XyneAI'
-                    data-track-name='OPEN_SESSION_MENU'
-                  >
-                    <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
-                  </button>
-                }
-                className='w-48 rounded-lg border border-border bg-popover p-0 shadow-lg'
-              >
-                <button
-                  type='button'
-                  onClick={e => {
-                    e.stopPropagation();
-                    setOpenDropdownId(null);
-                    setDeletingId(session.sessionId);
-                  }}
-                  className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
-                  data-track-category='XyneAI'
-                  data-track-name='DELETE_SESSION'
-                >
-                  <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
-                  <span>Delete</span>
-                </button>
-              </Popover>
             </div>
-          </li>
-        );
-      })}
-    </ul>
+            <p className='px-5 pb-5 text-sm leading-relaxed text-foreground'>
+              <span className='font-semibold'>{pendingSession.title || 'Untitled'}</span> will be
+              deleted for good. This can&apos;t be undone.
+            </p>
+            <div className='flex justify-end gap-2 px-5 pb-4'>
+              <Button
+                variant='outline'
+                onClick={closeDeleteDialog}
+                disabled={isDeleting}
+                data-track-category='XyneAI'
+                data-track-name='CANCEL_DELETE_SESSION'
+              >
+                Cancel
+              </Button>
+              <Button
+                variant='destructive'
+                loading={isDeleting}
+                onClick={() => void confirmDelete()}
+                data-track-category='XyneAI'
+                data-track-name='CONFIRM_DELETE_SESSION'
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+    </>
   );
 }
 
@@ -285,7 +337,14 @@ export function AISidebar({
 
   const [recentsOpen, setRecentsOpen] = useState(true);
 
-  const routedActiveItem = VISIBLE_NAV_ITEMS.find(item => pathname.includes(item.to));
+  const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
+
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
+  const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const visibleNavItems = NAV_ITEMS.filter(
+    item => (!item.adminOnly || isAdmin) && (!item.orgManagerOnly || canManageOrg),
+  );
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   const { selectedAgentSlug } = useSelectedAgent();
@@ -327,13 +386,16 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {VISIBLE_NAV_ITEMS.map(({ key, label, icon: Icon, to }) => {
+            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
                   key={key}
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
+                  {...(trackName
+                    ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
+                    : {})}
                   className={cn(
                     NAV_ITEM_CLASS,
                     isActive ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS,

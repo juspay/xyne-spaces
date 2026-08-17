@@ -8,6 +8,7 @@ import { VITE_ZERO_SERVER } from '../config';
 import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
+import { useEncryptionBootstrap } from '@xyne/shared/hooks';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -15,6 +16,7 @@ interface ZeroProviderProps {
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
+  const { isReady: encryptionReady } = useEncryptionBootstrap();
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
@@ -23,12 +25,12 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const [zero, setZero] = useState<Zero | null>(null);
 
   useEffect(() => {
-    if (!user) {
+    console.log('ZeroProvider useEffect triggered', { user, encryptionReady, refreshCount });
+    if (!user || !encryptionReady) {
       return;
     }
+    console.log('Initializing Zero with user', { id: user.id, workspaceId: user.workspaceId });
 
-    // Auth function - returns undefined to let Zero use cookies
-    // Cookies are sent automatically by the browser
     const authFunction = undefined;
 
     const handleUpdateNeeded = async (reason: UpdateNeededReason): Promise<void> => {
@@ -70,10 +72,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         userID: user.id,
         auth: authFunction,
         server: VITE_ZERO_SERVER,
+        pingTimeoutMs: 10000,
         schema,
         mutators: mutators,
         hiddenTabDisconnectDelay: 60000,
-        pingTimeoutMs: 10000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,
@@ -98,7 +100,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     };
 
     void initZero();
-  }, [user, refreshCount]);
+  }, [user, refreshCount, encryptionReady]);
 
   if (!zero) {
     return null;

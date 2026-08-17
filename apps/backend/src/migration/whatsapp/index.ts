@@ -1,10 +1,10 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import multer from 'multer';
 import { tmpdir } from 'os';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import type { Request } from 'express';
-import { AccessType } from '@prisma/client';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { WhatsAppMigrationController } from '@/controllers/whatsappMigrationController';

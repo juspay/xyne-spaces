@@ -11,7 +11,7 @@ import {
   type Tool,
 } from '@juspay-jaf/jaf';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, NudgeKind, SurfaceAreaType, ChannelScopeType } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
@@ -297,7 +297,7 @@ export const findRelatedMessageFromMessage: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'FIND_RELATED_MESSAGE_FROM_MESSAGE',
+  kind: NudgeKind.FIND_RELATED_MESSAGE_FROM_MESSAGE,
   mode: 'explicit',
   priority: 'high',
   trigger: {
@@ -311,7 +311,7 @@ export const findRelatedMessageFromMessage: NudgeDefinition<
       return isEligibleMessage({ messageId, channelId, conversationId });
     },
   },
-  direction: { from: 'MESSAGE', to: 'MESSAGE' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
   async buildContext(payload, activityContext, runtime) {
     const base = await buildMessageNudgeContext(payload, activityContext, runtime);
@@ -354,8 +354,8 @@ export const findRelatedMessageFromMessage: NudgeDefinition<
     const evidence =
       agentResult.matchingEvidence?.trim() || description;
     const shouldRestrictVisibility =
-      relatedChannel?.scopeType === 'DM' ||
-      relatedChannel?.scopeType === 'GROUP_DM' ||
+      relatedChannel?.scopeType === ChannelScopeType.DM ||
+      relatedChannel?.scopeType === ChannelScopeType.GROUP_DM ||
       relatedChannel?.visibility === 'PRIVATE';
 
     const actions: ExplicitNudgeAction = {

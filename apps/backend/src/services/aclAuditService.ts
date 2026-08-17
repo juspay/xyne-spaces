@@ -1,6 +1,6 @@
 import { repositories } from '../database/repositories/index';
-import { getContextOrNull } from '@/database/tenant/context';
-import { ACLAuditEventType, ACLAuditTargetType } from '@prisma/client';
+import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
+import { getContextOrNull, isSystemWorkspaceId } from '@/database/tenant/context';
 import { ACLAuditLog, ACLAuditLogWithActor, PaginationOptions, PaginatedResult } from '../types/database';
 import { logger } from '../utils/logger';
 
@@ -28,11 +28,18 @@ export class ACLAuditService {
     targetId: string,
     description: string,
     actorUserId?: string
-  ): Promise<ACLAuditLog> {
+  ): Promise<ACLAuditLog | null> {
     try {
-      // System/no-context entry points (e.g. the ACL seed script) legitimately have no tenant.
-      // workspaceId is nullable, so record a tenant-less audit row rather than throwing.
-      const workspaceId = getContextOrNull()?.workspaceId ?? null;
+      const workspaceId = getContextOrNull()?.workspaceId;
+      if (!workspaceId) {
+                logger.warn(`ACL audit skipped (no tenant context): ${eventType} - ${description}`);
+        return null;
+      }
+      // `runAsSystem` reaches here with SYSTEM_WORKSPACE_ID, which is truthy — deliberate, so
+      // seed-acl's events are still recorded against the NOT NULL column. Not tenant rows.
+      if (isSystemWorkspaceId(workspaceId)) {
+        logger.warn(`ACL audit recorded against system sentinel: ${eventType} - ${description}`);
+      }
       const auditLog = await repositories.aclAuditLogs.create({
         eventType,
         targetType,
@@ -60,7 +67,7 @@ export class ACLAuditService {
   /**
    * Log resource creation
    */
-  async logResourceCreated(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logResourceCreated(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.RESOURCE_CREATED,
       ACLAuditTargetType.RESOURCE,
@@ -73,7 +80,7 @@ export class ACLAuditService {
   /**
    * Log resource update
    */
-  async logResourceUpdated(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logResourceUpdated(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.RESOURCE_UPDATED,
       ACLAuditTargetType.RESOURCE,
@@ -86,7 +93,7 @@ export class ACLAuditService {
   /**
    * Log resource deletion
    */
-  async logResourceDeleted(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logResourceDeleted(resourceId: string, resourceName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.RESOURCE_DELETED,
       ACLAuditTargetType.RESOURCE,
@@ -103,7 +110,7 @@ export class ACLAuditService {
     resourceAccessId: string,
     description: string,
     actorUserId?: string
-  ): Promise<ACLAuditLog> {
+  ): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_GRANTED,
       ACLAuditTargetType.RESOURCE_ACCESS,
@@ -120,7 +127,7 @@ export class ACLAuditService {
     resourceAccessId: string,
     description: string,
     actorUserId?: string
-  ): Promise<ACLAuditLog> {
+  ): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_REVOKED,
       ACLAuditTargetType.RESOURCE_ACCESS,
@@ -137,7 +144,7 @@ export class ACLAuditService {
     resourceAccessId: string,
     description: string,
     actorUserId?: string
-  ): Promise<ACLAuditLog> {
+  ): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_UPDATED,
       ACLAuditTargetType.RESOURCE_ACCESS,
@@ -150,7 +157,7 @@ export class ACLAuditService {
   /**
    * Log user group creation
    */
-  async logUserGroupCreated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupCreated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_CREATED,
       ACLAuditTargetType.USER_GROUP,
@@ -163,7 +170,7 @@ export class ACLAuditService {
   /**
    * Log user group update
    */
-  async logUserGroupUpdated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupUpdated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_UPDATED,
       ACLAuditTargetType.USER_GROUP,
@@ -176,7 +183,7 @@ export class ACLAuditService {
   /**
    * Log user group deletion
    */
-  async logUserGroupDeleted(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupDeleted(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_DELETED,
       ACLAuditTargetType.USER_GROUP,
@@ -189,7 +196,7 @@ export class ACLAuditService {
   /**
    * Log user group deactivation
    */
-  async logUserGroupDeactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupDeactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_DEACTIVATED,
       ACLAuditTargetType.USER_GROUP,
@@ -202,7 +209,7 @@ export class ACLAuditService {
   /**
    * Log user group reactivation
    */
-  async logUserGroupReactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupReactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog | null> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_REACTIVATED,
       ACLAuditTargetType.USER_GROUP,

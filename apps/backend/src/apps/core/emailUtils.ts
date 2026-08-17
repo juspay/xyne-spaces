@@ -1,5 +1,5 @@
-import { EmailType, UserType } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { EmailType, UserType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { EmailRepliesCursor, EmailRepliesItem, EmailRepliesResponse, AppEventType, BaseAppEvent, EmailEventPayload } from '../types';
@@ -48,7 +48,7 @@ export async function getEmailReplies(
     // Resolve parent (root email) per externalThreadId in one query
     const rootByThread = new Map<string, string>();
     const replyThreadIds = Array.from(
-      new Set(emails.filter(e => !isRootEmailType(e.type)).map(e => e.externalThreadId))
+      new Set(emails.filter(e => !isRootEmailType(e.type as EmailType)).map(e => e.externalThreadId))
     );
     const roots = await repositories.emails.findRootsByExternalThreadIds(replyThreadIds);
     for (const r of roots) {
@@ -60,7 +60,7 @@ export async function getEmailReplies(
     const itemsResults: EmailRepliesItem[] = emails.map((email) => ({
       id: email.id,
       parentId:
-        isRootEmailType(email.type)
+        isRootEmailType(email.type as EmailType)
           ? email.id
           : (rootByThread.get(email.externalThreadId) ?? email.id),
       type: email.type,
@@ -134,6 +134,7 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
       id: email.id,
       ticketId: ticket?.id ?? '',
       channelName: channel?.name ?? '',
+      ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
     };
 
     const event: BaseAppEvent = {

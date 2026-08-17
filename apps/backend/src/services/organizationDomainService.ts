@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient, Status } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
-import { OrganizationDomainVerificationStatus } from '@xyne/shared';
+import { OrganizationDomainVerificationStatus, Status, WorkspaceType } from '@xyne/shared';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com',
@@ -125,7 +126,7 @@ export class OrganizationDomainService {
       return null;
     }
 
-    const mapping = await this.prisma.organizationDomain.findFirst({
+    const mappings = await this.prisma.organizationDomain.findMany({
       where: {
         domain,
         verificationStatus: { in: MATCHABLE_DOMAIN_STATUSES },
@@ -133,13 +134,13 @@ export class OrganizationDomainService {
       orderBy: { createdAt: 'asc' },
     });
 
-    if (!mapping) {
+    if (mappings.length === 0) {
       return null;
     }
 
-    const organization = await this.prisma.organization.findFirst({
+    const activeOrgs = await this.prisma.organization.findMany({
       where: {
-        orgId: mapping.orgId,
+        orgId: { in: mappings.map(mapping => mapping.orgId) },
         status: Status.ACTIVE,
       },
       select: {
@@ -149,15 +150,20 @@ export class OrganizationDomainService {
       },
     });
 
-    if (!organization) {
-      return null;
+    const activeOrgById = new Map(activeOrgs.map(org => [org.orgId, org]));
+
+    for (const mapping of mappings) {
+      const organization = activeOrgById.get(mapping.orgId);
+      if (organization) {
+        return {
+          ...organization,
+          domain: mapping.domain,
+          verificationStatus: mapping.verificationStatus,
+        };
+      }
     }
 
-    return {
-      ...organization,
-      domain: mapping.domain,
-      verificationStatus: mapping.verificationStatus,
-    };
+    return null;
   }
 
   async findEnterpriseWorkspaceByEmailDomain(
@@ -172,7 +178,7 @@ export class OrganizationDomainService {
       where: {
         orgId: existingOrg.orgId,
         status: Status.ACTIVE,
-        OR: [{ workspaceType: 'ENTERPRISE' }, { workspaceType: null }],
+        OR: [{ workspaceType: WorkspaceType.ENTERPRISE }, { workspaceType: null }],
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -231,36 +237,39 @@ export class OrganizationDomainService {
   }
 
   async assertOrgMemberLimit(orgId: string, email?: string): Promise<void> {
-    if (this.orgMemberLimit === null) {
-      return;
-    }
-
-    const normalizedEmail = email?.trim().toLowerCase();
-    if (normalizedEmail) {
-      const existingMember = await this.prisma.orgMember.findFirst({
-        where: {
-          orgId,
-          email: normalizedEmail,
-          leftAt: null,
-        },
-        select: { memberId: true },
-      });
-
-      if (existingMember) {
+    // Counts every seat in the org, not just the caller's own, so it runs above the caller's own scope.
+    return withWorkspaceScope(async () => {
+      if (this.orgMemberLimit === null) {
         return;
       }
-    }
 
-    const activeMemberCount = await this.prisma.orgMember.count({
-      where: {
-        orgId,
-        leftAt: null,
-      },
+      const normalizedEmail = email?.trim().toLowerCase();
+      if (normalizedEmail) {
+        const existingMember = await this.prisma.orgMember.findFirst({
+          where: {
+            orgId,
+            email: normalizedEmail,
+            leftAt: null,
+          },
+          select: { memberId: true },
+        });
+
+        if (existingMember) {
+          return;
+        }
+      }
+
+      const activeMemberCount = await this.prisma.orgMember.count({
+        where: {
+          orgId,
+          leftAt: null,
+        },
+      });
+
+      if (activeMemberCount >= this.orgMemberLimit) {
+        throw new OrgMemberLimitError(orgId, this.orgMemberLimit);
+      }
     });
-
-    if (activeMemberCount >= this.orgMemberLimit) {
-      throw new OrgMemberLimitError(orgId, this.orgMemberLimit);
-    }
   }
 }
 
