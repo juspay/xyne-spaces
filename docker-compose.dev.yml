@@ -235,7 +235,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./otelCollector/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./docker/dev-infra/configs/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
       - "${OTEL_HTTP_BIND_PORT:-4318}:4318" # OTLP HTTP receiver (Browser sends here)
       - "${OTEL_GRPC_BIND_PORT:-4317}:4317" # OTLP gRPC receiver
