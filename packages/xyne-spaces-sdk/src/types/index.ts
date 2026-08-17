@@ -423,7 +423,6 @@ export interface CreateTicketInput {
   excludedChatAttachmentIds?: string[];
   draftAttachmentIds?: string[];
   dynamicFields?: Record<string, string | string[]>;
-  workflowType?: string;
   stageName?: string;
   tags?: string[];
   merchantId?: string;
@@ -724,15 +723,16 @@ export interface Call {
   status: CallStatus;
   externalId: string;
   roomLink: string | null;
-  createdBy: string;
+  createdByUserId: string;
   title: string | null;
   startsAt: number | null;
   endsAt: number | null;
   startedAt: number | null;
   endedAt: number | null;
-  notesCanvasId: string | null;
   participantCount: number | null;
-  seriesId: string | null;
+  recurringSeriesId: string | null;
+  /** JSON blob. The notes-canvas link lives here as `metadata.notesCanvasId`. */
+  metadata?: unknown;
   createdAt: number;
   updatedAt: number;
 }

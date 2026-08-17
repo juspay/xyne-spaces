@@ -94,13 +94,17 @@ export const automationsOperations = {
    * Send a draft for approval.
    * Maps to: Zero mutator 'automations.submitForApproval'
    */
-  submitForApproval: mutator<{ id: string }, void>('automations.submitForApproval'),
+  submitForApproval: mutator<{ id: string }, void>('automations.submitForApproval', {
+    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
+  }),
 
   /**
    * Withdraw a submission before it is decided.
    * Maps to: Zero mutator 'automations.revoke'
    */
-  revoke: mutator<{ id: string }, void>('automations.revoke'),
+  revoke: mutator<{ id: string }, void>('automations.revoke', {
+    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
+  }),
 
   /**
    * Approve a submitted automation.
@@ -124,7 +128,9 @@ export const automationsOperations = {
    * Start running an approved automation.
    * Maps to: Zero mutator 'automations.activate'
    */
-  activate: mutator<{ id: string }, void>('automations.activate'),
+  activate: mutator<{ id: string }, void>('automations.activate', {
+    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
+  }),
 
   /**
    * Stop running an automation without deleting it.
@@ -142,5 +148,7 @@ export const automationsOperations = {
    * Retire an automation.
    * Maps to: Zero mutator 'automations.archive'
    */
-  archive: mutator<{ id: string }, void>('automations.archive'),
+  archive: mutator<{ id: string }, void>('automations.archive', {
+    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
+  }),
 } as const;

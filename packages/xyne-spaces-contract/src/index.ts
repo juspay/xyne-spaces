@@ -42,19 +42,9 @@ export {
 export {
   searchQuerySchema,
   searchSchemaQuerySchema,
-  searchResponseSchema,
   VESPA_SCHEMAS,
   type SearchQuery,
 } from './schemas/search.js';
-
-export {
-  userSchema,
-  userProfileSchema,
-  meSchema,
-  type User,
-  type UserProfile,
-  type Me,
-} from './schemas/users.js';
 
 export {
   PAGE_SIZE_DEFAULT,

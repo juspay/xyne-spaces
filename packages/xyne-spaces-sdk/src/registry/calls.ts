@@ -181,7 +181,9 @@ export const callsOperations = {
    * Leave a call.
    * Maps to: Zero mutator 'calls.leave'
    */
-  leave: mutator<{ callId: string }, void>('calls.leave'),
+  leave: mutator<{ callId: string }, void>('calls.leave', {
+    mapArgs: (args) => ({ callId: args.callId, timestamp: now() }),
+  }),
 
   /**
    * Decline an incoming call.

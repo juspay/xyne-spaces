@@ -304,9 +304,14 @@ export class TicketsResource extends Resource {
     return this.call(ticketsOperations.addTag, { ticketId, projectId, tagName });
   }
 
-  /** Remove a tag from a ticket. */
-  removeTag(tagId: string): Promise<void> {
-    return this.call(ticketsOperations.removeTag, { tagId });
+  /**
+   * Remove a tag from a ticket.
+   *
+   * Needs both ids: the tag and the row linking it to this ticket. Get the mapping
+   * id from the ticket's `tagMappings`.
+   */
+  removeTag(tagId: string, mappingId: string): Promise<void> {
+    return this.call(ticketsOperations.removeTag, { tagId, mappingId });
   }
 
   // ----- References -----
