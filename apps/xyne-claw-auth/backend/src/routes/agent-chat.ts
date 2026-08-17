@@ -4,7 +4,6 @@ import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
@@ -1405,10 +1404,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           toolPermissions: {},
         }
       : runAgentConfig;
-    // KB curators need their collection grants on the wire — see
-    // attachKbGrantsToConfig. No-op for every other agent.
-    const configWithKb = await attachKbGrantsToConfig(effectiveAgentConfig, agent.id, prisma);
-    const fastModeEnabled = await resolveFastMode(conversationId, slug, configWithKb);
+    const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
     const forwardBody: Record<string, unknown> = {
       userId,
@@ -1447,7 +1443,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // skillTriggers, promptInjections, custom-tool config values.
       // Without this, those features silently default to "off" on V2
       // dashboard chat (same bug existed for webhook + scheduled jobs).
-      ...(configWithKb ? { agentConfig: configWithKb } : {}),
+      ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
     };
 

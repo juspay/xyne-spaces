@@ -31,7 +31,6 @@ import {
 } from "./lib/branching.js";
 
 import { createLogger } from "../logger.js";
-import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
 const log = createLogger("run-stream");
 const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
@@ -881,15 +880,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: agentRow.description,
       },
     };
-
-    // KB curators need their collection grants on the wire — see
-    // attachKbGrantsToConfig. No-op for every other agent.
-    const configForClaw = (await attachKbGrantsToConfig(
-      enrichedAgentConfig,
-      agentRow.id,
-      prisma,
-    )) as Record<string, unknown>;
-
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
@@ -923,7 +913,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig: configForClaw,
+      agentConfig: enrichedAgentConfig,
       additionalInstructions,
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,

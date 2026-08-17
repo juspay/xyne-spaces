@@ -427,26 +427,28 @@ async function resolveSpacesAuthFromRequest(
 async function resolveAgent(
   agentSlug: string | undefined,
   orgId: string | undefined,
-  callerFindingScope?: unknown,
-): Promise<{
-  id: string;
-  systemPrompt: string;
-  modelId?: string | undefined;
-  agentConfig: Record<string, unknown>;
-  config?: unknown;
-  orgId: string;
-  delegationTier: "standard" | "orchestrator";
-  spacesAppId?: string | null;
-  spacesAppToken?: string | null;
-  spacesAppUserId?: string | null;
-  skills?: {
-    slug: string;
-    name: string;
-    description: string;
-    content: string;
-    files?: Array<{ relativePath: string; content: string; contentType?: string | null }>;
-  }[];
-} | { error: string }> {
+): Promise<
+  | {
+      id: string;
+      systemPrompt: string;
+      modelId?: string | undefined;
+      agentConfig: Record<string, unknown>;
+      config?: unknown;
+      orgId: string;
+      delegationTier: "standard" | "orchestrator";
+      spacesAppId?: string | null;
+      spacesAppToken?: string | null;
+      spacesAppUserId?: string | null;
+      skills?: {
+        slug: string;
+        name: string;
+        description: string;
+        content: string;
+        files?: Array<{ relativePath: string; content: string; contentType?: string | null }>;
+      }[];
+    }
+  | { error: string }
+> {
   // Find by slug, or fall back to default agent. Include the skill's
   // sibling files (SkillFile rows) so directory-style skills get
   // materialized in the child workspace alongside SKILL.md.
@@ -503,14 +505,7 @@ async function resolveAgent(
     spacesAppId: agent.spacesAppId ?? null,
     spacesAppToken: agent.spacesAppToken ?? null,
     spacesAppUserId: agent.spacesAppUserId ?? null,
-    // Caller-supplied runtime scope is merged in. `agentConfig` is otherwise
-    // rebuilt from the agent row, which would drop anything the dispatcher
-    // passed — findingScope tells the extractor which project it is reading
-    // for, and without it emit-finding is never built at all.
-    agentConfig: {
-      ...stripPlatformConfigKeys(agent.config as Record<string, unknown>),
-      ...(callerFindingScope ? { findingScope: callerFindingScope } : {}),
-    },
+    agentConfig: stripPlatformConfigKeys(agent.config as Record<string, unknown>),
     config: agent.config,
     ...(skills.length > 0 ? { skills } : {}),
   };
@@ -918,11 +913,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
 
     // Resolve agent (only if explicitly requested). Org comes from auth/user DB,
     // never from request body.
-    const agent = await resolveAgent(
-      agentSlug,
-      runtimeOrgId,
-      (req.body as { agentConfig?: { findingScope?: unknown } } | undefined)?.agentConfig?.findingScope,
-    );
+    const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       res.status(400).json({ success: false, error: agent.error });
       return;

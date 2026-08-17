@@ -6,7 +6,6 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
-import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
@@ -85,12 +84,6 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   const { providerConfigs, providerOrder, parent: providerParent } = agentRow
     ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true })
     : { providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined };
-  // KB curators need their collection grants on the wire — see
-  // attachKbGrantsToConfig. Scheduled runs are the nightly merge's normal path,
-  // so omitting this here would leave cron-triggered runs on filesystem tools.
-  const scheduledAgentConfig = agentRow
-    ? await attachKbGrantsToConfig(agentRow.config as Record<string, unknown>, agentRow.id, prisma)
-    : undefined;
   const fastModeEnabled = await resolveFastMode(runConversationId, agentSlug, agentRow?.config);
 
   const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
@@ -122,7 +115,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     // (~19/hour in prod), mislabeling every scheduled run as "spaces" in the
     // Control Center. Mirrors how /agent-chat opts out (see run.ts).
     __persistedByCaller: true,
-    ...(scheduledAgentConfig ? { agentConfig: scheduledAgentConfig } : {}),
+    ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
     // Primary provider — the pod keys its model off `provider` (defaults to
     // "spaces"/kimi when unset). Without this, scheduled runs used the platform default
     // regardless of the agent's configured provider.
