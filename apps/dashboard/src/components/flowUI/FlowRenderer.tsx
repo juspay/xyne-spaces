@@ -253,8 +253,24 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     if (!isVisible(component)) return null;
     const Component = NodeRegistry.get(component.type);
     if (!Component) {
+      // TEMPORARY — remove once every deploy target ships the same @xyne/shared.
+      // Returning null here meant a card emitted by a newer claw simply vanished:
+      // no node, no error, a blank message. Showing the raw component is ugly but
+      // honest — the content is visible and the version skew is obvious.
       console.warn(`[FlowRenderer] Unknown component type: ${component.type}`);
-      return null;
+      return (
+        <details
+          key={component.id}
+          className='my-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs'
+        >
+          <summary className='cursor-pointer text-muted-foreground'>
+            Unsupported card (<code>{component.type}</code>) — update to view it properly
+          </summary>
+          <pre className='mt-2 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-snug'>
+            {JSON.stringify(component, null, 2)}
+          </pre>
+        </details>
+      );
     }
     return (
       <Component key={component.id} node={component}>
