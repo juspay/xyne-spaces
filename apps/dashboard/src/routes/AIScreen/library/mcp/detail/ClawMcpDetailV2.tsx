@@ -32,7 +32,7 @@ function Field({
       <div
         className={cn(
           'flex w-full gap-2 rounded-2xl border border-border bg-card',
-          single ? 'h-[54px] items-center px-4' : 'items-start p-4',
+          single ? 'h-10 items-center px-3' : 'items-start p-4',
         )}
       >
         <div className='min-w-0 flex-1'>{children}</div>

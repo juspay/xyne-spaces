@@ -4,13 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { addHHMMDuration } from '@/utils/dateUtils';
 import { DatabaseClient } from '@/database/client';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { runWithContext } from '@/database/tenant/context';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -70,7 +70,7 @@ class RecurringCallService {
   ): Promise<string> {
     const callId = uuidv4();
     const externalId = uuidv4();
-    const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
+    const roomLink = buildCallInviteUrl(externalId);
     const { targetUserIds, externalInvitees } =
       await repositories.recurringCallParticipants.findInstanceSeed(recurringSeries.id, tx);
 

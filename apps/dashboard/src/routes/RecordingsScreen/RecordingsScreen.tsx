@@ -11,6 +11,8 @@ import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
 import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
@@ -122,6 +124,7 @@ const CanvasCreationFallback = ({
 const MAX_ASK_AI_SELECTION = 5;
 
 export default function RecordingsScreen(): ReactElement {
+  const { isMobile } = usePlatform();
   const [error, setError] = useState<string | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
@@ -146,6 +149,8 @@ export default function RecordingsScreen(): ReactElement {
   // Recording store state (context holds the recording-specific fields)
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
+  const pauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
+  const accumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const channelId = useRecordingStore(ctx => ctx.channelId);
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
@@ -504,6 +509,14 @@ export default function RecordingsScreen(): ReactElement {
       data-testid='recordings-page'
       className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
     >
+      {/* Floated rather than in-flow so the list keeps the full viewport height.
+          `w-fit` gives the shrink-to-fit box a definite width for the navigator's
+          own `w-full`. */}
+      {!isMobile && (
+        <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
+          <AppNavigator />
+        </div>
+      )}
       {/* ─── Main Area (list + workspace overlay) ───── */}
       <div className='flex-1 relative overflow-hidden'>
         {/* List View — always rendered, stays behind the workspace overlay */}
@@ -734,6 +747,8 @@ export default function RecordingsScreen(): ReactElement {
             <RecordingWorkspaceHeader
               startTime={startTime}
               isPaused={recordingStatus === 'paused'}
+              pauseStartedAt={pauseStartedAt}
+              accumulatedPausedMs={accumulatedPausedMs}
               hasCanvas={hasCanvas}
               activeLayout={activeLayout}
               isCreatingCanvas={isCreatingCanvas}
@@ -801,6 +816,8 @@ export default function RecordingsScreen(): ReactElement {
                   <MinimizedTranscriptView
                     status={recordingStatus}
                     startTime={startTime}
+                    pauseStartedAt={pauseStartedAt}
+                    accumulatedPausedMs={accumulatedPausedMs}
                     transcripts={transcripts}
                     onMaximize={() =>
                       sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
@@ -827,6 +844,8 @@ export default function RecordingsScreen(): ReactElement {
                   <MinimizedTranscriptView
                     status={recordingStatus}
                     startTime={startTime}
+                    pauseStartedAt={pauseStartedAt}
+                    accumulatedPausedMs={accumulatedPausedMs}
                     transcripts={transcripts}
                     onMaximize={() =>
                       sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
@@ -857,6 +876,8 @@ export default function RecordingsScreen(): ReactElement {
             <MinimizedTranscriptView
               status={recordingStatus}
               startTime={startTime}
+              pauseStartedAt={pauseStartedAt}
+              accumulatedPausedMs={accumulatedPausedMs}
               transcripts={transcripts}
               onMaximize={() =>
                 sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false })
@@ -872,6 +893,8 @@ export default function RecordingsScreen(): ReactElement {
         isPaused={recordingStatus === 'paused'}
         isStarting={recordingStatus === 'starting'}
         startTime={startTime}
+        pauseStartedAt={pauseStartedAt}
+        accumulatedPausedMs={accumulatedPausedMs}
         onStart={handleStartRecording}
         onStop={handleStopRecording}
         onPause={handlePauseRecording}

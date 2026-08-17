@@ -14,7 +14,7 @@ import type { ReactElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
+import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useActiveUserSearch, useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
@@ -28,6 +28,7 @@ import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
 import { SearchUserV2, type SearchEntry } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
+import DragAndDropOverlay from '../DragAndDropOverlay';
 import { sendConversationWithAttachments, useExistingDmChannel } from './useExistingDmChannel';
 import { useDebouncedDmCreation } from './useDebouncedDmCreation';
 import {
@@ -51,7 +52,7 @@ export const ComposeDmPanel: React.FC = () => {
   const [preselectedInitialized, setPreselectedInitialized] = useState(false);
   const [createdChannelId, setCreatedChannelId] = useState<string | undefined>(undefined);
   const searchUserRef = useRef<HTMLInputElement>(null);
-  const inputBoxRef = useRef<InputBoxHandle>(null);
+  const { dragAndDropAreaRef, inputRef: inputBoxRef, isDragging } = useDragAndDropAreaRef();
   const context = useAuthContextValues();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -461,7 +462,8 @@ export const ComposeDmPanel: React.FC = () => {
   };
 
   return (
-    <div className='pt-4 pb-2 relative h-full'>
+    <div ref={dragAndDropAreaRef} className='pt-4 pb-2 relative h-full'>
+      <DragAndDropOverlay isVisible={isDragging} />
       <form
         className='h-full'
         onSubmit={e => {

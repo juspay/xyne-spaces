@@ -228,15 +228,20 @@ export interface Automation {
   automationSeriesId: string | null;
 }
 
-export interface AutomationRun {
+/** Row shape returned by the runs list — no context blobs. */
+export interface AutomationRunSummary {
   id: string;
   automationId: string;
   status: AutomationRunStatus;
-  triggerData: Record<string, unknown>;
-  context: Record<string, unknown>;
   error: string | null;
   startedAt: string;
   completedAt: string | null;
+}
+
+/** Returned by the run-detail endpoint only. */
+export interface AutomationRun extends AutomationRunSummary {
+  triggerData: Record<string, unknown>;
+  context: Record<string, unknown>;
 }
 
 export interface SaveResult {
@@ -360,7 +365,7 @@ export function releaseAutomationTemplate(attachmentId: string): Promise<{ remov
 
 // ─── Runs API (REST — replaces Zero queries for runs) ────────────────────
 export interface RunsListPage {
-  runs: AutomationRun[];
+  runs: AutomationRunSummary[];
   nextCursor: string | null;
 }
 

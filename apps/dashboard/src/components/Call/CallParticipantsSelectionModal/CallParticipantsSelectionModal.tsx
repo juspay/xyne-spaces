@@ -226,7 +226,29 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
         </div>
         <div className='p-5 space-y-5'>
           <div className='space-y-2'>
-            <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+            <div className='flex items-center justify-between'>
+              <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+              {selectedUsers.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='h-auto p-0 text-[13px] text-muted-foreground hover:text-foreground'
+                  onClick={() => {
+                    hasUserModifiedRef.current = true;
+                    setSelectedParticipants([]);
+                  }}
+                  data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+                  data-track-name='ClearAllCallParticipants'
+                  data-track-metadata={JSON.stringify({
+                    count: selectedUsers.length,
+                    channelId,
+                    conversationId,
+                  })}
+                >
+                  Clear All
+                </Button>
+              )}
+            </div>
             {/* Selected participants list - horizontal with wrap */}
             {selectedUsers.length > 0 && (
               <div className='flex flex-wrap gap-2 mb-3'>

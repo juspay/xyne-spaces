@@ -29,24 +29,26 @@ export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
   : `${protocol}://${hostname}${backendPort}/api`;
 
+const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
   : isSandBox
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-// Zero Cache
-const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
-export const VITE_ZERO_SERVER = isElectronBundled
-  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+export const VITE_ZERO_SERVER =
+  (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
+  (isElectronBundled
+    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+    : `${protocol}://${hostname}${zeroServerPort}/zero`);
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
 const otelPort = isLocalhost || isDockerTestEnv ? ':4318' : '';
+const otelPath = isLocalhost || isDockerTestEnv ? '/v1/metrics' : '/godel/v1/metrics';
 export const OTEL_METRICS_ENDPOINT = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/godel/v1/metrics`
-  : `${protocol}://${otelHost}${otelPort}/godel/v1/metrics`;
+  : `${protocol}://${otelHost}${otelPort}${otelPath}`;
 export const OTEL_SERVICE_NAME =
   (import.meta.env['VITE_OTEL_SERVICE_NAME'] as string) || 'xyne-spaces-frontend';
 export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(

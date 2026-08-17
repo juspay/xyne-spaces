@@ -55,6 +55,17 @@ const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
     | TiptapEditorLike
     | undefined) ?? null;
 
+const closeFormattingToolbar = (editor: CanvasEditorLike): void => {
+  try {
+    const toolbar = editor.extensions.get('formattingToolbar') as
+      | { store?: { setState?: (value: boolean) => void } }
+      | undefined;
+    toolbar?.store?.setState?.(false);
+  } catch {
+    // Optional extension — the draft card still opens without it.
+  }
+};
+
 const getSelectionRect = (container: HTMLElement | null, blockId: string): DOMRect | null => {
   const selection = window.getSelection();
   if (selection && selection.rangeCount > 0) {
@@ -290,6 +301,10 @@ export function useCanvasCommentEditorBridge({
           to: anchor.selectionTo,
         });
         editor.addStyles({ canvasCommentThread: threadId } as never);
+        tiptapEditor.commands.setTextSelection({
+          from: anchor.selectionTo,
+          to: anchor.selectionTo,
+        });
         refreshCommentHighlights();
         return true;
       } catch {
@@ -340,6 +355,8 @@ export function useCanvasCommentEditorBridge({
       setIsCommentsOpen(false);
       setActiveCommentAnchor(anchor);
       if (rect) {
+        const editor = getEditor();
+        if (editor) closeFormattingToolbar(editor);
         setInlineCommentThread({
           mode: 'create',
           blockId,
@@ -353,7 +370,7 @@ export function useCanvasCommentEditorBridge({
     setInlineCommentThread(null);
     setActiveCommentAnchor(null);
     toast.error('Select text to add a comment');
-  }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor]);
+  }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor, getEditor]);
 
   const focusCommentBlock = useCallback(
     (blockId: string): void => {

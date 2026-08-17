@@ -32,9 +32,30 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { superpositionClient } from '@/services/superpositionClient';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
+
+const ZERO_DISABLED_QUERIES_KEY = 'zero_disabled_queries';
+
+const parseDisabledQueries = (raw: string): Set<string> =>
+  new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  );
+
+const isQueryDisabled = async (name: string): Promise<boolean> => {
+  try {
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
+    return parseDisabledQueries(raw).has(name);
+  } catch (error) {
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
+  }
+};
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -243,7 +264,13 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
-          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
+          const wrappedTx = wrapTransactionWithACL(
+            tx,
+            context,
+            mutationVespaJobs,
+            mutationSideEffectJobs,
+            mutatorName,
+          );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
         }).then((mutatorResult) => {
@@ -372,12 +399,20 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      (queryName, args) => {
-        capturedQueryName = queryName;
-        const query = mustGetBackendQuery(queryName);
-        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-        return query.fn({ args, ctx: context });
-      },
+      // zero's QueryRequestHandler type is sync-only but the runtime awaits the
+      // handler result, so returning a promise (typed as any) is safe.
+      (queryName, args): any =>
+        (async () => {
+          capturedQueryName = queryName;
+          if (await isQueryDisabled(queryName)) {
+            getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+            logger.warn('zero_query_disabled', { query: queryName });
+            throw new Error(`Query '${queryName}' is disabled`);
+          }
+          const query = mustGetBackendQuery(queryName);
+          const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
+          return query.fn({ args, ctx: context });
+        })(),
       schema,
       request
     );
@@ -603,7 +638,8 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         tx,
         { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
         vespaJobs,
-        sideEffectJobs
+        sideEffectJobs,
+        mutation.name,
       );
       const mutator = mustGetMutator(mutators, mutation.name);
       await mutator.fn({

@@ -533,21 +533,48 @@ export const NotificationHandler: React.FC = () => {
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
-  const wasRecordingActiveRef = useRef<boolean | null>(null);
+  const recordingPauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
+  const recordingAccumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
+  const lastRecordingStateRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isElectron) return;
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
-    if (isActive !== wasRecordingActiveRef.current) {
-      window.electronAPI?.ipcSend?.('recording:state-changed', {
-        active: isActive,
-        startTime: recordingStartTime ?? undefined,
-      });
+    const state = {
+      active: isActive,
+      startTime: recordingStartTime ?? undefined,
+      paused: recordingStatus === 'paused',
+      pauseStartedAt: recordingPauseStartedAt,
+      accumulatedPausedMs: recordingAccumulatedPausedMs,
+    };
+    const stateKey = JSON.stringify(state);
+    if (stateKey !== lastRecordingStateRef.current) {
+      window.electronAPI?.ipcSend?.('recording:state-changed', state);
       if (!isActive) {
         window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
       }
     }
-    wasRecordingActiveRef.current = isActive;
-  }, [isElectron, recordingStatus, recordingStartTime]);
+    lastRecordingStateRef.current = stateKey;
+  }, [
+    isElectron,
+    recordingStatus,
+    recordingStartTime,
+    recordingPauseStartedAt,
+    recordingAccumulatedPausedMs,
+  ]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingResumeRequest) return;
+    return window.electronAPI.onRecordingResumeRequest(() => {
+      sendRecordingEvent({ type: 'resumeRecording' });
+    });
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingPauseRequest) return;
+    return window.electronAPI.onRecordingPauseRequest(() => {
+      sendRecordingEvent({ type: 'pauseRecording' });
+    });
+  }, [isElectron]);
 
   const handleNotificationRef = useRef(handleNotification);
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>

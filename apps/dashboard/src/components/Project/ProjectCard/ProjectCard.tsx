@@ -8,20 +8,32 @@ import type { Project } from '@xyne/shared';
 
 interface ProjectCardProps {
   project: Project;
-  onEdit: (project: Project) => void;
+  // Optional: when omitted, the Edit button is hidden (read-only browse views).
+  onEdit?: (project: Project) => void;
+  // When set, ProjectDetailScreen reads this from location.state to open on a
+  // specific tab. Used by the Release Manager view to jump straight into
+  // the release tab instead of the default boards tab.
+  initialDetailTab?: 'boards' | 'release';
 }
 
-export const ProjectCard = ({ project, onEdit }: ProjectCardProps): ReactElement => {
+export const ProjectCard = ({
+  project,
+  onEdit,
+  initialDetailTab,
+}: ProjectCardProps): ReactElement => {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
 
   const handleCardClick = (): void => {
-    void navigate(`/listProjects/${project.id}`);
+    void navigate(
+      `/listProjects/${project.id}`,
+      initialDetailTab ? { state: { tab: initialDetailTab } } : undefined,
+    );
   };
 
   const handleEditClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
     e?.stopPropagation();
-    onEdit(project);
+    onEdit?.(project);
   };
 
   const handleCopyId = (e: React.MouseEvent): void => {
@@ -89,20 +101,22 @@ export const ProjectCard = ({ project, onEdit }: ProjectCardProps): ReactElement
           </div>
         </div>
 
-        <div className='flex gap-2'>
-          <Button
-            variant='secondary'
-            onClick={handleEditClick}
-            data-track-category='Projects'
-            data-track-name='EditProject'
-            data-track-metadata={JSON.stringify({
-              projectId: project.id,
-              projectName: project.name,
-            })}
-          >
-            Edit
-          </Button>
-        </div>
+        {onEdit && (
+          <div className='flex gap-2'>
+            <Button
+              variant='secondary'
+              onClick={handleEditClick}
+              data-track-category='Projects'
+              data-track-name='EditProject'
+              data-track-metadata={JSON.stringify({
+                projectId: project.id,
+                projectName: project.name,
+              })}
+            >
+              Edit
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

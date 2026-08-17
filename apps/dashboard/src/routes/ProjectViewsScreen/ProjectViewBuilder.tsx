@@ -11,6 +11,7 @@ interface SeedConfig {
   name: string;
   filters: TicketFilters;
   groupBy?: string;
+  columns?: string[];
 }
 
 // Decode the #cfg= share-link payload.
@@ -53,6 +54,10 @@ const ProjectViewBuilder = (): ReactElement => {
       if (!ownView) return null;
       const values = ownView.values ?? [];
       const groupBy = values.find(v => v.fieldName === '__groupBy')?.fieldValue;
+      const columns = values
+        .find(v => v.fieldName === '__columns')
+        ?.fieldValue.split(',')
+        .filter(Boolean);
       const filters = valuesToFilters(values);
       // Legacy per-board saved views store their board in contextId (no 'boards' value rows).
       if (!filters.boards?.length && ownView.contextId) {
@@ -62,6 +67,7 @@ const ProjectViewBuilder = (): ReactElement => {
         name: ownView.name,
         filters,
         ...(groupBy ? { groupBy } : {}),
+        ...(columns ? { columns } : {}),
       };
     }
     return sharedConfig;
@@ -95,6 +101,7 @@ const ProjectViewBuilder = (): ReactElement => {
       {...(seed?.name ? { initialName: seed.name } : {})}
       {...(seed?.filters ? { initialFilters: seed.filters } : {})}
       {...(seed?.groupBy ? { initialGroupBy: seed.groupBy } : {})}
+      {...(seed?.columns ? { initialColumns: seed.columns } : {})}
     />
   );
 };

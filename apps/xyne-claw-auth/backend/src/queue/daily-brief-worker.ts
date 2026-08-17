@@ -29,7 +29,7 @@ async function processJob(job: Job<DailyBriefJobData>): Promise<void> {
   // (BullMQ concurrency/limiter are per-instance) — the real provider-rate guard
   // for a mass fan-out. If no slot frees within the wait window the gate throws
   // and BullMQ retries the job later.
-  await withDailyBriefLlmSlot(() => generateDailyBrief(userId));
+  await withDailyBriefLlmSlot(() => generateDailyBrief(userId, { trigger: "scheduled" }));
 }
 
 /**
