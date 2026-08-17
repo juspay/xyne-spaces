@@ -1,16 +1,16 @@
 import { forwardRef, useMemo, useState } from 'react';
 import { ChannelType } from '@xyne/shared';
 import {
-  Check,
+  CheckTickSingle,
   ChevronDown,
-  Radio,
   CircleDot,
-  Hash,
-  Mail,
-  Search,
-  User as UserIcon,
-  X,
-} from 'lucide-react';
+  EnvelopeDefault,
+  Hashtag,
+  LightningThunderElectricOn,
+  MultipleCrossCancelDefault,
+  SearchDefault,
+  UserDefault,
+} from '@xyne/icons';
 import { Button } from '../../../ui/Button/Button';
 import { Popover } from '../../../ui/Popover/Popover';
 import { DateRangeFilter } from '../../../ui/DateRangeFilter/DateRangeFilter';
@@ -37,6 +37,8 @@ interface AutomationFiltersBarProps {
   onChange: (next: AutomationFilters) => void;
   onClearQuery: () => void;
   items: Automation[];
+  /** Hides the Status pill — for views where every row already shares one status (e.g. the Approvals inbox). */
+  hideStatus?: boolean;
 }
 
 const DATE_FIELD_OPTIONS: { value: AutomationDateField; label: string }[] = [
@@ -57,7 +59,7 @@ const FilterTriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
       ref={ref}
       type='button'
       className={cn(
-        'inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-xs font-medium transition-colors',
+        'inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium transition-colors',
         count > 0
           ? 'border-foreground/40 bg-foreground/5 text-foreground'
           : 'text-muted-foreground hover:text-foreground hover:bg-accent/40',
@@ -103,7 +105,7 @@ function OptionsChecklist<T extends string>({
     <div className='w-64 py-1'>
       {search && (
         <div className='relative border-b border-border p-1.5'>
-          <Search className='pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
+          <SearchDefault className='pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
           <input
             type='text'
             autoFocus
@@ -159,7 +161,7 @@ function OptionsChecklist<T extends string>({
                   {option.count}
                 </span>
               )}
-              {isSelected && <Check className='size-4 shrink-0 text-muted-foreground' />}
+              {isSelected && <CheckTickSingle className='size-4 shrink-0 text-muted-foreground' />}
             </button>
           );
         })}
@@ -170,9 +172,9 @@ function OptionsChecklist<T extends string>({
 
 function channelIcon(type: string | null | undefined): React.ReactElement {
   return type === ChannelType.EMAIL ? (
-    <Mail className='size-4 text-muted-foreground' />
+    <EnvelopeDefault className='size-4 text-muted-foreground' />
   ) : (
-    <Hash className='size-4 text-muted-foreground' />
+    <Hashtag className='size-4 text-muted-foreground' />
   );
 }
 
@@ -233,6 +235,7 @@ export function AutomationFiltersBar({
   onChange,
   onClearQuery,
   items,
+  hideStatus,
 }: AutomationFiltersBarProps): React.ReactElement {
   const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
   const [channelSearch, setChannelSearch] = useState('');
@@ -278,7 +281,7 @@ export function AutomationFiltersBar({
       {popover(
         'trigger',
         <FilterTriggerButton
-          icon={<Radio className='size-3.5' aria-hidden='true' />}
+          icon={<LightningThunderElectricOn className='size-3.5' aria-hidden='true' />}
           label='Trigger'
           count={filters.triggerTypes.length}
           data-track-category='automations-list'
@@ -291,26 +294,27 @@ export function AutomationFiltersBar({
         />,
       )}
 
-      {popover(
-        'status',
-        <FilterTriggerButton
-          icon={<CircleDot className='size-3.5' aria-hidden='true' />}
-          label='Status'
-          count={filters.statuses.length}
-          data-track-category='automations-list'
-          data-track-name='filter-status'
-        />,
-        <OptionsChecklist
-          options={statusOptions}
-          selectedValues={filters.statuses}
-          onChange={values => onChange({ ...filters, statuses: values })}
-        />,
-      )}
+      {!hideStatus &&
+        popover(
+          'status',
+          <FilterTriggerButton
+            icon={<CircleDot className='size-3.5' aria-hidden='true' />}
+            label='Status'
+            count={filters.statuses.length}
+            data-track-category='automations-list'
+            data-track-name='filter-status'
+          />,
+          <OptionsChecklist
+            options={statusOptions}
+            selectedValues={filters.statuses}
+            onChange={values => onChange({ ...filters, statuses: values })}
+          />,
+        )}
 
       {popover(
         'channels',
         <FilterTriggerButton
-          icon={<Hash className='size-3.5' aria-hidden='true' />}
+          icon={<Hashtag className='size-3.5' aria-hidden='true' />}
           label='Channel'
           count={filters.channelIds.length}
           data-track-category='automations-list'
@@ -332,7 +336,7 @@ export function AutomationFiltersBar({
       {popover(
         'createdBy',
         <FilterTriggerButton
-          icon={<UserIcon className='size-3.5' aria-hidden='true' />}
+          icon={<UserDefault className='size-3.5' aria-hidden='true' />}
           label='Created by'
           count={filters.createdByUserIds.length}
           data-track-category='automations-list'
@@ -351,7 +355,7 @@ export function AutomationFiltersBar({
         />,
       )}
 
-      <div className='inline-flex items-center gap-1 rounded-full border border-border px-1'>
+      <div className='inline-flex items-center gap-1 rounded-md border border-border px-1'>
         {DATE_FIELD_OPTIONS.map(opt => (
           <button
             key={opt.value}
@@ -360,7 +364,7 @@ export function AutomationFiltersBar({
             data-track-name={`filter-date-field-${opt.value}`}
             onClick={() => onChange({ ...filters, dateField: opt.value })}
             className={cn(
-              'rounded-full px-2 py-1 text-xs font-medium transition-colors',
+              'rounded px-2 py-1 text-xs font-medium transition-colors',
               filters.dateField === opt.value
                 ? 'bg-foreground text-background'
                 : 'text-muted-foreground hover:text-foreground',
@@ -388,7 +392,7 @@ export function AutomationFiltersBar({
           data-track-name='filter-clear'
           className='text-xs text-muted-foreground'
         >
-          <X className='size-3.5' />
+          <MultipleCrossCancelDefault className='size-3.5' />
           Clear filters
         </Button>
       )}

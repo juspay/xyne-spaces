@@ -122,7 +122,11 @@ export function filterAutomations(
       }
     }
 
-    if (filters.statuses.length > 0 && !filters.statuses.includes(a.status)) {
+    // No length-guard here (unlike the other filters above): an empty
+    // `statuses` selection means "show nothing", not "status filter is off"
+    // — the checklist always starts with a real default set, so a user who
+    // manually unchecks every box is deliberately filtering everything out.
+    if (!filters.statuses.includes(a.status)) {
       return false;
     }
 
@@ -162,7 +166,12 @@ export function countAutomationsByStatus(
   query: string,
   filters: AutomationFilters,
 ): Partial<Record<AutomationStatus, number>> {
-  const base = filterAutomations(list, query, { ...filters, statuses: [] });
+  // Passing every possible status makes the (now unconditional) status
+  // check above pass for every row, i.e. "as if status weren't filtered".
+  const base = filterAutomations(list, query, {
+    ...filters,
+    statuses: STATUS_OPTIONS.map(o => o.value),
+  });
   const counts: Partial<Record<AutomationStatus, number>> = {};
   for (const a of base) counts[a.status] = (counts[a.status] ?? 0) + 1;
   return counts;

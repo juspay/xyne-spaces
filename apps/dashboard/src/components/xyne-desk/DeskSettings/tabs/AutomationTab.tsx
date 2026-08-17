@@ -5,6 +5,7 @@ import { RunHistory } from '../../../Automation/AutomationRuns/RunHistory/RunHis
 import { RunDetail } from '../../../Automation/AutomationRuns/RunDetail/RunDetail';
 import { AutomationApprovalsList } from '../../../Automation/AutomationApprovalsList/AutomationApprovalsList';
 import { VersionHistory } from '../../../Automation/AutomationVersions/VersionHistory/VersionHistory';
+import { VersionDiffView } from '../../../Automation/AutomationVersions/VersionDiffView/VersionDiffView';
 import type { Automation, AutomationRunSummary } from '../../../Automation/Automation.types';
 
 interface AutomationTabProps {
@@ -25,7 +26,8 @@ type AutomationView =
     }
   | { screen: 'runs'; automation: Automation }
   | { screen: 'run-detail'; automation: Automation; run: AutomationRunSummary }
-  | { screen: 'history'; automationId: string; returnTo: Automation };
+  | { screen: 'history'; automationId: string; returnTo: Automation }
+  | { screen: 'compare'; automationId: string; fromId: string; toId: string; returnTo: Automation };
 
 export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId }) => {
   const [view, setView] = useState<AutomationView>({ screen: 'list' });
@@ -118,6 +120,30 @@ export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId }) => {
         automationId={view.automationId}
         onBack={() => setView({ screen: 'builder', automation: view.returnTo })}
         onOpenVersion={version => setView({ screen: 'builder', automation: version })}
+        onCompare={(fromId, toId) =>
+          setView({
+            screen: 'compare',
+            automationId: view.automationId,
+            fromId,
+            toId,
+            returnTo: view.returnTo,
+          })
+        }
+      />
+    );
+  }
+
+  if (view.screen === 'compare') {
+    return (
+      <VersionDiffView
+        automationId={view.automationId}
+        fromId={view.fromId}
+        toId={view.toId}
+        onFromChange={fromId => setView({ ...view, fromId })}
+        onToChange={toId => setView({ ...view, toId })}
+        onClose={() =>
+          setView({ screen: 'history', automationId: view.automationId, returnTo: view.returnTo })
+        }
       />
     );
   }

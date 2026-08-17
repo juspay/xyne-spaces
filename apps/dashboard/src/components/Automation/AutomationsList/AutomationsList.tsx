@@ -1,23 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Archive } from 'lucide-react';
 import {
-  Archive,
-  ArrowUpDown,
-  Check,
+  ChatDefault,
   ChevronLeft,
   ChevronRight,
-  Copy,
-  History,
-  Link2,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-  Zap,
-} from 'lucide-react';
+  ChevronSortVertical,
+  CopyDefault,
+  DeleteDustbin01,
+  EnvelopeDefault,
+  LightningThunderElectricOn,
+  LinkHorizontal,
+  PencilEditBox,
+  PencilEdit,
+  PhoneDefault,
+  PlusDefault,
+  ReminderClockwise,
+  SearchDefault,
+  SendPlaneHorizontal,
+  Spinner,
+  Tag,
+  ThreeDotsMenuHorizontal,
+  TicketToken,
+  Webhook,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
@@ -34,7 +41,7 @@ import {
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
-import { fetchStepCatalog, fetchTriggerCatalog } from '../../../api/automationsApi';
+import { fetchTriggerCatalog } from '../../../api/automationsApi';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -48,6 +55,7 @@ import { AutomationStatusValues, isLiveStatus } from '../Automation.types';
 import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
 import {
+  automationTriggerIconName,
   DEFAULT_AUTOMATION_SORT,
   formatRelative,
   sortAutomations,
@@ -96,13 +104,7 @@ export function AutomationsList({
     queryFn: fetchTriggerCatalog,
     staleTime: 5 * 60 * 1000,
   });
-  const stepCatalogQuery = useQuery({
-    queryKey: ['automations', 'schema', 'steps'],
-    queryFn: fetchStepCatalog,
-    staleTime: 5 * 60 * 1000,
-  });
   const triggerCatalog = triggerCatalogQuery.data ?? [];
-  const stepCatalog = stepCatalogQuery.data ?? [];
 
   const [rows, rowsMeta] = useCachedQuery(queries.automationsList({ workspaceId }));
   const isLoading = !rows || rowsMeta?.type !== 'complete';
@@ -210,50 +212,48 @@ export function AutomationsList({
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
-      <div className='flex flex-col gap-3 border-b border-border px-6 py-4'>
-        <div className='flex items-center gap-3'>
-          <div className='flex flex-1 items-center gap-2'>
-            <Zap className='size-5 text-foreground' />
-            <h1 className='text-base font-semibold text-foreground'>Automations</h1>
+      <header className='sticky top-0 z-10 flex flex-col gap-4 border-b border-border bg-background px-6 pt-5 pb-4'>
+        <div className='flex items-center gap-5'>
+          <div className='flex min-w-0 flex-1 flex-col gap-1'>
+            <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
+              Automations
+            </h1>
+            <p className='text-[15px] leading-[1.2] text-muted-foreground'>
+              Create and manage workflows that react to events across your workspace.
+            </p>
           </div>
-          <div className='relative w-[280px]'>
-            <Search
-              aria-hidden='true'
-              className='pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
-            />
-            <Input
-              type='search'
-              aria-label='Search automations'
-              placeholder='Search automations…'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              className='pl-8'
-            />
-          </div>
-          {/* Approvals inbox is readable by anyone — non-admins see the
-              queue but the Approve / Reject buttons stay admin-gated. */}
-          <Link to='/automations/approvals'>
-            <Button variant='outline' className='font-semibold'>
-              <Check className='size-4' />
-              Approvals
-            </Button>
-          </Link>
-          <Button onClick={onCreate} className='font-semibold'>
-            <Plus className='size-4' />
+          <Button onClick={onCreate} className='shrink-0 font-semibold'>
+            <PlusDefault className='size-4' />
             New automation
           </Button>
         </div>
-        <div className='flex items-start justify-between gap-3'>
-          <AutomationFiltersBar
-            query={query}
-            filters={filters}
-            onChange={setFilters}
-            onClearQuery={() => setQuery('')}
-            items={visibleItems}
-          />
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='relative w-56 max-w-full'>
+              <SearchDefault
+                aria-hidden='true'
+                className='pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground'
+              />
+              <Input
+                type='search'
+                aria-label='Search automations'
+                placeholder='Search automations…'
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className='h-8 rounded-md pl-8 text-xs'
+              />
+            </div>
+            <AutomationFiltersBar
+              query={query}
+              filters={filters}
+              onChange={setFilters}
+              onClearQuery={() => setQuery('')}
+              items={visibleItems}
+            />
+          </div>
           <SortDropdown value={sort} onChange={setSort} />
         </div>
-      </div>
+      </header>
 
       <div className='flex-1 overflow-y-auto bg-muted/30'>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-6'>
@@ -266,18 +266,19 @@ export function AutomationsList({
           )}
           {isLoading && visibleItems.length === 0 ? (
             <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>
-              <Loader2 className='mr-2 size-4 animate-spin' />
+              <Spinner className='mr-2 size-4 animate-spin' />
               Loading automations…
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState hasFilter={hasAnyFilter} onCreate={onCreate} />
           ) : (
-            <ul className='flex flex-col gap-2'>
+            <ul className='flex flex-col gap-3'>
               {pageItems.map(item => (
                 <AutomationRow
                   key={item.id}
                   automation={item}
-                  summary={summarizeAutomation(item, triggerCatalog, stepCatalog)}
+                  summary={summarizeAutomation(item, triggerCatalog)}
+                  triggerIconName={automationTriggerIconName(item, triggerCatalog)}
                   onOpen={() => onOpen(item)}
                   onEdit={() => handleEdit(item)}
                   onShowRuns={onShowRuns ? () => onShowRuns(item) : undefined}
@@ -464,7 +465,7 @@ function SortDropdown({
         className='h-8 flex-shrink-0 gap-1.5 text-xs'
         aria-label='Sort automations'
       >
-        <ArrowUpDown className='size-3.5' aria-hidden='true' />
+        <ChevronSortVertical className='size-3.5' aria-hidden='true' />
         <SelectValue />
       </SelectTrigger>
       <SelectContent align='end'>
@@ -554,7 +555,7 @@ function EmptyState({
   return (
     <div className='mx-auto max-w-md py-16 text-center'>
       <div className='mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400'>
-        <Zap className='size-6' />
+        <LightningThunderElectricOn className='size-6' />
       </div>
       <h2 className='mb-1 text-base font-medium text-foreground'>No automations yet</h2>
       <p className='mb-4 text-sm text-muted-foreground'>
@@ -562,16 +563,29 @@ function EmptyState({
         from your workspace.
       </p>
       <Button size='sm' onClick={onCreate}>
-        <Plus className='size-4' />
+        <PlusDefault className='size-4' />
         Create your first automation
       </Button>
     </div>
   );
 }
 
+/** Maps each trigger's backend-assigned icon name (see `automationTriggerIconName`) to its @xyne/icons equivalent, so the row icon actually reflects what the automation fires on. */
+const TRIGGER_ICON_BY_NAME: Record<string, typeof LightningThunderElectricOn> = {
+  Phone: PhoneDefault,
+  Mail: EnvelopeDefault,
+  Send: SendPlaneHorizontal,
+  Tag,
+  MessageSquare: ChatDefault,
+  Ticket: TicketToken,
+  PenSquare: PencilEditBox,
+  Webhook,
+};
+
 interface AutomationRowProps {
   automation: Automation;
   summary: string;
+  triggerIconName: string | undefined;
   onOpen: () => void;
   onEdit: () => void;
   onShowRuns?: (() => void) | undefined;
@@ -585,6 +599,7 @@ interface AutomationRowProps {
 function AutomationRow({
   automation,
   summary,
+  triggerIconName,
   onOpen,
   onEdit,
   onShowRuns,
@@ -594,6 +609,8 @@ function AutomationRow({
   onToggleActive,
   toggleLoading,
 }: AutomationRowProps): React.ReactElement {
+  const TriggerIcon =
+    (triggerIconName && TRIGGER_ICON_BY_NAME[triggerIconName]) || LightningThunderElectricOn;
   const [menuOpen, setMenuOpen] = useState(false);
   const isActive = automation.status === 'ACTIVE';
   const creator = useUser(automation.createdById);
@@ -630,17 +647,17 @@ function AutomationRow({
         data-track-category='automations-list'
         data-track-name='row-open'
         className={cn(
-          'group flex cursor-pointer flex-col gap-2 border-b border-border bg-background px-6 py-3 transition-colors',
-          'hover:bg-muted/40',
+          'group flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-background px-4 py-3 transition-colors',
+          'hover:border-foreground/20 hover:bg-muted/40',
           'focus-visible:outline-none focus-visible:bg-muted/40',
         )}
       >
         <div className='flex items-start gap-3'>
           <div
             aria-hidden='true'
-            className='flex size-9 flex-shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            className='flex size-9 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400'
           >
-            <Zap className='size-4' />
+            <TriggerIcon className='size-4' />
           </div>
           <button
             type='button'
@@ -665,7 +682,7 @@ function AutomationRow({
               </span>
               <span
                 className={cn(
-                  'rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                  'rounded-md border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
                   statusPillClasses(automation.status),
                 )}
               >
@@ -722,7 +739,7 @@ function AutomationRow({
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
                   )}
                 >
-                  <MoreHorizontal className='size-4' aria-hidden='true' />
+                  <ThreeDotsMenuHorizontal className='size-4' aria-hidden='true' />
                 </button>
               }
             >
@@ -732,7 +749,7 @@ function AutomationRow({
               {automation.status !== AutomationStatusValues.PENDING_APPROVAL && (
                 <RowMenuButton
                   label='Edit'
-                  icon={<Pencil className='size-4' />}
+                  icon={<PencilEdit className='size-4' />}
                   onClick={() => {
                     setMenuOpen(false);
                     onEdit();
@@ -741,7 +758,7 @@ function AutomationRow({
               )}
               <RowMenuButton
                 label='Clone'
-                icon={<Copy className='size-4' />}
+                icon={<CopyDefault className='size-4' />}
                 onClick={() => {
                   setMenuOpen(false);
                   onClone();
@@ -749,7 +766,7 @@ function AutomationRow({
               />
               <RowMenuButton
                 label='Copy link'
-                icon={<Link2 className='size-4' />}
+                icon={<LinkHorizontal className='size-4' />}
                 onClick={() => {
                   setMenuOpen(false);
                   handleCopyLink();
@@ -758,7 +775,7 @@ function AutomationRow({
               {onShowRuns && (
                 <RowMenuButton
                   label='Run history'
-                  icon={<History className='size-4' />}
+                  icon={<ReminderClockwise className='size-4' />}
                   onClick={() => {
                     setMenuOpen(false);
                     onShowRuns();
@@ -785,7 +802,7 @@ function AutomationRow({
                   <RowMenuButton
                     label='Delete'
                     danger
-                    icon={<Trash2 className='size-4' />}
+                    icon={<DeleteDustbin01 className='size-4' />}
                     onClick={() => {
                       setMenuOpen(false);
                       onDelete();

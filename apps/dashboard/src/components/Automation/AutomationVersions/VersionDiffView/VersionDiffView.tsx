@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import {
   Select,
@@ -9,13 +10,16 @@ import {
 } from '../../../ui/Select/Select';
 import { Tooltip } from '../../../ui/Tooltip';
 import { useUsersById } from '../../../../hooks/useUsers';
+import { fetchAutomationVersions } from '../../../../api/automationsApi';
 import { AutomationBuilder } from '../../AutomationBuilder/AutomationBuilder';
 import type { Automation } from '../../Automation.types';
 
 interface VersionDiffViewProps {
-  versions: Automation[];
-  initialFromId: string;
-  initialToId: string;
+  automationId: string;
+  fromId: string;
+  toId: string;
+  onFromChange: (id: string) => void;
+  onToChange: (id: string) => void;
   onClose: () => void;
 }
 
@@ -63,14 +67,22 @@ function VersionPicker({
   );
 }
 
+// Kept independent of `VersionHistory`'s own fetch so this view can be mounted
+// on its own (driven purely by the `fromId`/`toId` it's given) — same query
+// key, so React Query serves it from cache when both are open.
 export function VersionDiffView({
-  versions,
-  initialFromId,
-  initialToId,
+  automationId,
+  fromId,
+  toId,
+  onFromChange,
+  onToChange,
   onClose,
 }: VersionDiffViewProps): React.ReactElement {
-  const [fromId, setFromId] = useState(initialFromId);
-  const [toId, setToId] = useState(initialToId);
+  const { data } = useQuery({
+    queryKey: ['automation-versions', automationId],
+    queryFn: () => fetchAutomationVersions(automationId),
+  });
+  const versions = useMemo(() => data ?? [], [data]);
   const usersById = useUsersById();
 
   const from = useMemo(() => versions.find(v => v.id === fromId), [versions, fromId]);
@@ -94,12 +106,17 @@ export function VersionDiffView({
         <span className='text-xs font-medium text-muted-foreground'>Compare</span>
         <VersionPicker
           value={fromId}
-          onChange={setFromId}
+          onChange={onFromChange}
           versions={versions}
           usersById={usersById}
         />
         <span className='text-xs font-medium text-muted-foreground'>with</span>
-        <VersionPicker value={toId} onChange={setToId} versions={versions} usersById={usersById} />
+        <VersionPicker
+          value={toId}
+          onChange={onToChange}
+          versions={versions}
+          usersById={usersById}
+        />
       </div>
 
       <div className='flex min-h-0 flex-1 divide-x divide-border'>

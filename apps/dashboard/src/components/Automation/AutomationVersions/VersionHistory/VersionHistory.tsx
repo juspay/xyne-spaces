@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, GitCompare, Info } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
@@ -10,7 +9,6 @@ import { fetchAutomationVersions } from '../../../../api/automationsApi';
 import { isLiveStatus } from '../../Automation.types';
 import type { Automation } from '../../Automation.types';
 import { formatRelative, statusPillClasses } from '../../AutomationsList/AutomationsList.utils';
-import { VersionDiffView } from '../VersionDiffView/VersionDiffView';
 import type { VersionHistoryProps } from './VersionHistory.types';
 
 const SKELETON_ROWS = 4;
@@ -18,17 +16,17 @@ const SKELETON_ROWS = 4;
 export function VersionHistory({
   automationId,
   onOpenVersion,
+  onCompare,
   onBack,
 }: VersionHistoryProps): React.ReactElement {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['automation-versions', automationId],
     queryFn: () => fetchAutomationVersions(automationId),
   });
-  const [comparing, setComparing] = useState(false);
 
   const versions = data ?? [];
 
-  if (comparing) {
+  const handleCompareClick = (): void => {
     // Default the comparison to the current version against its nearest
     // neighbor — defaulting both sides to `automationId` would open the
     // diff view showing a version compared against itself.
@@ -36,15 +34,8 @@ export function VersionHistory({
     const defaultToId =
       (currentIndex >= 0 ? (versions[currentIndex + 1] ?? versions[currentIndex - 1])?.id : null) ??
       automationId;
-    return (
-      <VersionDiffView
-        versions={versions}
-        initialFromId={automationId}
-        initialToId={defaultToId}
-        onClose={() => setComparing(false)}
-      />
-    );
-  }
+    onCompare(automationId, defaultToId);
+  };
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
@@ -64,7 +55,7 @@ export function VersionHistory({
           <Button
             variant='outline'
             size='sm'
-            onClick={() => setComparing(true)}
+            onClick={handleCompareClick}
             data-track-category='automation-versions'
             data-track-name='version-history-compare'
           >

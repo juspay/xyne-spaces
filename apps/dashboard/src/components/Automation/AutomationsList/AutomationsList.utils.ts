@@ -1,38 +1,30 @@
 import type { Automation, AutomationStatus } from '../Automation.types';
 
-type CatalogLike = { type: string; name: string };
+type CatalogLike = { type: string; name: string; icon?: string };
 
+/** Trigger clause only ("When X…") — the step chain is redundant with the row's own action count, so it's dropped here. */
 export function summarizeAutomation(
-  automation: { config?: { trigger?: { type?: string } | null; steps?: Array<{ type?: string }> } },
+  automation: { config?: { trigger?: { type?: string } | null } },
   triggerCatalog: CatalogLike[],
-  stepCatalog: CatalogLike[],
 ): string {
   const triggerType = automation.config?.trigger?.type;
-  const steps = automation.config?.steps ?? [];
+  if (!triggerType) return 'No trigger configured';
 
-  const triggerLabel = triggerType
-    ? (triggerCatalog.find(t => t.type === triggerType)?.name ?? prettyType(triggerType))
-    : null;
+  const triggerLabel =
+    triggerCatalog.find(t => t.type === triggerType)?.name ?? prettyType(triggerType);
+  return /^when\b/i.test(triggerLabel)
+    ? capitalizeFirst(triggerLabel)
+    : `When ${triggerLabel.toLowerCase()}`;
+}
 
-  const stepLabels = steps
-    .map(s =>
-      s.type ? (stepCatalog.find(c => c.type === s.type)?.name ?? prettyType(s.type)) : null,
-    )
-    .filter((s): s is string => !!s);
-
-  const left = triggerLabel
-    ? /^when\b/i.test(triggerLabel)
-      ? capitalizeFirst(triggerLabel)
-      : `When ${triggerLabel.toLowerCase()}`
-    : null;
-  const right =
-    stepLabels.length === 0
-      ? null
-      : stepLabels.length === 1
-        ? `then ${stepLabels[0]!.toLowerCase()}`
-        : `then ${stepLabels[0]!.toLowerCase()} +${stepLabels.length - 1} more`;
-
-  return [left, right].filter(Boolean).join(' · ') || '—';
+/** Backend-assigned icon name for this automation's trigger type (e.g. "Mail", "Webhook", "Ticket") — see each trigger's `icon` field in `apps/backend/src/automations/triggers/*.trigger.ts`. */
+export function automationTriggerIconName(
+  automation: { config?: { trigger?: { type?: string } | null } },
+  triggerCatalog: CatalogLike[],
+): string | undefined {
+  const triggerType = automation.config?.trigger?.type;
+  if (!triggerType) return undefined;
+  return triggerCatalog.find(t => t.type === triggerType)?.icon;
 }
 
 function capitalizeFirst(s: string): string {

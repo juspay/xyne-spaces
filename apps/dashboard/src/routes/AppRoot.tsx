@@ -241,11 +241,11 @@ import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapPro
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
 import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
 import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
-import AutomationVersionHistoryScreen from './AutomationsScreen/AutomationVersionHistoryScreen';
 import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
 import TeamIntelligenceScreen from './TeamIntelligenceScreen/TeamIntelligenceScreen.tsx';
 import TeamIntelligenceOrgScreen from './TeamIntelligenceScreen/TeamIntelligenceOrgScreen.tsx';
@@ -1567,31 +1567,15 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'automations',
-                  element: <AutomationsListScreen />,
-                },
-                {
-                  path: 'automations/approvals',
-                  element: <AutomationApprovalsScreen />,
-                },
-                {
-                  path: 'automations/new',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id/runs',
-                  element: <AutomationRunsScreen />,
-                },
-                {
-                  path: 'automations/:id/runs/:runId',
-                  element: <AutomationRunDetailScreen />,
-                },
-                {
-                  path: 'automations/:id/history',
-                  element: <AutomationVersionHistoryScreen />,
+                  element: <AutomationsScreen />,
+                  children: [
+                    { index: true, element: <AutomationsListScreen /> },
+                    { path: 'approvals', element: <AutomationApprovalsScreen /> },
+                    { path: 'new', element: <AutomationBuilderScreen /> },
+                    { path: ':id', element: <AutomationBuilderScreen /> },
+                    { path: ':id/runs', element: <AutomationRunsScreen /> },
+                    { path: ':id/runs/:runId', element: <AutomationRunDetailScreen /> },
+                  ],
                 },
                 {
                   path: 'apps',

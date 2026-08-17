@@ -45,6 +45,7 @@ export function isTerminalProposalStatus(status: string): boolean {
 }
 
 export const AutomationRunStatusValues = {
+  PENDING: 'PENDING',
   SCHEDULED: 'SCHEDULED',
   RUNNING: 'RUNNING',
   EXTERNAL_WAIT: 'EXTERNAL_WAIT',
