@@ -1,3 +1,10 @@
+## [1.189.2](https://github.com/juspay/xyne-spaces/compare/v1.189.1...v1.189.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* recording list refresh & duplicate email summary title  ([#566](https://github.com/juspay/xyne-spaces/issues/566)) ([f766f51](https://github.com/juspay/xyne-spaces/commit/f766f51df8f264cceca0a4d5bbfc70a315f85826))
+
 ## [1.189.1](https://github.com/juspay/xyne-spaces/compare/v1.189.0...v1.189.1) (2026-08-17)
 
 
