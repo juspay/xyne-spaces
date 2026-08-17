@@ -166,6 +166,10 @@ export class TeamIntelligenceOrgController {
       const fromDate = new Date(from);
       const toDate = new Date(to);
       const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
 
       const result = await teamIntelligenceOrgRepository.getDashboardSummary({
         from: fromDate,
@@ -208,6 +212,10 @@ export class TeamIntelligenceOrgController {
       const fromDate = new Date(from);
       const toDate = new Date(to);
       const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
 
       const result = await teamIntelligenceOrgRepository.getOrgBulletsByDate({
         from: fromDate,
@@ -249,6 +257,10 @@ export class TeamIntelligenceOrgController {
       const fromDate = new Date(from);
       const toDate = new Date(to);
       const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
 
       const result = await teamIntelligenceOrgRepository.getOrgTeamsByDate({
         from: fromDate,
@@ -285,12 +297,18 @@ export class TeamIntelligenceOrgController {
       const { from, to, page, limit } = parseResult.data;
       const fromDate = new Date(from);
       const toDate = new Date(to);
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
 
       const result = await teamIntelligenceOrgRepository.getOrgChannelRecaps({
         from: fromDate,
         to: toDate,
         page,
         limit,
+        workspaceId,
       });
 
       res.status(200).json(result);

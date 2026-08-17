@@ -12,6 +12,7 @@ export interface TeamBulletsDateRangeInput {
   from: Date;
   to: Date;
   teamId: string;
+  orgId?: string | null;
   page: number;
   limit: number;
 }
@@ -27,6 +28,7 @@ class TeamIntelligenceTeamDashboardService {
         from: input.from,
         to: input.to,
         teamId: input.teamId,
+        orgId: input.orgId,
         page: input.page,
         limit: input.limit,
       });
@@ -36,7 +38,7 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamLeadershipSnapshots(input: { from: Date; to: Date; teamId: string }) {
+  async getTeamLeadershipSnapshots(input: { from: Date; to: Date; teamId: string; orgId?: string | null }) {
     try {
       return await teamIntelligenceTeamRepository.getTeamLeadershipSnapshotsByDate(input);
     } catch (error) {
@@ -45,12 +47,13 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getPrByDate(input: { from: Date; to: Date; prId: number }) {
+  async getPrByDate(input: { from: Date; to: Date; prId: number; orgId?: string | null }) {
     try {
       return await teamIntelligenceTeamRepository.getPrByDate({
         from: input.from,
         to: input.to,
         prId: input.prId,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceTeam] getPrByDate failed', { error, input });
@@ -58,12 +61,13 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamUsageSummary(input: { from: Date; to: Date; teamId: string }) {
+  async getTeamUsageSummary(input: { from: Date; to: Date; teamId: string; orgId?: string | null }) {
     try {
       return await teamIntelligenceTeamRepository.getTeamUsageSummary({
         from: input.from,
         to: input.to,
         teamId: input.teamId,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceTeam] getTeamUsageSummary failed', { error, input });
@@ -169,9 +173,9 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamChannelRecaps(input: { from: Date; to: Date; teamId: string; page: number; limit: number }) {
+  async getTeamChannelRecaps(input: { from: Date; to: Date; teamId: string; page: number; limit: number; workspaceId: string }) {
     try {
-      const { from, to, teamId, page, limit } = input;
+      const { from, to, teamId, page, limit, workspaceId } = input;
       const display = await teamIntelligenceTeamRepository.findLatestTeamDisplayByTeamId(teamId, { from, to });
       const teamName = display?.teamName ?? 'No Team';
       const allTeamNames = await teamIntelligenceTeamRepository.findAllTeamNamesByTeamId(teamId);
@@ -179,7 +183,7 @@ class TeamIntelligenceTeamDashboardService {
       const cacheKey = this.buildTeamChannelMatchCacheKey(teamId, from, to);
       const cacheTtlSeconds = 5 * 24 * 60 * 60;
 
-      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to });
+      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to, workspaceId });
     if (candidates.length === 0) {
       return {
         from: from.toISOString().slice(0, 10),
@@ -272,6 +276,7 @@ class TeamIntelligenceTeamDashboardService {
       channelIds: matchedChannelIds,
       page,
       limit,
+      workspaceId,
     });
 
     const matchedChannelSet = new Set(matchedChannelIds);
@@ -303,9 +308,9 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamChannelTickets(input: { from: Date; to: Date; teamId: string; page: number; limit: number }) {
+  async getTeamChannelTickets(input: { from: Date; to: Date; teamId: string; page: number; limit: number; workspaceId: string }) {
     try {
-      const { from, to, teamId, page, limit } = input;
+      const { from, to, teamId, page, limit, workspaceId } = input;
       const display = await teamIntelligenceTeamRepository.findLatestTeamDisplayByTeamId(teamId, { from, to });
       const teamName = display?.teamName ?? 'No Team';
       const allTeamNames = await teamIntelligenceTeamRepository.findAllTeamNamesByTeamId(teamId);
@@ -313,7 +318,7 @@ class TeamIntelligenceTeamDashboardService {
       const cacheKey = this.buildTeamChannelMatchCacheKey(teamId, from, to);
       const cacheTtlSeconds = 5 * 24 * 60 * 60;
 
-      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to });
+      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to, workspaceId });
       if (candidates.length === 0) {
         return {
           from: from.toISOString().slice(0, 10),

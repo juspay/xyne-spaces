@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
 import { teamIntelligenceTeamDashboardService } from '@/services/teamIntelligenceTeamDashboardService';
 import {
   leadershipSectionNames,
@@ -15,9 +16,25 @@ import {
 } from '@/validation/teamIntelligenceDashboardQuerySchemas';
 
 export class TeamIntelligenceTeamController {
+  private async resolveCallerOrgId(req: Request): Promise<string | null> {
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) return null;
+    const mapping = await db.workspaceOrganization.findFirst({
+      where: { workspaceId },
+      select: { orgId: true },
+    });
+    return mapping?.orgId ?? null;
+  }
+
   /** Returns one independently paginated section from the newest team snapshot. */
   getTeamLeadershipSection = async (req: Request, res: Response): Promise<void> => {
     try {
+      const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamLeadershipSectionQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -42,6 +59,7 @@ export class TeamIntelligenceTeamController {
         from: fromDate,
         to: toDate,
         teamId,
+        orgId,
       });
       const snapshot = result.snapshots[0];
       if (!snapshot?.summary) {
@@ -67,13 +85,15 @@ export class TeamIntelligenceTeamController {
 
   /**
    * GET /api/team-intelligence-dashboard/team/bullets?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=20
-   *
-   * Response:
-   *   from, to, teamId, teamName, page, limit, total, totalPages,
-   *   bullets[] where bullets are flattened provenance bullets for the team.
    */
   getTeamBullets = async (req: Request, res: Response): Promise<void> => {
     try {
+      const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamBulletsQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -91,6 +111,7 @@ export class TeamIntelligenceTeamController {
         from: fromDate,
         to: toDate,
         teamId,
+        orgId,
         page,
         limit,
       });
@@ -107,6 +128,12 @@ export class TeamIntelligenceTeamController {
    */
   getTeamLeadershipSnapshots = async (req: Request, res: Response): Promise<void> => {
     try {
+      const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamDateRangeQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -124,6 +151,7 @@ export class TeamIntelligenceTeamController {
         from: fromDate,
         to: toDate,
         teamId,
+        orgId,
       });
       res.status(200).json(result);
     } catch (err) {
@@ -134,12 +162,15 @@ export class TeamIntelligenceTeamController {
 
   /**
    * GET /api/team-intelligence-dashboard/team/pr?from=YYYY-MM-DD&to=YYYY-MM-DD&prId=3110
-   *
-   * Response:
-   *   from, to, prId, total, matches[] where each match includes full pullRequest object.
    */
   getPrByDate = async (req: Request, res: Response): Promise<void> => {
     try {
+      const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamPrQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -157,6 +188,7 @@ export class TeamIntelligenceTeamController {
         from: fromDate,
         to: toDate,
         prId,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -168,12 +200,15 @@ export class TeamIntelligenceTeamController {
 
   /**
    * GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
-   *
-   * Response:
-   *   from, to, teamId, teamName, totalPrCount, totalCommitCount, aiUsages
    */
   getTeamUsageSummary = async (req: Request, res: Response): Promise<void> => {
     try {
+      const orgId = await this.resolveCallerOrgId(req);
+      if (!orgId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamDateRangeQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -191,6 +226,7 @@ export class TeamIntelligenceTeamController {
         from: fromDate,
         to: toDate,
         teamId,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -201,11 +237,16 @@ export class TeamIntelligenceTeamController {
   };
 
   /**
-   * GET /api/team-intelligence-dashboard/team/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10
-   * Provide `teamId` as a query parameter.
+   * GET /api/team-intelligence-dashboard/team/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=10
    */
   getTeamChannelRecaps = async (req: Request, res: Response): Promise<void> => {
     try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamChannelQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -225,6 +266,7 @@ export class TeamIntelligenceTeamController {
         teamId,
         page,
         limit,
+        workspaceId,
       });
 
       res.status(200).json(result);
@@ -235,11 +277,16 @@ export class TeamIntelligenceTeamController {
   };
 
   /**
-   * GET /api/team-intelligence-dashboard/team/channel-tickets?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10
-   * Provide `teamId` as a query parameter.
+   * GET /api/team-intelligence-dashboard/team/channel-tickets?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=10
    */
   getTeamChannelTickets = async (req: Request, res: Response): Promise<void> => {
     try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
       const parseResult = TeamChannelQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
         res.status(400).json({
@@ -259,6 +306,7 @@ export class TeamIntelligenceTeamController {
         teamId,
         page,
         limit,
+        workspaceId,
       });
 
       res.status(200).json(result);

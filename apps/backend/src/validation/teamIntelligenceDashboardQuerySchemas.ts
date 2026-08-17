@@ -34,7 +34,7 @@ const dateRangeSchema = <T extends z.ZodRawShape>(shape: T) =>
       to: isoDateQuery('to'),
       ...shape,
     })
-    .refine(({ from, to }) => from <= to, {
+    .refine(({ from, to }) => !from || !to || from <= to, {
       path: ['from'],
       message: '"from" must be before or equal to "to"',
     });

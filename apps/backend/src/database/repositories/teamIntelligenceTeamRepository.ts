@@ -5,6 +5,7 @@ export interface TeamBulletsDateRangeFilters {
   from: Date;
   to: Date;
   teamId: string;
+  orgId?: string | null;
   page: number;
   limit: number;
 }
@@ -25,6 +26,7 @@ export interface TeamPrByDateFilters {
   from: Date;
   to: Date;
   prId: number;
+  orgId?: string | null;
 }
 
 export interface TeamPrMatch {
@@ -48,6 +50,7 @@ export interface TeamUsageSummaryFilters {
   from: Date;
   to: Date;
   teamId: string;
+  orgId?: string | null;
 }
 
 export interface TeamAiUsageAggregate {
@@ -72,6 +75,7 @@ export interface TeamLeadershipSnapshotsDateRangeFilters {
   from: Date;
   to: Date;
   teamId: string;
+  orgId?: string | null;
 }
 
 export interface TeamLeadershipSnapshotsDateRangeResult {
@@ -167,7 +171,7 @@ class TeamIntelligenceTeamRepository {
   }
 
   async getTeamBulletsByDate(filters: TeamBulletsDateRangeFilters): Promise<TeamBulletsDateRangeResult> {
-    const { from, to, teamId, page, limit } = filters;
+    const { from, to, teamId, orgId, page, limit } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -183,6 +187,7 @@ class TeamIntelligenceTeamRepository {
         teamId,
         status: 'COMPLETED',
         contentUrl: { not: null },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -240,7 +245,7 @@ class TeamIntelligenceTeamRepository {
   async getTeamLeadershipSnapshotsByDate(
     filters: TeamLeadershipSnapshotsDateRangeFilters
   ): Promise<TeamLeadershipSnapshotsDateRangeResult> {
-    const { from, to, teamId } = filters;
+    const { from, to, teamId, orgId } = filters;
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
     const rangeEnd = new Date(to);
@@ -252,6 +257,7 @@ class TeamIntelligenceTeamRepository {
         teamId,
         status: 'COMPLETED',
         contentUrl: { not: null },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -308,7 +314,7 @@ class TeamIntelligenceTeamRepository {
   }
 
   async getPrByDate(filters: TeamPrByDateFilters): Promise<TeamPrByDateResult> {
-    const { from, to, prId } = filters;
+    const { from, to, prId, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -319,6 +325,7 @@ class TeamIntelligenceTeamRepository {
     const userIngestions = await db.teamIntelligenceUserIngestionV2.findMany({
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -372,7 +379,7 @@ class TeamIntelligenceTeamRepository {
   }
 
   async getTeamUsageSummary(filters: TeamUsageSummaryFilters): Promise<TeamUsageSummaryResult> {
-    const { from, to, teamId } = filters;
+    const { from, to, teamId, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -386,6 +393,7 @@ class TeamIntelligenceTeamRepository {
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
         teamId,
+        ...(orgId ? { orgId } : {}),
       },
       select: {
         teamId: true,
@@ -449,9 +457,11 @@ class TeamIntelligenceTeamRepository {
   async getChannelRecapChannelsByDate({
     from,
     to,
+    workspaceId,
   }: {
     from: Date;
     to: Date;
+    workspaceId: string;
   }): Promise<TeamChannelRecapChannelCandidate[]> {
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -462,6 +472,7 @@ class TeamIntelligenceTeamRepository {
     const grouped = await db.recap.groupBy({
       by: ['entityId'],
       where: {
+        workspaceId,
         entityType: 'CHANNEL',
         recapDate: {
           gte: rangeStart,
@@ -488,9 +499,8 @@ class TeamIntelligenceTeamRepository {
     const channelIds = grouped.map((item) => item.entityId);
     const channels = await db.channel.findMany({
       where: {
-        id: {
-          in: channelIds,
-        },
+        workspaceId,
+        id: { in: channelIds },
       },
       select: {
         id: true,
@@ -514,12 +524,14 @@ class TeamIntelligenceTeamRepository {
     channelIds,
     page,
     limit,
+    workspaceId,
   }: {
     from: Date;
     to: Date;
     channelIds: string[];
     page: number;
     limit: number;
+    workspaceId: string;
   }) {
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -552,26 +564,18 @@ class TeamIntelligenceTeamRepository {
     const [total, recaps, channels] = await Promise.all([
       db.recap.count({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
-          entityId: {
-            in: channelIds,
-          },
-          recapDate: {
-            gte: rangeStart,
-            lte: rangeEnd,
-          },
+          entityId: { in: channelIds },
+          recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
       db.recap.findMany({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
-          entityId: {
-            in: channelIds,
-          },
-          recapDate: {
-            gte: rangeStart,
-            lte: rangeEnd,
-          },
+          entityId: { in: channelIds },
+          recapDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ recapDate: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
@@ -586,9 +590,8 @@ class TeamIntelligenceTeamRepository {
       }),
       db.channel.findMany({
         where: {
-          id: {
-            in: channelIds,
-          },
+          workspaceId,
+          id: { in: channelIds },
         },
         select: {
           id: true,

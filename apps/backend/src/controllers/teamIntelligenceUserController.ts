@@ -115,7 +115,7 @@ export class TeamIntelligenceUserController {
       select: { orgId: true },
     });
 
-    return mapping?.orgId ?? '';
+    return mapping?.orgId ?? false;
   };
 
   /**

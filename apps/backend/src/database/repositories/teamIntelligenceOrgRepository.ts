@@ -585,11 +585,13 @@ class TeamIntelligenceOrgRepository {
     to,
     page,
     limit,
+    workspaceId,
   }: {
     from: Date;
     to: Date;
     page: number;
     limit: number;
+    workspaceId: string;
   }) {
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -599,15 +601,24 @@ class TeamIntelligenceOrgRepository {
 
     const now = new Date();
 
-    const [total, recaps, channels, ticketRecords] = await Promise.all([
+    // Fetch workspace channels first so tickets can be scoped by channelId
+    const channels = await db.channel.findMany({
+      where: { workspaceId },
+      select: { id: true, name: true },
+    });
+    const workspaceChannelIds = channels.map((c) => c.id);
+
+    const [total, recaps, ticketRecords] = await Promise.all([
       db.recap.count({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
       db.recap.findMany({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
@@ -622,15 +633,15 @@ class TeamIntelligenceOrgRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
-        select: { id: true, name: true },
-      }),
-      db.ticket.findMany({
-        where: {
-          createdAt: { gte: rangeStart, lte: rangeEnd },
-        },
-        select: { statusV2: true, eta: true },
-      }),
+      workspaceChannelIds.length > 0
+        ? db.ticket.findMany({
+            where: {
+              channelId: { in: workspaceChannelIds },
+              createdAt: { gte: rangeStart, lte: rangeEnd },
+            },
+            select: { statusV2: true, eta: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const channelNameById = new Map(channels.map((c) => [c.id, c.name]));
