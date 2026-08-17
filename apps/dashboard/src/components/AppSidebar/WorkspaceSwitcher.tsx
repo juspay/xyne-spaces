@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
@@ -215,7 +216,11 @@ export const WorkspaceSwitcher: React.FC = () => {
       window.location.href = `/${targetWorkspaceId}/chat/dir`;
     } catch (err) {
       setError('Failed to switch workspace. Please try again.');
-      console.error('[WorkspaceSwitcher] Switch failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[WorkspaceSwitcher] Switch failed:'),
+        error: err,
+      });
     } finally {
       setSwitching(null);
     }

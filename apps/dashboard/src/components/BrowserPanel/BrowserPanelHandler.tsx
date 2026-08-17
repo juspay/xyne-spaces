@@ -53,11 +53,18 @@ export function BrowserPanelHandler(): null {
     if (!api?.onOpenXyneAIWithContext) return;
 
     const cleanup = api.onOpenXyneAIWithContext((data: BrowserContextFromDeepLink) => {
-      console.log('[BrowserPanelHandler] Received XyneAI context from deep link:', data);
+      logger.info(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_log',
+        message: String('[BrowserPanelHandler] Received XyneAI context from deep link:'),
+        context: [data],
+      });
 
       // Validate context data
       if (!data.text || !data.url) {
-        console.warn('[BrowserPanelHandler] Invalid context received');
+        logger.warn(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[BrowserPanelHandler] Invalid context received'),
+        });
         return;
       }
 
@@ -89,9 +96,16 @@ export function BrowserPanelHandler(): null {
           new CustomEvent('xyne-ai-browser-context-ready', { detail: contextPill }),
         );
 
-        console.log('[BrowserPanelHandler] Context stored and event dispatched for XyneAI');
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('[BrowserPanelHandler] Context stored and event dispatched for XyneAI'),
+        });
       } catch (error) {
-        console.error('[BrowserPanelHandler] Failed to store browser context:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[BrowserPanelHandler] Failed to store browser context:'),
+          error: error,
+        });
       }
     });
 

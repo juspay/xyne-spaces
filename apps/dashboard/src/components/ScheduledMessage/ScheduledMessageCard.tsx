@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement } from 'react';
 import { CalendarClock, Calendar, Clock, User } from 'lucide-react';
 import { cn } from '../../utils/classNames';
@@ -23,7 +24,10 @@ const ScheduledMessageCard = ({
   const creatorUser = useUser(scheduledMessage?.createdBy ?? '');
 
   if (!scheduledMessage) {
-    console.error('[ScheduledMessageCard] Scheduled message is undefined');
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[ScheduledMessageCard] Scheduled message is undefined'),
+    });
     return <div>Invalid scheduled message data</div>;
   }
 

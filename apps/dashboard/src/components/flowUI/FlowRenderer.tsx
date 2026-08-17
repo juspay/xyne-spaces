@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { FlowContext, FlowContextValue } from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
@@ -150,11 +151,20 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const executeAction = useCallback(
     async (action: FlowAction) => {
       if (!validatedFlow) {
-        console.warn('[FlowRenderer] executeAction called but validatedFlow is null — skipping');
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String(
+            '[FlowRenderer] executeAction called but validatedFlow is null — skipping',
+          ),
+        });
         return;
       }
 
-      console.log(`[FlowRenderer] executeAction type=${action.type}`, action);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(`[FlowRenderer] executeAction type=${action.type}`),
+        context: [action],
+      });
 
       // Client-only: update_state, close_screen, navigate
       if (action.type === 'update_state') {
@@ -169,7 +179,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           await navigator.clipboard.writeText(value);
           toast.success(successMessage ?? 'Copied to clipboard');
         } catch (error) {
-          console.error('[FlowRenderer] clipboard write failed:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[FlowRenderer] clipboard write failed:'),
+            context: [error],
+          });
           toast.error('Could not copy — select the URL in the message instead.');
         }
         return;
@@ -190,9 +204,12 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       // Guard: messageId/conversationId are required for network actions.
       // They may be empty if the component rendered before Zero sync completed.
       if (!messageId || !conversationId) {
-        console.warn(
-          '[FlowRenderer] Cannot execute network action — messageId/conversationId not yet available. Please try again.',
-        );
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String(
+            '[FlowRenderer] Cannot execute network action — messageId/conversationId not yet available. Please try again.',
+          ),
+        });
         toast.error('Message context not ready yet. Please try again in a moment.');
         return;
       }
@@ -203,10 +220,13 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           return next;
         });
       }
-      console.log(
-        `[FlowRenderer] → sending ${action.type} actionId=${action.actionId} values=`,
-        stateRef.current.values,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(
+          `[FlowRenderer] → sending ${action.type} actionId=${action.actionId} values=`,
+        ),
+        context: [stateRef.current.values],
+      });
       try {
         const response = await flowActionService.execute({
           actionId: action.actionId,
@@ -217,7 +237,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           conversationId,
         });
 
-        console.log(`[FlowRenderer] ← response type=${response.type}`, response);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`[FlowRenderer] ← response type=${response.type}`),
+          context: [response],
+        });
 
         if (response.type === 'error') {
           toast.error(response.message);
@@ -226,7 +250,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Action failed';
-        console.error('[FlowRenderer] executeAction error:', message);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[FlowRenderer] executeAction error:'),
+          error: message,
+        });
         if (!isInputChange) {
           toast.error(
             action.type === 'submit'
@@ -266,11 +294,13 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     if (!isVisible(component)) return null;
     const Component = NodeRegistry.get(component.type);
     if (!Component) {
-      // TEMPORARY — remove once every deploy target ships the same @xyne/shared.
-      // Returning null here meant a card emitted by a newer claw simply vanished:
-      // no node, no error, a blank message. Showing the raw component is ugly but
-      // honest — the content is visible and the version skew is obvious.
-      console.warn(`[FlowRenderer] Unknown component type: ${component.type}`);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'unknown_component_type',
+        message: String(`[FlowRenderer] Unknown component type: ${component.type}`),
+      });
+      // Render a visible fallback instead of silently dropping the card, so a node
+      // emitted by a newer @xyne/shared than this deploy ships stays visible and the
+      // version skew is obvious rather than surfacing as a blank message.
       return (
         <details
           key={component.id}

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
@@ -288,9 +289,15 @@ export function AutomationBuilder({
       description: string;
       config: AutomationConfig;
     }): Promise<SaveResult> => {
-      console.info('[automations] save attempted', {
-        id: savedId,
-        status: savedStatus,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save attempted'),
+        context: [
+          {
+            id: savedId,
+            status: savedStatus,
+          },
+        ],
       });
 
       const validationResult = await validateAutomation(payload.config);
@@ -369,9 +376,15 @@ export function AutomationBuilder({
       }
       setSavedStatus(result.automation.status);
       setEditMode(false);
-      console.info('[automations] save succeeded', {
-        id: result.automation.id,
-        status: result.automation.status,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save succeeded'),
+        context: [
+          {
+            id: result.automation.id,
+            status: result.automation.status,
+          },
+        ],
       });
       toast.success('Saved');
       onSaved?.(result);
@@ -381,14 +394,22 @@ export function AutomationBuilder({
       const v = (err as Error & { validation?: ValidationResult }).validation;
       if (v) setValidation(v);
       setErrorMessage(message);
-      console.error('[automations] save failed', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[automations] save failed'),
+        error: err,
+      });
       toast.error(message);
     },
   });
 
   const activateMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      console.info('[automations] activate attempted', { id });
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] activate attempted'),
+        context: [{ id }],
+      });
       const validationResult = await validateAutomation(config);
       if (!validationResult.valid) {
         setValidation(validationResult);
@@ -567,10 +588,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, cond);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(cond),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(cond),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -584,10 +611,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, sw);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(sw),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(sw),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -602,10 +635,16 @@ export function AutomationBuilder({
       };
       setConfig(prev => {
         const next = insertInto(prev.steps, action);
-        console.info('[automations] step added', {
-          type,
-          insertAt,
-          finalIndex: next.indexOf(action),
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_info',
+          message: String('[automations] step added'),
+          context: [
+            {
+              type,
+              insertAt,
+              finalIndex: next.indexOf(action),
+            },
+          ],
         });
         return { ...prev, steps: next };
       });
@@ -642,9 +681,15 @@ export function AutomationBuilder({
   const handleDeleteStep = useCallback((index: number): void => {
     setConfig(prev => {
       const removed = prev.steps[index];
-      console.info('[automations] step removed', {
-        type: removed?.type,
-        index,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step removed'),
+        context: [
+          {
+            type: removed?.type,
+            index,
+          },
+        ],
       });
       return { ...prev, steps: prev.steps.filter((_, i) => i !== index) };
     });
@@ -653,10 +698,16 @@ export function AutomationBuilder({
   const handleMoveStep = useCallback((index: number, direction: -1 | 1): void => {
     setConfig(prev => {
       const moved = prev.steps[index];
-      console.info('[automations] step reordered', {
-        type: moved?.type,
-        from: index,
-        to: index + direction,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step reordered'),
+        context: [
+          {
+            type: moved?.type,
+            from: index,
+            to: index + direction,
+          },
+        ],
       });
       return { ...prev, steps: moveStep(prev.steps, index, direction) };
     });
