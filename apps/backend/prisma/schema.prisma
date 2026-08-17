@@ -3829,6 +3829,7 @@ model Recap {
   @@index([recapDate])
   @@index([userId])
   @@index([entityType])
+  @@index([entityType, recapDate, entityId], map: "recaps_entityType_recapDate_entityId_idx")
   @@map("recaps")
   @@schema("public")
 }

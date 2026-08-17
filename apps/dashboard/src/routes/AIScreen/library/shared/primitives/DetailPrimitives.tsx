@@ -127,14 +127,21 @@ export function DetailEmptyState({
   title,
   description,
   action,
+  className,
 }: {
   icon: ReactNode;
   title: string;
   description: string;
   action?: ReactNode;
+  className?: string;
 }): ReactElement {
   return (
-    <div className='flex w-full flex-col items-center justify-center gap-4 p-8 text-center'>
+    <div
+      className={cn(
+        'flex w-full flex-col items-center justify-center gap-4 p-8 text-center',
+        className,
+      )}
+    >
       <span
         className='flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground'
         aria-hidden

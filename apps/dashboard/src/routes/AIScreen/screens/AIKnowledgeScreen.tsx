@@ -9,11 +9,7 @@ const AIKnowledgeScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <GlobalCollectionsProvider>
         <CollectionTreeDataSync>
           <KnowledgeBaseV2Screen />

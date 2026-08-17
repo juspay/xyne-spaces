@@ -2,7 +2,14 @@ import { useState, useCallback } from 'react';
 import { type DateRangeValue } from '../components/ui/DateRangeFilter';
 import { TicketPriority } from '@xyne/shared';
 
-type RangeLabel = 'Today' | 'Yesterday' | 'Last 7 days' | 'Last 30 days' | 'custom';
+type RangeLabel =
+  | 'Today'
+  | 'Yesterday'
+  | 'Last 7 days'
+  | 'Last 30 days'
+  | 'Last 60 days'
+  | 'Last 90 days'
+  | 'custom';
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);
@@ -27,10 +34,16 @@ const detectLabel = (dr: DateRangeValue): RangeLabel => {
   s7.setDate(s7.getDate() - 6);
   const s30 = new Date(today);
   s30.setDate(s30.getDate() - 29);
+  const s60 = new Date(today);
+  s60.setDate(s60.getDate() - 59);
+  const s90 = new Date(today);
+  s90.setDate(s90.getDate() - 89);
   if (isSameDay(dr.startDate, today) && isSameDay(dr.endDate, today)) return 'Today';
   if (isSameDay(dr.startDate, yest) && isSameDay(dr.endDate, yest)) return 'Yesterday';
   if (isSameDay(dr.startDate, s7) && isSameDay(dr.endDate, today)) return 'Last 7 days';
   if (isSameDay(dr.startDate, s30) && isSameDay(dr.endDate, today)) return 'Last 30 days';
+  if (isSameDay(dr.startDate, s60) && isSameDay(dr.endDate, today)) return 'Last 60 days';
+  if (isSameDay(dr.startDate, s90) && isSameDay(dr.endDate, today)) return 'Last 90 days';
   return 'custom';
 };
 
@@ -56,6 +69,16 @@ const rangeFromLabel = (
     case 'Last 30 days': {
       const s = new Date(today);
       s.setDate(s.getDate() - 29);
+      return { startDate: startOfDay(s), endDate: endOfDay(today) };
+    }
+    case 'Last 60 days': {
+      const s = new Date(today);
+      s.setDate(s.getDate() - 59);
+      return { startDate: startOfDay(s), endDate: endOfDay(today) };
+    }
+    case 'Last 90 days': {
+      const s = new Date(today);
+      s.setDate(s.getDate() - 89);
       return { startDate: startOfDay(s), endDate: endOfDay(today) };
     }
     case 'custom':
@@ -86,6 +109,8 @@ interface StoredFilters {
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
   selectedUserGroupIds: string[];
+  selectedTagCategory: string | null;
+  selectedTagValues: string[];
   // Per-field selected values or text terms: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
@@ -99,6 +124,8 @@ const DEFAULT_STORED: StoredFilters = {
   selectedStageNames: [],
   selectedPriorities: [],
   selectedUserGroupIds: [],
+  selectedTagCategory: null,
+  selectedTagValues: [],
   selectedCustomFieldValues: {},
   comparedChannelIds: [],
 };
@@ -113,6 +140,8 @@ const readStorage = (key: string): StoredFilters => {
       'Yesterday',
       'Last 7 days',
       'Last 30 days',
+      'Last 60 days',
+      'Last 90 days',
       'custom',
     ];
     const result: StoredFilters = {
@@ -133,6 +162,9 @@ const readStorage = (key: string): StoredFilters => {
       selectedUserGroupIds: isStringArray(p['selectedUserGroupIds'])
         ? p['selectedUserGroupIds']
         : [],
+      selectedTagCategory:
+        typeof p['selectedTagCategory'] === 'string' ? p['selectedTagCategory'] : null,
+      selectedTagValues: isStringArray(p['selectedTagValues']) ? p['selectedTagValues'] : [],
       // Handle migration from old string[] format → default to empty
       selectedCustomFieldValues: isPerKeyValues(p['selectedCustomFieldValues'])
         ? p['selectedCustomFieldValues']
@@ -163,6 +195,8 @@ export interface PersistedDeskMetricsFilters {
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
   selectedUserGroupIds: string[];
+  selectedTagCategory: string | null;
+  selectedTagValues: string[];
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
@@ -170,6 +204,8 @@ export interface PersistedDeskMetricsFilters {
   setSelectedStageNames: (names: string[]) => void;
   setSelectedPriorities: (priorities: TicketPriority[]) => void;
   setSelectedUserGroupIds: (ids: string[]) => void;
+  setSelectedTagCategory: (cat: string | null) => void;
+  setSelectedTagValues: (vals: string[]) => void;
   setSelectedCustomFieldValues: (vals: Record<string, string[]>) => void;
   setComparedChannelIds: (ids: string[]) => void;
 }
@@ -243,6 +279,21 @@ export const usePersistedDeskMetricsFilters = (
     [persist],
   );
 
+  const setSelectedTagCategory = useCallback(
+    (cat: string | null) => {
+      // Changing category always clears specific tag selections
+      persist(prev => ({ ...prev, selectedTagCategory: cat, selectedTagValues: [] }));
+    },
+    [persist],
+  );
+
+  const setSelectedTagValues = useCallback(
+    (vals: string[]) => {
+      persist(prev => ({ ...prev, selectedTagValues: vals }));
+    },
+    [persist],
+  );
+
   const setSelectedCustomFieldValues = useCallback(
     (vals: Record<string, string[]>) => {
       persist(prev => ({ ...prev, selectedCustomFieldValues: vals }));
@@ -266,6 +317,8 @@ export const usePersistedDeskMetricsFilters = (
     selectedStageNames: stored.selectedStageNames,
     selectedPriorities: stored.selectedPriorities,
     selectedUserGroupIds: stored.selectedUserGroupIds,
+    selectedTagCategory: stored.selectedTagCategory,
+    selectedTagValues: stored.selectedTagValues,
     selectedCustomFieldValues: stored.selectedCustomFieldValues,
     comparedChannelIds: stored.comparedChannelIds,
     setDateRange,
@@ -273,6 +326,8 @@ export const usePersistedDeskMetricsFilters = (
     setSelectedStageNames,
     setSelectedPriorities,
     setSelectedUserGroupIds,
+    setSelectedTagCategory,
+    setSelectedTagValues,
     setSelectedCustomFieldValues,
     setComparedChannelIds,
   };

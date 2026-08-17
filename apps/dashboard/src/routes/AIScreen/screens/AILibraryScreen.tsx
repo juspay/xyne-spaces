@@ -7,14 +7,10 @@ const AILibraryScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
         data-id='ai-library-view'
-        className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
+        className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
         <div className='relative flex-1 overflow-auto no-scrollbar'>
           <LibraryV2 />
