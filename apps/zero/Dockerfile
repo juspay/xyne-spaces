@@ -3,10 +3,10 @@ ARG NODE_VERSION=22.23.1
 FROM golang:1.25.10 AS litestream
 
 WORKDIR /src/
-RUN git clone --depth 1 --branch zero@v0.0.9 https://github.com/rocicorp/litestream.git
+RUN git clone --depth 1 --branch zero@v0.0.10 https://github.com/rocicorp/litestream.git
 WORKDIR /src/litestream/
 
-ARG LITESTREAM_VERSION=0.3.13+z0.0.9
+ARG LITESTREAM_VERSION=0.3.13+z0.0.10
 
 ENV GOTOOLCHAIN=local
 
@@ -53,6 +53,8 @@ ENV ZERO_LITESTREAM_EXECUTABLE=/usr/local/bin/litestream
 ENV ZERO_LITESTREAM_EXECUTABLE_V5=/usr/local/bin/litestream-v5
 ENV ZERO_LITESTREAM_VFS_EXTENSION_PATH=/usr/local/lib/litestream-vfs.so
 ENV ZERO_LITESTREAM_CONFIG_PATH=/etc/litestream.yml
+
+ENV ZERO_LITESTREAM_RESTORE_USING_V5=false
 ENV ZERO_LOG_FORMAT=json
 ENV ZERO_SERVER_VERSION=${ZERO_VERSION}
 ENV ZERO_IN_CONTAINER=1
