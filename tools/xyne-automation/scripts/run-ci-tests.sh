@@ -12,7 +12,10 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
   [ -f .nvmrc ] && nvm use
 fi
 
-cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+AUTOMATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# cwd = tools/ (parent of the package), which the runner uses to place artifacts.
+# ts-node by path (not `pnpm exec`): it's a package dep, not a root one.
+cd "$AUTOMATION_DIR/.."
 
-exec pnpm exec ts-node --project tools/xyne-automation/tsconfig.json \
-  tools/xyne-automation/scripts/runner/index.ts --mode=ci --plain "$@"
+exec "$AUTOMATION_DIR/node_modules/.bin/ts-node" --project "$AUTOMATION_DIR/tsconfig.json" \
+  "$AUTOMATION_DIR/scripts/runner/index.ts" --mode=ci --plain "$@"

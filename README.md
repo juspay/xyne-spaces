@@ -2,13 +2,19 @@
 
 # Xyne Spaces
 
-**The org OS — a collaborative workspace that is your organization's context layer.
-Real-time by default, permission-aware by default, and built for agents.**
+**The org OS — your organization's context layer, with collaborative apps built
+around it. Real-time, permission-aware and built for agents.**
 
-Chat, threads, tickets, boards, calls and shared canvases — where your team actually does
-the work. And because the work happens here, every conversation, ticket, call, document and
-calendar is already in one place, indexed and served back to your people *and* your
-agents — with each read and write filtered through the same permission model.
+**At the center: your org's context.** Connectors bring in what your organization
+already knows — Slack, Google Workspace, Microsoft 365 and [more](#connectors) —
+normalised into a store built for records *and* retrieval, and served back to your
+people and your agents through permission-aware org-context APIs, so every caller
+gets exactly the slice they're allowed to see.
+
+Around that core sit the [org apps](#org-apps) — Call · Claw · Agentic Search ·
+Automations · Customer Support Desk · Chat · Canvas · Tickets — adopted as you
+choose, where your team can do the work directly. Work done in them lands straight in the same context store —
+with each read and write filtered through the same permission model.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml/badge.svg)](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml)
@@ -26,6 +32,7 @@ agents — with each read and write filtered through the same permission model.
 - [Agents and the sandbox](#agents-and-the-sandbox)
 - [Quickstart](#quickstart)
 - [Connectors](#connectors)
+- [Org apps](#org-apps)
 - [MCP tools](#mcp-tools)
 - [Demos](#demos)
 - [Repository map](#repository-map)
@@ -40,36 +47,31 @@ agents — with each read and write filtered through the same permission model.
 
 ## Why Xyne Spaces?
 
-Most "context platforms" are a layer bolted onto tools people work in somewhere else, which
-means the context is always a stale copy of the real thing. Xyne Spaces inverts that: **it
-is the place the work happens.** Teams chat, run calls, file tickets, draft on canvases and
-review each other's work here — collaboratively and in real time — and the context is simply
-the exhaust of that, current by construction rather than by sync schedule.
+**Context is the foundation.** Every conversation, decision, ticket, document, and call adds to your organization’s understanding of what it knows, how it works, and where it’s going. Query responses, automation, and agents are only as good as the context they can reach.
 
-Which leads to the wall everyone hits next. An organization's context is scattered across a
-dozen tools, and the moment you gather it somewhere useful: **most of it is not safe to show
-to everyone.** Search that ignores permissions is a leak. An assistant that ignores them is
-a worse one.
+That context has to live in one place — normalized, indexed, and served through one interface — rather than pieced together from a dozen tools every time a person or agent needs it.
 
-Xyne Spaces starts from the opposite end. Context is centralized, but **access control
-lives in the data layer, not in a filter bolted on top**:
+**The apps build the context as work happens.** They are agent-first and collaboration-first: real-time and shared by default, with people and agents working together in the same threads, tickets, and canvases.
 
-- **Synced reads are narrowed before they run.** Every table carries a policy that rewrites
-  the query for the acting user, so rows they may not see are never selected — not fetched
-  and then hidden.
-- **Writes are wrapped, not trusted.** Sync mutations are ACL-wrapped centrally, and REST
-  routes go through a permission matrix of resource × access level resolved per user and
-  group. Both paths are enforced in one place each, so a new feature is guarded by default
-  rather than by someone remembering to add a check.
-- **Agents inherit the same boundary.** An agent acts *as the person who invoked it*. It
-  reaches exactly their slice of the org, and there is no system-token back door around it.
+Accessing context — through search or agents — must respect the permissions of the underlying work, so **access control is enforced at the data layer**:
 
-That last point is what makes it worth pointing an agent at your company's context at all.
-It can use everything that person could have found themselves — no more, and no less.
+* **Reads respect user permissions.** Queries are scoped to the acting user, returning only the context they’re allowed to access.
+* **Writes are enforced centrally.** Mutations go through the same permission layer, so access rules apply consistently across apps and features.
+* **Agents inherit the user’s access.** Agents act as the person invoking them, so they can only search, read, and act on context that person can access. There is no privileged bypass.
 
 ---
 
 ## What can I do with Xyne Spaces?
+
+Xyne Spaces breaks down into four stacks:
+
+- **Context** — the store at the center: connectors bring in what the org knows, and
+  permission-aware APIs serve it back.
+- **Collaboration** — real-time work with your team: Chat, Call, Canvas.
+- **Agentic workflows** — Claw agents, Agentic Search and Automations, all working
+  from the same context.
+- **Org productivity apps** — Customer Support Desk and Tickets for the day-to-day
+  running of the org.
 
 <details>
 <summary><b>Bring your org's context into one place</b></summary>
@@ -82,12 +84,12 @@ threaded and indexed for hybrid search.
 </details>
 
 <details>
-<summary><b>Work in real time, together</b></summary>
+<summary><b>Search across everything you're allowed to see</b></summary>
 <br>
 
-Channels, threads, tickets, boards, calls and collaborative canvases. The client keeps a
-live local replica rather than polling, so edits appear instantly, keep working offline,
-and replay on reconnect.
+Hybrid retrieval over the full corpus — conversations, documents, tickets, call
+transcripts — scoped to the person asking. The same index backs both the search box and an
+agent's context lookups.
 
 </details>
 
@@ -103,12 +105,11 @@ connected systems.
 </details>
 
 <details>
-<summary><b>Search across everything you're allowed to see</b></summary>
+<summary><b>Work in real time, collaboratively</b></summary>
 <br>
 
-Hybrid retrieval over the full corpus — conversations, documents, tickets, call
-transcripts — scoped to the person asking. The same index backs both the search box and an
-agent's context lookups.
+Channels, threads, tickets, boards, calls and collaborative canvases. The client keeps a
+live local replica rather than polling, so edits appear instantly.
 
 </details>
 
@@ -171,7 +172,8 @@ acting as you needs your consent.
 ## Quickstart
 
 **Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
-Compose. Details in [Prerequisites](docs/setup/prerequisites.md).
+Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
+with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
@@ -191,8 +193,17 @@ re-running it on an existing checkout is safe — and you can run any phase on i
 | `pnpm run env:setup` | Copies each app's `.env.example` into place — never overwrites an existing file |
 | `pnpm run setup` | Installs workspace dependencies and builds the shared packages |
 | `pnpm run secrets` | Generates the local secrets that ship as `set-me` placeholders |
-| `pnpm run services` | Starts infrastructure containers, runs migrations, seeds the databases |
-| `pnpm run dev:all` | Starts backend, dashboard, `xyne-claw` and `xyne-claw-auth` in parallel |
+| `pnpm run services` | Asks which features you need, checks ports, starts infrastructure containers, runs migrations, seeds the databases |
+| `pnpm run dev` | Asks which apps to run, then opens them in a multi-pane process TUI (one pane per app, restart any one with `r`) |
+
+The pickers remember previous answers, and both stages check that the ports they
+need are free before starting — naming the process that holds a busy one. Scripted
+runs skip every prompt (`pnpm run bootstrap:raw`, `XYNE_DEV_APPS=all pnpm run dev`).
+
+The bootstrap phases and `validate` use **Xyne Doctor**. In an interactive
+terminal, a nonzero exit can package a redacted local failure report and hand it to Claude Code or
+Codex without leaving the terminal. Plain and automated runs keep normal output without persisting
+a report. See [Xyne Doctor](docs/setup/xyne-doctor.md) for safety behavior and a demo.
 
 </details>
 
@@ -233,6 +244,24 @@ adapter, not touching the pipeline. Credentials are stored encrypted and decrypt
 the moment of use.
 
 → Adapter contract: [`apps/backend/src/integrations/README.md`](apps/backend/src/integrations/README.md)
+
+---
+
+## Org apps
+
+Eight apps, adopted independently. All of them read and write through the same context
+store and permission model.
+
+| App | What it does |
+| --- | --- |
+| **Call** | Team calls with recordings; transcripts are indexed into the context store. |
+| **Claw** | Sandboxed agents that read repositories, run code and call tools on connected systems; actions taken as you require approval. |
+| **Agentic Search** | Search across conversations, documents, tickets and call transcripts, scoped to the person asking; the same retrieval backs agents' context lookups. |
+| **Automations** | Scheduled agent runs and background jobs: ticket triage and classification, entity extraction, draft replies, SLA tracking, recaps. |
+| **Customer Support Desk** | Ticket intake, queues and triage. |
+| **Chat** | Channels, threads and DMs, live-synced. |
+| **Canvas** | Collaborative documents, drafted and reviewed together in real time. |
+| **Tickets** | Tickets and boards for planning and tracking work. |
 
 ---
 
@@ -313,12 +342,14 @@ xyne-spaces/
 
 | Guide | |
 | --- | --- |
+| [Local setup](docs/setup/local-setup.md) | From a blank machine to a running environment |
 | [Prerequisites](docs/setup/prerequisites.md) | Versions and tooling you need first |
 | [Local development](docs/setup/local-development.md) | Getting a working environment |
 | [Services](docs/setup/services.md) | What the infrastructure containers do |
 | [AI providers](docs/setup/ai-providers.md) | Configuring model access |
 | [Troubleshooting](docs/setup/troubleshooting.md) | When setup goes wrong |
 | [API reference](API_DOCUMENTATION.md) | REST API documentation |
+| [MCP Gateway integration](apps/xyne-claw-auth/docs/mcp-gateway-integration.md) | Claw Auth MCP gateway integration guide |
 
 ---
 

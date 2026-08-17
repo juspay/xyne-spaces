@@ -186,124 +186,10 @@ export function agentIdentity(input: {
 }
 
 /**
- * Is the `agent` component type live on the Spaces/dashboard side?
- *
- * apps/backend validates EVERY posted flow against @xyne/shared's strict
- * discriminated union (chatController → validateFlowDefinition), so emitting
- * `type: "agent"` before that half ships is a 400 VALIDATION_ERROR at
- * postMessage — the message never appears at all, rather than degrading to a
- * blank card. claw-auth deploys independently of the dashboard, so the emitter
- * must not assume they move together.
- *
- * Default OFF: the fallback below renders the same card out of primitives that
- * have shipped for months. Flip SPACES_SUPPORTS_AGENT_CARD=true once
- * agentComponentSchema + AgentNode are deployed. Same pattern as
- * SPACES_SUPPORTS_AGENT_PROGRESS in webhook.ts.
- */
-function agentComponentSupported(): boolean {
-  return process.env["SPACES_SUPPORTS_AGENT_CARD"] === "true";
-}
-
-/** "**Model:** claude-opus-5" style rows, skipping anything absent. */
-function identityLines(agent: AgentIdentity): string[] {
-  const lines: string[] = [];
-  if (agent.builtBy) lines.push(`Built by @${agent.builtBy}`);
-  if (agent.description) lines.push(agent.description);
-  if (agent.modelId) lines.push(`**Model:** ${agent.modelId}`);
-  for (const row of agent.details ?? []) lines.push(`**${row.label}:** ${row.value}`);
-  return lines;
-}
-
-/**
- * The same card built from primitives (heading/text/multiselect/button) that
- * the deployed dashboard already renders.
- *
- * Two things must match the real component exactly or the round trip breaks:
- *   - the capability picker is `name: AGENT_COMPONENT_ID`, because FlowUI keys
- *     state.values by props.name (CheckboxNode) and flow-action.ts reads
- *     values[AGENT_COMPONENT_ID] to learn which capabilities the user kept;
- *   - the button actionIds are the two flow-action.ts accepts verbatim
- *     (agent-draft-approve / agent-draft-decline); anything else is a 400.
- * `data` is set by the caller below, so authorization and routing are identical
- * on both paths.
- */
-function buildAgentCardFallback(props: AgentCardProps, screenKey: string): FlowBuilder {
-  const b = new FlowBuilder(`agent-card-${screenKey}`);
-  const agent = props.agent;
-
-  b.addHeading('name', agent.name, 3);
-  b.addText('slug', `\`@${agent.slug}\``, { variant: 'muted', size: 'sm' });
-  const lines = identityLines(agent);
-  if (lines.length > 0) b.addText('identity', lines.join('\n\n'));
-
-  const capabilities = agent.capabilities ?? [];
-  const isPendingDraft = props.variant === 'draft' && props.phase === 'pending';
-
-  if (capabilities.length > 0) {
-    if (isPendingDraft) {
-      // Editable on the pending draft — unchecking a capability is how the user
-      // removes it before approving.
-      b.addComponent({
-        id: AGENT_COMPONENT_ID,
-        type: 'multiselect',
-        props: {
-          name: AGENT_COMPONENT_ID,
-          label: 'Capabilities',
-          options: capabilities.map((c) => ({ label: c.label, value: c.id })),
-          defaultValue: props.selected ?? capabilities.map((c) => c.id),
-        },
-      });
-    } else {
-      b.addText('capabilities', `**Capabilities:** ${capabilities.map((c) => c.label).join(', ')}`);
-    }
-  }
-
-  for (const link of agent.connectLinks ?? []) {
-    b.addText(`connect-${link.serverType}`, `Connect **${link.displayName}**: ${link.authUrl}`, {
-      variant: 'warning',
-      size: 'sm',
-    });
-  }
-
-  if (props.variant === 'draft') {
-    if (props.phase === 'pending') {
-      b.addDivider('d1');
-      b.addButton(
-        'agent-draft-approve',
-        'Create agent',
-        { type: 'submit', actionId: 'agent-draft-approve', successMessage: 'Creating…' },
-        { variant: 'primary' },
-      );
-      b.addButton(
-        'agent-draft-decline',
-        'Discard',
-        { type: 'submit', actionId: 'agent-draft-decline', successMessage: 'Discarded' },
-        { variant: 'secondary' },
-      );
-    } else {
-      // Terminal phases carry no buttons — the decision already happened, and a
-      // live button here would let a stale card re-submit it.
-      const who = props.decidedBy ? ` by ${props.decidedBy}` : '';
-      b.addText(
-        'outcome',
-        props.phase === 'created' ? `✅ Agent created${who}.` : `Discarded${who}.`,
-        { variant: props.phase === 'created' ? 'success' : 'muted' },
-      );
-    }
-  }
-
-  if (props.note) b.addText('note', props.note, { variant: 'muted', size: 'sm' });
-  return b;
-}
-
-/**
  * Build the agent card as a single `agent` component. Deterministic (pure) so
  * every phase/variant re-render produces a byte-stable card the client can
  * reconcile in place. screenId is keyed on the card's server identity so phase
  * updates for the same draft land on the same screen.
- *
- * Falls back to primitive components until the dashboard ships the `agent`
- * node — see agentComponentSupported().
  */
 export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): FlowDefinition {
   const componentProps: Record<string, unknown> =
@@ -333,13 +219,8 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
   // No title: FlowRenderer paints `flowJSON.title` as an <h2> ABOVE the card, and
   // a bare "Agent" heading over a card whose first line is the agent's name is
   // pure duplication. The card names itself.
-  const builder = agentComponentSupported()
-    ? new FlowBuilder(`agent-card-${screenKey}`).addComponent(component)
-    : buildAgentCardFallback(props, screenKey);
-
-  // setData is IDENTICAL on both paths — flow-action.ts authorizes and routes
-  // purely from here, so the fallback is not a second security surface.
-  return builder
+  return new FlowBuilder(`agent-card-${screenKey}`)
+    .addComponent(component)
     .setData({
       actionType: 'agent-card',
       variant: props.variant,

@@ -8,6 +8,7 @@ import { isTestEnv } from '../../../config';
 import {
   AttachmentEntityType,
   BaseTicketType,
+  BoardType,
   ChannelScopeType,
   FormContextType,
   FormEntityType,
@@ -39,7 +40,6 @@ import {
   Trash2,
   User,
   Users,
-  WorkflowIcon,
   X,
 } from 'lucide-react';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -54,11 +54,11 @@ import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { queries } from '../../../zero/queries';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -388,9 +388,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const [newTags, setNewTags] = useState<string[]>([]);
 
-  // Fetch workflow types using optimized hook
-  const { workflowTypes } = useWorkflowTypes();
-
   // Title generator hook
   const {
     title: generatedTitle,
@@ -472,6 +469,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     () => boards?.find(b => b.id === formValues.boardId),
     [boards, formValues.boardId],
   );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
@@ -482,7 +480,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showAssignee = ticketFormConfig?.assignedTo?.enabled ?? true;
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
-  const showWorkflows = ticketFormConfig?.workflows?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
   const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
   const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
@@ -492,7 +489,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryAssignee = ticketFormConfig?.assignedTo?.mandatory ?? false;
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
-  const mandatoryWorkflows = ticketFormConfig?.workflows?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
   const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
@@ -529,12 +525,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (!selectedBoard) return;
 
-    const ticketType = isReleaseBoard(selectedBoard.boardType)
-      ? BaseTicketType.Release
-      : BaseTicketType.Fix;
+    const ticketType = isFlowRootTicket
+      ? BaseTicketType.Epic
+      : isReleaseBoard(selectedBoard.boardType)
+        ? BaseTicketType.Release
+        : BaseTicketType.Fix;
     form.setFieldValue('ticketType', ticketType);
     markAutoApplied({ ticketType });
-  }, [selectedBoard, form, markAutoApplied]);
+  }, [selectedBoard, isFlowRootTicket, form, markAutoApplied]);
 
   useEffect(() => {
     if (!isOpen || resolvedFormFields.length === 0) return;
@@ -589,6 +587,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     isOpen,
     debounceMs: 2000,
   });
+
+  // Retrieval always returns its top-ranked tickets, so a non-empty candidate list means
+  // "closest matches", not "duplicate". Only surface the panel once the analysis has actually
+  // confirmed a duplicate and named a ticket — otherwise unrelated tickets get shown as similar.
+  const showDuplicatePanel = Boolean(
+    duplicateCheck?.analysis?.isDuplicate &&
+    duplicateCheck?.analysis?.duplicateTicketId &&
+    duplicateCheck?.candidates?.length,
+  );
 
   // Once the user acts on the board (manual select, accept, or reject), suppress all further AI suggestions
   const [boardAISuggestionSuppressed, setBoardAISuggestionSuppressed] = useState(false);
@@ -871,12 +878,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.setFieldValue('title', generatedTitle);
       markAutoApplied({ title: generatedTitle.trim() });
     }
-    // Only set generated ticket type for non-release boards
-    if (generatedTicketType && !isReleaseBoard(selectedBoard?.boardType)) {
+    // FLOW root tickets are always Epic; AI classification only applies elsewhere.
+    if (generatedTicketType && !isFlowRootTicket && !isReleaseBoard(selectedBoard?.boardType)) {
       form.setFieldValue('ticketType', generatedTicketType);
       markAutoApplied({ ticketType: generatedTicketType });
     }
-  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType, markAutoApplied]);
+  }, [
+    form,
+    generatedTitle,
+    generatedTicketType,
+    isFlowRootTicket,
+    selectedBoard?.boardType,
+    markAutoApplied,
+  ]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {
@@ -1008,7 +1022,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showAssignee,
         showTodo,
         showDueDate,
-        showWorkflows,
         showLabels,
         showMerchantId,
         showTicketType,
@@ -1016,7 +1029,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryAssignee,
         mandatoryTodo,
         mandatoryDueDate,
-        mandatoryWorkflows,
         mandatoryLabels,
         mandatoryMerchantId,
         mandatoryTicketType,
@@ -1029,7 +1041,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       showAssignee,
       showTodo,
       showDueDate,
-      showWorkflows,
       showLabels,
       showMerchantId,
       showTicketType,
@@ -1037,7 +1048,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryAssignee,
       mandatoryTodo,
       mandatoryDueDate,
-      mandatoryWorkflows,
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
@@ -1068,9 +1078,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
       if (showTodo && mandatoryTodo && !formData.status) {
         mandatoryFieldErrors.push('Todo/Status is required');
-      }
-      if (showWorkflows && mandatoryWorkflows && !formData.workflowType) {
-        mandatoryFieldErrors.push('Workflow is required');
       }
       if (showLabels && mandatoryLabels && (!formData.tags || formData.tags.length === 0)) {
         mandatoryFieldErrors.push('Labels are required');
@@ -1296,16 +1303,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         const masterTicketId = createdTicketResponse.id;
         const masterConversationId = createdTicketResponse.conversationId;
         subticketsToCreate.forEach((subTicket, index) => {
-          void zero.mutate(
-            mutators.subTicket.create({
-              subTicketId: uuidv4(),
-              mappingId: uuidv4(),
-              timestamp: baseTimestamp + index,
-              title: subTicket.title,
-              ...(subTicket.description ? { description: subTicket.description } : {}),
-              ticketId: masterTicketId,
-              ...(masterConversationId ? { conversationId: masterConversationId } : {}),
-            }),
+          void surfaceMutationError(
+            zero.mutate(
+              mutators.subTicket.create({
+                subTicketId: uuidv4(),
+                mappingId: uuidv4(),
+                timestamp: baseTimestamp + index,
+                title: subTicket.title,
+                ...(subTicket.description ? { description: subTicket.description } : {}),
+                ticketId: masterTicketId,
+                ...(masterConversationId ? { conversationId: masterConversationId } : {}),
+              }),
+            ),
+            `Failed to create sub-ticket "${subTicket.title}"`,
           );
         });
       }
@@ -2359,16 +2369,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               <span>Checking for duplicates...</span>
             </div>
           )}
-          {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
+          {showDuplicatePanel && (
             <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
               <div className='space-y-2'>
                 <div className='flex items-center justify-between pb-0.5'>
                   <span className='flex items-center gap-2'>
                     <Copy className='size-3' strokeWidth={2.5} />
                     <p className='text-sm font-medium text-foreground leading-5'>
-                      {duplicateCheck?.analysis?.isDuplicate
-                        ? 'Duplicate ticket found'
-                        : 'Similar tickets found'}
+                      Duplicate ticket found
                     </p>
                   </span>
                   <Button
@@ -2380,10 +2388,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     <X strokeWidth={2.33} className='size-3.5' />
                   </Button>
                 </div>
-                {(duplicateCheck?.analysis?.isDuplicate
-                  ? duplicateCheck?.candidates?.slice(0, 1)
-                  : duplicateCheck?.candidates?.slice(0, 5)
-                )?.map(candidate => {
+                {duplicateCheck?.candidates?.slice(0, 1)?.map(candidate => {
                   const candidateLink = candidateLinks.get(candidate.id);
 
                   return (
@@ -2648,34 +2653,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             }}
           </form.Field>
 
-          {/* Workflow Type Selection - conditionally rendered */}
-          {showWorkflows && (
-            <form.Field name='workflowType'>
-              {field => {
-                return (
-                  <EntitySelector
-                    variant='inline'
-                    options={workflowTypes.map(workflowType => ({
-                      ...workflowType,
-                      value: workflowType.id,
-                      icon: null,
-                    }))}
-                    selectedValue={field.state.value}
-                    onSelect={value => {
-                      field.handleChange(value as CreateTicketFormData['workflowType']);
-                    }}
-                    searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
-                    inputClassName='bg-background'
-                    showIndicator={false}
-                    testId='ticket-workflow-selector'
-                  />
-                );
-              }}
-            </form.Field>
-          )}
-
           {/* Tags Selection - conditionally rendered */}
           {showLabels && (
             <form.Field name='tags'>
@@ -2707,12 +2684,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           {showTicketType && (
             <form.Field name='ticketType'>
               {field => {
-                const typeOptions =
-                  ticketTypeOptions?.map(type => ({
-                    label: type.value,
-                    value: type.value,
-                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                  })) ?? [];
+                const typeOptions = isFlowRootTicket
+                  ? [
+                      {
+                        label: BaseTicketType.Epic,
+                        value: BaseTicketType.Epic,
+                        icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                      },
+                    ]
+                  : (ticketTypeOptions?.map(type => ({
+                      label: type.value,
+                      value: type.value,
+                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                    })) ?? []);
 
                 return (
                   <EntitySelector
@@ -2726,7 +2710,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'
-                    showClearButton={true}
+                    showClearButton={!isFlowRootTicket}
                     showIndicator={false}
                   />
                 );

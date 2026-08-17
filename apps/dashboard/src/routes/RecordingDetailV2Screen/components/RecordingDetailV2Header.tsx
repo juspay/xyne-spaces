@@ -1,6 +1,5 @@
 import { type ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
@@ -74,7 +73,6 @@ export const RecordingDetailV2Header = ({
   const [editedTitle, setEditedTitle] = useState(recording.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showLiveAskAIHint, setShowLiveAskAIHint] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
@@ -189,14 +187,6 @@ export const RecordingDetailV2Header = ({
       event.preventDefault();
       handleCancelEdit();
     }
-  };
-
-  const handleAskAIClick = (): void => {
-    if (isLive) {
-      setShowLiveAskAIHint(true);
-      return;
-    }
-    onAskAI();
   };
 
   const handleStartEdit = (): void => {
@@ -378,43 +368,22 @@ export const RecordingDetailV2Header = ({
             />
           </Dialog>
         )}
-
-        <Popover.Root open={showLiveAskAIHint} onOpenChange={setShowLiveAskAIHint}>
+        {!isLive && (
           <Tooltip content='Ask AI about this recording' side='top'>
-            <Popover.Anchor asChild>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleAskAIClick}
-                className='h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
-                data-track-category='RecordingDetailV2'
-                data-track-name={isLive ? 'ask_ai_live_hint' : 'ask_ai_recording'}
-              >
-                <XyneAIStar />
-                Ask AI
-              </Button>
-            </Popover.Anchor>
-          </Tooltip>
-
-          <Popover.Portal>
-            <Popover.Content
-              side='bottom'
-              align='end'
-              sideOffset={8}
-              className='z-50 w-64 rounded-xl border border-border bg-popover p-3.5 shadow-2xl'
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={onAskAI}
+              className='h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
+              data-track-category='RecordingDetailV2'
+              data-track-name='ask_ai_recording'
             >
-              <div className='mb-2 flex items-center gap-1.5'>
-                <XyneAIStar size={14} />
-                <h3 className='text-sm font-semibold text-foreground'>Ask AI</h3>
-              </div>
-              <p className='text-pretty text-xs leading-relaxed text-muted-foreground/70'>
-                Ask about decisions, action items, and anything said. Available on the full
-                recording once you stop.
-              </p>
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+              <XyneAIStar />
+              Ask AI
+            </Button>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

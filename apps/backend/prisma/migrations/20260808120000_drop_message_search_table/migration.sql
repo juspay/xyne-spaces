@@ -1,0 +1,12 @@
+-- Drop the unused `message_search` table.
+--
+-- This table was a Postgres full-text search index (tsvector + GIN indexes) that
+-- was only ever written to (upsert on message create/edit, delete on message
+-- delete). Nothing ever read from `searchVector`/`plaintextContent` for search —
+-- message search is served by the Vespa index — so the table was pure write
+-- amplification. Removing the model, repository, and all mutator write paths.
+--
+-- CASCADE drops the associated GIN indexes
+-- (`message_search_plaintext_trgm_idx`, `message_search_vector_idx`) and any
+-- remaining constraints along with the table.
+DROP TABLE IF EXISTS "workflow"."message_search" CASCADE;

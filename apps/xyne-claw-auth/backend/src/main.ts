@@ -18,6 +18,7 @@ import { webhookRouter } from "./routes/webhook.js";
 import { flowActionRouter } from "./routes/flow-action.js";
 import { twinDraftInternalRouter } from "./routes/twin-draft.js";
 import { attachmentsInternalRouter } from "./routes/attachments.js";
+import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
 import { spacesRouter } from "./routes/spaces.js";

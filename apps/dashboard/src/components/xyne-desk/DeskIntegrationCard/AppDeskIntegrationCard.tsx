@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 import { disconnectAppDesk, reconnectAppDesk } from '../../../services/clients/appDeskApi';
 import {
   useChannelIntegrationInfo,
@@ -16,17 +17,25 @@ export const AppDeskIntegrationCard = ({
   channelId,
   canManage,
 }: AppDeskIntegrationCardProps): ReactElement | null => {
+  const queryClient = useQueryClient();
   const { isConnected, hasSource, sourceType, connectedLabel } =
     useChannelIntegrationInfo(channelId);
 
   if (sourceType !== 'app-desk' || !hasSource) return null;
   if (!canManage) return null;
 
+  // Connecting/disconnecting changes the desk count the create-desk picker shows, and that
+  // list sits behind the global 5-minute staleTime.
+  const invalidateEligibleApps = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ['app-desk-eligible-apps'] });
+  };
+
   const handleDisconnect = async (): Promise<void> => {
     try {
       await disconnectAppDesk(channelId);
       toast.success('Xyne App disconnected. Conversation history is preserved.');
       clearChannelConnectedEmailCache(channelId);
+      invalidateEligibleApps();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect — please try again.');
       throw err;
@@ -38,6 +47,7 @@ export const AppDeskIntegrationCard = ({
       await reconnectAppDesk(channelId);
       toast.success('Xyne App reconnected.');
       clearChannelConnectedEmailCache(channelId);
+      invalidateEligibleApps();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to reconnect — please try again.');
       throw err;

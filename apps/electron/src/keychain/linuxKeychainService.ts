@@ -143,9 +143,8 @@ class LinuxKeychainService implements IKeychain {
         await writeFileAsync(certPath, certPem);
 
         try {
-            // ACCEPTED RISK (secops #289, MED): static 'changeit' P12 passphrase. The .p12 is a
-            // per-call temp file, immediately imported via pk12util and unlink()ed in the finally
-            // below, so the passphrase guards nothing on-host; kept static so export/import agree.
+            // The bundle is a per-call temp file, imported immediately and removed in the finally
+            // below. The passphrase is fixed so the export and import agree.
             // Create PKCS#12 bundle
             const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
@@ -204,13 +203,13 @@ class LinuxKeychainService implements IKeychain {
 
         try {
             // Extract Common Name to use as nickname. execFile (no shell) — the CN comes from an
-            // untrusted certificate and must not be interpolated into a shell command (secops #362).
+            // Comes from an untrusted certificate, so it is never interpolated into a shell command.
             const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
             const rawNickname = cnMatch ? cnMatch[1].trim() : `XyneRootCA_${Date.now()}`;
             // Restrict the nickname to a safe charset: it is used both as a certutil -n value and as a
             // filename under /usr/local/share/ca-certificates below, so it must not carry shell
-            // metacharacters or path separators/traversal (secops #362).
+            // Rejects shell metacharacters, path separators and traversal.
             const nickname = rawNickname.replace(/[^A-Za-z0-9._@ -]/g, '_').slice(0, 128) || `XyneRootCA_${Date.now()}`;
 
             // Check if certificate with same nickname already exists

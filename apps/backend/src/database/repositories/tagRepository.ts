@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { Prisma, Tag, TagsConfig } from '@prisma/client';
+import { TagMethod } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 
 export type TxClient = Prisma.TransactionClient;
@@ -160,6 +161,19 @@ export class TagRepository {
     await this.client(tx).tag.update({
       where: { id },
       data: { isDeleted: true, updatedAt: new Date(), ...(updatedBy !== undefined ? { updatedBy } : {}) },
+    });
+  }
+
+  async findById(id: string, workspaceId: string, tx?: TxClient): Promise<Tag | null> {
+    return this.client(tx).tag.findFirst({
+      where: { id, workspaceId, isDeleted: false },
+    });
+  }
+
+  async updateTagMethod(id: string, method: TagMethod, updatedBy?: string | null, tx?: TxClient): Promise<Tag> {
+    return this.client(tx).tag.update({
+      where: { id },
+      data: { method, updatedAt: new Date(), ...(updatedBy !== undefined ? { updatedBy } : {}) },
     });
   }
 

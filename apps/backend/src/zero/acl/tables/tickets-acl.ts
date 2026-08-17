@@ -3,7 +3,7 @@ import {
     MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { Schema } from '@xyne/shared'
+import { Schema, UserStatus } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
@@ -90,6 +90,24 @@ export class TicketACl extends BaseACL<'tickets'> {
 
         if (!isParticipant) {
             throw new MutationACLError('Ticket update failed: you must be a project participant to update tickets', 'tickets');
+        }
+
+        // Require the assignee to be an active (non-left) user. Intentionally NOT filtered by
+        // users.workspaceId — that column is the user's home workspace, not a tenant boundary,
+        // so a legitimate cross-workspace/guest participant would be wrongly rejected. (Being
+        // assigned does not grant channel access, so an out-of-workspace assignee is a data
+        // concern, not an access one.)
+        if (args.assignedTo) {
+            const assignee = await tx.run(
+                zql.users
+                    .where('id', args.assignedTo as string)
+                    .where('status', UserStatus.ACTIVE)
+                    .where('leftAt', 'IS', null)
+                    .one()
+            );
+            if (!assignee) {
+                throw new MutationACLError('Ticket update failed: assignee must be an active user', 'tickets');
+            }
         }
     }
 

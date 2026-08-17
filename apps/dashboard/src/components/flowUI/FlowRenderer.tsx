@@ -161,6 +161,19 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         setState(prev => ({ ...prev, values: { ...prev.values, ...action.stateUpdates } }));
         return;
       }
+      if (action.type === 'copy') {
+        const { value, successMessage } = action as { value: string; successMessage?: string };
+        try {
+          // navigator.clipboard is undefined outside a secure context (plain http
+          // on a non-localhost host), so report failure rather than throwing.
+          await navigator.clipboard.writeText(value);
+          toast.success(successMessage ?? 'Copied to clipboard');
+        } catch (error) {
+          console.error('[FlowRenderer] clipboard write failed:', error);
+          toast.error('Could not copy — select the URL in the message instead.');
+        }
+        return;
+      }
       if (action.type === 'close_screen' || action.type === 'navigate') {
         const closeAction = action as { type: string; finalMessage?: string };
         const closeResponse: AppActionResponse = closeAction.finalMessage

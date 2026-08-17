@@ -83,6 +83,7 @@ import {
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
+import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
@@ -106,7 +107,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, isTwinDelivery } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
@@ -493,6 +494,13 @@ import {
   AUTOMATION_RUN_DEDUP_TTL,
 } from "../lib/session-context.js";
 export { setSession, getSession, getSessionByConv, type SessionContext };
+import {
+  upsertWidgetBinding,
+  findPrBindingByUrl,
+  readPrBindingData,
+  normalizePrUrl,
+  setWidgetBindingStatus,
+} from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -6779,6 +6787,355 @@ function renderPlanCard(
   return next;
 }
 
+// ── PR card render (create/merge PR subagent tool → kind:"pr" progress) ─────
+// A github/bitbucket/gitlab subagent's create_pull_request / merge_pull_request
+// tool fires a kind:"pr" progress event carrying a canonical, provider-neutral
+// PR fact. We post ONE card per PR (keyed by a deterministic screenId) the first
+// time, then updateMessage the SAME card in place as its status advances. Only
+// conversation mode (a Spaces thread) has a surface — DM/approval runs are
+// skipped. Renders are serialized per session so two PR events can't race the
+// message-id write. Best-effort; never blocks the /progress ack.
+interface PrProgressInput {
+  provider: PrProvider;
+  status: PrStatus;
+  title: string;
+  url?: string;
+  desc?: string;
+  ticketId?: string;
+  number?: string | number;
+  repo?: string;
+}
+
+const PR_PROVIDERS = new Set<PrProvider>(["github", "bitbucket", "gitlab", "other"]);
+const PR_STATUSES = new Set<PrStatus>(["created", "merged", "reverted", "deleted", "declined"]);
+
+/** Validate + coerce the untrusted wire `pr` payload into a typed fact, or null. */
+function coercePrInput(raw: unknown): PrProgressInput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const { provider, status, title } = o as { provider?: unknown; status?: unknown; title?: unknown };
+  if (typeof provider !== "string" || !PR_PROVIDERS.has(provider as PrProvider)) return null;
+  if (typeof status !== "string" || !PR_STATUSES.has(status as PrStatus)) return null;
+  if (typeof title !== "string" || !title.trim()) return null;
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  const out: PrProgressInput = {
+    provider: provider as PrProvider,
+    status: status as PrStatus,
+    title: title.trim(),
+  };
+  const url = str(o["url"]);
+  if (url) out.url = url;
+  const desc = str(o["desc"]);
+  if (desc) out.desc = desc;
+  const ticketId = str(o["ticketId"]);
+  if (ticketId) out.ticketId = ticketId;
+  const repo = str(o["repo"]);
+  if (repo) out.repo = repo;
+  const number = o["number"];
+  if (typeof number === "string" && number.trim()) out.number = number.trim();
+  else if (typeof number === "number" && Number.isFinite(number)) out.number = number;
+  return out;
+}
+
+const prRenderQueue = new Map<string, Promise<void>>();
+
+async function doRenderPrCard(
+  sessionId: string,
+  pr: PrProgressInput,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  // Same robust resolution every /webhook/progress branch uses (sessionId →
+  // recovery → conv-index), so a refired run that minted a fresh sessionId still
+  // lands the card in the right thread.
+  const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) {
+    clog.warn(
+      `[pr-card] skipping render for ${sessionId}: ctx=${ctx ? "yes" : "MISSING"} ` +
+        `responseMode=${ctx?.responseMode ?? "?"} channelId=${ctx?.channelId ? "yes" : "MISSING"} ` +
+        `appToken=${ctx?.appToken ? "yes" : "MISSING"} (conv=${conversationId ?? "?"} agent=${agentSlug ?? "?"})`,
+    );
+    return;
+  }
+
+  // Deterministic screenId keyed on PR identity — same PR ⇒ same card across
+  // status transitions (created → merged / …). Must match buildPrFlow's own
+  // derivation, so pass it explicitly to both the id map and the builder.
+  const identity: { provider: PrProvider; repo?: string; number?: string | number; url?: string } = {
+    provider: pr.provider,
+  };
+  if (pr.repo) identity.repo = pr.repo;
+  if (pr.number !== undefined) identity.number = pr.number;
+  if (pr.url) identity.url = pr.url;
+  const screenId = prScreenId(identity);
+
+  const flow = buildPrFlow(
+    {
+      provider: pr.provider,
+      status: pr.status,
+      title: pr.title,
+      ...(pr.url ? { url: pr.url } : {}),
+      ...(pr.desc ? { desc: pr.desc } : {}),
+      ...(pr.ticketId ? { ticketId: pr.ticketId } : {}),
+    },
+    {
+      screenId,
+      data: {
+        agentSlug: ctx.agentSlug,
+        conversationId: ctx.conversationId,
+        channelId: ctx.channelId,
+      },
+    },
+  );
+
+  const existing = ctx.prMessageIds?.[screenId];
+  let renderedMessageId: string | undefined = existing;
+  if (!existing) {
+    clog.info(
+      `[pr-card] posting NEW card screenId=${screenId} provider=${pr.provider} status=${pr.status} conv=${ctx.conversationId}`,
+    );
+    // postMessage takes the partial `flow` field; chatController wraps it.
+    // conversationId lands the card IN THE THREAD (channelId alone hits root).
+    const resp = (await spacesAppFetch(
+      "/chat/postMessage",
+      { channelId: ctx.channelId, conversationId: ctx.conversationId, flow, userId: ctx.spacesAppUserId },
+      ctx.appToken,
+    )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+    const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
+    if (messageId) {
+      renderedMessageId = messageId;
+      clog.info(`[pr-card] posted card screenId=${screenId} messageId=${messageId}`);
+      // Merge into the FRESHEST session so we don't clobber a concurrently-set
+      // planMessageId or another PR's id.
+      const fresh = (await getSession(sessionId).catch(() => null)) ?? ctx;
+      await setSession(sessionId, {
+        ...fresh,
+        prMessageIds: { ...(fresh.prMessageIds ?? {}), [screenId]: messageId },
+      }).catch(() => {});
+    } else {
+      clog.warn(`[pr-card] postMessage returned no messageId for screenId=${screenId} — resp=${JSON.stringify(resp)?.slice(0, 200)}`);
+    }
+  } else {
+    clog.info(`[pr-card] updating card in place screenId=${screenId} messageId=${existing} → status=${pr.status}`);
+    // updateMessage takes the full `flowJSON` field; needs channelId for
+    // validateChannelAccessForPost.
+    await spacesAppFetch(
+      "/chat/updateMessage",
+      { messageId: existing, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
+      ctx.appToken,
+    );
+  }
+
+  // ── Durable binding (COMPLEMENTS the Redis fast path above) ───────────────
+  // Persist where this PR card lives + the agent that posted it, keyed by the
+  // deterministic screenId and (for webhook lookup) the normalized PR URL. An
+  // inbound Bitbucket webhook that fires after this session's SessionContext is
+  // gone reads this to post a fresh status card. Best-effort — a binding failure
+  // must never break the render, and a missing URL just means the webhook can't
+  // find it (we log so that's visible). We store the card-rebuild fields in
+  // `data` so the webhook renders an identical card with the new status.
+  try {
+    // Empty-after-normalize (e.g. a protocol-only URL) MUST be stored as null,
+    // never "" — a webhook lookup by a real URL could never match "", and an ""
+    // key could spuriously collide across PRs.
+    const normalizedUrl = pr.url ? normalizePrUrl(pr.url) : "";
+    const externalKey = normalizedUrl || null;
+    if (!externalKey) {
+      clog.warn(
+        `[pr-card] binding has no usable PR url (screenId=${screenId}) — webhook status updates won't find this card`,
+      );
+    }
+    const bindingData: Record<string, unknown> = { provider: pr.provider, title: pr.title };
+    if (pr.url) bindingData["url"] = pr.url;
+    if (pr.ticketId) bindingData["ticketId"] = pr.ticketId;
+    if (pr.desc) bindingData["desc"] = pr.desc;
+    if (pr.repo) bindingData["repo"] = pr.repo;
+    if (pr.number !== undefined) bindingData["number"] = pr.number;
+    await upsertWidgetBinding({
+      orgId: ctx.agentOrgId ?? "",
+      kind: "pr",
+      screenId,
+      externalKey,
+      conversationId: ctx.conversationId,
+      channelId: ctx.channelId,
+      messageId: renderedMessageId ?? null,
+      spacesAppId: ctx.spacesAppId,
+      spacesAppUserId: ctx.spacesAppUserId,
+      agentSlug: ctx.agentSlug ?? null,
+      status: pr.status,
+      data: bindingData,
+    });
+  } catch (e) {
+    clog.warn(
+      `[pr-card] upsertWidgetBinding failed for screenId=${screenId}:`,
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+function renderPrCard(
+  sessionId: string,
+  pr: PrProgressInput,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  const prev = prRenderQueue.get(sessionId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => doRenderPrCard(sessionId, pr, conversationId, agentSlug));
+  prRenderQueue.set(sessionId, next);
+  void next.finally(() => {
+    if (prRenderQueue.get(sessionId) === next) prRenderQueue.delete(sessionId);
+  });
+  return next;
+}
+
+// ── POST /webhook/pr-event — inbound git-host PR status change (S2S) ────────
+//
+// The MAIN backend receives + HMAC-verifies the Bitbucket webhook and runs its
+// ticket-status sync, then forwards a normalized PR fact HERE (fire-and-forget,
+// x-s2s-key). We look up the durable AgentWidgetBinding for this PR by its
+// normalized URL and — only if an agent originally posted a card for it — post a
+// FRESH status card into the SAME thread as that agent's bot. No binding ⇒ this
+// PR wasn't created by an agent in a Spaces thread ⇒ 200 no-op (mirrors the
+// backend's "not created by Xyne → ignore"). Dedupe on the last-rendered status
+// so provider re-delivery (or an in-session merge already rendered live) never
+// double-posts. Serialized per PR URL. Best-effort; the ack is immediate.
+interface PrEventInput {
+  provider: PrProvider;
+  status: PrStatus;
+  prUrl: string;
+  number?: string | number;
+  repo?: string;
+}
+
+function coercePrEventInput(raw: unknown): PrEventInput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const provider = o["provider"];
+  const status = o["status"];
+  const prUrl = o["prUrl"] ?? o["url"];
+  if (typeof provider !== "string" || !PR_PROVIDERS.has(provider as PrProvider)) return null;
+  if (typeof status !== "string" || !PR_STATUSES.has(status as PrStatus)) return null;
+  if (typeof prUrl !== "string" || !prUrl.trim()) return null;
+  const out: PrEventInput = {
+    provider: provider as PrProvider,
+    status: status as PrStatus,
+    prUrl: prUrl.trim(),
+  };
+  const repo = o["repo"];
+  if (typeof repo === "string" && repo.trim()) out.repo = repo.trim();
+  const number = o["number"];
+  if (typeof number === "string" && number.trim()) out.number = number.trim();
+  else if (typeof number === "number" && Number.isFinite(number)) out.number = number;
+  return out;
+}
+
+async function postWebhookPrStatusCard(ev: PrEventInput): Promise<{ posted: boolean; reason?: string }> {
+  const binding = await findPrBindingByUrl(ev.prUrl);
+  if (!binding) return { posted: false, reason: "no-binding" };
+  if (binding.status === ev.status) return { posted: false, reason: "dedup-same-status" };
+
+  const cardData = readPrBindingData(binding);
+  if (!cardData) return { posted: false, reason: "binding-missing-card-data" };
+
+  const agentRow = await agentRepository.findBySpacesAppId(binding.spacesAppId);
+  if (!agentRow?.spacesAppToken) return { posted: false, reason: "agent-unresolved" };
+  // Defense-in-depth org isolation: the agent resolved from the binding's OWN
+  // spacesAppId must belong to the binding's org. They agree by construction
+  // (both captured from one SessionContext at card-creation), so a mismatch
+  // means corrupted/tampered state — never post another org's bot into this
+  // thread. Only enforced when both orgs are known (a binding written when
+  // ctx.agentOrgId was absent stores ""), so a legit empty-org binding still
+  // renders.
+  if (binding.orgId && agentRow.orgId && binding.orgId !== agentRow.orgId) {
+    clog.warn(
+      `[webhook/pr-event] org mismatch binding.org=${binding.orgId} agent.org=${agentRow.orgId} (spacesAppId=${binding.spacesAppId}) — skipping`,
+    );
+    return { posted: false, reason: "org-mismatch" };
+  }
+  const appToken = decryptStoredField(agentRow.spacesAppToken);
+  const userId = binding.spacesAppUserId || agentRow.spacesAppUserId || "";
+  if (!userId) return { posted: false, reason: "no-bot-user" };
+
+  // A distinct screenId per status so each webhook status card is its OWN
+  // artifact in the thread (a NEW card per status change), never reconciling
+  // onto the agent's original created card.
+  const screenId = `${binding.screenId}-${ev.status}`;
+  const flow = buildPrFlow(
+    {
+      provider: cardData.provider as PrProvider,
+      status: ev.status,
+      title: cardData.title,
+      ...(cardData.url ? { url: cardData.url } : {}),
+      ...(cardData.desc ? { desc: cardData.desc } : {}),
+      ...(cardData.ticketId ? { ticketId: cardData.ticketId } : {}),
+    },
+    {
+      screenId,
+      data: {
+        ...(binding.agentSlug ? { agentSlug: binding.agentSlug } : {}),
+        conversationId: binding.conversationId,
+        channelId: binding.channelId,
+        source: "webhook",
+      },
+    },
+  );
+
+  clog.info(
+    `[webhook/pr-event] posting status card screenId=${screenId} status=${ev.status} conv=${binding.conversationId}`,
+  );
+  const resp = (await spacesAppFetch(
+    "/chat/postMessage",
+    { channelId: binding.channelId, conversationId: binding.conversationId, flow, userId },
+    appToken,
+  )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+  const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
+
+  // Record the new status so a re-delivered webhook is a no-op. Best-effort: if
+  // this write fails a re-delivery could post a duplicate card (acceptable — far
+  // better than losing the card by marking status BEFORE the post succeeds), so
+  // log rather than swallow, to surface a persistent failure.
+  await setWidgetBindingStatus(binding.id, ev.status, messageId).catch((e) =>
+    clog.warn(
+      `[webhook/pr-event] setWidgetBindingStatus failed (binding=${binding.id} status=${ev.status}):`,
+      e instanceof Error ? e.message : e,
+    ),
+  );
+  return { posted: true };
+}
+
+const prEventQueue = new Map<string, Promise<unknown>>();
+
+router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) => {
+  // Ack immediately — never block the caller (the backend webhook handler).
+  res.json({ success: true });
+
+  const ev = coercePrEventInput(req.body);
+  if (!ev) {
+    clog.warn(`[webhook/pr-event] rejected payload: ${JSON.stringify(req.body)?.slice(0, 300)}`);
+    return;
+  }
+
+  // Serialize per PR URL so two rapid events for the same PR can't race the
+  // status write (and thus the dedup check).
+  const key = normalizePrUrl(ev.prUrl);
+  const prev = prEventQueue.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(async () => {
+    try {
+      const r = await postWebhookPrStatusCard(ev);
+      clog.info(
+        `[webhook/pr-event] provider=${ev.provider} status=${ev.status} url=${key} → ${r.posted ? "POSTED" : `skipped:${r.reason}`}`,
+      );
+    } catch (e) {
+      clog.warn(`[webhook/pr-event] failed url=${key}:`, e instanceof Error ? e.message : e);
+    }
+  });
+  prEventQueue.set(key, next);
+  void next.finally(() => {
+    if (prEventQueue.get(key) === next) prEventQueue.delete(key);
+  });
+});
+
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
@@ -6837,6 +7194,28 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
       clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
     );
+    return;
+  }
+
+  // PR card: a create/merge pull-request subagent tool fires kind:"pr" with a
+  // canonical, provider-neutral PR fact. Post (first time) or update-in-place the
+  // PR card in the thread. Serialized per session; best-effort — never blocks.
+  if ((req.body as { kind?: string }).kind === "pr") {
+    void touchRunRecovery(sessionId).catch(() => {});
+    const rawPr = (req.body as { pr?: unknown }).pr;
+    const pr = coercePrInput(rawPr);
+    if (pr) {
+      clog.info(
+        `[webhook/progress] kind:pr received sessionId=${sessionId} provider=${pr.provider} status=${pr.status} number=${pr.number ?? "?"} repo=${pr.repo ?? "?"}`,
+      );
+      renderPrCard(sessionId, pr, conversationId, agentSlug).catch((e) =>
+        clog.warn(`[webhook/progress] renderPrCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
+      );
+    } else {
+      clog.warn(
+        `[webhook/progress] kind:pr REJECTED by coercePrInput sessionId=${sessionId} raw=${JSON.stringify(rawPr)?.slice(0, 300)}`,
+      );
+    }
     return;
   }
 

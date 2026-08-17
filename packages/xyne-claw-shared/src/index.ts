@@ -38,6 +38,8 @@ export type {
   AgentDraftPhase,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
+export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
+export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 // The sandbox_unavailable wire contract — shared by the emitting tool, the

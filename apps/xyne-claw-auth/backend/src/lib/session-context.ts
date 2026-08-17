@@ -93,6 +93,15 @@ export interface SessionContext {
    */
   planMessageId?: string;
   /**
+   * MessageIds of the PR cards this run posted, keyed by the deterministic PR
+   * screenId (prScreenId → `agent-pr-<identity>`). A `*__create_pull_request` /
+   * `*__merge_pull_request` subagent tool fires a kind:"pr" progress event; the
+   * card is posted once per PR and then updated in place as its status advances
+   * (created → merged / reverted / deleted / declined). One entry per distinct PR
+   * touched in the run; undefined until the first PR op.
+   */
+  prMessageIds?: Record<string, string>;
+  /**
    * Auto-draft forward URL. Present only when this run was triggered by the
    * Spaces email auto-draft (a synthetic APP_MENTIONED, not a real mention).
    * /webhook/result persists as usual, then forwards the result here (the

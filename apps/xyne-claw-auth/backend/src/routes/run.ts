@@ -9,7 +9,7 @@ import { spacesAppFetch } from "../lib/spaces-api.js";
 import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
-import { gcsService } from "../services/gcsService.js";
+import { gcsService } from "../services/storageService.js";
 import {
   normalizeAttachedContext,
   buildAttachedContextPayload,
@@ -2661,6 +2661,10 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
         },
         onPlan: async (sid, todos) => {
           await postProgress({ sessionId: sid, kind: "plan", todos });
+        },
+        onPr: async (sid, pr) => {
+          log.info(`[run] proxy: bridging kind:pr → progress session=${sid}`);
+          await postProgress({ sessionId: sid, kind: "pr", pr });
         },
         onProgressLabel: async (sid, payload) => {
           await postProgress({ sessionId: sid, ...payload });

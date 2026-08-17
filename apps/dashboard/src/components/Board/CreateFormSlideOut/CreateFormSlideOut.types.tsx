@@ -14,14 +14,18 @@ export interface CreateFormSlideOutProps {
   isOpen: boolean;
   onClose: () => void;
   projectId?: string;
-  onSave: (formData: { formName: string; formDescription: string; fields: FormField[] }) => void;
+  onSave: (formData: {
+    formName: string;
+    formDescription: string;
+    fields: FormField[];
+  }) => void | Promise<void>;
   /** Called when updating an existing form (provides formId along with data) */
   onUpdate?: (formData: {
     formId: string;
     formName: string;
     formDescription: string;
     fields: FormField[];
-  }) => void;
+  }) => void | Promise<void>;
   /** The form ID when editing an existing form */
   formId?: string;
   /** Pre-populate the form builder with existing data (for editing an existing form) */
@@ -32,6 +36,9 @@ export interface CreateFormSlideOutProps {
   };
   /** Override the panel title (default: "Create Form") */
   title?: string;
+  /** Render builder in parent layout instead of fixed slide-out. */
+  embedded?: boolean;
+  submitLabel?: string;
 }
 
 export interface SelectOption {

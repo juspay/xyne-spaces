@@ -1,5 +1,5 @@
 import { repositories } from '../database/repositories/index';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { logger } from '../utils/logger';
 
 /**
@@ -143,7 +143,7 @@ export class ACLService {
 
       return userAccess.map(access => ({
         resourceName: access.resource.name,
-        accessType: access.accessType
+        accessType: access.accessType as AccessType
       }));
     } catch (error) {
       logger.error('Error getting user resources:', error);
@@ -157,7 +157,8 @@ export class ACLService {
   async grantUserAccess(
     userId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
     try {
       // Find the resource
@@ -169,11 +170,14 @@ export class ACLService {
         };
       }
 
-      // Grant access
+      // Grant access. workspaceId comes from the caller, which has already resolved and
+      // authorized the target — re-reading the user row here would only re-derive the same
+      // value, once per resource in a batch grant.
       await repositories.resourceAccess.grantAccess({
         userId,
         resourceId: resource.id,
-        accessType
+        accessType,
+        workspaceId,
       });
 
       logger.info(`Granted ${accessType} access to user ${userId} for resource ${resourceName}`);
@@ -196,7 +200,8 @@ export class ACLService {
   async grantGroupAccess(
     groupId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
     try {
       // Find the resource
@@ -208,11 +213,12 @@ export class ACLService {
         };
       }
 
-      // Grant access
+      // Grant access — see grantUserAccess on why workspaceId is passed in.
       await repositories.resourceAccess.grantAccess({
         groupId,
         resourceId: resource.id,
-        accessType
+        accessType,
+        workspaceId,
       });
 
       logger.info(`Granted ${accessType} access to group ${groupId} for resource ${resourceName}`);

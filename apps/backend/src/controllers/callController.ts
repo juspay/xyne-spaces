@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ChannelRole } from '@prisma/client';
 import {
   livekitService,
   allowedSourcesForHostControls,
@@ -11,16 +10,7 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  InvitationResponse,
-  MeetingStatus,
-  NotificationType,
-  RecordingType,
-  Prisma,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -33,7 +23,7 @@ import {
 } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
-import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
@@ -41,16 +31,21 @@ import {
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   ShareableEntityType,
-} from '@xyne/shared';
+  ChannelRole,
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MeetingStatus,
+  NotificationType,
+  RecordingType, AttachmentEntityType } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import {
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
-} from '@/services/recordingSummaryTemplates';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -64,10 +59,7 @@ const UpdateHeadlessRecordingSchema = z
   });
 
 const RegenerateHeadlessSummarySchema = z.object({
-  summaryTemplateId: z.string().refine(
-    value => !!getBuiltinRecordingSummaryTemplate(value),
-    'Invalid recording summary template',
-  ),
+  summaryTemplateId: z.string().trim().min(1),
 });
 
 export class CallController {
@@ -425,9 +417,9 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
-        const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+        const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
-          callType: 'HEADLESS',
+          callType: CallType.HEADLESS,
           sttModel: sttModel || 'azure',
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
@@ -591,7 +583,7 @@ export class CallController {
             livekitUrl: livekitService.getServerUrl(),
             externalId: existingCall.externalId,
             callId: existingCall.externalId,
-            roomLink: existingCall.roomLink || `${livekitService.getClientUrl()}/call/${existingCall.externalId}?type=${callType}`,
+            roomLink: existingCall.roomLink,
             channelId: finalChannelId,
             scopeType: channel.scopeType, // Add scopeType for CallKit filtering
           });
@@ -623,7 +615,7 @@ export class CallController {
         // This path should never execute since we already fetched channel above
       }
       // Generate room link
-      const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+      const roomLink = buildCallInviteUrl(callExternalId);
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -698,7 +690,10 @@ export class CallController {
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
       if (headlessNotesCanvasId) {
         try {
-          await db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } });
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessNotesCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } }),
+          ]);
         } catch (cleanupError) {
           logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
             canvasId: headlessNotesCanvasId,
@@ -733,12 +728,20 @@ export class CallController {
 
       let call = await repositories.calls.findByExternalId(callId);
 
+      // Calls are tenant-scoped by the repository ACL. Fail closed before any
+      // LiveKit lookup so an authenticated user in workspace B cannot receive
+      // a token for an already-running workspace A room whose UUID they know.
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
       // --- Recurring series link resolution ---
       // If the requested call belongs to a recurring series, try to redirect the
       // participant to the currently active instance (someone shared an old link).
       // Fallback: use the current in-window SCHEDULED instance, or the next one
       // when the requested link points to an occurrence whose window has ended.
-      if (call?.recurringSeriesId) {
+      if (call.recurringSeriesId) {
         const activeSeriesCall = await repositories.calls.findActiveCallByRecurringSeriesId(call.recurringSeriesId);
         if (activeSeriesCall) {
           logger.info(`[joinCall] Recurring series redirect: old call ${callId} → active call ${activeSeriesCall.externalId}`);
@@ -759,6 +762,16 @@ export class CallController {
         }
       }
 
+      // Defense in depth after recurring resolution: the final call instance
+      // must belong to the workspace identity selected by authentication.
+      if (!user.workspaceId || call.workspaceId !== user.workspaceId) {
+        logger.warn(
+          `[CallController] join denied, workspace mismatch | callId=${callId}, userId=${user.id}`,
+        );
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
       if (call && call.status === CallStatus.ENDED) {
         res.status(400).json({ success: false, error: 'Cannot join an ended call' });
         return;
@@ -767,7 +780,7 @@ export class CallController {
       // Fetch channel to get scopeType for CallKit filtering and participant gating
       let scopeType = null;
       let callChannel = null;
-      if (call?.channelId) {
+      if (call.channelId) {
         callChannel = await repositories.channels.findById(call.channelId);
         scopeType = callChannel?.scopeType || null;
       }
@@ -802,6 +815,7 @@ export class CallController {
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           projectId: channel.projectId,
+          createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
 
@@ -852,6 +866,23 @@ export class CallController {
             data: { metadata: restMeta as Prisma.InputJsonValue },
           });
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
+        }
+
+        // Who belongs to a call: the host, anyone invited, and the members of the
+        // channel it is happening in — a channel call is offered to the channel, so
+        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
+        // else holds a link they were never given access by, and is turned away.
+        if (!participant && call.createdByUserId !== user.id) {
+          const isChannelMember = call.channelId
+            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
+            : false;
+          if (!isChannelMember) {
+            logger.warn(
+              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
+            );
+            res.status(403).json({ success: false, error: 'You do not have access to this call' });
+            return;
+          }
         }
       }
 
@@ -1323,8 +1354,12 @@ export class CallController {
       }
 
       if (input.summaryTemplateId) {
-        const template = await repositories.summaryTemplates.findById(input.summaryTemplateId);
-        if (!template || template.workspaceId !== req.user!.workspaceId) {
+        const template = await summaryTemplateService.findAccessibleById(
+          input.summaryTemplateId,
+          req.user!.workspaceId,
+          userId,
+        );
+        if (!template) {
           res.status(400).json({ success: false, error: 'Invalid summary template' });
           return;
         }
@@ -1408,7 +1443,7 @@ export class CallController {
 
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
-        input.summaryTemplateId as BuiltinRecordingSummaryTemplateId,
+        input.summaryTemplateId,
       );
       if (!result) {
         res.status(404).json({
@@ -1457,6 +1492,11 @@ export class CallController {
       if (!call) {
         logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
 
@@ -1585,6 +1625,11 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
       if (
         call.callType === CallType.HEADLESS &&
         !(await callShareService.canView(call, userId, req.user!.workspaceId))
@@ -1682,6 +1727,11 @@ export class CallController {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
       if (
@@ -1829,6 +1879,12 @@ export class CallController {
         return;
       }
 
+      const callerParticipant = await repositories.calls.findParticipant(call.id, userId);
+      if (!callerParticipant && call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'You are not a participant of this call' });
+        return;
+      }
+
       if (call.status !== 'ACTIVE') {
         res.status(400).json({ success: false, error: 'Call is not active' });
         return;
@@ -1838,8 +1894,29 @@ export class CallController {
       const invitedUserIds: string[] = [];
       const db = DatabaseClient.getInstance();
 
+      // Invitees are resolved within the caller's workspace.
+      const callerWorkspaceId = req.user?.workspaceId;
+      if (!callerWorkspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const invitableUsers = await db.user.findMany({
+        where: { id: { in: userIds as string[] }, workspaceId: callerWorkspaceId },
+        select: { id: true },
+      });
+      const invitableUserIds = new Set(invitableUsers.map(u => u.id));
+      const rejectedUserIds = (userIds as string[]).filter(id => !invitableUserIds.has(id));
+      if (rejectedUserIds.length > 0) {
+        logger.warn(
+          `[${callId}] invite_users_rejected_out_of_workspace | count=${rejectedUserIds.length} caller=${userId}`,
+        );
+      }
+
       // Process each user
       for (const targetUserId of userIds) {
+        if (!invitableUserIds.has(targetUserId)) {
+          continue;
+        }
         // Check if participant already exists
         const existingParticipant = await repositories.calls.findParticipant(call.id, targetUserId);
 
@@ -2231,6 +2308,21 @@ export class CallController {
    * channel members can view/download them even if they didn't join the call.
    * Mutating ops (start/stop/rename/delete) stay participant/starter-gated.
    */
+  /**
+   * Whether a caller belongs to a call's audience: its host, anyone who took part, or a
+   * member of the channel it happened in. A channel call is offered to the channel, so a
+   * member who could not attend can still read what came out of it.
+   */
+  private async isCallAudience(
+    call: { id: string; channelId: string | null; createdByUserId: string },
+    userId: string,
+  ): Promise<boolean> {
+    if (call.createdByUserId === userId) return true;
+    if (await repositories.calls.findParticipant(call.id, userId)) return true;
+    if (!call.channelId) return false;
+    return repositories.channelParticipants.isParticipant(call.channelId, userId);
+  }
+
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call) return false;
@@ -2565,7 +2657,7 @@ export class CallController {
         const deleteResult = await db.messageAttachment.deleteMany({
           where: {
             entityId: { in: messageIds },
-            entityType: 'CHAT',
+            entityType: AttachmentEntityType.CHAT,
           },
         });
         logger.info(`Deleted ${deleteResult.count} attachments for recording ${callId}`);

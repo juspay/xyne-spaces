@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
 import { logger } from '@/utils/logger';
@@ -58,22 +59,6 @@ const preferencesSchema = z.record(
 export class NotificationController {
   private resolveSessionId(req: Request): string | undefined {
     return req.authenticatedSessionId;
-  }
-
-  async getVapidPublicKey(_req: Request, res: Response): Promise<void> {
-    try {
-      const publicKey = process.env.VAPID_PUBLIC_KEY;
-
-      if (!publicKey) {
-        res.status(500).json({ error: 'VAPID public key not configured' });
-        return;
-      }
-
-      res.json({ publicKey });
-    } catch (error) {
-      logger.error('Failed to get VAPID public key:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
   }
 
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
@@ -396,7 +381,7 @@ export class NotificationController {
       await notificationService.createNotification(userId, {
         title: 'Test Notification',
         message: 'This is a test notification from Xyne Spaces',
-        type: 'WORKFLOW_COMPLETION',
+        type: NotificationType.WORKFLOW_COMPLETION,
         relatedEntityType: 'test',
         relatedEntityId: 'test-' + Date.now(),
         actionUrl: `/${req.user!.workspaceId}/notifications`,

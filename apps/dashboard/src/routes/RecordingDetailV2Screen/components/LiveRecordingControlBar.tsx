@@ -19,8 +19,9 @@
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, Flag } from '@xyne/icons';
+import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
+import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
@@ -38,6 +39,8 @@ interface LiveRecordingControlBarProps {
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   onMarkerSelect?: (item: MarkedItem) => void;
   isAudioPreparing?: boolean;
+  /** True once playback is known to be unavailable for this recording. */
+  isAudioUnavailable?: boolean;
 }
 
 /** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
@@ -50,6 +53,7 @@ export const LiveRecordingControlBar = ({
   onLoadAudio,
   onMarkerSelect,
   isAudioPreparing = false,
+  isAudioUnavailable = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
   // Recording session state — only meaningful when this tab owns the live session.
   const activeExternalId = useRecordingStore(context => context.externalId);
@@ -114,6 +118,7 @@ export const LiveRecordingControlBar = ({
       <RecordedTimelineBar
         recording={recording}
         isAudioPreparing={isAudioPreparing}
+        isAudioUnavailable={isAudioUnavailable}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
       />
@@ -180,7 +185,7 @@ export const LiveRecordingControlBar = ({
       <span
         className={[
           'shrink-0 font-mono text-xs font-medium uppercase tracking-wide w-12',
-          isPaused ? 'text-muted-foreground' : 'text-destructive',
+          isPaused ? 'text-muted-foreground' : 'text-primary',
         ].join(' ')}
       >
         {isPaused ? 'Paused' : 'Live'}
@@ -326,10 +331,8 @@ const LiveRecordingTimeline = ({
           className='absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2'
           style={{ left: `${progressPercent}%` }}
         >
-          {!isPaused && (
-            <span className='absolute inset-0 animate-ping rounded-full bg-destructive opacity-40' />
-          )}
-          <span className='absolute inset-0 rounded-full border-2 border-background bg-destructive shadow-sm' />
+          {!isPaused && <span className='absolute inset-0 animate-ping rounded-full bg-primary' />}
+          <span className='absolute inset-0 rounded-full border-2 border-background bg-primary shadow-sm' />
         </div>
       </div>
     </div>
@@ -348,6 +351,8 @@ interface RecordedTimelineBarProps {
   onMarkerSelect?: (item: MarkedItem) => void;
   /** True while the stitched audio is still on its way. */
   isAudioPreparing?: boolean;
+  /** True once playback is known to be unavailable (e.g. older recordings). */
+  isAudioUnavailable?: boolean;
 }
 
 const RecordedTimelineBar = ({
@@ -355,6 +360,7 @@ const RecordedTimelineBar = ({
   onLoadAudio,
   onMarkerSelect,
   isAudioPreparing = false,
+  isAudioUnavailable = false,
 }: RecordedTimelineBarProps): ReactElement => {
   const fallbackDurationMs =
     recording.durationMs ??
@@ -381,16 +387,28 @@ const RecordedTimelineBar = ({
   const isPlaying = playback.state === 'playing';
   const isStitching = !onLoadAudio && isAudioPreparing;
   const isAudioBusy = isStitching || playback.state === 'loading';
+  // Once stitching has given up (or never applied) and there is still no audio to
+  // load, the recording simply has no playable audio (e.g. older recordings) — show
+  // an alert-triangle instead of a spinner that would otherwise never resolve.
+  const showAudioUnavailable = !onLoadAudio && !isStitching && isAudioUnavailable;
   const audioControlLabel = isStitching
     ? 'Preparing audio'
-    : !onLoadAudio
-      ? 'Audio is unavailable for this recording'
-      : playback.state === 'loading'
-        ? 'Loading audio'
-        : isPlaying
-          ? 'Pause recording'
-          : 'Play recording';
-  const audioIconKey = isAudioBusy ? 'loading' : isPlaying ? 'pause' : 'play';
+    : showAudioUnavailable
+      ? 'Recording is not available for playback.'
+      : !onLoadAudio
+        ? 'Audio is unavailable for this recording'
+        : playback.state === 'loading'
+          ? 'Loading audio'
+          : isPlaying
+            ? 'Pause recording'
+            : 'Play recording';
+  const audioIconKey = isAudioBusy
+    ? 'loading'
+    : showAudioUnavailable
+      ? 'unavailable'
+      : isPlaying
+        ? 'pause'
+        : 'play';
 
   const selectMarker =
     playback.canSeek || onMarkerSelect
@@ -400,52 +418,60 @@ const RecordedTimelineBar = ({
         }
       : null;
 
+  const playButton = (
+    <motion.div
+      className='shrink-0'
+      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={
+        shouldReduceMotion ? { duration: 0.15 } : { type: 'spring', stiffness: 480, damping: 30 }
+      }
+    >
+      <Button
+        type='button'
+        variant='outline'
+        size='icon'
+        onClick={() => void playback.toggle()}
+        disabled={!onLoadAudio || playback.state === 'loading'}
+        aria-busy={isAudioBusy}
+        className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
+        aria-label={audioControlLabel}
+        title={audioControlLabel}
+        data-track-category='RecordingDetailV2'
+        data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
+      >
+        <AnimatePresence mode='wait' initial={false}>
+          <motion.span
+            key={audioIconKey}
+            className='flex items-center justify-center'
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.6 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+          >
+            {isAudioBusy ? (
+              <Spinner size={14} className='animate-spin' />
+            ) : showAudioUnavailable ? (
+              <AlertTriangle size={14} className='text-muted-foreground' />
+            ) : isPlaying ? (
+              <PauseBig size={14} strokeWidth={4} variant='Solid' />
+            ) : (
+              <PlayBig size={14} variant='Solid' />
+            )}
+          </motion.span>
+        </AnimatePresence>
+      </Button>
+    </motion.div>
+  );
+
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
       <div className='flex min-h-11 items-center gap-4'>
-        <motion.div
-          className='shrink-0'
-          initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={
-            shouldReduceMotion
-              ? { duration: 0.15 }
-              : { type: 'spring', stiffness: 480, damping: 30 }
-          }
-        >
-          <Button
-            type='button'
-            variant='outline'
-            size='icon'
-            onClick={() => void playback.toggle()}
-            disabled={!onLoadAudio || playback.state === 'loading'}
-            aria-busy={isAudioBusy}
-            className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
-            aria-label={audioControlLabel}
-            title={audioControlLabel}
-            data-track-category='RecordingDetailV2'
-            data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
-          >
-            <AnimatePresence mode='wait' initial={false}>
-              <motion.span
-                key={audioIconKey}
-                className='flex items-center justify-center'
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
-              >
-                {isAudioBusy ? (
-                  <Spinner size={14} className='animate-spin' />
-                ) : isPlaying ? (
-                  <PauseBig size={14} strokeWidth={4} variant='Solid' />
-                ) : (
-                  <PlayBig size={14} variant='Solid' />
-                )}
-              </motion.span>
-            </AnimatePresence>
-          </Button>
-        </motion.div>
+        {showAudioUnavailable ? (
+          <Tooltip content='Recording is not available for playback.'>{playButton}</Tooltip>
+        ) : (
+          playButton
+        )}
 
         <span className='w-12 shrink-0 text-right font-mono text-xs text-foreground'>
           {formatElapsedTime(elapsedMs)}
@@ -560,7 +586,10 @@ const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement 
       };
       return (
         <div key={i} className='flex h-4 items-center'>
-          <div className='rec-overlay-waveform-bar w-1 rounded-full bg-destructive' style={style} />
+          <div
+            className='rec-overlay-waveform-bar w-1 rounded-full bg-primary !opacity-100'
+            style={style}
+          />
         </div>
       );
     })}

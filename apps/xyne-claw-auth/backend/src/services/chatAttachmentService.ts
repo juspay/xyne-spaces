@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { gcsService } from "./gcsService.js";
+import { gcsService } from "./storageService.js";
 import { chatAttachmentRepository } from "../repositories/chatAttachmentRepository.js";
 import { createLogger } from "../logger.js";
 

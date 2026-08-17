@@ -13,8 +13,7 @@ import {
   BoardType,
   FormEntityType,
   ReleaseTrackingMode,
-  isReleaseTicket,
-} from '@xyne/shared';
+  isReleaseTicket, PRStatus, TicketStatusV2 } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -147,7 +146,7 @@ class VersionReleaseMappingService {
     const pullRequests = await prisma.pullRequests.findMany({
       where: {
         ticketId: devTicket.id,
-        status: { not: 'DELETED' },
+        status: { not: PRStatus.DELETED },
       },
       orderBy: { updatedAt: 'desc' },
     });
@@ -758,7 +757,7 @@ class VersionReleaseMappingService {
     if (
       !ticket
       || !ticket.boardId
-      || ticket.statusV2 !== 'COMPLETED'
+      || ticket.statusV2 !== TicketStatusV2.COMPLETED
       || !isReleaseTicket(ticket.ticketType as BaseTicketType)
       || ticket.board?.boardType !== BoardType.RELEASE
       || ticket.board.releaseTrackingMode !== ReleaseTrackingMode.VERSION

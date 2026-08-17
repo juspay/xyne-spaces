@@ -7,7 +7,7 @@ import { Trash2, RefreshCw, Edit, GripVertical, Maximize2, X } from 'lucide-reac
 import { Button } from '../../components/ui/Button';
 import type { Query as QueryType, Dashboard } from '@xyne/shared';
 import { QueryVisualization } from '../QueryVisualizations/QueryVisualization';
-import type { QueryVisualizationType } from '../QueryVisualizations/types';
+import { QueryVisualizationType } from '../QueryVisualizations/types';
 import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
@@ -428,7 +428,9 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                 visualType: (q.visualType as string) || null,
               };
 
-              const isKPI = r.visualType === 'KPI' || r.visualType === 'KPI_COMPARE';
+              const isKPI =
+                r.visualType === QueryVisualizationType.KPI ||
+                r.visualType === QueryVisualizationType.KPI_COMPARE;
               const hasData = r.data && r.data.length > 0;
 
               return (
@@ -450,8 +452,8 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                         </span>
                       </div>
                       <div className='flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity duration-200'>
-                        {(r.visualType === 'BAR_CHART' ||
-                          r.visualType === 'DATA_TABLE' ||
+                        {(r.visualType === QueryVisualizationType.BAR_CHART ||
+                          r.visualType === QueryVisualizationType.DATA_TABLE ||
                           !r.visualType) && (
                           <Button
                             variant='ghost'

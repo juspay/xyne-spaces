@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { mettleEmployeeDetailsService } from '../services/mettleEmployeeDetailsService';
 import { logger } from '../utils/logger';
+import { db } from '../database/client';
 
 export class MettleEmployeeDetailsController {
   private static instance: MettleEmployeeDetailsController;
@@ -31,6 +32,31 @@ export class MettleEmployeeDetailsController {
       }
 
       const trimmedEmail = email.trim();
+
+      // Restrict lookups to the caller's own org: caller and queried email must resolve
+      // to the same org (OrgMember is email-keyed).
+      const callerEmail = req.user?.email;
+      if (!callerEmail) {
+        res.status(403).json({ error: 'Not authorized' });
+        return;
+      }
+      const [callerOrg, targetOrg] = await Promise.all([
+        db.orgMember.findFirst({
+          where: { email: { equals: callerEmail, mode: 'insensitive' } },
+          select: { orgId: true },
+        }),
+        db.orgMember.findFirst({
+          where: { email: { equals: trimmedEmail, mode: 'insensitive' } },
+          select: { orgId: true },
+        }),
+      ]);
+      if (!callerOrg || !targetOrg || callerOrg.orgId !== targetOrg.orgId) {
+        logger.warn(
+          `[Mettle] Rejected cross-org employee lookup by ${callerEmail} for ${trimmedEmail}`,
+        );
+        res.status(403).json({ error: 'Not authorized to view this employee' });
+        return;
+      }
 
       logger.info(`Fetching employee details for email: ${trimmedEmail}`);
 

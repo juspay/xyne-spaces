@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { CallType, ChannelType, RecordingType } from '@prisma/client';
+import { CallType, ChannelType, RecordingType } from '@xyne/shared';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -10,7 +10,7 @@ import { callShareService } from '@/services/callShareService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
-import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { extractEmailAddress } from '@/utils/email';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';

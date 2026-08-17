@@ -15,7 +15,7 @@ vi.mock("../middleware/agent-acl.js", () => ({
   getRequesterId: (req: Request) => req.headers["x-user-id"],
   getOrgId: (req: Request) => req.headers["x-org-id"],
 }));
-vi.mock("../services/gcsService.js", () => ({
+vi.mock("../services/storageService.js", () => ({
   gcsService: { createReadStream: vi.fn() },
 }));
 vi.mock("../db.js", () => ({

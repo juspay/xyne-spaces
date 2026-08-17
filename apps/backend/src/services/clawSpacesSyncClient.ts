@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { logger } from '@/utils/logger';
 
 export interface ClawSyncOrgPayload {
   spacesOrgId: string;
@@ -22,6 +23,8 @@ export interface ClawSyncUserPayload {
   spacesUserId: string;
   spacesWorkspaceId: string;
   spacesOrgId: string;
+  /** Stable identity for one person within a Spaces organization. */
+  spacesOrgMemberId: string;
   email: string;
   name: string;
   role?: string | null;
@@ -29,17 +32,24 @@ export interface ClawSyncUserPayload {
   orgName?: string | null;
   createdBySpacesUserId?: string | null;
   status?: string;
+  grantClawAdmin?: boolean;
 }
 
 export class ClawSpacesSyncError extends Error {
   statusCode?: number;
   retryable: boolean;
 
-  constructor(message: string, options: { statusCode?: number; retryable: boolean }) {
+  constructor(
+    message: string,
+    options: { statusCode?: number; retryable: boolean; cause?: unknown },
+  ) {
     super(message);
     this.name = 'ClawSpacesSyncError';
     this.statusCode = options.statusCode;
     this.retryable = options.retryable;
+    if (options.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
   }
 }
 
@@ -111,10 +121,21 @@ class ClawSpacesSyncClient {
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ClawSpacesSyncError(`Claw spaces sync request failed: ${message}`, {
-        retryable: true,
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      logger.error('Claw spaces sync network failure', {
+        path,
+        url: `${baseUrl}/claw/api/v1/internal/spaces-sync${path}`,
+        method: 'POST',
+        payload: this.summarizePayload(payload),
+        error: String(error),
       });
+
+      throw new ClawSpacesSyncError(
+        `Claw spaces sync ${path} request failed: ${errorMessage}`,
+        { retryable: true, cause: error },
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -148,6 +169,7 @@ class ClawSpacesSyncClient {
       spacesUserId: value.spacesUserId,
       role: value.role,
       status: value.status,
+      grantClawAdmin: value.grantClawAdmin,
     };
 
     return JSON.stringify(safePayload);

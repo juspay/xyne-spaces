@@ -4,6 +4,7 @@ import {
   Plus,
   X,
   Loader2,
+  KeyRound,
   Users,
   ChevronDown,
   ChevronRight,
@@ -32,12 +33,14 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { v4 as uuidv4 } from 'uuid';
 import { OrgRole, WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config';
 import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
+import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
 
 // ─── types ───────────────────────────────────────────────────────────────────
@@ -50,6 +53,16 @@ interface OrgMemberRow {
   joinedAt: number;
   leftAt?: number | null;
 }
+
+type ProvisionWorkspaceEncryptionResponse = {
+  ok: boolean;
+  results: Array<{
+    workspaceId: string;
+    ok: boolean;
+    keyId?: string;
+    message?: string;
+  }>;
+};
 
 interface CreateWorkspaceResponse {
   user: { id: string; email: string; workspaceId: string };
@@ -454,6 +467,7 @@ export const OrganisationsScreen = (): ReactElement => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const [isProvisioningEncryption, setIsProvisioningEncryption] = useState(false);
   const [communityWorkspaceName, setCommunityWorkspaceName] = useState('');
   const [communityJoinPolicy, setCommunityJoinPolicy] = useState<
     (typeof WorkspaceJoinPolicy)[keyof typeof WorkspaceJoinPolicy]
@@ -539,7 +553,7 @@ export const OrganisationsScreen = (): ReactElement => {
       }
       localStorage.setItem('user_id', response.data.user.id);
       toast.success('Community workspace created');
-      window.location.href = `/${newWorkspaceId}/chat/dir`;
+      window.location.href = `/${newWorkspaceId}`;
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const message = (error.response?.data as { message?: string } | undefined)?.message;
@@ -549,6 +563,31 @@ export const OrganisationsScreen = (): ReactElement => {
       toast.error('Failed to create community workspace');
     } finally {
       setIsCreatingCommunityWorkspace(false);
+    }
+  };
+
+  const handleProvisionEncryption = async (): Promise<void> => {
+    setIsProvisioningEncryption(true);
+    try {
+      const response = await apiInstance.post<ProvisionWorkspaceEncryptionResponse>(
+        '/encryption/workspaces/backfill-provision',
+      );
+      const succeeded = response.data.results.filter(result => result.ok).length;
+      const failed = response.data.results.length - succeeded;
+
+      if (response.data.results.length === 0) {
+        toast.success('No workspaces found');
+      } else if (failed > 0) {
+        toast.error(
+          `Provisioned encryption for ${succeeded}/${response.data.results.length} workspaces`,
+        );
+      } else {
+        toast.success(`Provisioned encryption for ${succeeded} workspaces`);
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to provision workspace encryption'));
+    } finally {
+      setIsProvisioningEncryption(false);
     }
   };
 
@@ -585,16 +624,35 @@ export const OrganisationsScreen = (): ReactElement => {
                     <p className='text-muted-foreground'>Manage organisations and their members</p>
                   </div>
                 </div>
-                <Button
-                  variant='outline'
-                  className='gap-2 shrink-0'
-                  onClick={() => setShowCreateDialog(true)}
-                  data-track-category='Organisations'
-                  data-track-name='OpenCreateOrgDialog'
-                >
-                  <Plus className='w-4 h-4' />
-                  Create New Org
-                </Button>
+                <div className='flex items-center gap-2 shrink-0'>
+                  <Button
+                    onClick={() => void handleProvisionEncryption()}
+                    disabled={isProvisioningEncryption}
+                    variant='outline'
+                    className='gap-2'
+                    data-track-category='Organisations'
+                    data-track-name='ProvisionOrgEncryption'
+                  >
+                    {isProvisioningEncryption ? (
+                      <Loader2 className='w-4 h-4 animate-spin' />
+                    ) : (
+                      <KeyRound className='w-4 h-4' />
+                    )}
+                    {isProvisioningEncryption
+                      ? 'Provisioning...'
+                      : 'Provision workspace encryption'}
+                  </Button>
+                  <Button
+                    variant='outline'
+                    className='gap-2 shrink-0'
+                    onClick={() => setShowCreateDialog(true)}
+                    data-track-category='Organisations'
+                    data-track-name='OpenCreateOrgDialog'
+                  >
+                    <Plus className='w-4 h-4' />
+                    Create New Org
+                  </Button>
+                </div>
               </div>
 
               {canCreateCommunityWorkspace ? (

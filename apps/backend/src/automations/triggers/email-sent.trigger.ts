@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmailType } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';
@@ -59,6 +59,7 @@ const EmailSentConfigSchema = z.object({
 export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
   email: z.object({
     id: z.string(),
+    url: z.string().url().nullable(),
     subject: z.string(),
     body: z.string(),
     from: z.string(),

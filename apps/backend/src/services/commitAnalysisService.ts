@@ -1,10 +1,11 @@
 import { BitbucketService } from './bitbucketService';
+import { VcsClient } from '../types/vcs';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
 import { PullRequestInfo, DiffstatSummary, ChangeEntry } from '@/types/bitbucket';
-import { FormContextType, FormEntityType, BaseTicketType } from '@xyne/shared';
+import { FormContextType, FormEntityType, BaseTicketType, BoardType, ChannelVisibility, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
@@ -75,14 +76,16 @@ type StubAuthor = { id?: string | number; displayName?: string; emailAddress?: s
 
 
 export class CommitAnalysisService {
-  private bitbucketService: BitbucketService;
+  // Structurally typed so a BitbucketService or GitHubService can be passed —
+  // the controller picks based on board.vcsProvider.
+  private bitbucketService: VcsClient;
   private ticketRepository: TicketRepository | null = null;
   private applicationRepository: ApplicationRepository | null = null;
   private xyneRelease: XyneRelease | null = null;
   private releaseRepository: ReleaseRepository | null = null;
 
-  constructor(bitbucketService: BitbucketService) {
-    this.bitbucketService = bitbucketService;
+  constructor(vcsClient: VcsClient | BitbucketService) {
+    this.bitbucketService = vcsClient;
     this.initialize();
   }
 
@@ -92,7 +95,6 @@ export class CommitAnalysisService {
   private initialize(): void {
     try {
       if (
-        this.ticketRepository &&
         this.applicationRepository &&
         this.xyneRelease &&
         this.releaseRepository
@@ -104,12 +106,16 @@ export class CommitAnalysisService {
       // TODO: we should have a factory/service to generate the release change requests
       this.xyneRelease = new XyneRelease();
       this.releaseRepository = new ReleaseRepository();
-      this.ticketRepository = new TicketRepository();
       logger.info('[CommitAnalysisService] Successfully initialized all repositories');
     } catch (error) {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
     }
 
+  }
+
+  private get tickets(): TicketRepository {
+    this.ticketRepository ??= new TicketRepository();
+    return this.ticketRepository;
   }
 
 
@@ -148,7 +154,7 @@ export class CommitAnalysisService {
     prAuthor?: StubAuthor,
   ): Promise<TicketInfo | null> {
     try {
-      const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId, workspaceId);
+      const ticket = await this.tickets.getTicketByXyneId(xyneId, workspaceId);
 
       if (ticket) {
         return {
@@ -213,7 +219,7 @@ export class CommitAnalysisService {
         return null;
       }
       const board = await db.board.findFirst({
-        where: { projectId: project.id, boardType: { not: 'RELEASE' } },
+        where: { projectId: project.id, boardType: { not: BoardType.RELEASE } },
         select: { id: true },
       });
       if (!board) {
@@ -246,7 +252,7 @@ export class CommitAnalysisService {
       // Prefer a PUBLIC channel on the project; fall back to any project channel.
       const channel =
         (await db.channel.findFirst({
-          where: { projectId: project.id, visibility: 'PUBLIC' },
+          where: { projectId: project.id, visibility: ChannelVisibility.PUBLIC },
           select: { id: true },
         })) ??
         (await db.channel.findFirst({
@@ -282,8 +288,8 @@ export class CommitAnalysisService {
           // so the TicketActivitiesACL's ticket→conversation→channel traversal resolves.
           // Re-use an existing conversation in the project channel if available.
           conversationId: conversation?.conversationId ?? channel.id,
-          statusV2: 'TODO',
-          priority: 'LOW',
+          statusV2: TicketStatusV2.TODO,
+          priority: TicketPriority.LOW,
           stageName: 'BACKLOG',
           ticketType: BaseTicketType.Fix,
           lastEmailAt: new Date(),
@@ -394,7 +400,7 @@ export class CommitAnalysisService {
     repositorySlug: string,
     workspaceId: string,
     ticketPrefix: string,
-    branch?: string
+    branch?: string,
   ): Promise<CommitAnalysisResult> {
     const result: CommitAnalysisResult = {
       commitId,
@@ -636,6 +642,36 @@ export class CommitAnalysisService {
     }
   }
 
+  /**
+   * Diagnostic-only sibling to {@link detectAffectedApplications}. Returns one
+   * entry per configured application — INCLUDING those whose regex matched
+   * zero files — so the release summary can show "0/2 apps matched" with
+   * per-app counts. This is what lets the user tell "no env/migrations
+   * changed" apart from "my regex was broken".
+   */
+  async getApplicationMatchSummary(
+    mainReleaseBoardId: string,
+    filePaths: string[],
+  ): Promise<Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>> {
+    const applications =
+      await this.applicationRepository!.findByMainReleaseBoardId(mainReleaseBoardId);
+    return applications.map((app) => {
+      let re: RegExp | null = null;
+      try {
+        re = new RegExp(app.regex);
+      } catch {
+        re = null;
+      }
+      const matchCount = re ? filePaths.reduce((n, p) => (re!.test(p) ? n + 1 : n), 0) : 0;
+      return {
+        name: app.name,
+        regex: app.regex,
+        matchCount,
+        regexValid: re !== null,
+      };
+    });
+  }
+
   async saveReleaseChangesWithDiffs(
     projectKey: string,
     repositorySlug: string,
@@ -814,7 +850,7 @@ export class CommitAnalysisService {
 
         migrationChangeCount++;
         // Construct Bitbucket diff link using projectKey and repositorySlug
-        const diffUrl = `https://bitbucket.example.com/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}#${filePath}`;
+        const diffUrl = this.bitbucketService.buildCommitFileUrl(projectKey, repositorySlug, commitId, filePath);
         migrationLinks.push({ filePath, diffUrl });
       } catch (error) {
         logger.warn(`Failed to fetch diff for migration file ${filePath}:`, error);
@@ -1103,6 +1139,85 @@ export class CommitAnalysisService {
       select: { id: true },
     });
     return Boolean(existing);
+  }
+
+  /**
+   * Build the release's env/migration summary from the PERSISTED release_change_types
+   * for this release — the source of truth the Envs/Migrations tabs and the release
+   * report already read — instead of only the rows saved during the current run.
+   *
+   * Why: `saveReleaseChangesWithDiffs` skips re-inserting changes that already exist
+   * (the dedup guard that protects human QA/sign-off state across re-runs), so a
+   * summary accumulated from a single run under-reports on every re-run — reporting
+   * "Env/Migration Change: No" even though the changes are persisted. Reading the
+   * persisted facts here makes analysis idempotent: the same range always yields the
+   * same summary. Env diffs are re-fetched from VCS so the canvas can parse var names;
+   * migration links keep the `/commits/<sha>` URL shape the canvas groups on.
+   */
+  async buildReleaseChangeSummary(
+    projectKey: string,
+    repositorySlug: string,
+    releaseId: string,
+  ): Promise<{
+    envChangeCount: number;
+    migrationChangeCount: number;
+    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+  }> {
+    const db = DatabaseClient.getInstance();
+    const changes = await db.releaseChangeType.findMany({
+      where: { releaseId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
+    const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+    // Cache diffs within this build so a file touched by multiple change rows is
+    // fetched once.
+    const diffCache = new Map<string, string>();
+
+    for (const change of changes) {
+      if (!change.filePath || !change.commitId) continue;
+
+      if (change.changeType === XyneChangeType.MIGRATION) {
+        const diffUrl = this.bitbucketService.buildCommitFileUrl(projectKey, repositorySlug, change.commitId, change.filePath);
+        migrationLinks.push({ filePath: change.filePath, diffUrl });
+        continue;
+      }
+
+      if (change.changeType === XyneChangeType.ENV) {
+        const cacheKey = `${change.commitId}::${change.filePath}`;
+        let diff = diffCache.get(cacheKey);
+        if (diff === undefined) {
+          try {
+            diff = await this.bitbucketService.getFileDiff(
+              projectKey,
+              repositorySlug,
+              change.commitId,
+              change.filePath,
+            );
+          } catch (error) {
+            logger.warn(
+              `[ReleaseChanges] Failed to re-fetch env diff for ${change.filePath}@${change.commitId}:`,
+              error,
+            );
+            diff = '';
+          }
+          diffCache.set(cacheKey, diff);
+        }
+        const fileName = change.filePath.split('/').pop() || change.filePath;
+        // Carry commitId so the canvas can key env changes by (commit, path) —
+        // otherwise two commits touching the same env file collapse to one.
+        envChanges.push({ fileName, filePath: change.filePath, newValue: diff, commitId: change.commitId });
+      }
+    }
+
+    return {
+      envChangeCount: envChanges.length,
+      migrationChangeCount: migrationLinks.length,
+      migrationLinks,
+      envChanges,
+    };
   }
 
 }

@@ -8,6 +8,11 @@ const conversationController = new ConversationController();
 // Static route must be registered before any /:conversationId routes.
 router.get('/threads', conversationController.getUserThreads);
 
+router.post('/reply-drafts/:draftId/approve', conversationController.approveReplyDraft);
+router.post('/reply-drafts/:draftId/decline', conversationController.declineReplyDraft);
+// Latest conversations + full threads for every channel the user visited in the last N days.
+router.get('/recent-visited', conversationController.getRecentVisitedConversations);
+
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
 
@@ -19,6 +24,10 @@ router.get('/by-message/:messageId', conversationController.getConversationByMes
 
 // Read current ephemeral agent-progress signals for a conversation (dashboard rehydrate on thread open)
 router.get('/:conversationId/agent-progress', conversationController.getAgentProgress);
+
+router.get('/:conversationId/summary', conversationController.getSummary);
+
+router.get('/:conversationId/recommendation', conversationController.getRecommendation);
 
 // Cancel an in-flight agent run for the given conversation
 router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);

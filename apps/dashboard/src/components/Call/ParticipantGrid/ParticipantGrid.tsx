@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useSelector } from '@xstate/react';
 import { cn } from '../../../utils/classNames';
 import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import { useGridLayout } from './useGridLayout';
@@ -7,6 +8,8 @@ import { sortParticipants } from './sortParticipants';
 import { PaginationIndicator } from './PaginationIndicator';
 import { PaginationControls } from './PaginationControls';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { roomActor } from '../../../machines/roomMachine';
+import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
 
 interface ParticipantGridProps {
   participants: ParticipantInfo[];
@@ -32,18 +35,33 @@ export function ParticipantGrid({
   // Max 4 tiles (2x2) for compact view, 16 tiles (4x4) for full view
   const maxTiles = compact ? 4 : 16;
 
+  // Host kill-switch: when transcription is off the agent stays in the room but
+  // its tile is hidden (mirrors the participants-sidebar filter) so the call looks
+  // agent-free while capture is paused.
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
+  const visibleParticipants = useMemo(
+    () =>
+      isTranscriptionEnabled
+        ? participants
+        : participants.filter(p => !isTranscriptionAgentIdentity(p.identity)),
+    [participants, isTranscriptionEnabled],
+  );
+
   // Compute layout first using raw participant count — layout.maxTiles is the true
   // per-page capacity determined by container size, not just the cap.
-  const { containerRef, layout } = useGridLayout(participants.length, maxTiles);
+  const { containerRef, layout } = useGridLayout(visibleParticipants.length, maxTiles);
 
   // Pagination is active when participants spill onto a second page.
   // This is the canonical signal that sorting matters (so users can find
   // the most-engaged participants on page 0).
-  const isPaginating = participants.length > layout.maxTiles;
+  const isPaginating = visibleParticipants.length > layout.maxTiles;
   const displayParticipants = useMemo(() => {
-    if (!isPaginating) return participants;
-    return sortParticipants(participants, isAIAssistantEnabled);
-  }, [participants, isPaginating, isAIAssistantEnabled]);
+    if (!isPaginating) return visibleParticipants;
+    return sortParticipants(visibleParticipants, isAIAssistantEnabled);
+  }, [visibleParticipants, isPaginating, isAIAssistantEnabled]);
 
   const pagination = usePagination(layout.maxTiles, displayParticipants);
 

@@ -40,7 +40,7 @@ import {
   markSessionIdle,
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
-import { gcsUploadDebugRun } from "./gcs.js";
+import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
@@ -986,6 +986,10 @@ export interface ProgressEmitter {
   attachment(sessionId: string, attachment: ClawAttachmentPayload): void;
   sandboxPreview(sessionId: string, payload: ClawSandboxPreviewPayload, meta?: ClawStreamMeta): void;
   plan(sessionId: string, todos: Todo[]): void;
+  /** A create/merge pull-request tool completed — carries the canonical PR fact
+   *  for the Spaces PR card (mirrors `plan`; consumer bridges it to a kind:"pr"
+   *  progress POST → renderPrCard). */
+  pr(sessionId: string, pr: Record<string, unknown>): void;
   streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string }): void;
   debugProgress(sessionId: string, event: DebugEventRecord): void;
   progressLabel(sessionId: string, toolLabel: string, meta?: ClawStreamMeta): void;
@@ -1001,10 +1005,253 @@ function isEmitter(dest: ProgressDest): dest is ProgressEmitter {
   return !!dest && typeof dest !== "string";
 }
 
+// ── PR card interception ────────────────────────────────────────────────────
+// When a github/bitbucket/gitlab create/merge pull-request tool completes,
+// normalize the provider-specific result into a canonical, provider-neutral PR
+// fact and fire a kind:"pr" progress event so claw-auth renders (and later
+// updates in place) the PR card in the Spaces thread. This lives in
+// pushInvocation — the ONE choke point every tool_execution_end flows through,
+// parent tools AND nested subagent child tools — so a PR card is emitted whether
+// create_pull_request runs directly in the parent or inside the git-host
+// subagent. Fire-and-forget: PR card rendering must NEVER block or fail a tool.
+// Only the URL/webhook progress path carries the card; SSE (emitter) mode has no
+// such surface, so we skip there (mirrors the plan card).
+
+type PrProviderName = "github" | "bitbucket" | "gitlab" | "other";
+
+// Inner tool name (after any `<server>__` prefix, hyphens→underscores) → status.
+const PR_TOOL_STATUS: Record<string, "created" | "merged"> = {
+  create_pull_request: "created",
+  merge_pull_request: "merged",
+};
+
+function detectPrProvider(server: string): PrProviderName {
+  const s = server.toLowerCase();
+  if (s.includes("github")) return "github";
+  if (s.includes("bitbucket")) return "bitbucket";
+  if (s.includes("gitlab")) return "gitlab";
+  return "other";
+}
+
+/** First non-empty trimmed string among the args. */
+function firstPrStr(...vals: unknown[]): string | undefined {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return undefined;
+}
+
+/**
+ * Unwrap a tool result into the object that actually holds PR fields. Handles:
+ *   - the MCP envelope `{ content: [{ type:'text', text:'<json>' }] }` (parse the
+ *     inner text as JSON), and
+ *   - a nested `pull_request` / `pullRequest` / `pr` wrapper (Bitbucket's
+ *     create_pull_request returns `{ message, pull_request: { id, web_url, … } }`).
+ * Returns the innermost object to read url/number/title from, or undefined.
+ */
+function resolvePrPayload(text: string): Record<string, unknown> | undefined {
+  const parse = (s: string): unknown => {
+    try {
+      return JSON.parse(s);
+    } catch {
+      // Tolerate a leading token (e.g. a citation marker "[clf-…#1] {…}") by
+      // reparsing from the first brace.
+      const brace = s.indexOf("{");
+      if (brace > 0) {
+        try {
+          return JSON.parse(s.slice(brace));
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
+    }
+  };
+  const obj = parse(text);
+  if (!obj || typeof obj !== "object") return undefined;
+  let rec = obj as Record<string, unknown>;
+  // MCP text envelope → parse the inner JSON payload.
+  const content = rec["content"];
+  if (Array.isArray(content)) {
+    const inner = content
+      .filter((c): c is { text?: string } => !!c && typeof c === "object" && (c as { type?: string }).type === "text")
+      .map((c) => c.text ?? "")
+      .join("");
+    if (inner) {
+      try {
+        const parsed = JSON.parse(inner);
+        if (parsed && typeof parsed === "object") rec = parsed as Record<string, unknown>;
+      } catch {
+        /* inner wasn't JSON — keep the outer object */
+      }
+    }
+  }
+  // Descend into a nested PR wrapper when present.
+  for (const key of ["pull_request", "pullRequest", "pullrequest", "pr"]) {
+    const nested = rec[key];
+    if (nested && typeof nested === "object") return nested as Record<string, unknown>;
+  }
+  return rec;
+}
+
+/** Pull the PR URL from the resolved payload, else scrape one from raw text. */
+function extractPrUrl(obj: Record<string, unknown> | undefined, text: string): string | undefined {
+  if (obj) {
+    const links = obj["links"] as Record<string, unknown> | undefined;
+    const self = links?.["self"];
+    const selfHref = Array.isArray(self)
+      ? (self[0] as Record<string, unknown> | undefined)?.["href"]
+      : (self as Record<string, unknown> | undefined)?.["href"];
+    const html = links?.["html"] as Record<string, unknown> | undefined;
+    const u = firstPrStr(obj["web_url"], obj["html_url"], obj["url"], selfHref, html?.["href"]);
+    if (u) return u;
+  }
+  // Prefer a PR-shaped URL (Bitbucket /pull-requests/N, GitHub /pull/N, GitLab
+  // /merge_requests/N); fall back to any URL in the text.
+  const pr = text.match(
+    /https?:\/\/[^\s"')\]]*(?:pull-?requests?|\/pull\/|merge_requests)[^\s"')\]]*/i,
+  );
+  if (pr) return pr[0];
+  return text.match(/https?:\/\/[^\s"')\]]+/i)?.[0];
+}
+
+function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
+  try {
+    const inv = (invocation ?? {}) as {
+      toolName?: unknown;
+      args?: unknown;
+      result?: unknown;
+      isError?: unknown;
+    };
+    const toolName = typeof inv.toolName === "string" ? inv.toolName : "";
+    if (!toolName) return;
+
+    // Strip any `<server>__` prefix; normalize hyphen/underscore naming variants.
+    const bare = (toolName.includes("__") ? toolName.slice(toolName.indexOf("__") + 2) : toolName)
+      .toLowerCase()
+      .replace(/-/g, "_");
+    const status = PR_TOOL_STATUS[bare];
+    // Not a create/merge PR tool — stay silent (this runs for EVERY tool).
+    if (!status) return;
+
+    // From here we KNOW it's a PR tool → log every decision so a missing card is
+    // traceable end-to-end.
+    if (inv.isError === true) {
+      log.info(`[pr-card] ${toolName} ended with isError=true — no card emitted`);
+      return;
+    }
+    if (!progressUrl) {
+      log.info(`[pr-card] ${toolName} detected but no progressUrl — skipping`);
+      return;
+    }
+
+    const provider = detectPrProvider(toolName);
+    const a = (inv.args ?? {}) as Record<string, unknown>;
+
+    const text =
+      typeof inv.result === "string"
+        ? inv.result
+        : (() => {
+            try {
+              return JSON.stringify(inv.result);
+            } catch {
+              return String(inv.result);
+            }
+          })();
+    if (!text) {
+      log.warn(`[pr-card] ${toolName} had empty result — skipping`);
+      return;
+    }
+    const payload = resolvePrPayload(text);
+
+    const url = extractPrUrl(payload, text);
+    const number = firstPrStr(payload?.["id"], payload?.["number"], payload?.["iid"]);
+    // Require evidence the op actually produced a PR before emitting a card.
+    if (!url && !number) {
+      log.warn(
+        `[pr-card] ${toolName}: could not extract url/number from result — skipping. ` +
+          `payloadKeys=[${payload ? Object.keys(payload).join(",") : "<unparsed>"}] preview=${text.slice(0, 300)}`,
+      );
+      return;
+    }
+
+    const title =
+      firstPrStr(payload?.["title"], a["title"], a["ticketTitle"]) ?? "Pull request";
+    const desc = firstPrStr(payload?.["description"], payload?.["body"], a["description"], a["ticketDescription"]);
+    const ticketId = firstPrStr(a["xyneId"], a["ticketId"]);
+    const repo = firstPrStr(
+      a["workspace"] && a["repository"] ? `${String(a["workspace"])}/${String(a["repository"])}` : undefined,
+      a["projectKey"] && a["repoSlug"] ? `${String(a["projectKey"])}/${String(a["repoSlug"])}` : undefined,
+      a["owner"] && a["repo"] ? `${String(a["owner"])}/${String(a["repo"])}` : undefined,
+      a["repoName"],
+      a["repoSlug"],
+      a["repository"],
+      a["repo"],
+    );
+
+    const pr: Record<string, unknown> = {
+      provider,
+      status,
+      title,
+      ...(url ? { url } : {}),
+      ...(desc ? { desc } : {}),
+      ...(ticketId ? { ticketId } : {}),
+      ...(number ? { number } : {}),
+      ...(repo ? { repo } : {}),
+    };
+
+    // Dispatch on the progress channel type. SSE/streaming runs (spaces threads
+    // go through claw-auth's SSE bridge, and the dashboard chat) carry an
+    // EMITTER: hand the fact to `emitter.pr()`, which frames a `pr` SSE event
+    // that the bridge translates into a kind:"pr" progress POST → renderPrCard.
+    // Legacy HTTP runs carry a string webhook URL: POST kind:"pr" directly.
+    if (typeof progressUrl !== "string") {
+      log.info(
+        `[pr-card] emitting kind:pr via emitter sessionId=${sessionId} ` +
+          `provider=${provider} status=${status} number=${number ?? "?"} repo=${repo ?? "?"} url=${url ?? "?"}`,
+      );
+      try {
+        progressUrl.pr(sessionId, pr);
+      } catch (err) {
+        log.warn(`[pr-card] emitter.pr failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    log.info(
+      `[pr-card] emitting kind:pr → ${progressUrl} sessionId=${sessionId} ` +
+        `provider=${provider} status=${status} number=${number ?? "?"} repo=${repo ?? "?"} url=${url ?? "?"}`,
+    );
+    void fetch(progressUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      },
+      body: JSON.stringify({ sessionId, kind: "pr", pr }),
+      signal: AbortSignal.timeout(5_000),
+    })
+      .then((r) => {
+        if (r.ok) log.info(`[pr-card] posted kind:pr OK (${r.status}) sessionId=${sessionId}`);
+        else log.warn(`[pr-card] webhook responded ${r.status} for kind:pr sessionId=${sessionId}`);
+      })
+      .catch((err) => {
+        log.warn(`[pr-card] push failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  } catch (err) {
+    // Fire-and-forget: PR-card rendering must never affect tool execution.
+    log.warn(`[pr-card] unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // Send a single tool invocation to the progress endpoint — NOT throttled,
 // fires on every tool_execution_end so the Control Center sees live tool streams.
 export function pushInvocation(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
   if (!progressUrl) return;
+  // Emit a PR card when this invocation is a completed create/merge PR (guards
+  // internally; no-op for every other tool). Runs for parent + nested tools.
+  maybeEmitPrCard(progressUrl, sessionId, invocation);
   if (isEmitter(progressUrl)) {
     try { progressUrl.invocation(sessionId, invocation); } catch (err) {
       log.warn(`[agent] Tool invocation emit failed: ${err instanceof Error ? err.message : String(err)}`);

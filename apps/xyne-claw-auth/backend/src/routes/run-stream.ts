@@ -5,7 +5,7 @@ import { requireAuth, requireNoAccessToken, requireResultToken } from "../middle
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
-import { gcsService } from "../services/gcsService.js";
+import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";

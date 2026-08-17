@@ -16,7 +16,11 @@ import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
-import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import {
+  sendRecordingEvent,
+  stopRecordingForTeardown,
+  useRecordingStore,
+} from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -522,23 +526,55 @@ export const NotificationHandler: React.FC = () => {
     });
   }, [isElectron]);
 
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
+    return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
+  }, [isElectron]);
+
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
-  const wasRecordingActiveRef = useRef<boolean | null>(null);
+  const recordingPauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
+  const recordingAccumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
+  const lastRecordingStateRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isElectron) return;
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
-    if (isActive !== wasRecordingActiveRef.current) {
-      window.electronAPI?.ipcSend?.('recording:state-changed', {
-        active: isActive,
-        startTime: recordingStartTime ?? undefined,
-      });
+    const state = {
+      active: isActive,
+      startTime: recordingStartTime ?? undefined,
+      paused: recordingStatus === 'paused',
+      pauseStartedAt: recordingPauseStartedAt,
+      accumulatedPausedMs: recordingAccumulatedPausedMs,
+    };
+    const stateKey = JSON.stringify(state);
+    if (stateKey !== lastRecordingStateRef.current) {
+      window.electronAPI?.ipcSend?.('recording:state-changed', state);
       if (!isActive) {
         window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
       }
     }
-    wasRecordingActiveRef.current = isActive;
-  }, [isElectron, recordingStatus, recordingStartTime]);
+    lastRecordingStateRef.current = stateKey;
+  }, [
+    isElectron,
+    recordingStatus,
+    recordingStartTime,
+    recordingPauseStartedAt,
+    recordingAccumulatedPausedMs,
+  ]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingResumeRequest) return;
+    return window.electronAPI.onRecordingResumeRequest(() => {
+      sendRecordingEvent({ type: 'resumeRecording' });
+    });
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingPauseRequest) return;
+    return window.electronAPI.onRecordingPauseRequest(() => {
+      sendRecordingEvent({ type: 'pauseRecording' });
+    });
+  }, [isElectron]);
 
   const handleNotificationRef = useRef(handleNotification);
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>

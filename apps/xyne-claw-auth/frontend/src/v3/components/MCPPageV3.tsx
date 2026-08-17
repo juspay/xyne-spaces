@@ -160,6 +160,11 @@ function McpItemCard({
           className="line-clamp-1 flex w-fit items-center gap-2 text-sm font-medium leading-snug text-xyne-fg-primary"
         >
           {server.name}
+          {server.oauth && (
+            <span className="shrink-0 rounded bg-xyne-surface px-1.5 py-0.5 text-[10px] font-semibold text-xyne-fg-tertiary shadow-sm">
+              OAuth
+            </span>
+          )}
         </div>
         {hasDescription && (
           <p

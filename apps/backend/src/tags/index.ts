@@ -3,6 +3,7 @@ export { tagService, TagService } from './service';
 export { tagRoutes } from './routes';
 export {
   CategoryConfigSchema,
+  ConfirmTagBodySchema,
   CreateTagBodySchema,
   CreateTagsConfigBodySchema,
   DeleteTagBodySchema,

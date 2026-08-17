@@ -26,17 +26,26 @@ import { v4 as uuidv4 } from 'uuid';
 import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
+import { usePath } from '../../hooks/usePath';
 
 interface SettingsProps {
   onClose: () => void;
   onOpenPreferences: () => void;
   onOpenStatusModal: () => void;
+  /**
+   * Open the profile in a modal instead of navigating to the routed
+   * `/chat/dir/.../profile/...` sidebar. Provided on surfaces where the routed
+   * profile sidebar is not mounted (non-chat pages). When absent, or when the
+   * user is already on a chat page, the routed navigation is used.
+   */
+  onOpenProfileModal?: (userId: string) => void;
 }
 
 const Settings = ({
   onClose,
   onOpenPreferences,
   onOpenStatusModal,
+  onOpenProfileModal,
 }: SettingsProps): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
@@ -47,6 +56,7 @@ const Settings = ({
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
+  const path = usePath();
 
   const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
     user?.id ?? '',
@@ -134,6 +144,15 @@ const Settings = ({
 
   const handleProfileClick = (): void => {
     onClose();
+    // On non-chat pages the routed profile sidebar is not mounted, so navigating
+    // to `/chat/dir/.../profile/...` would bounce the user out of their current
+    // page into chat. When a modal handler is available and we are not on a chat
+    // page, open the profile in a modal and stay on the current page instead.
+    const isChatPage = path.startsWith('/chat/');
+    if (onOpenProfileModal && !isChatPage && user?.id) {
+      onOpenProfileModal(user.id);
+      return;
+    }
     if (channelId) {
       void navigate(`/chat/dir/${channelId}/profile/${user?.id}`);
     } else {

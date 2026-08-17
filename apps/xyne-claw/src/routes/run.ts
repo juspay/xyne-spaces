@@ -127,7 +127,7 @@ import {
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
-import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
+import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
@@ -1185,6 +1185,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
+    pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -2785,6 +2786,42 @@ async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
     }
 
+    // Agent authoring (agent.config.agentAuthoring): inject the terminal
+    // propose-agent tool so this agent can DRAFT another agent. Gated on the same
+    // interactive-surface conditions as the plan tools — a draft is worthless
+    // without a human to approve its card, so a scheduled/automation run (no one
+    // watching) must never get the tool. Never alongside the other terminal tools
+    // (plan / daily brief own turn termination in their modes).
+    const agentAuthoringEnabled =
+      agentConfig?.["agentAuthoring"] === true &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    if (agentAuthoringEnabled) {
+      allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
+      log("Agent authoring enabled — injected terminal propose-agent tool");
+    }
+
+    // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
+    // question any agent should answer from its real configuration rather than
+    // from prose the model invents. Gated only on there being somewhere to post
+    // the card — a scheduled/automation run has no one to show it to.
+    //
+    // Deliberately NOT excluded in plan mode: the tool writes nothing (plan
+    // mode's read-only filter passes it through untouched), and an agent
+    // configured to plan first should still be able to say what it is. Twin is
+    // excluded because that flow delivers through its own approval surface.
+    const describeAgentAvailable =
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isDailyBrief;
+    if (describeAgentAvailable) {
+      allTools.push(buildDescribeAgentTool(describeAgentRef));
+    }
+
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
     // guard, a caller dispatching `provider="copilot"` without copilot creds
@@ -3280,7 +3317,7 @@ async function processTask(
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
         "- For URLs of the form `http://localhost:<port>` (dashboard :5173, backend :3001) use `sandbox-pw-*` tools, NOT `sandbox-run` with inline Playwright. The browser inside the sandbox can reach those addresses.",
-        "- Git/GitHub PRs: make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). The sandbox has NO `gh` CLI — do NOT try `gh pr create`. To OPEN the PR, hand it to the **github** subagent's `create_pull_request` tool (head=<your branch>, base=<default branch>); that runs against the GitHub API and needs no `gh`. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
+        "- Opening PRs (any git host): make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). There is NO `gh`/`glab`/host CLI — do NOT try `gh pr create`. The push only creates the branch; to OPEN the PR, hand it to the subagent that MATCHES the repo's host: for a **GitHub** repo use the **github** subagent's `create_pull_request` (`head`=<your branch>, `base`=<default branch>); for a **Bitbucket** repo use the **bitbucket** subagent's `create_pull_request` (`workspace`=<project key, e.g. XYNE>, `repository`=<repo slug>, `source_branch`=<your branch>, `destination_branch`=<default branch>). Do NOT use the github subagent for a Bitbucket repo (or vice-versa) — it hits the wrong API and fails. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
         "- NEVER claim a branch was pushed or a PR was opened from memory. Verify first: a push is only real if `git ls-remote --heads origin <branch>` shows the ref (or `git push` printed the upstream-tracking/'new branch' line). State exactly what the command returned — do not narrate a success or a failure you did not observe.",
       ];
       // Surface an active session for this conversation so the agent reuses

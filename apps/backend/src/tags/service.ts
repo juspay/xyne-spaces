@@ -1,6 +1,6 @@
-import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { Prisma, Tag, TagsConfig } from '@prisma/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import { TagsConfigShapeSchema } from './schema';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
@@ -214,7 +214,7 @@ export class TagService {
         configKey: existing.configKey,
         tagCategory,
         tag: newTag,
-        method: existing.method,
+        method: existing.method as TagMethod,
         createdBy: existing.createdBy,
         updatedBy,
       }, tx);
@@ -244,6 +244,22 @@ export class TagService {
     await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
 
     await tagRepository.softDeleteTagRow(existing.id, deletedBy);
+  }
+
+  /**
+   * Flip an existing (AI-suggested) Tag row's method to `manual` in place —
+   * same id, so any array of Tag ids referencing it (e.g. Call.labels) needs
+   * no update. Used to "confirm" an AI-suggested tag from a tick/cross UI.
+   * Idempotent: confirming an already-manual tag is a no-op.
+   */
+  async confirmTag(tagId: string, workspaceId: string, updatedBy?: string | null): Promise<Tag> {
+    const existing = await tagRepository.findById(tagId, workspaceId);
+    if (!existing) {
+      throw new TagServiceError(`No active tag found for id "${tagId}"`, 404);
+    }
+    if (existing.method === TagMethod.MANUAL) return existing;
+
+    return tagRepository.updateTagMethod(tagId, TagMethod.MANUAL, updatedBy);
   }
 
   async getUniqueTagValues(
@@ -312,7 +328,7 @@ export class TagService {
       }
 
       const updated = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
-      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method }));
+      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method as TagMethod }));
     });
   }
 

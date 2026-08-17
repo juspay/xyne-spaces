@@ -11,16 +11,35 @@ export class ToolController {
 
   createTool = async (req: Request, res: Response): Promise<void> => {
     try {
-      const toolData: CreateToolInput = req.body;
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
 
-      if (!toolData.name) {
-        res.status(400).json({ 
-          error: 'Missing required field: name is required' 
+      // Allowlist the writable fields and force the workspace from the
+      // authenticated context, rather than spreading req.body into the create.
+      const { name, description, status } = (req.body ?? {}) as {
+        name?: unknown;
+        description?: unknown;
+        status?: unknown;
+      };
+
+      if (!name || typeof name !== 'string') {
+        res.status(400).json({
+          error: 'Missing required field: name is required',
         });
         return;
       }
 
-      const tool = await repositories.tools.create(toolData);
+      const createData: CreateToolInput = {
+        name,
+        ...(typeof description === 'string' ? { description } : {}),
+        ...(typeof status === 'string' ? { status } : {}),
+        workspace: { connect: { id: workspaceId } },
+      };
+
+      const tool = await repositories.tools.create(createData);
       res.status(201).json(tool);
     } catch (error) {
       logger.error('Error creating tool:', error);
@@ -145,13 +164,30 @@ export class ToolController {
   updateTool = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const updateData: UpdateToolInput = req.body;
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
 
+      // Scope the lookup to the caller's workspace so a foreign id returns 404,
+      // and allowlist the mutable fields (name/description/status).
       const existingTool = await repositories.tools.findById(id);
-      if (!existingTool) {
+      if (!existingTool || existingTool.workspaceId !== workspaceId) {
         res.status(404).json({ error: 'Tool not found' });
         return;
       }
+
+      const { name, description, status } = (req.body ?? {}) as {
+        name?: unknown;
+        description?: unknown;
+        status?: unknown;
+      };
+      const updateData: UpdateToolInput = {
+        ...(name !== undefined ? { name: name as string } : {}),
+        ...(description !== undefined ? { description: description as string } : {}),
+        ...(status !== undefined ? { status: status as string } : {}),
+      };
 
       const updatedTool = await repositories.tools.update(id, updateData);
       res.status(200).json(updatedTool);

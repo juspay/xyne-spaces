@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { WorkspaceRole } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
@@ -19,7 +20,6 @@ import { decrypt, encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
-import { WorkspaceRole } from '@prisma/client';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import {
   appendQueryToReturnPath,

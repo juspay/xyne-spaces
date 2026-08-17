@@ -16,6 +16,7 @@ import {
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
+  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -56,6 +57,7 @@ import {
   SurfaceAreaType,
   SurfaceLinkKind,
   RotationInterval,
+  ReleaseEventType,
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
@@ -71,6 +73,7 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  DraftOrigin,
   assertCanvasDestinationAccess,
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
@@ -89,6 +92,15 @@ import {
   normalizeNotificationKeywords,
   isDeskChannelType,
   deskTypeForChannelType,
+  Platform 
+} from '@xyne/shared';
+import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  FLOW_STAGE_NAMES,
+  FlowPlanSchema,
+  deserializeFlowPlan,
+  serializeFlowPlan,
+  validateFlowPlan,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
@@ -97,7 +109,6 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
@@ -144,8 +155,16 @@ import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
+import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
+import {
+  onFlowPlanUpdated,
+  onFlowStepBacklogged,
+  onFlowTicketStatusChanged,
+} from '@/services/flowCascadeService';
+import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
+import { getEncryptionProvider } from '@/services/encryption';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -208,6 +227,14 @@ const storageService = getStorageService();
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
+async function getCanvasThreadCommentCount(
+  tx: Transaction<Schema>,
+  threadId: string,
+): Promise<number> {
+  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  return comments.filter(comment => comment.deletedAt == null).length;
+}
+
 const XYNE_USER_IDS = new Set([
   'cmhesdd48001ghu4rc6bcb9m0', 'ou9fi7t9tmq2eeiss09km8j3',
   'vj6bzzhi4g1n7q3ikj26f9w1', 'ufvy4nv2jpi55f692hf7kq5e',
@@ -220,6 +247,7 @@ export type AuthData = {
   name: string;
   displayName?: string | null;
   workspaceId: string;
+  orgId: string;
   role: string;
   orgRole: string;
   memberId: string;
@@ -619,6 +647,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
+    channelId: channelId ?? undefined,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -875,7 +904,11 @@ async function createNonParticipantSystemMessages(
   }
 }
 
-export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
+export function createMutators(
+  authData: AuthData,
+  asyncTasks: Array<() => Promise<void>>,
+  awaitedPostCommitTasks: Array<() => Promise<void>>,
+) {
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -1055,7 +1088,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -1483,11 +1516,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: timestamp,
           });
 
-          // Query for drafts in this channel for this user (follows backend logic)
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where('channelId', channelId)
-              .where('userId', authData.sub),
+              .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
 
           // Find the channel-level draft (conversationId === null)
@@ -1504,6 +1537,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -2209,6 +2243,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
+            ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
         },
@@ -2258,9 +2293,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           isCollapsed: z.boolean().optional(),
           position: z.string().optional(),
           sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
+        async ({
+          tx,
+          args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
+        }) => {
           const section = await tx.run(
             zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
           );
@@ -2287,6 +2326,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(isCollapsed !== undefined && { isCollapsed }),
             ...(position !== undefined && { position }),
             ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             updatedAt: timestamp,
           });
         },
@@ -2371,7 +2411,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: now,
           });
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -2417,7 +2456,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // Legacy path: scan the current draft and transfer everything.
             const channelDrafts = await tx.run(zql.draft_messages
               .where('channelId', channelId)
-              .where('userId', authData.sub));
+              .where('userId', authData.sub)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))));
 
             const draft = channelDrafts.find(d => d.conversationId === null);
 
@@ -2540,26 +2580,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM messages - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
           asyncTasks.push(async () => {
-            if (channel.scopeType !== 'DM' || !user) return;
+            if (channel.scopeType !== ChannelScopeType.DM || !user) return;
             try {
               // Check if there's a bot in this DM channel
               const botUserId = await unifiedDMService.getBotInDM(channel.id);
@@ -3058,7 +3083,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one()),
             tx.run(zql.draft_messages
               .where('channelId', conversation.channelId)
-              .where('userId', authData.sub)),
+              .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))),
           ]);
           if (!channel) {
             throw new Error("Channel doesn't exists");
@@ -3068,7 +3094,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -3366,27 +3391,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM replies - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
           asyncTasks.push(async () => {
-            if (channel.scopeType !== 'DM' || !user) return;
+            if (channel.scopeType !== ChannelScopeType.DM || !user) return;
             try {
               // Check if there's a bot in this DM channel
               const botUserId = await unifiedDMService.getBotInDM(channel.id);
@@ -3602,26 +3611,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          if (content !== undefined) {
-            asyncTasks.push(async () => {
-              try {
-                // For forwarded messages, index both the forwarded content and the optionalText
-                // For regular messages, just index the content
-                let contentToIndex = content;
-                if (isForwardedMessage) {
-                  const parsedForwarded = parseForwardedMessageXml(message.content);
-                  contentToIndex = `${parsedForwarded?.content || ''} ${content}`.trim();
-                }
-                await repositories.messageSearch.upsert(
-                  messageId,
-                  generatePlainTextContent(contentToIndex),
-                  authData.workspaceId
-                );
-              } catch (error) {
-                logger.error('Failed to update message search index:', error);
-              }
-            });
-          }
         },
       ),
       react: defineMutator(
@@ -3923,15 +3912,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // Clean up asynchronously
-          asyncTasks.push(async () => {
-            try {
-              // Delete from search index
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to cleanup system message after non-participant action:', error);
-            }
-          });
         },
       ),
       delete: defineMutator(
@@ -4140,13 +4120,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 6. Async Side Effects
           asyncTasks.push(async () => {
-            // Delete from search index
-            try {
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to delete from message search index:', error);
-            }
-
             // Delete attachment files from GCS if any attachments exist
             if (attachments.length > 0) {
               await Promise.allSettled(
@@ -4346,6 +4319,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: now,
             labels: [],
             markedItems: [],
+            xyneManaged: false,
             metadata: {
               systemMessageId,
               conversationId,
@@ -5048,6 +5022,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
               .one(),
           );
 
@@ -5062,6 +5037,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -5122,6 +5098,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
               .one(),
           );
 
@@ -5136,6 +5113,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -5554,6 +5532,62 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const ticket = await tx.run(zql.tickets.where("id", params.id).one());
           if (!ticket) throw new Error("Ticket not found");
 
+          const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          if (
+            currentBoard?.boardType === BoardType.FLOW &&
+            (params.stageName !== undefined || params.statusV2 !== undefined)
+          ) {
+            if (!params.stageName) {
+              throw new Error('Flow ticket status must change through a stage transition');
+            }
+            const [currentStage, targetStage, transitions] = await Promise.all([
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+              ),
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', params.stageName).one(),
+              ),
+              tx.run(zql.stage_transitions.where('boardId', ticket.boardId)),
+            ]);
+            if (!currentStage || !targetStage) {
+              throw new Error('Flow ticket stage not found');
+            }
+            const allowed = transitions.some(
+              transition =>
+                transition.fromStageId === currentStage.id &&
+                transition.toStageId === targetStage.id,
+            );
+            if (!allowed) throw new Error('This Flow stage transition is not allowed');
+            if (
+              params.statusV2 !== undefined &&
+              params.statusV2 !== targetStage.defaultTicketStatusV2
+            ) {
+              throw new Error('Flow ticket status must match its target stage');
+            }
+            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
+            if (params.stageName === FLOW_STAGE_NAMES.BACKLOG && !flow?.planNodeId) {
+              throw new Error('The main Flow ticket cannot be moved to backlog');
+            }
+            if (
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              flow?.planNodeId &&
+              currentBoard.flowPlan
+            ) {
+              const plan = deserializeFlowPlan(currentBoard.flowPlan);
+              if (plan.decisions?.some(decision => decision.parentNodeId === flow.planNodeId)) {
+                throw new Error(
+                  'Conditional form steps cannot be moved to backlog. Submit the form to choose a path.',
+                );
+              }
+            }
+            if (flow?.planNodeId && flow.rootTicketId) {
+              const root = await tx.run(zql.tickets.where('id', flow.rootTicketId).one());
+              if (root?.statusV2 === TicketStatusV2.PAUSED) {
+                throw new Error('Flow run is paused');
+              }
+            }
+          }
+
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
@@ -5624,6 +5658,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Handle board transfer
           if (params.boardId !== undefined && params.boardId !== oldBoardId) {
             const now = Date.now();
+
+            // Flow boards only receive tickets through the flow cascade or
+            // "Start flow"; runs would break if tickets moved in or out.
+            const targetBoard = await tx.run(zql.boards.where('id', params.boardId).one());
+            if (targetBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved onto a Flow board');
+            }
+            const sourceBoard = await tx.run(zql.boards.where('id', oldBoardId).one());
+            if (sourceBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved off a Flow board');
+            }
 
             // 1. Fetch all stages of the new board
             const newBoardStages = await tx.run(
@@ -5758,6 +5803,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
+          // Flow-board cascade: instantiate the next plan steps / cascade-cancel
+          // after this transaction commits (ticket creation cannot run inside
+          // a Zero transaction).
+          if (currentBoard?.boardType === BoardType.FLOW) {
+            const movingToBacklog =
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              ticket.stageName !== FLOW_STAGE_NAMES.BACKLOG;
+            if (movingToBacklog) {
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowStepBacklogged({ ticketId: params.id, actorUserId: authData.sub });
+              });
+            } else if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
+              const newStatus = params.statusV2 as TicketStatusV2;
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowTicketStatusChanged({
+                  ticketId: params.id,
+                  newStatus,
+                  actorUserId: authData.sub,
+                });
+              });
+            }
+          }
+
           // StatusV2 pause/unpause handling:
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
@@ -5813,6 +5881,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   : { oldValue: ticket[field], newValue: params[field] },
               });
             }
+          }
+
+          const flowSnapshot = (
+            ticket.metadata as {
+              flow?: {
+                nodeSnapshot?: {
+                  planNodeId?: string;
+                  title?: string;
+                  gate?: { type?: string; prompt?: string };
+                };
+              };
+            } | null
+          )?.flow?.nodeSnapshot;
+          if (
+            params.statusV2 === TicketStatusV2.COMPLETED &&
+            ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+            flowSnapshot?.gate?.type === 'confirmation'
+          ) {
+            activities.push({
+              activityType: ActivityType.METADATA,
+              value: {
+                field: 'flowConfirmation',
+                planNodeId: flowSnapshot.planNodeId ?? null,
+                prompt: flowSnapshot.gate.prompt?.trim() || null,
+                confirmationText:
+                  flowSnapshot.gate.prompt?.trim() || flowSnapshot.title?.trim() || null,
+              },
+            });
           }
 
 
@@ -6161,13 +6257,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const userName = user.displayName || user.name;
             let activityMessage = '';
 
-            if (activity.activityType === 'TITLE') {
+            if (activity.activityType === ActivityType.TITLE) {
               activityMessage = `${userName} updated the title`;
-            } else if (activity.activityType === 'DESCRIPTION') {
+            } else if (activity.activityType === ActivityType.DESCRIPTION) {
               activityMessage = `${userName} updated the description`;
-            } else if (activity.activityType === 'STATUS' && activity.value.field === 'stageName') {
+            } else if (activity.activityType === ActivityType.STATUS && activity.value.field === 'stageName') {
               activityMessage = `${userName} moved ticket from "${activity.value.oldValue}" to "${activity.value.newValue}"`;
-            } else if (activity.activityType === 'ASSIGNED_TO') {
+            } else if (activity.activityType === ActivityType.ASSIGNED_TO) {
               if (activity.value.newValue) {
                 const newAssignee = await tx.run(zql.users.where('id', activity.value.newValue).one());
                 if (activity.value.newValue === authData.sub) {
@@ -6178,17 +6274,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               } else {
                 activityMessage = `${userName} unassigned the ticket`;
               }
-            } else if (activity.activityType === 'PRIORITY') {
+            } else if (activity.activityType === ActivityType.PRIORITY) {
               activityMessage = `${userName} changed priority from ${activity.value.oldValue} to ${activity.value.newValue}`;
-            } else if (activity.activityType === 'ETA') {
+            } else if (activity.activityType === ActivityType.ETA) {
               const oldDate = activity.value.oldValue ? new Date(activity.value.oldValue).toLocaleDateString() : 'none';
               const newDate = activity.value.newValue ? new Date(activity.value.newValue).toLocaleDateString() : 'none';
               activityMessage = `${userName} updated ETA from ${oldDate} to ${newDate}`;
-            } else if (activity.activityType === 'BOARD') {
+            } else if (activity.activityType === ActivityType.BOARD) {
               const oldBoard = await tx.run(zql.boards.where('id', activity.value.oldValue).one());
               const newBoard = await tx.run(zql.boards.where('id', activity.value.newValue).one());
               activityMessage = `${userName} moved ticket from board "${oldBoard?.name || activity.value.oldValue}" to "${newBoard?.name || activity.value.newValue}"`;
-            } else if (activity.activityType === 'USER_GROUP_ID') {
+            } else if (activity.activityType === ActivityType.USER_GROUP_ID) {
               if (activity.value.newValue) {
                 const newGroup = await tx.run(zql.user_groups.where('id', activity.value.newValue).one());
                 activityMessage = `${userName} transferred the ticket to ${newGroup?.name || 'Unknown'}`;
@@ -6196,12 +6292,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const oldGroup = activity.value.oldValue ? await tx.run(zql.user_groups.where('id', activity.value.oldValue).one()) : null;
                 activityMessage = `${userName} removed user group${oldGroup ? ` ${oldGroup.name}` : ''}`;
               }
-            } else if (activity.activityType === 'IS_ARCHIVED') {
+            } else if (activity.activityType === ActivityType.IS_ARCHIVED) {
               activityMessage = `${userName} archived the ticket`;
-            } else if (activity.activityType === 'TICKET_TYPE') {
+            } else if (activity.activityType === ActivityType.TICKET_TYPE) {
               const oldType = activity.value.oldValue || 'none';
               const newType = activity.value.newValue || 'none';
               activityMessage = `${userName} changed ticket type from ${oldType} to ${newType}`;
+            } else if (
+              activity.activityType === ActivityType.METADATA &&
+              activity.value.field === 'flowConfirmation'
+            ) {
+              const confirmationText = activity.value.confirmationText;
+              activityMessage = confirmationText
+                ? `${userName} confirmed “${confirmationText}”`
+                : `${userName} completed the confirmation`;
             }
 
             if (activityMessage && ticket.conversationId) {
@@ -6510,7 +6614,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               showInChannel: false,
               createdAt: Date.now(),
               metadata: {
-                activityType: 'STAGE_ETA',
+                activityType: ActivityType.STAGE_ETA,
                 isTicketActivity: true,
               },
             });
@@ -6531,12 +6635,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
-          // A ticket that is itself mapped as a subticket cannot have its own subtickets
-          const parentAsSubTicket = await tx.run(zql.sub_tickets.where('mappedTicketId', ticketId).one());
+          const parentAsSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+          );
+          // Parent ticket is also needed below to denormalize channelId onto the activity.
+          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           if (parentAsSubTicket) {
-            throw new Error(`Cannot create a sub-ticket under a sub-ticket. Parent ticket ${ticketId} is already a sub-ticket.`);
+            const parentBoard = parentTicket
+              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+              : null;
+            if (parentBoard?.boardType !== BoardType.FLOW) {
+              throw new Error('Cannot create a sub-ticket under a sub-ticket');
+            }
           }
-
           // Create the subticket
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
@@ -6563,7 +6674,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Log activity and create system message
           const activityId = uuidv4();
-          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           await tx.mutate.ticket_activities.insert({
             workspaceId: authData.workspaceId,
             id: activityId,
@@ -6698,11 +6808,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           args: {
             projectId,
             mainBoardId,
-            mainBoardName,
+            mainBoardName: rawMainBoardName,
             vcsProvider,
             releaseTrackingMode,
             channelId,
-            applications,
+            applications: rawApplications,
           },
         }) => {
           // Validate project exists
@@ -6720,8 +6830,49 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Channel does not belong to this project');
           }
 
-          if (applications.length === 0) {
+          if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
+          }
+
+          // ── Normalize all user-typed strings up-front ─────────────────────
+          // Why: a single trailing space in `regex` previously caused commit
+          // analysis to silently match zero files (bug discovered 2026-06-25).
+          // Now: trim everything, drop empty path entries, and validate the
+          // regex compiles BEFORE any DB write. Downstream code already does
+          // some of these trims inline; those become no-ops on already-trimmed
+          // strings.
+          const mainBoardName = rawMainBoardName.trim();
+          const applications = rawApplications.map(app => {
+            const trimmedRegex = app.regex.trim();
+            const trimmedName = app.name.trim();
+            if (trimmedRegex !== '') {
+              try {
+                new RegExp(trimmedRegex);
+              } catch (e) {
+                const why = e instanceof Error ? e.message : 'unknown error';
+                throw new Error(
+                  `Invalid regex for application "${trimmedName || '(unnamed)'}": ${why}`,
+                );
+              }
+            }
+            return {
+              ...app,
+              name: trimmedName,
+              boardName: app.boardName.trim(),
+              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
+              regex: trimmedRegex,
+              ownerTeam: app.ownerTeam.trim(),
+              envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
+              migrationPaths: app.migrationPaths.map(p => p.trim()).filter(Boolean),
+            };
+          });
+
+          for (const app of applications) {
+            if (app.regex === '') {
+              throw new Error(
+                `Application "${app.name || '(unnamed)'}" is missing its file-path regex`,
+              );
+            }
           }
 
           const normalizedApplicationNames = applications.map(app => app.name.trim());
@@ -7065,8 +7216,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), userRoleUpdates: z.record(z.string(), z.string()).optional(), timestamp: z.number() }),
-        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp } }) => {
+        z.object({
+          userGroupId: z.string(),
+          name: z.string().optional(),
+          alias: z.string().optional(),
+          description: z.string().optional(),
+          reassignOnUnavailable: z.boolean().optional(),
+          userResponsibilityUpdates: z
+            .record(z.string(), z.nativeEnum(UserResponsibility))
+            .optional(),
+          userRoleUpdates: z.record(z.string(), z.string()).optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            userGroupId,
+            name,
+            alias,
+            description,
+            reassignOnUnavailable,
+            userResponsibilityUpdates,
+            userRoleUpdates,
+            timestamp,
+          },
+        }) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
 
@@ -7101,6 +7275,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(name !== undefined && { name }),
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
+            ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
             updatedAt: timestamp,
           });
 
@@ -7316,6 +7491,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     board: {
+      updateFlowPlan: defineMutator(
+        z.object({
+          boardId: z.string(),
+          plan: FlowPlanSchema,
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { boardId, plan, timestamp } }) => {
+          const board = await tx.run(zql.boards.where('id', boardId).one());
+          if (!board) {
+            throw new Error('Board not found');
+          }
+          if (board.boardType !== BoardType.FLOW) {
+            throw new Error('Flow plans can only be set on Flow boards');
+          }
+          validateFlowPlan(plan);
+          await validateFlowDecisionFields(tx, plan);
+          await tx.mutate.boards.update({
+            id: boardId,
+            flowPlan: serializeFlowPlan(plan),
+            updatedBy: authData.sub,
+            updatedAt: timestamp,
+          });
+          awaitedPostCommitTasks.push(async () => {
+            await onFlowPlanUpdated({ boardId, actorUserId: authData.sub });
+          });
+        },
+      ),
       update: defineMutator(
         z.object({
           boardId: z.string(),
@@ -7381,6 +7583,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
+          if (boardType !== undefined && boardType !== board.boardType) {
+            if (board.boardType === BoardType.FLOW) {
+              throw new Error('Flow boards cannot be converted to another board type');
+            }
+            if (boardType === BoardType.FLOW) {
+              throw new Error('Existing boards cannot be converted to a Flow board');
+            }
+          }
+
           // Validate project exists if projectId is being changed
           if (projectId && projectId !== board.projectId) {
             const project = await tx.run(zql.projects.where('id', projectId).one());
@@ -7414,17 +7625,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // Validate that stages have at least one TODO, STARTED, and COMPLETED stage
             const hasTodo = stages.some(
               s =>
-                s.defaultTicketStatusV2 === TicketStatusV2.TODO || s.defaultTicketStatusV2 === 'TODO',
+                s.defaultTicketStatusV2 === TicketStatusV2.TODO || s.defaultTicketStatusV2 === TicketStatusV2.TODO,
             );
             const hasStarted = stages.some(
               s =>
                 s.defaultTicketStatusV2 === TicketStatusV2.STARTED ||
-                s.defaultTicketStatusV2 === 'STARTED',
+                s.defaultTicketStatusV2 === TicketStatusV2.STARTED,
             );
             const hasCompleted = stages.some(
               s =>
                 s.defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
-                s.defaultTicketStatusV2 === 'COMPLETED',
+                s.defaultTicketStatusV2 === TicketStatusV2.COMPLETED,
             );
 
             if (!hasTodo || !hasStarted || !hasCompleted) {
@@ -7674,7 +7885,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // Insert new approvers if provided
               const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
                 approverId: entry.approverId,
-                approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
+                approverType: entry.approverType === ApproverType.ROLE ? ApproverType.ROLE : ApproverType.USER,
               }));
               if (stage.approverIds && stage.approverIds.length > 0) {
                 for (const approverId of stage.approverIds) {
@@ -8257,6 +8468,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdBy: authData.sub,
             visibility: visibility || CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: false,
             docType: DocType.Canvas,
             lastEditedBy: authData.sub,
@@ -8994,6 +9206,46 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.canvases.delete({ id });
         },
       ),
+      archiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can archive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: true,
+          });
+        },
+      ),
+      unarchiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can unarchive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: false,
+          });
+        },
+      ),
     },
     canvasUserStatus: {
       toggleStarred: defineMutator(
@@ -9086,6 +9338,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             blockId,
             anchorText: anchorText || null,
             initialCommentId: commentId,
+            commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: null,
             statusUpdatedAt: null,
@@ -9137,12 +9390,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: timestamp,
           });
 
+          const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+
           if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
             await tx.mutate.canvas_comment_threads.update({
               id: threadId,
+              commentCount,
               status: CanvasCommentThreadStatus.OPEN,
               statusUpdatedBy: authData.sub,
               statusUpdatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.canvas_comment_threads.update({
+              id: threadId,
+              commentCount,
             });
           }
         },
@@ -9197,6 +9458,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             mentionedUserIds: '[]',
             deletedAt: timestamp,
           });
+
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+          if (thread) {
+            const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+            await tx.mutate.canvas_comment_threads.update({
+              id: comment.threadId,
+              commentCount,
+            });
+          }
         },
       ),
       setThreadStatus: defineMutator(
@@ -9711,7 +9981,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 eventName: 'NUDGE_DISMISSED',
                 url: '',
                 triggerType: 'SYSTEM',
-                platform: 'WEB',
+                platform: Platform.WEB,
                 timestamp: new Date(timestamp),
                 contextMetadata: {
                   nudgeId,
@@ -9823,6 +10093,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       upsert: defineMutator(
         z.object({
           displayName: z.string().nullable().optional(),
+          role: z.string().nullable().optional(),
           pronunciation: z.string().nullable().optional(),
           team: z.string().nullable().optional(),
           phoneNumber: z.string().nullable().optional(),
@@ -9847,6 +10118,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: string;
             userId: string;
             displayName?: string | null;
+            role?: string | null;
             pronunciation?: string | null;
             team?: string | null;
             phoneNumber?: string | null;
@@ -9858,6 +10130,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: profileId,
             userId: authData.sub,
             ...(params.displayName !== undefined && { displayName: params.displayName }),
+            ...(params.role !== undefined && { role: params.role }),
             ...(params.pronunciation !== undefined && { pronunciation: params.pronunciation }),
             ...(params.team !== undefined && { team: params.team }),
             ...(params.phoneNumber !== undefined && { phoneNumber: params.phoneNumber }),
@@ -11442,6 +11715,65 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    // Thread types — what kind of thread this is, as a stringified JSON array on the
+    // conversation row. The caller sends the FULL desired set: the column is one value, so a
+    // partial update would be a read-modify-write race.
+    //
+    // KEEP IN SYNC with apps/backend/src/zero/mutators.ts threadTag.
+    threadTag: {
+      setTypes: defineMutator(
+        z.object({
+          conversationId: z.string(),
+          // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
+          // add their own. Length-capped so a tag stays a label rather than a paragraph.
+          types: z.array(z.string().trim().min(1).max(40)),
+        }),
+        async ({ tx, ctx, args: { conversationId, types } }) => {
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one(),
+          );
+          if (!conversation) throw new Error('Conversation not found');
+
+          // Built-in types first in vocabulary order, then custom ones alphabetically, so
+          // chips render in a stable order regardless of the order they were picked.
+          const rank = (name: string): number => {
+            const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
+            return i === -1 ? THREAD_TYPE_NAMES.length : i;
+          };
+          const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
+            (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+          );
+
+
+          // '[]' rather than null when cleared: null means "never classified" and the
+          // classifier would re-derive it on its next pass.
+          await tx.mutate.conversations.update({
+            conversationId,
+            threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+          });
+
+          // Backend copy only. Zero collects no side-effect job for conversation updates
+          // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on
+          // the ROOT MESSAGE's Vespa doc — so without this a hand-applied tag never reaches
+          // search. Deferred rather than awaited: a Redis round-trip inside the mutation
+          // would hold the transaction open, and an unindexed tag must never fail the write.
+          const { initialMessageId, workspaceId } = conversation;
+          asyncTasks.push(async () => {
+            try {
+              await vespaQueue.addJob({
+                schema: 'chat_message',
+                jobType: 'feed',
+                docId: initialMessageId,
+                userId: ctx.userID,
+                ...(workspaceId ? { workspaceId } : {}),
+              });
+            } catch (error) {
+              logger.error('[threadTag] Failed to queue Vespa refeed', { conversationId, error });
+            }
+          });
+        },
+      ),
+    },
     // KEEP IN SYNC with shared/src/zero/mutators.ts ticketMailbox.
     // Gmail-style per-user mailbox overlay over shared desk tickets. Sparse: a row exists
     // only once the agent acts; absence means { INBOX, not starred }.
@@ -11681,7 +12013,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             timestamp,
           },
         }) => {
-          // 1. Check if draft exists for this channel/conversation/user
           let existingDraft = null;
           if (conversationId) {
             existingDraft = await tx.run(
@@ -11689,13 +12020,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('channelId', channelId)
                 .where('userId', authData.sub)
                 .where('conversationId', conversationId)
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
                 .one(),
             );
           } else {
             const channelDrafts = await tx.run(
               zql.draft_messages
                 .where('channelId', channelId)
-                .where('userId', authData.sub),
+                .where('userId', authData.sub)
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
             );
             existingDraft = channelDrafts.find(draft => draft.conversationId === null);
           }
@@ -11712,6 +12045,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: content || '',
               hasAttachment: true,
+              origin: DraftOrigin.user,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -11826,7 +12160,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where('channelId', channelId)
-              .where('userId', authData.sub),
+              .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const draft = conversationId
             ? channelDrafts.find(d => d.conversationId === conversationId)
@@ -12914,6 +13249,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               updatedAt: timestamp,
             });
           }
+
+          // Emit a TESTING event to the release timeline so the user can see
+          // QA stage changes in the audit feed. Requires looking up the release
+          // ticket for channelId/conversationId (ART doesn't store them).
+          if (stageName) {
+            const releaseTicket = await tx.run(
+              zql.tickets.where('id', row.releaseId).one(),
+            );
+            if (releaseTicket) {
+              const devTitle = devTicket?.title ?? 'dev ticket';
+              const message = failureReason
+                ? `${devTitle} → ${stageName} (reason: ${failureReason})`
+                : `${devTitle} → ${stageName}`;
+              await tx.mutate.release_events.insert({
+                id: uuidv4(),
+                workspaceId: authData.workspaceId,
+                releaseId: row.releaseId,
+                applicationReleaseId: row.applicationReleaseId ?? undefined,
+                eventType: ReleaseEventType.TESTING,
+                eventName: 'STAGE_CHANGED',
+                message,
+                userId: authData.sub,
+                userName: authData.name,
+                channelId: releaseTicket.channelId ?? '',
+                conversationId: releaseTicket.conversationId,
+                createdAt: timestamp,
+              });
+            }
+          }
         },
       ),
       // Set the QA assigned to test this ART row. Independent of status; users
@@ -13792,7 +14156,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // avoids stripping resource access that may have been granted independently
               // via the Roles screen (no provenance tracking exists to tell them apart).
               asyncTasks.push(() =>
-                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub),
+                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub, workspaceId),
               );
             }
           }
@@ -13847,6 +14211,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one(),
           );
           if (existing) throw new Error('Organization name already exists');
+
+          await getEncryptionProvider().initializeOrg(orgId);
 
           await tx.mutate.organizations.insert({
             orgId,
@@ -14073,6 +14439,54 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     userPreference: {
+      setSidebarGroupPreference: defineMutator(
+        z.object({
+          id: z.string(),
+          group: z.enum(['starred', 'channels', 'dms']),
+          filterMode: z.nativeEnum(ChannelFilterMode).optional(),
+          sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
+          const filterField = {
+            starred: 'starredFilterMode',
+            channels: 'channelFilterMode',
+            dms: 'dmFilterMode',
+          }[group];
+          const sortField = {
+            starred: 'starredSortOrder',
+            channels: 'channelSortOrder',
+            dms: 'dmSortOrder',
+          }[group];
+          const fields = {
+            ...(filterMode !== undefined && { [filterField]: filterMode }),
+            ...(sortOrder !== undefined && { [sortField]: sortOrder }),
+          };
+          const existing = await tx.run(zql.user_preferences.where('userId', authData.sub).one());
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              ...fields,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              showThreadTags: false,
+              ...fields,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
       setChannelSortOrder: defineMutator(
         z.object({
           id: z.string(),
@@ -14102,6 +14516,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14137,6 +14552,43 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setShowThreadTags: defineMutator(
+        z.object({
+          id: z.string(),
+          showThreadTags: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, showThreadTags, timestamp } }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', ctx.userID).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              showThreadTags,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: ctx.workspaceId,
+              id,
+              userId: ctx.userID,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14172,6 +14624,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14223,6 +14676,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
               channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14259,6 +14713,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords,
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -15071,7 +15526,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where("channelId", channelId)
-              .where("userId", ctx.userID),
+              .where("userId", ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const existingDraft = channelDrafts.find(
             (d) =>
@@ -15233,7 +15689,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const channelDrafts = await tx.run(
-            zql.draft_messages.where('channelId', scheduled.channelId).where('userId', ctx.userID)
+            zql.draft_messages
+              .where('channelId', scheduled.channelId)
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
           );
           const existingDraft = channelDrafts.find(
             (d) => d.conversationId === (scheduled.conversationId ?? null) && d.messageId === null
@@ -15263,6 +15722,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             userId: ctx.userID,
             content: scheduled.content,
             hasAttachment,
+            origin: DraftOrigin.user,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -15307,7 +15767,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       /** Delete a draft message by ID (only the owner can delete their own draft) */
       delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where('id', id).where('userId', ctx.userID).one()
+          zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
         );
         if (!draft) {
           throw new Error('Draft not found');
@@ -15325,7 +15785,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, content, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
@@ -15346,7 +15806,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
@@ -15649,8 +16109,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       disable: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { id, timestamp } }) => {
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+          cancelQueued: z.boolean().optional(),
+        }),
+        async ({ tx, args: { id, timestamp, cancelQueued } }) => {
           logger.info(`[Mutator] automations.disable START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
@@ -15675,7 +16139,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const { approvalService } = await import(
                 '../automations/services/approval.service'
               );
-              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED);
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED, {
+                cancelQueued: cancelQueued ?? true,
+              });
               logger.info(
                 `[Mutator] automations.disable asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
               );
@@ -15751,6 +16217,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (!board) throw new Error('Board not found');
           if (board.workspaceId !== authData.workspaceId) throw new Error('Board not found');
 
+          // Editing a board's stage transitions/approvers rewrites the approval workflow,
+          // which is a board-admin action — restrict to the board creator or a project
+          // admin, mirroring BoardAcl.canUpdate.
+          if (board.createdBy !== authData.sub && !(await hasProjectAdminAccess({ userID: authData.sub }, tx))) {
+            throw new Error('Not authorized to edit board transitions');
+          }
+
           // Validate the incoming edges before persisting. These guards prevent configs that
           // the runtime can't satisfy (and that the UI may not block on non-UI paths):
           //  - self-loops (fromStageId === toStageId) make no sense as a directed transition
@@ -15780,6 +16253,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+
+          logger.info(`[MUTATOR-NON-LINEAR] stage transitions for board ${boardId} updated by ${authData.sub}`, {
+            boardId,
+            userId: authData.sub,
+            oldTransitionIds: existing.map(t => t.id),
+            newTransitionIds: transitions.map(t => t.id),
+          });
+
           for (const t of existing) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', t.id),

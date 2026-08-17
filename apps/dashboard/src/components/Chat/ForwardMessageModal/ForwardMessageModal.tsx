@@ -46,6 +46,8 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
+import { RecordingShareContent } from '../../ui/MessageBubble/RecordingShareContent';
+import { useRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -285,6 +287,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }
     return message.content;
   }, [useOptionalText, forwardedMessageData, message.content, sourceConversation]);
+  const recordingShare = useRecordingShareMessage(previewContent);
 
   const allVisibleChannels = useAllVisibleChannels();
   const allChannels = useAllChannels().map(
@@ -342,23 +345,25 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const getGroupDMParticipants = (channel: { name: string; scopeType: ChannelScopeType }) => {
     const otherIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
-    return otherIds.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as {
-      name: string;
-    }[];
+    return otherIds
+      .map(id => allUsers.find(u => u.id === id))
+      .filter((user): user is (typeof allUsers)[number] => user !== undefined);
   };
 
   const getGroupDMLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
     const participants = getGroupDMParticipants(channel);
-    return participants.map(u => u.name).join(', ');
+    return participants.map(user => getUserDisplayName(user)).join(', ');
   };
 
   const getGroupDMBadgeLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
     const MAX_SHOWN = 3;
     const participants = getGroupDMParticipants(channel);
-    if (participants.length <= MAX_SHOWN) return participants.map(u => u.name).join(', ');
+    if (participants.length <= MAX_SHOWN) {
+      return participants.map(user => getUserDisplayName(user)).join(', ');
+    }
     const shown = participants
       .slice(0, MAX_SHOWN)
-      .map(u => u.name)
+      .map(user => getUserDisplayName(user))
       .join(', ');
     return `${shown} +${participants.length - MAX_SHOWN} more`;
   };
@@ -388,8 +393,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     return (
       <div className='max-w-[200px] flex flex-wrap gap-x-1 gap-y-0.5'>
         {participants.map((u, i) => (
-          <span key={i}>
-            {u.name}
+          <span key={u.id}>
+            {getUserDisplayName(u)}
             {i < participants.length - 1 ? ',' : ''}
           </span>
         ))}
@@ -551,8 +556,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       .filter(channel => {
         const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
         const participants = allUsers.filter(u => participantIds.includes(u.id));
+        const query = trimmedInputValue.toLowerCase();
         return participants.some(u =>
-          u.name.toLowerCase().includes(trimmedInputValue.toLowerCase()),
+          [u.displayName, u.name, u.email].some(value => value?.toLowerCase().includes(query)),
         );
       })
       .slice(0, 5)
@@ -811,13 +817,25 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                     {formatRelativeTimestamp(message.createdAt)}
                   </span>
                 </div>
-                {previewContent && (
+                {recordingShare ? (
+                  <RecordingShareContent
+                    recordingShare={recordingShare}
+                    className='flex min-w-0 flex-col gap-1'
+                    renderNote={noteHtml => (
+                      <div
+                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
+                      >
+                        <RenderMessageWithHTML message={noteHtml} />
+                      </div>
+                    )}
+                  />
+                ) : previewContent ? (
                   <div
                     className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
                   >
                     <RenderMessageWithHTML message={previewContent} />
                   </div>
-                )}
+                ) : null}
                 {/* Attachments - hide when using optionalText (it's either optionalText OR content with attachments) */}
                 {!useOptionalText && message.attachments && message.attachments.length > 0 && (
                   <div className='mt-2'>

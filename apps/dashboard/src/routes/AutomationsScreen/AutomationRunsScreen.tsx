@@ -18,8 +18,8 @@ export default function AutomationRunsScreen(): ReactElement {
     <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <RunHistory
         automationId={id}
-        onBack={() => void navigate(`/automations/${id}`)}
-        onOpenRun={run => void navigate(`/automations/${id}/runs/${run.id}`)}
+        onBack={() => void navigate('..', { relative: 'path' })}
+        onOpenRun={run => void navigate(`${run.id}`, { relative: 'path' })}
       />
     </div>
   );

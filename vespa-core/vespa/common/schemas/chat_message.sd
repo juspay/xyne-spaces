@@ -15,6 +15,17 @@ schema chat_message {
       index: enable-bm25
     }
 
+    # Per-chunk body used for chunk-level embeddings, mirroring mail.sd.
+    # `text` (above) is retained as the single display/summary/lexical field;
+    # `chunks` holds the same body split into <=2000-char segments so long
+    # messages are not truncated at embed time (bge-small-en-v1.5 512-token limit).
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
     field userId type string {
       indexing: attribute | summary
       attribute: fast-search
@@ -51,6 +62,18 @@ schema chat_message {
 
     field threadId type string {
       indexing: attribute | summary
+    }
+
+    field messageActs type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field threadType type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
     }
 
     # True when this message is its conversation's initial/root message. Lets
@@ -156,7 +179,15 @@ schema chat_message {
       distance-metric: angular
     }
   }
-  
+
+  # Per-chunk embeddings (one vector per `chunks` element).
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
 field text_fuzzy type string {
     indexing: input text |tokenize | lowercase | index | summary
     index: enable-bm25
@@ -166,7 +197,7 @@ field text_fuzzy type string {
     }
 }
   fieldset default {
-    fields: text, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
+    fields: text, chunks, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
   }
 
   rank-profile initial {
@@ -188,7 +219,7 @@ field text_fuzzy type string {
     }
 
     function vector_score() {
-      expression: closeness(field, text_embeddings)
+      expression: max(closeness(field, text_embeddings), closeness(field, chunk_embeddings))
     }
 
     function combined_nativeRank() {
@@ -232,6 +263,7 @@ field text_fuzzy type string {
     summary text {
       bolding: on
     }
+    summary chunks {}
     summary mentions {}
     summary channelMentions {}
     summary attachmentIds {}
@@ -255,6 +287,8 @@ field text_fuzzy type string {
     summary threadId {}
     summary replyCount {}
     summary isRootMessage {}
+    summary messageActs {}
+    summary threadType {}
     summary messageType {}
     summary threadSenders {}
     summary attachmentIds {}

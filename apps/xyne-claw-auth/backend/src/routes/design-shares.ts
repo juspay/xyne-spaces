@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
-import { gcsService } from "../services/gcsService.js";
+import { gcsService } from "../services/storageService.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("design-shares");

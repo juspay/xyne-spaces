@@ -9,12 +9,17 @@ import {
   type KanbanCountsRequest,
   type KanbanCountsViewMode,
 } from '../../services/ticketService';
-import { BaseTicketType } from '@xyne/shared';
+import {
+  BaseTicketType,
+  FormFieldType,
+  TicketStatusV2,
+  type FlowStepVisibilityOptions,
+} from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 
-interface UseKanbanCountsOptions {
+interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
   columnType?: 'stage' | 'status';
   projectId?: string;
@@ -126,13 +131,13 @@ const getFormFieldGroupKeys = (
 ): string[] => {
   const value = snapshot.formFieldValues[groupBy.fieldId] ?? null;
 
-  if (groupBy.fieldType === 'MULTI_SELECT') {
+  if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
     return stringValues.length > 0 ? stringValues : ['No Value'];
   }
 
-  if (groupBy.fieldType === 'USER') {
+  if (groupBy.fieldType === FormFieldType.USER) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
     return stringValues.length > 0 ? stringValues : ['Unassigned'];
@@ -321,7 +326,9 @@ const matchesRequest = (
   }
 
   if (request.showOverdueOnly) {
-    const isTerminal = snapshot.statusV2 === 'COMPLETED' || snapshot.statusV2 === 'CANCELLED';
+    const isTerminal =
+      snapshot.statusV2 === TicketStatusV2.COMPLETED ||
+      snapshot.statusV2 === TicketStatusV2.CANCELLED;
     if (isTerminal) return false;
     if (snapshot.eta === null || snapshot.eta === undefined || snapshot.eta >= Date.now())
       return false;
@@ -558,6 +565,7 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.boardId !== undefined) request.boardId = options.boardId;
   if (options.userId !== undefined) request.userId = options.userId;
   if (options.groupId !== undefined) request.groupId = options.groupId;
+  if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);
   if (normalizedFilters) request.filters = normalizedFilters;
@@ -598,6 +606,13 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     let cancelled = false;
     const handleCountsUpdate = (event: TicketCountsUpdateEvent): void => {
       if (cancelled) return;
+
+      // Live count snapshots do not carry rootId. Refetch aggregate-board
+      // counts so materialized flow steps cannot leak into the total.
+      if (request.excludeFlowSteps) {
+        void queryClient.invalidateQueries({ queryKey: ['tickets', 'kanban-counts', request] });
+        return;
+      }
 
       queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(
         ['tickets', 'kanban-counts', request],

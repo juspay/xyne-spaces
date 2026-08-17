@@ -10,12 +10,6 @@ export default {
     './src/**/*.{ts,tsx}',
     './index.html',
   ],
-  safelist: [
-    { pattern: /bg-\[.*\]/ }, // allow arbitrary bg classes
-    { pattern: /bg-\[color:.*\]/ }, // allow color-typed arbitrary values
-    { pattern: /bg-\[color:hsl\(var\(.*\)\)\]/ }, // specific pattern for HSL with CSS variables
-    { pattern: /hljs-.*/ }, // preserve all syntax highlighting classes
-  ],
   prefix: '',
   theme: {
     container: {
@@ -29,6 +23,10 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
+        serif: ['"Libre Baskerville"', 'Georgia', 'serif'],
+      },
+      maxWidth: {
+        'ai-content': '50rem',
       },
       colors: {
         // Xyne Foundation Theme Colors

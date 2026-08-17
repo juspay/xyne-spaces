@@ -71,7 +71,7 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
 /**
  * Gate for the privileged mTLS/keychain IPC handlers. Only the top-level frame of the main
  * application window may invoke them — this blocks renderer-injected content (an XSS'd sub-frame
- * or `<iframe srcdoc>`) from silently driving certificate/keychain operations (secops #362).
+ * or `<iframe srcdoc>`) from silently driving certificate/keychain operations.
  *
  * The legitimate device-enrollment flow (generate-keys -> generate-csr -> store-certificate) runs
  * in the main window's top frame, so it passes this gate unchanged; only nested/foreign frames are
@@ -105,6 +105,7 @@ function assertMainWindowSender(event: IpcMainInvokeEvent): void {
 export function setupMTLSIpcHandlers(): void {
 
     // mtls start
+    // Privileged mTLS identity operations are restricted to the main window's top frame.
     ipcMain.handle('generate-keys', async (event) => {
         assertMainWindowSender(event);
         Logger.info(EnrollmentEvent.FIRST_TIME_SIGNUP_START);

@@ -3,9 +3,10 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 
-// Labels are private to their creator and live in a channel (desk). A user may read
-// a label only when it's theirs (createdBy) AND they can see its channel: either it's
-// public or they're a participant (mirrors ConversationLabelMappingsACL).
+// Labels are a shared, channel-wide palette (the app fetches ALL labels for a channel,
+// e.g. conversationLabelsByChannelId). A user may read a label when they can see its
+// channel: it's public or they're a participant. (Previously gated to createdBy, which
+// hid teammates' labels in a channel the caller could otherwise fully see.)
 export class ConversationLabelsACL extends BaseQueryACL<'conversation_labels'> {
   constructor(ctx: Context) {
     super(ctx, 'conversation_labels');
@@ -15,7 +16,6 @@ export class ConversationLabelsACL extends BaseQueryACL<'conversation_labels'> {
     query: Query<'conversation_labels', Schema, TReturn>,
   ): Query<'conversation_labels', Schema, TReturn> {
     return query
-      .where('createdBy', this.ctx.userID)
       .whereExists('channel', (ch) =>
         ch.where(({ or, cmp, exists }) =>
           or(

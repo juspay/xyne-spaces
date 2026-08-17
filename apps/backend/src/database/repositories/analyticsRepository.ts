@@ -1,8 +1,10 @@
 import { DatabaseClient, readReplicaDb } from '../client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
+import { AttachmentEntityType, CallType, ChannelScopeType, UserType } from '@xyne/shared';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
@@ -12,6 +14,18 @@ export interface AnalyticsFilters {
   endDate?: string; // ISO date string for custom range end
   repoName?: string; // Repository filter
   userId?: string; // User filter - 'all' or specific user ID
+}
+
+// Calls and recordings are the same table, split by callType (HEADLESS = recording)
+export interface CallsBreakdown {
+  calls: number;      // Regular calls (every callType except HEADLESS)
+  recordings: number; // Recordings (HEADLESS)
+}
+
+export interface CallsTimeSeriesPoint {
+  date: string;
+  calls: number;      // Call count for the bucket (recordings excluded)
+  recordings: number; // Recording count for the bucket
 }
 
 // New optimized types for execution stats
@@ -112,16 +126,24 @@ type FilteredMessage = {
   messageId: string;
   senderId: string;
   conversationId: string;
-  metadata: any;
+  channelId: string;
+  channelScopeType: string;
   createdAt: Date;
 };
+const MINUTE_MS = 60 * 1000;
+/**
+ * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]
+ */
+function floorToMinute(date: Date): Date {
+  return new Date(Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS);
+}
 
 /**
  * Helper method to get date filter SQL condition
  * ALL DATE OPERATIONS USE UTC TO AVOID TIMEZONE ISSUES
  */
 export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
-  const now = new Date();
+  const now = floorToMinute(new Date());
 
   // Handle custom date range
   if (filters.timeRange === 'custom' && filters.startDate) {
@@ -198,18 +220,54 @@ export class AnalyticsRepository {
     'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n','cmlv7gc0a00mrka9fol3ccjrk'
   ];
 
-  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<FilteredMessage[]> {
-    const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
+  /**
+   * Coalesces concurrent identical scans. Every analytics panel calls this
+   * helper with the same (workspace, range) key, and the dashboard fires all
+   * of them in parallel on mount and on every refetch — without this, one
+   * dashboard render issues ~8 copies of the same scan against the replica.
+   *
+   * Relies on ranges being minute-quantized (see floorToMinute) so that panels
+   * resolving their range moments apart still produce the same key.
+   */
+  private static readonly inFlightMessageQueries = new Map<string, Promise<FilteredMessage[]>>();
+
+  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<readonly FilteredMessage[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     const gte = dateCondition.gte ? dateCondition.gte.toISOString() : null;
     const lte = dateCondition.lte ? dateCondition.lte.toISOString() : null;
-    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
+
+    const key = `${scopedWorkspaceId}|${gte ?? ''}|${lte ?? ''}`;
+    const inFlight = AnalyticsRepository.inFlightMessageQueries.get(key);
+    if (inFlight) return inFlight;
+
+    const query = this.queryFilteredMessages(gte, lte, scopedWorkspaceId)
+      .finally(() => AnalyticsRepository.inFlightMessageQueries.delete(key));
+
+    AnalyticsRepository.inFlightMessageQueries.set(key, query);
+    return query;
+  }
+
+  private async queryFilteredMessages(gte: string | null, lte: string | null, scopedWorkspaceId: string): Promise<FilteredMessage[]> {
+    const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
+
+    // Emit the date bounds as plain comparisons instead of
+    // `($1::timestamp IS NULL OR m."createdAt" >= $1::timestamp)`. That OR form
+    // is non-sargable: Postgres can only fold the IS NULL branch away while it
+    // still builds custom plans, so once a pooled connection's prepared
+    // statement flips to a generic plan it stops using (msgType, createdAt) and
+    // sequential-scans `messages` regardless of how narrow the range is. That is
+    // what makes the same request succeed on one connection and hit
+    // statement_timeout on the next.
+    const gteClause = gte ? Prisma.sql`AND m."createdAt" >= ${gte}::timestamp` : Prisma.empty;
+    const lteClause = lte ? Prisma.sql`AND m."createdAt" <= ${lte}::timestamp` : Prisma.empty;
 
     const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
       SELECT 
         m."messageId", 
         m."senderId", 
         m."conversationId", 
-        m."metadata", 
+        c."channelId",
+        ch."scopeType" AS "channelScopeType",
         m."createdAt"
       FROM "public"."messages_without_content" m
       INNER JOIN "public"."conversations" c 
@@ -218,8 +276,8 @@ export class AnalyticsRepository {
         ON ch."id" = c."channelId"
       WHERE 
         m."msgType" = 'USER'
-        AND (${gte}::timestamp IS NULL OR m."createdAt" >= ${gte}::timestamp)
-        AND (${lte}::timestamp IS NULL OR m."createdAt" <= ${lte}::timestamp)
+        ${gteClause}
+        ${lteClause}
         AND ch."workspaceId" = ${scopedWorkspaceId}
         AND c."channelId" NOT IN (${Prisma.join(excludedChannels)})
         AND NOT EXISTS (
@@ -264,7 +322,7 @@ export class AnalyticsRepository {
 
   private async getUsersId(workspaceId: string): Promise<string[]> {
     const users = await this.prisma.user.findMany({
-      where: { userType: 'USER', workspaceId: this.requireWorkspaceId(workspaceId) },
+      where: { userType: UserType.USER, workspaceId: this.requireWorkspaceId(workspaceId) },
       select: { id: true }
     });
     return users.map(u => u.id);
@@ -1474,11 +1532,11 @@ export class AnalyticsRepository {
     // Get all user IDs from different activity types using Promise.all for parallel execution
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       // Users who posted reactions
-      this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true },
         distinct: ['userId'],
-      }),
+      })),
 
       // Users who uploaded files
       this.prisma.messageAttachment.findMany({
@@ -1509,11 +1567,11 @@ export class AnalyticsRepository {
       }),
 
       // Users who edited canvas
-      this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true},
         distinct: ['userId'],
-      })
+      }))
     ]);
 
     const allActiveUserIds = new Set<string>();
@@ -1640,16 +1698,22 @@ export class AnalyticsRepository {
 
     if (validMessageIds.length === 0) return 0;
 
-    const filesSharedCount = await this.prisma.messageAttachment.count({
-      where: {
-        entityId: { in: validMessageIds },
-        entityType: 'CHAT',
-        workspaceId,
-        createdBy: { notIn: ['Unified Alerts', 'system'] }
-      }
-    });
+    const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS count
+      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+    `);
 
-    return filesSharedCount;
+    return count;
+  }
+
+  private chatAttachmentsFrom(messageIds: string[], workspaceId: string): Prisma.Sql {
+    return Prisma.sql`
+      FROM "public"."message_attachments" a
+      WHERE a."entityId" = ANY(${messageIds}::text[])
+        AND a."entityType" = ${AttachmentEntityType.CHAT}
+        AND a."workspaceId" = ${workspaceId}
+        AND a."createdBy" NOT IN ('Unified Alerts', 'system')
+    `;
   }
 
   /**
@@ -1662,25 +1726,9 @@ export class AnalyticsRepository {
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Use centralized helper for filtering
+    // Use centralized helper for filtering. Channel + scopeType ride along on each
+    // message, so no per-conversation follow-up query (and no unbounded IN list).
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get all channelIds from valid messages
-    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await this.prisma.conversation.findMany({
-      where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, channelId: true }
-    });
-  
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, workspaceId },
-      select: { id: true, scopeType: true }
-    });
-
-    // Create lookup maps for efficient processing
-    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
-    const channelToScopeMap = new Map(channels.map(c => [c.id, c.scopeType]));
 
     // Generate complete time buckets for the date range based on groupBy
     const timeBuckets = groupBy === 'hour' 
@@ -1695,10 +1743,8 @@ export class AnalyticsRepository {
 
     // Aggregate valid messages
     validMessages.forEach(message => {
-      const channelId = conversationToChannelMap.get(message.conversationId);
-      if (!channelId) return;
       const dateKey = this.getBucketKey(message.createdAt, groupBy);
-      const scopeType = channelToScopeMap.get(channelId);
+      const scopeType = message.channelScopeType;
       if (bucketData.has(dateKey)) {
         const bucket = bucketData.get(dateKey)!;
         bucket.total += 1;
@@ -1796,10 +1842,10 @@ export class AnalyticsRepository {
 
     // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, createdAt: true },
-      }),
+      })),
       this.prisma.messageAttachment.findMany({
         where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true, createdAt: true },
@@ -1824,10 +1870,10 @@ export class AnalyticsRepository {
       }),
 
       // Users who edited canvas
-      this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, updatedAt: true },
-      })
+      }))
     ]);
 
     // Generate time buckets based on groupBy
@@ -1969,33 +2015,16 @@ export class AnalyticsRepository {
     if (validMessages.length === 0) {
       return 0;
     }
-    // Get unique conversationIds
-    const validConversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    // Get channels for valid conversations
-    const conversations = await this.prisma.conversation.findMany({
-      where: {
-        conversationId: { in: validConversationIds }
-      },
-      select: { conversationId: true, channelId: true }
-    });
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    if (channelIds.length === 0) {
-      return 0;
-    }
 
-    // Get channels with DEFAULT scope type
-    const channels = await this.prisma.channel.findMany({
-      where: {
-        id: { in: channelIds },
-        scopeType: 'DEFAULT',
-        workspaceId
-      },
-      select: {
-        id: true
-      }
-    });
+    // Count the distinct DEFAULT-scope channels the messages belong to. The scope
+    // rides along on each message, so no conversation/channel lookups by id list.
+    const activeChannelIds = new Set(
+      validMessages
+        .filter(m => m.channelScopeType === ChannelScopeType.DEFAULT)
+        .map(m => m.channelId)
+    );
 
-    return channels.length;
+    return activeChannelIds.size;
   }
 
   /**
@@ -2013,22 +2042,9 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Use centralized helper for filtering
+    // Use centralized helper for filtering. Channel + scopeType ride along on each
+    // message, so no per-conversation follow-up query (and no unbounded IN list).
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get all channelIds from valid messages
-    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await this.prisma.conversation.findMany({
-      where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, channelId: true }
-    });
-    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, scopeType: 'DEFAULT', workspaceId },
-      select: { id: true }
-    });
-    const defaultChannelIds = new Set(channels.map(c => c.id));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
@@ -2043,11 +2059,10 @@ export class AnalyticsRepository {
 
     // Group valid channels by time buckets based on valid message activity
     validMessages.forEach(message => {
-      const channelId = conversationToChannelMap.get(message.conversationId);
-      if (!channelId || !defaultChannelIds.has(channelId)) return;
+      if (message.channelScopeType !== ChannelScopeType.DEFAULT) return;
       const bucketKey = this.getBucketKey(message.createdAt, groupBy);
       if (bucketData.has(bucketKey)) {
-        bucketData.get(bucketKey)!.add(channelId);
+        bucketData.get(bucketKey)!.add(message.channelId);
       }
     });
 
@@ -2137,8 +2152,9 @@ export class AnalyticsRepository {
    */
   async getMessagesToday(workspaceId?: string): Promise<number> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesTodayTimeSeries resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
     
     // Get start of today in IST
@@ -2161,8 +2177,9 @@ export class AnalyticsRepository {
    */
   async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesToday resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
 
     // Get start of today in IST
@@ -2366,10 +2383,14 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get number of calls
-   * Counts the number of calls started in the selected time period
+   * Get the calls that lasted more than 60 seconds in the selected time period
+   * Calls and recordings live in the same table - HEADLESS calls are note taker recordings,
+   * every other call type is a regular call
    */
-  async getNumberOfCalls(filters: AnalyticsFilters): Promise<number> {
+  private async getValidCalls(filters: AnalyticsFilters): Promise<{
+    validCalls: { startedAt: Date; isRecording: boolean }[];
+    dateCondition: Date | { gte: Date; lte?: Date };
+  }> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const userIds = await this.getUsersId(workspaceId);
@@ -2380,76 +2401,74 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get all calls in the date range
-    const calls = await this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
-        endedAt: true
+        endedAt: true,
+        callType: true
       }
-    });
+    }));
 
     // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
+    const validCalls = calls
+      .filter(call => {
+        if (!call.endedAt) return false;
+        const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+        return duration > 60;
+      })
+      .map(call => ({
+        startedAt: call.startedAt,
+        isRecording: call.callType === CallType.HEADLESS
+      }));
 
-    return validCalls.length;
+    return { validCalls, dateCondition };
+  }
+
+  /**
+   * Get number of calls and recordings
+   * Counts the calls started in the selected time period, split into regular calls
+   * and note taker recordings
+   */
+  async getNumberOfCalls(filters: AnalyticsFilters): Promise<CallsBreakdown> {
+    const { validCalls } = await this.getValidCalls(filters);
+
+    return {
+      calls: validCalls.filter(call => !call.isRecording).length,
+      recordings: validCalls.filter(call => call.isRecording).length
+    };
   }
 
   /**
    * Get number of calls time-series data
+   * Each point carries the call and recording counts for its bucket
    */
-  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<CallsTimeSeriesPoint[]> {
+    const { validCalls, dateCondition } = await this.getValidCalls(filters);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
-
-    // Get calls
-    const calls = await this.prisma.call.findMany({
-      where: {
-        startedAt: dateCondition,
-        ...this.getCallWorkspaceFilter(workspaceId, userIds)
-      },
-      select: {
-        startedAt: true,
-        endedAt: true
-      }
-    });
-
-    // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
+    const callBuckets = new Map<string, number>();
+    const recordingBuckets = new Map<string, number>();
 
     // Initialize buckets
     timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
+      callBuckets.set(bucket, 0);
+      recordingBuckets.set(bucket, 0);
     });
 
     // Group calls by time buckets
     validCalls.forEach(call => {
       const bucketKey = this.getBucketKey(call.startedAt, groupBy);
+      const bucketData = call.isRecording ? recordingBuckets : callBuckets;
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }
@@ -2458,7 +2477,8 @@ export class AnalyticsRepository {
     // Convert to array format
     return timeBuckets.map(bucketKey => ({
       date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
+      calls: callBuckets.get(bucketKey) || 0,
+      recordings: recordingBuckets.get(bucketKey) || 0
     })).sort((a, b) => a.date.localeCompare(b.date));
   }
 
@@ -2477,7 +2497,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get calls that have both start and end times
-    const calls = await this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
@@ -2487,7 +2507,7 @@ export class AnalyticsRepository {
         startedAt: true,
         endedAt: true
       }
-    });
+    }));
 
     // Filter for calls that lasted more than 60 seconds and sum their durations
     let totalDurationSeconds = 0;
@@ -2521,7 +2541,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Get calls that have both start and end times
-    const calls = await this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
@@ -2531,7 +2551,7 @@ export class AnalyticsRepository {
         startedAt: true,
         endedAt: true
       }
-    });
+    }));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
@@ -2637,15 +2657,10 @@ export class AnalyticsRepository {
     const validMessageIds = validMessages.map(m => m.messageId);
 
     // Get file attachments for valid (non-migrated) messages only
-    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.messageAttachment.findMany({
-      where: {
-        entityId: { in: validMessageIds },
-        entityType: 'CHAT',
-        workspaceId,
-        createdBy: { notIn: ['Unified Alerts', 'system'] }
-      },
-      select: { createdAt: true },
-    });
+    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
+      SELECT a."createdAt"
+      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+    `);
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'

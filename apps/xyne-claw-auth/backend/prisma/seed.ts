@@ -540,7 +540,7 @@ async function main() {
   // Create "spaces" Surface if it doesn't exist
   const spacesSurface = await prisma.surface.upsert({
     where: { key: "spaces" },
-    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    create: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
     update: {},
   });
 

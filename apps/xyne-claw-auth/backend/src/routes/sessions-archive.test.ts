@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../services/gcsService.js", () => ({ gcsService: {} }));
+vi.mock("../services/storageService.js", () => ({ gcsService: {} }));
 vi.mock("../redis.js", () => ({ redisService: {} }));
 
 describe("session archive identifiers", () => {

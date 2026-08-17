@@ -1,7 +1,8 @@
 # Local Development
 
 A first run from a clean clone. Assumes you have already worked through
-[Prerequisites](prerequisites.md).
+[Prerequisites](prerequisites.md) — and if the machine has nothing installed at
+all, start with [Local Setup](local-setup.md) instead.
 
 ## The one-command path
 
@@ -13,15 +14,29 @@ cd xyne-spaces
 pnpm run up
 ```
 
-`pnpm run up` is an alias for `pnpm run bootstrap`, which chains:
+`pnpm run up` (same as `pnpm run bootstrap`) runs in two stages:
 
 ```
-env:setup → setup (install + build:shared) → secrets → services → dev:all
+Stage 1 (supervised by Xyne Doctor):  env:setup → setup (install + build:shared) → secrets → services
+Stage 2 (interactive):                app picker → multi-pane process TUI
 ```
 
 The steps run serially and the chain stops at the first failure, so a broken step is
 never masked by a later one. Every step is idempotent — env files and real secrets are
 never overwritten — so it is safe to re-run on an existing checkout.
+
+Along the way it asks which **infrastructure features** you need (fewer features,
+fewer containers), which **apps** you want to run, and it checks the ports each
+choice needs are actually free before starting anything — naming the process that
+holds a busy port instead of letting six processes race to an `EADDRINUSE`.
+
+Stage 1 runs through [Xyne Doctor](xyne-doctor.md). On a real nonzero exit it can
+prepare redacted context and hand the failure to Claude Code or Codex; Ctrl-C and
+non-interactive runs keep their normal exit behavior. Stage 2 runs outside the
+doctor — a full-screen TUI cannot render into its captured pipe.
+
+Fully non-interactive equivalent (CI, scripts): `pnpm run bootstrap:raw` — no
+prompts, no TUI, plain interleaved logs.
 
 Expect a few minutes on the first run while container images download. When it
 finishes, open **http://localhost:5173**.
@@ -75,8 +90,8 @@ Fill them in:
 pnpm run secrets
 ```
 
-This generates `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, and the VAPID
-keypair used for web push, writing them into `apps/backend/.env.local`.
+This generates `JWT_SECRET`, `ZERO_AUTH_SECRET`, and `ENCRYPTION_KEY`, writing
+them into `apps/backend/.env.local`.
 
 `pnpm run services` runs this for you, so a normal setup never needs it explicitly.
 Reach for it directly when you copied `.env.local` by hand, or when a `.env.local`
@@ -110,9 +125,19 @@ pnpm --filter @xyne/shared run watch
 pnpm run services
 ```
 
-This brings up Postgres, Redis, LiveKit, MinIO, Y-Sweet, Zero, and observability
-containers, waits for health checks, applies Prisma migrations, and seeds baseline
-data. Expect a few minutes on the first run while images download.
+This first asks whether to **reuse existing data or start fresh** — fresh wipes
+this checkout's containers, volumes, and databases via `pnpm run reset` (with a
+confirmation, since it deletes every local database and bucket). Then it asks
+which features you need — *Chat & Tickets* (Postgres, Redis, Zero, MinIO) is
+always on; Calls, Canvas, Search, Transcription, Observability, and Feature
+Flags are opt-in, and each unselected feature is a container that never starts. Pick **Everything**, **Core**, or select individually; your answer is
+remembered for next time. It then checks the required host ports are free (naming
+whatever process holds a busy one), brings the containers up, waits for health
+checks, applies Prisma migrations, and seeds baseline data. Expect a few minutes
+on the first run while images download.
+
+Scripted runs skip the prompt: `XYNE_FEATURES=1,4,7 pnpm run services` starts
+Chat & Tickets, Calls, and Search directly (the numbers match the picker's order).
 
 See [Services](services.md) for what each container does and which port it uses.
 
@@ -124,19 +149,35 @@ pnpm run services:stop
 
 ## 5. Run the apps
 
-All four at once, with colour-coded interleaved logs:
-
 ```bash
-pnpm run dev:all
+pnpm run dev
 ```
 
-Or individually, in separate terminals:
+This asks which apps to run — **Everything**, **Core** (backend, worker,
+dashboard), your previous selection, or a custom pick — then opens them in a
+multi-pane terminal UI ([mprocs](https://github.com/pvolok/mprocs)): a process
+list on the left, one isolated pane per process on the right.
+
+| Key | Action |
+| --- | ------ |
+| `↑` / `↓` | switch between processes |
+| `r` | restart just that process |
+| `x` / `s` | stop / start it |
+| `z` | zoom the pane full-screen |
+| `Ctrl-a` | type into the process (again to leave) |
+| `q` | quit and stop everything |
+
+Busy dev ports are detected before launch, with an offer to stop whatever stale
+process is holding them.
+
+Other ways to run:
 
 ```bash
-pnpm --filter xyne-spaces-backend   run dev    # http://localhost:3001
+XYNE_DEV_APPS=backend,dashboard pnpm run dev   # no prompt, just these two
+XYNE_DEV_APPS=all pnpm run dev                 # no prompt, everything
+pnpm run dev:all:plain                         # old behaviour: one stream, interleaved logs
+pnpm --filter xyne-spaces-backend   run dev    # single app, plain terminal · http://localhost:3001
 pnpm --filter xyne-spaces-dashboard run dev    # http://localhost:5173
-pnpm --filter xyne-claw             run dev
-pnpm --filter xyne-claw-auth        run dev
 ```
 
 Open **http://localhost:5173**.

@@ -24,7 +24,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { resolve, isAbsolute } from "node:path";
+import { resolve, isAbsolute, dirname, sep } from "node:path";
 import https from "node:https";
 import http from "node:http";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
@@ -91,13 +91,18 @@ function resolveSessionPath(relPath: string): string {
   // here without plumbing it through — use cwd which IS the workspace at
   // tool-execution time.
   const cwd = process.cwd();
-  let candidate: string;
-  if (isAbsolute(relPath)) {
-    candidate = resolve(relPath);
-  } else {
-    candidate = resolve(cwd, relPath);
+  const candidate = isAbsolute(relPath) ? resolve(relPath) : resolve(cwd, relPath);
+
+  // Containment: the resolved path must stay within the session tree — the workspace
+  // (cwd) or its parent, which holds the sibling session-skills tree.
+  const sessionRoot = dirname(cwd);
+  const withinSession =
+    candidate === cwd || candidate.startsWith(cwd + sep) ||
+    candidate === sessionRoot || candidate.startsWith(sessionRoot + sep);
+  if (!withinSession) {
+    throw new Error(`refusing path outside the session workspace: ${relPath}`);
   }
-  // Cheap traversal check — refuse paths that go above cwd / session root.
+  // Cheap traversal check — belt-and-suspenders on top of the containment check.
   if (relPath.includes("..")) {
     throw new Error(`refusing path with traversal: ${relPath}`);
   }

@@ -1,6 +1,4 @@
 import {
-  MessageCircle,
-  FileText,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
@@ -27,7 +25,6 @@ import {
   Plus,
   Wand2,
   Sparkles,
-  Brain,
   Loader2,
   Pencil,
   Archive,
@@ -73,6 +70,8 @@ import {
 } from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { Hashtag, Star } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -81,19 +80,12 @@ import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
-import ThreadList from '../../components/Chat/ThreadList/ThreadList';
-import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
-import {
-  useChannel,
-  useGetChannelUserStatus,
-  useEmailChannels,
-  useUserChannelStatuses,
-} from '../../hooks/useChannels';
+import ThreadMessages from '../../components/Chat/ThreadPannel';
+import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
-import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -104,6 +96,7 @@ import {
   UserGroupSubmenu,
   StagesSubmenu,
   DynamicFieldSubmenu,
+  ConversationLabelSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
 import { getIconForFieldType } from '../../components/Tickets/TicketFilters/fieldTypeIcons';
 import {
@@ -118,6 +111,7 @@ import {
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
+import { classificationApi } from '../../api/classificationApi';
 import {
   CalendarView,
   PRESETS,
@@ -134,12 +128,8 @@ import {
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
-import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
-import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
 import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
-import * as Tabs from '@radix-ui/react-tabs';
-import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -149,8 +139,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
-import type { Ticket, FormFields } from '@xyne/shared';
-import { getDraft } from '../../hooks/useDraft';
+import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
@@ -163,25 +152,17 @@ import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
 import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  DraftSourcesPanel,
-  isOpenableCitationUrl,
-  resolveCitedClawCitations,
-} from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
-import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
-import type {
-  ClawCitation,
-  ToolInvocation,
-} from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
+import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
-import { useEmailDraft } from '../../hooks/useEmailDraft';
+import { useEmailDrafts } from '../../hooks/useEmailDraft';
 import {
   useComposeDrafts,
   useComposeDraftOperations,
@@ -189,10 +170,7 @@ import {
 } from '../../hooks/useComposeDraft';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
-import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
-import { UserSentView } from '../../components/xyne-desk/DeskFolders/UserSentView';
 import { DeskLabelsSidebar } from '../../components/xyne-desk/DeskFolders/DeskLabelsSidebar';
-import { LabelThreadsView } from '../../components/xyne-desk/DeskFolders/LabelThreadsView';
 import {
   DeskMailboxSidebar,
   type MailboxFolder,
@@ -203,22 +181,18 @@ import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
-import {
-  extractInlineCitations,
-  type InlineCitation,
-} from '../../components/ui/TipTapExtensions/CitationMark';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import {
-  useChannelConnectedEmail,
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
 } from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { API_BASE_URL } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -238,7 +212,6 @@ import {
 import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
-import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
@@ -314,6 +287,7 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.CALL,
   ChannelType.SLACK,
   ChannelType.APP,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -560,7 +534,6 @@ interface DemergeEmailResponse {
     conversationId: string;
   };
 }
-type TabType = 'messages' | 'details' | 'sources' | 'reasoning';
 
 type ViewMode = 'kanban' | 'list' | 'table';
 
@@ -587,9 +560,23 @@ const SupportScreen = (): ReactElement => {
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
 
-  const [channelBoardId, setChannelBoardId] = useState<string | null>(null);
+  const [resolvedChannelBoard, setResolvedChannelBoard] = useState<{
+    channelId: string;
+    boardId: string;
+  } | null>(null);
+  const channelBoardId =
+    resolvedChannelBoard?.channelId === selectedChannelId ? resolvedChannelBoard.boardId : null;
+  const handleChannelBoardIdResolved = useCallback(
+    (boardId: string): void => {
+      if (selectedChannelId) {
+        setResolvedChannelBoard({ channelId: selectedChannelId, boardId });
+      }
+    },
+    [selectedChannelId],
+  );
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
   useEffect(() => {
-    setChannelBoardId(null);
+    setKanbanTickets([]);
   }, [selectedChannelId]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -646,9 +633,6 @@ const SupportScreen = (): ReactElement => {
   }, [searchParams, sendFilters, filtersState.value]);
 
   const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
-  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent' | 'labelThreads'>(
-    'tickets',
-  );
   const [selectedLabel, setSelectedLabel] = useState<{ id: string; name: string } | null>(null);
   // Active mailbox folder for the base ticket list (Inbox by default). Inbox / All Mail /
   // Starred / Spam filter the same rich list, rather than opening a separate view.
@@ -657,9 +641,15 @@ const SupportScreen = (): ReactElement => {
     label: string;
   }>({ key: 'inbox', label: 'Inbox' });
 
-  const channelPreference = useEmailChannelPreference(selectedChannelId);
+  const preferenceChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : null;
+  const [channelPreferenceList, channelPreferenceDetails] = useCachedQuery(
+    queries.getEmailChannelPreference({ channelId: preferenceChannelId || '' }),
+    { enabled: !!preferenceChannelId },
+  );
+  const channelPreference = channelPreferenceList?.[0];
   const deskBoardId = channelPreference?.boardId || channelBoardId;
-  const [channelBoardDetail] = useCachedQuery(
+  const [channelBoardDetail, channelBoardDetailDetails] = useCachedQuery(
     queries.boardDetailById({ boardId: deskBoardId || '' }),
     { enabled: !!deskBoardId },
   );
@@ -731,6 +721,7 @@ const SupportScreen = (): ReactElement => {
           : filters.assigned
             ? [userID]
             : undefined,
+      createdBy: filters.createdBy && filters.createdBy.length > 0 ? filters.createdBy : undefined,
       priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
       stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
       aiCategory:
@@ -744,9 +735,13 @@ const SupportScreen = (): ReactElement => {
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
+      createdAtStart: filters.createdDateStart,
+      createdAtEnd: filters.createdDateEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
+      // Sidebar label view (selectedLabel) takes precedence over the More-Filters label pick.
+      conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
-    [filters, userID, dynamicFieldEntries, tagFilterConversationIds],
+    [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
@@ -779,31 +774,57 @@ const SupportScreen = (): ReactElement => {
       enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
     },
   );
-  const availableAiCategories = useMemo(() => {
-    const fromMappings = [
-      ...new Set(
-        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
-      ),
-    ];
-    if (fromMappings.length === 0) return [];
-    if (!fromMappings.includes('Other')) {
-      fromMappings.push('Other');
-    }
-    return fromMappings;
-  }, [classificationMappings]);
+  // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
+  // configured mappings only cover the subset that has an assignment rule — without this the
+  // filter hides every unmapped category that is visibly labelled on the list.
+  const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
+  const aiCategoriesChannelId =
+    filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null;
 
-  // deskBoardId (channel preference first) rather than the row-derived
-  // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: deskBoardId ?? '' }), {
-    enabled: filterOptionsEnabled && !!deskBoardId,
-  });
+  useEffect(() => {
+    if (!aiCategoriesChannelId) {
+      setTicketAiCategories([]);
+      return;
+    }
+    let cancelled = false;
+    classificationApi
+      .getAiCategories(aiCategoriesChannelId)
+      .then(categories => {
+        if (!cancelled) setTicketAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setTicketAiCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiCategoriesChannelId]);
+
+  const availableAiCategories = useMemo(() => {
+    const merged = [
+      ...new Set([
+        ...(classificationMappings ?? [])
+          .map(m => m.category)
+          .filter((c): c is string => Boolean(c)),
+        ...ticketAiCategories,
+      ]),
+    ];
+    if (merged.length === 0) return [];
+    if (!merged.includes('Other')) {
+      merged.push('Other');
+    }
+    return merged;
+  }, [classificationMappings, ticketAiCategories]);
+
   const availableStages = useMemo(
     () =>
-      boardStages?.map(s => ({
+      channelBoardDetail?.stages.map(s => ({
         name: s.name,
         status: s.defaultTicketStatusV2,
       })) ?? [],
-    [boardStages],
+    [channelBoardDetail?.stages],
   );
 
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
@@ -815,9 +836,13 @@ const SupportScreen = (): ReactElement => {
     (filters.aiCategory && filters.aiCategory.length > 0) ||
     (filters.generatedTags && filters.generatedTags.length > 0) ||
     (filters.userGroups && filters.userGroups.length > 0) ||
+    (filters.createdBy && filters.createdBy.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
     filters.lastEmailAtEnd !== undefined ||
-    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
+    filters.createdDateStart !== undefined ||
+    filters.createdDateEnd !== undefined ||
+    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
+    (!selectedLabel && !!filters.conversationLabelId)
   );
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
@@ -865,6 +890,29 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
+  const handleCreatedDateRangeChange = useCallback(
+    (range: DateRangeValue): void => {
+      const newFilters = {
+        ...filters,
+        createdDateStart: range.startDate.getTime(),
+        createdDateEnd: range.endDate.getTime(),
+      };
+      Object.keys(newFilters).forEach((filterKey: string) => {
+        const k = filterKey as keyof TicketFilters;
+        const filterValue = newFilters[k];
+        if (
+          filterValue === undefined ||
+          filterValue === null ||
+          (Array.isArray(filterValue) && filterValue.length === 0)
+        ) {
+          delete newFilters[k];
+        }
+      });
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
   const handleMenuItemClick = useCallback((category: string): void => {
     setActiveSubmenu(prev => (prev === category ? null : category));
   }, []);
@@ -889,21 +937,30 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
-  const filterMenuItems = useMemo(
-    () => [
+  // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
+  // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
+  // active (`selectedLabel`): the whole list is already scoped to that label, so a second
+  // label picker is redundant.
+  const filterMenuItems = useMemo(() => {
+    const items = [
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
-      { id: 'date', label: 'Date', icon: CalendarDays },
+      { id: 'createdBy', label: 'Created by', icon: User },
+      { id: 'date', label: 'Last updated', icon: CalendarDays },
+      { id: 'createdDate', label: 'Created at', icon: CalendarDays },
       ...deskDynamicFields.map(field => ({
         id: `dynamic-${field.id}`,
         label: field.fieldName,
         icon: getIconForFieldType(field.fieldType),
         dynamicFieldId: field.id,
       })),
-    ],
-    [deskDynamicFields],
-  );
+    ];
+    if (!selectedLabel) {
+      items.push({ id: 'conversationLabel', label: 'Label', icon: TagIcon });
+    }
+    return items;
+  }, [deskDynamicFields, selectedLabel]);
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
@@ -947,6 +1004,16 @@ const SupportScreen = (): ReactElement => {
             onClose={() => setActiveSubmenu(null)}
           />
         );
+      case 'createdBy':
+        return (
+          <UserSubmenu
+            key='created-by-submenu'
+            selectedUsers={filters.createdBy || []}
+            onChange={(users: string[]) => handleFilterChange('createdBy', users)}
+            label='Created by'
+            channelId={selectedChannelId ?? undefined}
+          />
+        );
       case 'date': {
         const currentRange: DateRangeValue | null =
           filters.lastEmailAtStart !== undefined && filters.lastEmailAtEnd !== undefined
@@ -987,6 +1054,7 @@ const SupportScreen = (): ReactElement => {
               })}
             </div>
             <CalendarView
+              key='last-email-calendar'
               range={currentRange}
               onSelect={(range: DateRangeValue) => {
                 handleDateRangeChange(range);
@@ -995,6 +1063,63 @@ const SupportScreen = (): ReactElement => {
           </div>
         );
       }
+      case 'createdDate': {
+        const currentCreatedRange: DateRangeValue | null =
+          filters.createdDateStart !== undefined && filters.createdDateEnd !== undefined
+            ? {
+                startDate: new Date(filters.createdDateStart),
+                endDate: new Date(filters.createdDateEnd),
+              }
+            : null;
+        return (
+          <div className='w-[252px] bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
+            <div className='p-1 border-b border-border'>
+              {PRESETS.map(preset => {
+                const v = preset.getValue();
+                const isActive =
+                  filters.createdDateStart !== undefined &&
+                  filters.createdDateEnd !== undefined &&
+                  Math.abs(filters.createdDateStart - v.startDate.getTime()) < 1000 &&
+                  Math.abs(filters.createdDateEnd - v.endDate.getTime()) < 1000;
+                return (
+                  <button
+                    key={preset.label}
+                    type='button'
+                    data-track-category='Support'
+                    data-track-name='SelectCreatedAtPreset'
+                    onClick={() => {
+                      handleCreatedDateRangeChange(v);
+                    }}
+                    className={cn(
+                      'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
+                      isActive
+                        ? 'bg-accent text-foreground font-medium'
+                        : 'hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            <CalendarView
+              key='created-at-calendar'
+              range={currentCreatedRange}
+              onSelect={(range: DateRangeValue) => {
+                handleCreatedDateRangeChange(range);
+              }}
+            />
+          </div>
+        );
+      }
+      case 'conversationLabel':
+        return (
+          <ConversationLabelSubmenu
+            selectedLabelId={filters.conversationLabelId}
+            onChange={(labelId?: string) => handleFilterChange('conversationLabelId', labelId)}
+            channelId={selectedChannelId}
+          />
+        );
       default:
         return null;
     }
@@ -1003,9 +1128,11 @@ const SupportScreen = (): ReactElement => {
     filters,
     handleFilterChange,
     handleDateRangeChange,
+    handleCreatedDateRangeChange,
     handleDynamicFieldChange,
     availableAiCategories,
     deskDynamicFields,
+    selectedChannelId,
   ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
@@ -1030,7 +1157,8 @@ const SupportScreen = (): ReactElement => {
   // Server-backed compose drafts for the selected channel (synced across devices).
   // The composer itself autosaves each window's content; here we only read the list
   // and delete rows on discard.
-  const composeDraftRows = useComposeDrafts(selectedChannelId);
+  const { drafts: composeDraftRows, isLoaded: composeDraftRowsLoaded } =
+    useComposeDrafts(selectedChannelId);
   const { deleteComposeDraft: deleteComposeDraftRow } =
     useComposeDraftOperations(selectedChannelId);
 
@@ -1368,19 +1496,28 @@ const SupportScreen = (): ReactElement => {
     markViewed();
     return markViewed;
   }, [selectedChannelId, isSelectedChannelJoined]);
-  const selectedChannelName =
-    sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
+  const selectedChannelFull = useMemo(
+    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
+    [sortedEmailChannels, selectedChannelId],
+  );
+  const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
+  const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
 
-  // Manual fetch — shown when a specific email channel is selected.
-  // SupportScreen already filters to EMAIL channels; the hook owns its own
-  // toasts and the 400 / 403 / generic-error branches.
+  // Manual fetch for the selected desk. Social-media desks fetch every review
+  // currently available from Google; email desks open the range picker.
   const refetchChannelId =
     selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined;
-  const { refetch: handleRefetch, isPending: isRefetching } =
-    useRefetchExternalSource(refetchChannelId);
+  const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
+    refetchChannelId,
+    isSocialMediaDesk,
+  );
   const canRefetch = !!refetchChannelId;
-  const selectedChannelPref = useEmailChannelPreference(refetchChannelId ?? null);
-  const isDlDesk = selectedChannelPref?.deskType === DeskType.DL;
+  const isDlDesk = channelPreference?.deskType === DeskType.DL;
+  useEffect(() => {
+    if (channelPreference?.boardId) {
+      handleChannelBoardIdResolved(channelPreference.boardId);
+    }
+  }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -1405,12 +1542,12 @@ const SupportScreen = (): ReactElement => {
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
   );
-  // Clear the selection on channel OR folder change — switching folders hides the
+  // Clear the selection on channel, folder OR label change — switching views hides the
   // previously-selected rows, so a stale selection would let bulk actions (mark-read,
-  // merge) operate on tickets that aren't visible in the current folder.
+  // merge) operate on tickets that aren't visible in the current view.
   useEffect(() => {
     setSelectedTickets(new Map());
-  }, [selectedChannelId, selectedFolder.key]);
+  }, [selectedChannelId, selectedFolder.key, selectedLabel?.id]);
   const selectedTicketIds = useMemo(() => new Set(selectedTickets.keys()), [selectedTickets]);
   const toggleTicketSelected = useCallback(
     (row: {
@@ -1545,10 +1682,9 @@ const SupportScreen = (): ReactElement => {
   }, []);
 
   const handleMergeSelectedTickets = useCallback(
-    async (parentTicketId: string): Promise<void> => {
-      if (selectedTickets.size < 2) return;
+    async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
+      if (ticketIds.length < 2) return;
       try {
-        const ticketIds = Array.from(selectedTickets.keys());
         await Promise.all(
           ticketIds
             .filter(id => id !== parentTicketId)
@@ -1582,16 +1718,6 @@ const SupportScreen = (): ReactElement => {
     [selectedTickets, clearTicketSelection, navigate, supportBase],
   );
 
-  const selectedChannelFull = useMemo(
-    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
-    [sortedEmailChannels, selectedChannelId],
-  );
-
-  // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
-  // array itself is not consumed here since the merge dialog is built from the
-  // selection map. See mergeDialogTickets for the rationale.
-  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
-
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
   const mergeDialogTickets = useMemo(() => {
@@ -1616,13 +1742,15 @@ const SupportScreen = (): ReactElement => {
       const response = await channelService.createChannel(
         formData,
         channelType || 'EMAIL',
-        emailDeskOpts ?? { deskType: 'EMAIL' },
+        emailDeskOpts ?? { deskType: DeskType.EMAIL },
       );
       return response;
     },
     onSuccess: () => {
       setShowCreateChannelModal(false);
       toast.success('Channel created successfully');
+      void queryClient.invalidateQueries({ queryKey: ['app-desk-eligible-apps'] });
+      void queryClient.invalidateQueries({ queryKey: ['slack-desk-channels'] });
     },
     onError: (error: Error) => {
       toast.error('Failed to create channel', {
@@ -1634,18 +1762,58 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      applications?: Array<{ displayName: string; packageName: string }>;
     },
   ) => {
-    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, ...rest } =
-      data;
+    const {
+      connector,
+      deskType,
+      callSource,
+      dlEmail,
+      slackChannelId,
+      installedAppId,
+      applications,
+      channelType: _submittedChannelType,
+      ...rest
+    } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
+
+    if (deskType === 'SOCIAL_MEDIA') {
+      if (!applications?.length || !rest.boardId) {
+        toast.error('At least one Google Play application and a board are required');
+        return;
+      }
+      void startGooglePlayOAuth({
+        channelName: rest.name,
+        applications,
+        projectId: rest.projectId,
+        boardId: rest.boardId,
+        ...(rest.assigneeUserGroupId && {
+          assigneeUserGroupId: rest.assigneeUserGroupId,
+        }),
+        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        platform: isElectron ? 'electron' : 'web',
+      })
+        .then(authorizationUrl => {
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(authorizationUrl);
+          } else {
+            window.location.href = authorizationUrl;
+          }
+        })
+        .catch(error => {
+          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
+        });
+      return;
+    }
 
     if (deskType === 'SLACK') {
       if (!slackChannelId) {
@@ -1655,7 +1823,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'SLACK',
-        emailDeskOpts: { deskType: 'SLACK', slackChannelId },
+        emailDeskOpts: { deskType: DeskType.SLACK, slackChannelId },
       });
       return;
     }
@@ -1668,7 +1836,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'APP',
-        emailDeskOpts: { deskType: 'APP', installedAppId },
+        emailDeskOpts: { deskType: DeskType.APP, installedAppId },
       });
       return;
     }
@@ -1690,7 +1858,7 @@ const SupportScreen = (): ReactElement => {
         await createChannelMutation.mutateAsync({
           ...rest,
           channelType: 'CALL',
-          emailDeskOpts: { deskType: 'CALL' },
+          emailDeskOpts: { deskType: DeskType.CALL },
         });
       })();
       return;
@@ -1704,7 +1872,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'EMAIL',
-        emailDeskOpts: { deskType: 'DL', dlEmail },
+        emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
       return;
     }
@@ -1790,6 +1958,34 @@ const SupportScreen = (): ReactElement => {
     createChannelMutation.mutate(rest);
   };
 
+  useEffect(() => {
+    const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const error = searchParams.get('socialMediaError');
+    const failedPackage = searchParams.get('socialMediaPackage');
+    if (!connected && !error) return;
+    if (connected) {
+      toast.success('Google Play reviews connected successfully');
+      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
+    }
+    if (error === 'google_play_package_validation_failed' && failedPackage) {
+      toast.error('Google Play app connection failed', {
+        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
+      });
+    } else if (error) {
+      toast.error(error.replaceAll('_', ' '));
+    }
+    setSearchParams(
+      previous => {
+        const next = new URLSearchParams(previous);
+        next.delete('socialMediaOAuth');
+        next.delete('socialMediaError');
+        next.delete('socialMediaPackage');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, selectedChannelId, setSearchParams]);
+
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
@@ -1865,65 +2061,36 @@ const SupportScreen = (): ReactElement => {
         next.add(id);
         return next;
       });
-      setDeskView('tickets');
+      setSelectedLabel(null);
     },
     [setSelectedChannelId],
   );
 
-  const openUserDrafts = useCallback(
-    (id: string): void => {
-      setSelectedChannelId(id);
-      setDeskView('userDrafts');
-    },
-    [setSelectedChannelId],
-  );
-
-  const openUserSent = useCallback(
-    (id: string): void => {
-      setSelectedChannelId(id);
-      setDeskView('userSent');
-    },
-    [setSelectedChannelId],
-  );
-
+  // A label is just another filter dimension on the same ticket list: selecting one opens
+  // the normal ticket list (list view) scoped to that label, so it gets the full Inbox
+  // experience (rich rows, filters, view toggles, pagination) rather than a bare panel.
   const openLabel = useCallback(
     (channelId: string, labelId: string, labelName: string): void => {
       setSelectedChannelId(channelId);
       setSelectedLabel({ id: labelId, name: labelName });
-      setDeskView('labelThreads');
+      setViewMode('list');
+      if (filters.conversationLabelId) {
+        handleFilterChange('conversationLabelId', undefined);
+      }
     },
-    [setSelectedChannelId],
+    [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
       setSelectedFolder({ key: folder, label });
+      setSelectedLabel(null);
       // Folders filter the base ticket LIST in place. The kanban board doesn't apply the
       // folder, so selecting a folder switches to list view to avoid silently ignoring it.
       setViewMode('list');
-      setDeskView('tickets');
     },
     [setSelectedChannelId],
-  );
-
-  const openDeskTicket = useCallback(
-    (item: {
-      channelId: string;
-      ticketXyneId: string;
-      ticketId: string;
-      conversationId: string;
-    }): void => {
-      void navigate(`${supportBase}/${item.channelId}/${item.ticketXyneId}`, {
-        state: { conversationId: item.conversationId, ticketId: item.ticketId },
-      });
-    },
-    [navigate, supportBase],
-  );
-
-  const composeDraftRefs = useMemo(
-    () => savedDrafts.map(draft => ({ id: draft.id, label: composeDraftLabel(draft) })),
-    [savedDrafts],
   );
 
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
@@ -1941,19 +2108,24 @@ const SupportScreen = (): ReactElement => {
               className:
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
-          : c.type === ChannelType.CALL
+          : c.type === ChannelType.SOCIAL_MEDIA
             ? {
-                label: 'Call',
-                className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                label: 'Social',
+                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
               }
-            : {
-                label: 'Mailbox',
-                className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-              };
+            : c.type === ChannelType.CALL
+              ? {
+                  label: 'Call',
+                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                }
+              : {
+                  label: 'Mailbox',
+                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                };
     const isJoined = joinedChannelIds.has(c.id);
     const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
-    const isActive = selectedChannelId === c.id && deskView === 'tickets';
+    const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
     const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
     const shouldShowBold =
@@ -2035,7 +2207,7 @@ const SupportScreen = (): ReactElement => {
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
             <DeskMailboxSidebar
               activeFolder={
-                selectedChannelId === c.id && deskView === 'tickets' && viewMode === 'list'
+                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
                   ? selectedFolder.key
                   : null
               }
@@ -2043,20 +2215,23 @@ const SupportScreen = (): ReactElement => {
             />
             <DeskDraftSubtree
               activeFolder={
-                selectedChannelId === c.id && (deskView === 'userDrafts' || deskView === 'userSent')
-                  ? deskView
+                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                  ? selectedFolder.key === 'drafts'
+                    ? 'userDrafts'
+                    : selectedFolder.key === 'sent'
+                      ? 'userSent'
+                      : null
                   : null
               }
-              onOpenUserDrafts={() => openUserDrafts(c.id)}
-              onOpenUserSent={() => openUserSent(c.id)}
+              // Drafts and Sent are both folders on the ticket list (reply drafts / sent
+              // emails roll up to their tickets); route them through openMailbox for the
+              // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
+              onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
+              onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
             />
             <DeskLabelsSidebar
               channelId={c.id}
-              activeLabelId={
-                selectedChannelId === c.id && deskView === 'labelThreads'
-                  ? (selectedLabel?.id ?? null)
-                  : null
-              }
+              activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
             />
           </div>
@@ -2202,34 +2377,6 @@ const SupportScreen = (): ReactElement => {
         {!ticketId && (
           <Panel id='main'>
             <div className='h-full flex flex-col relative bg-background'>
-              {deskView !== 'tickets' && selectedChannelId && (
-                <div className='absolute inset-0 z-30 bg-background'>
-                  {deskView === 'userDrafts' ? (
-                    <UserDraftsView
-                      channelId={selectedChannelId}
-                      composeDrafts={composeDraftRefs}
-                      onReopenCompose={reopenDraft}
-                      onDiscardCompose={discardDraft}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : deskView === 'userSent' && selectedChannelId ? (
-                    <UserSentView
-                      channelId={selectedChannelId}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : deskView === 'labelThreads' && selectedLabel ? (
-                    <LabelThreadsView
-                      labelId={selectedLabel.id}
-                      labelName={selectedLabel.name}
-                      channelId={selectedChannelId}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : null}
-                </div>
-              )}
               <div className='flex-shrink-0 relative border-b border-border'>
                 <div
                   className={cn(
@@ -2304,6 +2451,12 @@ const SupportScreen = (): ReactElement => {
                         <span className='flex items-center gap-2 min-w-0 px-1.5 py-0.5'>
                           <Hashtag size={16} className='shrink-0' />
                           <span className='truncate'>{selectedChannelName}</span>
+                        </span>
+                      )}
+                      {selectedLabel && (
+                        <span className='ml-1 flex shrink-0 items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                          <TagIcon size={12} className='shrink-0' />
+                          <span className='max-w-[160px] truncate'>{selectedLabel.name}</span>
                         </span>
                       )}
                     </div>
@@ -2402,11 +2555,19 @@ const SupportScreen = (): ReactElement => {
                           </DropdownMenu>
                         ) : (
                           <Tooltip
-                            content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                            content={
+                              isRefetching
+                                ? 'Fetching latest…'
+                                : isSocialMediaDesk
+                                  ? 'Fetch all available Google Play reviews'
+                                  : 'Fetch latest emails'
+                            }
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
+                              onClick={() =>
+                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
+                              }
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -2420,11 +2581,6 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
-                      {/* Ask AI, scoped to the desk channel — mirrors the normal-channel
-                          entry point in ConversationHeader. Passing channelId is what
-                          puts the sidebar in 'chat' context (xyneAIMachine.ts); without
-                          it the panel opens unscoped. Hidden on the ALL_CHANNELS view,
-                          which has no single channel to scope to. */}
                       {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Ask AI' side='bottom'>
                           <button
@@ -2446,7 +2602,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        selectedChannelPref?.metricsEnabled && (
+                        channelPreference?.metricsEnabled && (
                           <Tooltip content='Desk metrics' side='bottom'>
                             <button
                               onClick={() => {
@@ -2603,7 +2759,7 @@ const SupportScreen = (): ReactElement => {
                               >
                                 <div className='flex items-center gap-1.5'>
                                   <Circle className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Stages</span>
+                                  <span className='font-medium'>Status</span>
                                   {hasStagesFilter && (
                                     <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
                                   )}
@@ -2628,6 +2784,9 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
+                                isLoading={
+                                  !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                }
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -2716,8 +2875,18 @@ const SupportScreen = (): ReactElement => {
                                       )) ||
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
+                                    (item.id === 'createdBy' &&
+                                      !!(filters.createdBy && filters.createdBy.length > 0)) ||
+                                    (item.id === 'date' &&
+                                      (filters.lastEmailAtStart !== undefined ||
+                                        filters.lastEmailAtEnd !== undefined)) ||
+                                    (item.id === 'createdDate' &&
+                                      (filters.createdDateStart !== undefined ||
+                                        filters.createdDateEnd !== undefined)) ||
                                     ('dynamicFieldId' in item &&
-                                      !!filters.dynamicFields?.[item.dynamicFieldId]);
+                                      !!filters.dynamicFields?.[item.dynamicFieldId]) ||
+                                    (item.id === 'conversationLabel' &&
+                                      !!filters.conversationLabelId);
                                   const menuButton = (
                                     <button
                                       ref={el => {
@@ -2815,7 +2984,7 @@ const SupportScreen = (): ReactElement => {
                               const Icon =
                                 column.key === 'assignee'
                                   ? User
-                                  : column.key === 'dueDate'
+                                  : column.key === 'dueDate' || column.key === 'createdAt'
                                     ? CalendarDays
                                     : column.key === 'priority'
                                       ? BarChart4Icon
@@ -3062,6 +3231,8 @@ const SupportScreen = (): ReactElement => {
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
                   availableDesks={metricsSelectableDesks}
+                  customFieldDefinitions={deskDynamicFields}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3142,7 +3313,7 @@ const SupportScreen = (): ReactElement => {
                       <SupportKanbanBoard
                         channelId={selectedChannelId}
                         boardId={channelBoardId}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         ticketFilter={ticketFilter}
                         dynamicFieldEntries={dynamicFieldEntries}
                         onTicketClick={handleTicketClick}
@@ -3156,7 +3327,7 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         visibleColumns={tableVisibleColumns}
                         dynamicFieldColumns={tableDynamicFieldColumns}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         onTicketsLoaded={setKanbanTickets}
                         selectedIds={selectedTicketIds}
                         onSelectionChange={handleTableSelectionChange}
@@ -3172,7 +3343,7 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
-                        mailboxFolder={selectedFolder.key}
+                        mailboxFolder={selectedLabel ? undefined : selectedFolder.key}
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -3182,7 +3353,7 @@ const SupportScreen = (): ReactElement => {
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
-                        onBoardIdReady={setChannelBoardId}
+                        onBoardIdReady={handleChannelBoardIdResolved}
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={setKanbanTickets}
@@ -3210,6 +3381,8 @@ const SupportScreen = (): ReactElement => {
                 isMember={isSelectedChannelJoined}
                 onMailtoClick={handleMailtoClick}
                 navTickets={kanbanTickets}
+                channelPreference={channelPreference}
+                channelPreferenceLoaded={channelPreferenceDetails?.type === 'complete'}
               />
             </div>
           </Panel>
@@ -3300,7 +3473,7 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && (
+      {canRefetch && !isSocialMediaDesk && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
@@ -3349,6 +3522,10 @@ const SupportScreen = (): ReactElement => {
                   open
                   channelId={inst.channelId}
                   channelName={selectedChannelName}
+                  channelPreference={channelPreference}
+                  channelPreferenceLoaded={channelPreferenceDetails?.type === 'complete'}
+                  composeDrafts={composeDraftRows}
+                  composeDraftsLoaded={composeDraftRowsLoaded}
                   draftId={inst.id}
                   resetKey={inst.key}
                   minimized={inst.minimized}
@@ -3420,6 +3597,7 @@ const TicketMetaRow = ({
 type SupportTicketDetailProps = {
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -3428,10 +3606,14 @@ type SupportTicketDetailProps = {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;
+  channelPreference: EmailChannelPreference | undefined;
+  channelPreferenceLoaded: boolean;
   /**
    * Base path used to build in-detail ticket navigation (e.g. next/prev ticket).
    * Defaults to the Support inbox base (`/{workspaceId}/support`). Embedded
@@ -3458,6 +3640,8 @@ export const SupportTicketDetail = ({
   ticketFilter,
   isMember,
   onMailtoClick,
+  channelPreference,
+  channelPreferenceLoaded,
   navBasePath,
   onBack,
   navTickets,
@@ -3472,7 +3656,8 @@ export const SupportTicketDetail = ({
     ticketId?: string;
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
-  const { workspaceId, userID } = useAuthContextValues();
+  const shareableOrigin = useShareableOrigin();
+  const { workspaceId } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
     xyneAIActor,
@@ -3491,22 +3676,9 @@ export const SupportTicketDetail = ({
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('replyAll');
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [isArchivingTicket, setIsArchivingTicket] = useState(false);
-  // Auto-draft citations, fetched from the desk-owner's claw draft conversation
-  // via the autodraft-insight read-through endpoint (the auto-draft runs as the
-  // channel owner, so its citations aren't in the querying user's sidebar).
-  const [autoDraftCitations, setAutoDraftCitations] = useState<ClawCitation[]>([]);
-  // The querying user's own draft-agent session for this email thread (rerun /
-  // help-me-write run as the user). Used only to gate the "See sources" entry
-  // points — its citations live in the user's sidebar, not in this panel.
-  const [userDraftSession, setUserDraftSession] = useState<{
-    sessionId: string;
-    answered: boolean;
-  } | null>(null);
-  const [sourcesHydrating, setSourcesHydrating] = useState(false);
-  const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
     if (!cid) return;
     try {
@@ -3517,16 +3689,14 @@ export const SupportTicketDetail = ({
   }, []);
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const routerState = location.state as {
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
   };
-  // Router state is a perf hint from list navigation (instant paint); direct
-  // URL loads and new-tab openings fall back to the supportTicketByXyneId fetch
-  // below using the :ticketId path param. Title is NOT carried in state so that
-  // it always reflects the current ticket row (and disappears when ACL hides it).
+  // List navigation supplies stable IDs in router state; direct URL loads and
+  // new-tab openings fall back to the :ticketId path parameter below.
   const stateConversationId = routerState?.conversationId ?? null;
   const ticketId = routerState?.ticketId ?? null;
 
@@ -3538,12 +3708,11 @@ export const SupportTicketDetail = ({
   // matching EmailThreadItem after emails load.
   const targetMailId = searchParams.get('mail');
 
-  // Single consolidated fetch: the ticket row with `.related('emails')` gives us emails,
-  // channelId (scalar on ticket), conversationId, and everything else we need — replaces
-  // getEmailsForTicket + getConversationById. supportTicketDetail looks up by `id` when
-  // list navigation supplied it (router state), else by `xyneId` from the URL path param.
+  // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
+  // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
+  // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
   const [ticket] = useCachedQuery(
-    queries.supportTicketDetail({
+    queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
       workspaceId,
@@ -3552,61 +3721,21 @@ export const SupportTicketDetail = ({
     }),
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
-  const ticketEmailDrafts = (
-    ticket as
-      | {
-          emailDrafts?: ReadonlyArray<{
-            draftContent?: string | null;
-            userId?: string | null;
-          }>;
-        }
-      | null
-      | undefined
-  )?.emailDrafts;
-  const ticketEmailDraftCount = ticketEmailDrafts?.length ?? 0;
-  const draftBodyHtml = useMemo<string | null>(() => {
-    if (!ticketEmailDrafts || ticketEmailDrafts.length === 0) return null;
+  const detailConversationId = ticket?.conversationId ?? stateConversationId;
+  const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
-    const ownedBody: string | null = userID
-      ? (ticketEmailDrafts.find(d => d.userId === userID)?.draftContent ?? null)
-      : null;
-    const fallbackBody: string | null =
-      ticketEmailDrafts.find(d => d.userId === null)?.draftContent ?? null;
-    return ownedBody ?? fallbackBody;
-  }, [ticketEmailDrafts, userID]);
-  const persistedInlineCitations = useMemo(
-    () => extractInlineCitations(draftBodyHtml ?? ''),
-    [draftBodyHtml],
-  );
-  const visibleInlineCitations = useMemo(
-    () =>
-      (draftInlineCitations.length > 0 ? draftInlineCitations : persistedInlineCitations).filter(
-        citation => isOpenableCitationUrl(citation.url),
-      ),
-    [draftInlineCitations, persistedInlineCitations],
-  );
-  const visibleAutoDraftCitations = useMemo<ClawCitation[]>(() => {
-    if (!(composerOpen || ticketEmailDraftCount > 0)) return [];
-    return autoDraftCitations;
-  }, [composerOpen, ticketEmailDraftCount, autoDraftCitations]);
-
-  const draftHasCitations =
-    (composerOpen || ticketEmailDraftCount > 0) &&
-    (visibleAutoDraftCitations.length > 0 || visibleInlineCitations.length > 0);
-  const hasUserDraftAgentSession = !!userDraftSession?.answered;
-
-  // Gather conversation IDs for this ticket AND any tickets merged into it, so
-  // the email thread shows emails from the merged-away tickets too.
+  // Start the primary email query from router state while ticket metadata loads,
+  // then include any merged-ticket conversations once the detail query resolves.
   const allConversationIds = useMemo(() => {
     const ids = new Set<string>();
-    if (ticket?.conversationId) ids.add(ticket.conversationId);
+    if (detailConversationId) ids.add(detailConversationId);
     (ticket?.referencesIn ?? [])
       .filter(ref => ref.relationType === TicketReferenceRelation.MERGED_INTO)
       .forEach(ref => {
         if (ref.sourceTicket?.conversationId) ids.add(ref.sourceTicket.conversationId);
       });
     return Array.from(ids);
-  }, [ticket?.conversationId, ticket?.referencesIn]);
+  }, [detailConversationId, ticket?.referencesIn]);
 
   // conversationId -> the manually-merged-in ticket that owns it (needed so its
   // thread-root email uses the ticket-level unmerge action; see mergedRootEmailSource).
@@ -3639,10 +3768,10 @@ export const SupportTicketDetail = ({
         if (sourceTicketXyneId && channelIdParam) {
           void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
         }
-      } catch {
+      } catch (err) {
         toast.error('Unmerge Failed', {
           id: toastId,
-          description: 'Operation failed. Please try again.',
+          description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
         });
       }
     },
@@ -3650,7 +3779,11 @@ export const SupportTicketDetail = ({
   );
 
   const [allEmails] = useCachedQuery(
-    queries.getEmailsForConversations({ conversationIds: allConversationIds }),
+    queries.getEmailsForConversationsV2({
+      conversationIds: allConversationIds,
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: allConversationIds.length > 0 },
   );
 
@@ -3658,11 +3791,10 @@ export const SupportTicketDetail = ({
   const emailCollapseState = useEmailCollapseState(emails);
 
   const initiator = useMemo(() => {
-    if (emails.length === 0) return null;
-    const first = [...emails].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))[0];
+    const first = emailCollapseState.sortedEmails[0];
     if (!first?.from) return null;
     return parseFromField(first.from);
-  }, [emails]);
+  }, [emailCollapseState.sortedEmails]);
 
   // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
   // email so it's visible, then scroll to it with a brief yellow flash.
@@ -3693,7 +3825,7 @@ export const SupportTicketDetail = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMailId, emails]);
 
-  const channelId = ticket?.channelId || '';
+  const channelId = ticket?.channelId || routeChannelId;
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
   // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
@@ -3701,11 +3833,7 @@ export const SupportTicketDetail = ({
   const mailboxTicketId = ticket?.id ?? ticketId ?? null;
   const boardId = ticket?.boardId ?? null;
 
-  const [channelPreferenceList] = useCachedQuery(
-    queries.getEmailChannelPreference({ channelId: channelId || '' }),
-    { enabled: !!channelId },
-  );
-  const draftAgentSlug = channelPreferenceList?.[0]?.autoDraftAgentSlug || 'draft-agent';
+  const draftAgentSlug = channelPreference?.autoDraftAgentSlug || 'draft-agent';
   const { setSelectedAgentSlug } = useSelectedAgent();
 
   const openDraftAgentSession = useCallback(
@@ -3732,7 +3860,8 @@ export const SupportTicketDetail = ({
         contextType: 'chat',
         channelId,
         threadInfo,
-        ...(sessionId ? { focusSessionId: sessionId } : { startFreshChat: true }),
+        focusSessionId: sessionId ?? conversationId,
+        deskAutoDraft: { conversationId, channelId },
       });
     },
     [conversationId, channelId, draftAgentSlug, title, setSelectedAgentSlug],
@@ -3745,64 +3874,6 @@ export const SupportTicketDetail = ({
     }
     setComposerOpenState(composerOpenByConv.get(conversationId) ?? false);
   }, [conversationId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setAutoDraftCitations([]);
-    setUserDraftSession(null);
-    if (!conversationId) {
-      setSourcesHydrating(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-    setSourcesHydrating(true);
-
-    const withRetry = async <T,>(fn: () => Promise<T>): Promise<T> => {
-      let lastErr = new Error('request failed');
-      for (const delay of [0, 400, 1200]) {
-        if (delay > 0) await new Promise(r => setTimeout(r, delay));
-        if (cancelled) throw new Error('cancelled');
-        try {
-          return await fn();
-        } catch (err) {
-          lastErr = err instanceof Error ? err : new Error(String(err));
-        }
-      }
-      throw lastErr;
-    };
-
-    const hydrateAutodraft = async (): Promise<void> => {
-      if (!channelId) return;
-      try {
-        const res = await withRetry(() =>
-          apiInstance.get<{
-            available: boolean;
-            content: string | null;
-            toolInvocations: ToolInvocation[];
-          }>(`/email/${conversationId}/autodraft-insight`, { params: { channelId } }),
-        );
-        if (cancelled) return;
-        const citations = resolveCitedClawCitations(res.data.content, res.data.toolInvocations);
-        if (!cancelled) setAutoDraftCitations(citations);
-      } catch {
-        // No auto-draft insight yet for this conv — fine, leave empty.
-      }
-    };
-
-    // Ask AI v1 provided a desk-conversation → session lookup used to restore
-    // the querying user's prior draft-agent session (to gate "See sources").
-    // v2/claw has no equivalent by-conversation lookup on the frontend, so this
-    // restore is dropped — the autodraft insight (hydrateAutodraft) still runs.
-    void Promise.allSettled([hydrateAutodraft()]).finally(() => {
-      if (!cancelled) setSourcesHydrating(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, channelId]);
 
   const setComposerOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
     next => {
@@ -3818,19 +3889,16 @@ export const SupportTicketDetail = ({
     [conversationId],
   );
 
-  // Desk's connected mailbox — used as the "me" reference in thread headers
-  // and recipient summaries. Sourced from the existing `/channels/:id/connected-email`
-  // API via `useChannelConnectedEmail`. Empty string until loaded.
-  const deskEmail = useChannelConnectedEmail(channelId || null);
-  const { outboundConfigured } = useChannelIntegrationInfo(channelId || null);
+  const channelIntegrationInfo = useChannelIntegrationInfo(channelId || null);
+  const deskEmail = channelIntegrationInfo.email ?? '';
+  const { outboundConfigured } = channelIntegrationInfo;
 
   useAskAiTicketContext({
     channelId: channelId || null,
     conversationId: conversationId ?? null,
     previewText: title || 'Ticket conversation',
   });
-  const conversation = ticket?.conversation;
-  const ticketDraft = useEmailDraft(conversationId ?? null);
+  const ticketDraft = ticketEmailDrafts[0];
   const draftAutoOpenedConversationRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
@@ -3981,17 +4049,22 @@ export const SupportTicketDetail = ({
       }
 
       setIsArchivingTicket(true);
-      zero.mutate(
-        mutators.ticket.archiveDeskTicket({
-          id: ticket.id,
-          updatedAt: Date.now(),
-        }),
-      );
-
-      setIsArchivingTicket(false);
       setShowArchiveConfirmDialog(false);
-      toast.success('Ticket archived successfully');
-      goBackToTicketList();
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.archiveDeskTicket({
+            id: ticket.id,
+            updatedAt: Date.now(),
+          }),
+        ),
+        'Failed to archive ticket',
+      ).then(ok => {
+        setIsArchivingTicket(false);
+        if (ok) {
+          toast.success('Ticket archived successfully');
+          goBackToTicketList();
+        }
+      });
     } catch (err) {
       setIsArchivingTicket(false);
       toast.error('Failed to archive ticket', {
@@ -4135,99 +4208,25 @@ export const SupportTicketDetail = ({
     [conversationId],
   );
 
-  // Fetch messages for the conversation
-  const [messages] = useCachedQuery(
-    queries.conversationMessagesV2({
-      conversationId: conversationId || '',
-    }),
-    {
-      enabled: !!conversationId && !!channelId,
-    },
-  );
-
   const targetMessageId = searchParams.get('messageId');
-  useEffect(() => {
-    if (!targetMessageId || !conversationId) return;
-    if (!messages || messages.length === 0) return;
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = document.getElementById(
-          `thread-message-${conversationId}-${targetMessageId}`,
-        );
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('bg-yellow-50');
-          setTimeout(() => target.classList.remove('bg-yellow-50'), 2500);
-        }
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [targetMessageId, conversationId, messages]);
 
   // Get channel info and user status
   const channel = useChannel(channelId);
-  const channelParticipation = useGetChannelUserStatus(channelId);
-  const isUserMember = !!channelParticipation;
-
+  const [mailboxRows] = useCachedQuery(
+    queries.myTicketMailbox({ ticketId: mailboxTicketId ?? '' }),
+    { enabled: channel?.type === ChannelType.EMAIL && !!mailboxTicketId },
+  );
+  const mailboxOverlay = mailboxRows?.[0];
+  const [conversationLabelMappings] = useCachedQuery(
+    queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
+    { enabled: !!conversationId },
+  );
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
-  // Drag and drop functionality
-  const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(conversationId || '');
-
-  // Mark thread activities as read when component unmounts
   const zero = useZero();
-  useEffect(() => {
-    return (): void => {
-      if (conversationId) {
-        const draft = getDraft(channelId, conversationId);
-        void zero.mutate(
-          mutators.activities.markThreadActivitiesAsReadV2({
-            conversationId,
-            timestamp: Date.now(),
-            draftMessage: draft || '',
-            draftMessageId: uuidv4(),
-            participantId: uuidv4(),
-          }),
-        );
-      }
-    };
-  }, [conversationId]);
-
-  // Check if any message has a ticketId in metadata
-  const hasTicketInMessages = useMemo(() => {
-    if (!messages || messages.length === 0) return false;
-    return messages.some(msg => {
-      const metadata = msg.metadata as { ticketId?: string } | null;
-      return metadata?.ticketId !== undefined;
-    });
-  }, [messages]);
-
-  const hasAutoDraftReasoning = ticketDraft?.autoDraftStatus === AutoDraftStatus.READY;
-  const activeTab: TabType = ((): TabType => {
-    const t = searchParams.get('selectedTab');
-    if (t === 'details') return 'details';
-    if (t === 'sources') return 'sources';
-    if (t === 'reasoning' && hasAutoDraftReasoning) return 'reasoning';
-    return 'messages';
-  })();
-  const setActiveTab = useCallback(
-    (next: TabType) => {
-      setSearchParams(
-        prev => {
-          const params = new URLSearchParams(prev);
-          params.set('selectedTab', next);
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
-  const hasActiveCallForConversation = !!conversation?.callId;
-
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -4273,7 +4272,12 @@ export const SupportTicketDetail = ({
                   {ticketIdParam}
                 </span>
                 {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
-                  <MailboxActions ticketId={mailboxTicketId} channelId={channelId} slot='star' />
+                  <MailboxActions
+                    ticketId={mailboxTicketId}
+                    channelId={channelId}
+                    slot='star'
+                    mailboxOverlay={mailboxOverlay}
+                  />
                 )}
                 {/* `min-w-[8rem]` (rem, so it tracks font scaling) is what makes the
                     row break its flex line instead of crushing the title to nothing. */}
@@ -4298,6 +4302,7 @@ export const SupportTicketDetail = ({
                         conversationId={conversationId}
                         channelId={channelId}
                         slot='picker'
+                        appliedMappings={conversationLabelMappings ?? []}
                       />
                     )}
                     {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
@@ -4305,6 +4310,7 @@ export const SupportTicketDetail = ({
                         ticketId={mailboxTicketId}
                         channelId={channelId}
                         slot='actions'
+                        mailboxOverlay={mailboxOverlay}
                       />
                     )}
                   </div>
@@ -4385,7 +4391,7 @@ export const SupportTicketDetail = ({
                           toast.error('Cannot copy link');
                           return;
                         }
-                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
                         void navigator.clipboard
                           .writeText(url)
                           .then(() => toast.success('Link copied'))
@@ -4542,6 +4548,7 @@ export const SupportTicketDetail = ({
                           ticketId={mailboxTicketId}
                           channelId={channelId}
                           slot='chip'
+                          mailboxOverlay={mailboxOverlay}
                         />
                       )}
                       {conversationId && (
@@ -4549,6 +4556,7 @@ export const SupportTicketDetail = ({
                           conversationId={conversationId}
                           channelId={channelId}
                           slot='chips'
+                          appliedMappings={conversationLabelMappings ?? []}
                         />
                       )}
                     </div>
@@ -4755,38 +4763,16 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
-                    <SlackThread
-                      emails={emails}
-                      ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
-                    />
+                  {channel?.type === ChannelType.SLACK ||
+                  channel?.type === ChannelType.APP ||
+                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                    <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
-                    <CallThread
-                      emails={emails}
-                      ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
-                    />
+                    <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (
                     <EmailThread
                       collapseState={emailCollapseState}
                       ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
                       onReplyToEmail={(emailId, mode) => {
                         clearStoredRecipients(conversationId);
                         setReplyToEmailId(emailId);
@@ -4806,11 +4792,24 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                conversationId ? (
+                  <SocialMediaReplyComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    replyBasePath='/integrations/social-media'
+                    placeholder='Reply to this review…'
+                    maxLength={350}
+                    trackingCategory='social-media-composer'
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
                     recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
                   />
@@ -4827,6 +4826,8 @@ export const SupportTicketDetail = ({
                     >
                       <EmailComposer
                         conversationId={conversationId}
+                        drafts={ticketEmailDrafts}
+                        channelConnectedEmail={deskEmail}
                         emails={emails}
                         onClose={() => {
                           setComposerOpen(false);
@@ -4843,13 +4844,11 @@ export const SupportTicketDetail = ({
                         onOpenAskAISidebarFresh={() => {
                           xyneAIActor.send({ type: 'OPEN' });
                         }}
-                        onCitationClick={(): void => {
-                          setActiveTab('sources');
-                        }}
                         onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
-                        showSeeSources={hasUserDraftAgentSession}
-                        onDraftInlineCitationsChange={setDraftInlineCitations}
+                        hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
                         channelId={channelId}
+                        channelPreference={channelPreference}
+                        channelPreferenceLoaded={channelPreferenceLoaded}
                         ticketId={ticketId}
                         replyToEmailId={replyToEmailId}
                         replyMode={replyMode}
@@ -4899,247 +4898,24 @@ export const SupportTicketDetail = ({
             <Panel id='ticket-side-panel' defaultSize='35%' minSize='30%' maxSize='70%'>
               <div
                 className='h-full flex flex-col overflow-hidden relative'
-                ref={dragAndDropAreaRef}
                 data-thread-citation-host
               >
-                <DragAndDropOverlay isVisible={isDragging} />
                 {conversationId && channelId ? (
-                  <Tabs.Root
-                    value={activeTab}
-                    onValueChange={value => setActiveTab(value as TabType)}
-                    className='flex-1 flex flex-col h-full overflow-hidden'
-                  >
-                    {/* Tabs Header */}
-                    <div className='w-full p-4 pb-0 bg-background flex-shrink-0'>
-                      <div className='border-b border-border flex items-center justify-between'>
-                        <Tabs.List className='flex items-center justify-start'>
-                          <Tabs.Trigger asChild value='messages'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'messages'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <MessageCircle size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Messages
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          <Tabs.Trigger asChild value='details'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'details'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <FileText size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Details
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          {draftHasCitations && (
-                            <Tabs.Trigger asChild value='sources'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'sources'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenSourcesTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Sparkles size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Sources
-                                </span>
-                                <span
-                                  className={cn(
-                                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold',
-                                    activeTab === 'sources'
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'bg-muted text-muted-foreground',
-                                  )}
-                                >
-                                  {sourcesHydrating && visibleAutoDraftCitations.length === 0 ? (
-                                    <Loader2 size={10} className='animate-spin' />
-                                  ) : (
-                                    visibleAutoDraftCitations.length
-                                  )}
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                          {hasAutoDraftReasoning && (
-                            <Tabs.Trigger asChild value='reasoning'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'reasoning'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenReasoningTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Brain size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Reasoning
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                        </Tabs.List>
-                        <div className='flex items-center gap-2 shrink-0'>
-                          {/* Initiate Call Button */}
-                          {conversationId && (
-                            <ThreadCallButton
-                              onStartCall={() => setShowParticipantsModal(true)}
-                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                              hasActiveCall={hasActiveCallForConversation}
-                              testId='support-initiate-call-button'
-                            />
-                          )}
-                          <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
-                            <button
-                              type='button'
-                              onClick={() => {
-                                if (isAIPanelOpen) {
-                                  xyneAIActor.send({ type: 'CLOSE' });
-                                } else {
-                                  void openDraftAgentSession();
-                                }
-                              }}
-                              className={cn(
-                                'h-8 w-8 flex items-center justify-center rounded-lg border border-border transition-colors',
-                                isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
-                              )}
-                              aria-label='Toggle Ask AI panel'
-                              aria-pressed={isAIPanelOpen}
-                              data-track-category='Support'
-                              data-track-name='ToggleAIPanel'
-                              data-track-metadata={JSON.stringify({ source: 'right-panel-header' })}
-                            >
-                              <span className='inline-flex animate-ai-pop'>
-                                <XyneAIStar size={14} />
-                              </span>
-                            </button>
-                          </Tooltip>
-                          <button
-                            onClick={() => setIsRightPanelOpen(false)}
-                            className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
-                            aria-label='Close panel'
-                            title='Close panel'
-                            data-track-category='Support'
-                            data-track-name='CloseRightPanel'
-                          >
-                            <X size={16} className='text-muted-foreground' />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Messages Tab Content */}
-                    <Tabs.Content
-                      value='messages'
-                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
-                    >
-                      <ThreadList
-                        channelId={channelId}
-                        conversationId={conversationId}
-                        threadMessages={messages}
-                        initialScrollOffset={0}
-                        isTicketThread={false}
-                        conversation={conversation}
-                        channelScopeType={channel?.scopeType}
-                      />
-                      {isUserMember ? (
-                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
-                          <ChatInput
-                            ref={inputRef}
-                            channelId={channelId}
-                            conversation={conversation ?? undefined}
-                            placeholder='Reply to this thread...'
-                            hasTicket={hasTicketInMessages}
-                          />
-                        </div>
-                      ) : (
-                        <JoinChannel
-                          channelId={channelId}
-                          {...(channel?.name && { channelTitle: channel.name })}
-                        />
-                      )}
-                    </Tabs.Content>
-
-                    {/* Details Tab Content */}
-                    <Tabs.Content
-                      value='details'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden'
-                    >
-                      {ticket?.id ? (
-                        <TicketDetails ticketId={ticket.id} />
-                      ) : (
-                        <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
-                          <FileText size={48} className='mb-2 text-muted-foreground' />
-                          <p>Ticket ID not found</p>
-                        </div>
-                      )}
-                    </Tabs.Content>
-
-                    <Tabs.Content
-                      value='sources'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                    >
-                      <DraftSourcesPanel
-                        citations={visibleAutoDraftCitations}
-                        embedded
-                        showAutoDraftNote
-                        loading={sourcesHydrating}
-                      />
-                    </Tabs.Content>
-
-                    {hasAutoDraftReasoning && conversationId && channelId && (
-                      <Tabs.Content
-                        value='reasoning'
-                        className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                      >
-                        <AutoDraftReasoningPanel
-                          conversationId={conversationId}
-                          channelId={channelId}
-                        />
-                      </Tabs.Content>
-                    )}
-                  </Tabs.Root>
+                  <ThreadMessages
+                    channelId={channelId}
+                    conversationId={conversationId}
+                    ticketId={ticket?.id ?? null}
+                    matchedMessageId={targetMessageId}
+                    skipInputAutoFocus
+                    onClose={() => setIsRightPanelOpen(false)}
+                    onAskAI={() => {
+                      if (isAIPanelOpen) {
+                        xyneAIActor.send({ type: 'CLOSE' });
+                      } else {
+                        void openDraftAgentSession();
+                      }
+                    }}
+                  />
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>
@@ -5311,8 +5087,6 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
 const EmailThread = ({
   collapseState,
   ticketId,
-  lastEmailAt,
-  emailReads,
   onReplyToEmail,
   deskEmail,
   onMailtoClick,
@@ -5321,8 +5095,6 @@ const EmailThread = ({
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
-  lastEmailAt?: number | null | undefined;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   onMailtoClick: (email: string) => void;
@@ -5336,16 +5108,7 @@ const EmailThread = ({
   ) => void | Promise<void>;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
-  // Thread-level: upsert the current user's email_reads row. `isRead` compares
-  // the stored lastReadEmailAt snapshot against the ticket's lastEmailAt, so
-  // every email header in the thread flips read/unread together.
-  const { isRead } = useMarkEmailRead(
-    ticketId,
-    lastEmailId ?? null,
-    lastEmailAt ?? null,
-    emailReads,
-    true,
-  );
+  useMarkEmailRead(ticketId, lastEmailId ?? null, true);
   const threadAttachments = useMemo(
     () => sortedEmails.flatMap(e => e.attachments ?? []),
     [sortedEmails],
@@ -5383,7 +5146,6 @@ const EmailThread = ({
             isCollapsed={collapsedIds.has(email.id)}
             canCollapse={email.id !== lastEmailId}
             onToggleCollapse={() => toggleOne(email.id)}
-            isRead={isRead}
             threadAttachments={threadAttachments}
             {...(onReplyToEmail &&
               email.id !== lastEmailId && {
@@ -5409,7 +5171,6 @@ const EmailThreadItem = ({
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
-  isRead = true,
   onReply,
   deskEmail,
   isConversationRoot,
@@ -5422,7 +5183,6 @@ const EmailThreadItem = ({
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
-  isRead?: boolean;
   onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   /** True when this email is the earliest email in its own conversationId —
@@ -5488,10 +5248,10 @@ const EmailThreadItem = ({
           });
         }
       }
-    } catch {
+    } catch (err) {
       toast.error('Unmerge Failed', {
         id: toastId,
-        description: 'Operation failed. Please try again.',
+        description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
       });
     } finally {
       setIsDemerging(false);
@@ -5527,10 +5287,14 @@ const EmailThreadItem = ({
   ) : null;
 
   const headerClickable = canCollapse && !!onToggleCollapse;
-  const preview = stripHtml(email.body || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 140);
+  const preview = useMemo(
+    () =>
+      stripHtml(email.body || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 140),
+    [email.body],
+  );
 
   return (
     <div
@@ -5570,7 +5334,6 @@ const EmailThreadItem = ({
           createdAt={email.createdAt}
           isCollapsed={isCollapsed}
           previewText={preview}
-          isRead={isRead}
           deskEmail={deskEmail}
           extras={demergeButton}
           emailId={email.id}

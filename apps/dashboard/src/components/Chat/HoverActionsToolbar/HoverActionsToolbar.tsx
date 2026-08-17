@@ -18,6 +18,7 @@ import {
   Clock3,
   ChevronRight,
   Zap,
+  Tag as TagIcon,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -41,6 +42,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import { ThreadTagMenuItems } from '../../tags/ThreadTagMenuItems';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { MESSAGE_REMINDER_MENU_OPTIONS, type ReminderMenuOption } from '../utils/bookmarkUtils';
 import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
@@ -69,6 +71,8 @@ export interface HoverActionsToolbarProps {
   onDeleteMessage?: () => void;
   onPinMessage?: () => void;
   onCopyLink?: () => void;
+  /** Thread-type tags for this message's conversation. Absent = no tag menu. */
+  threadTags?: { applied: string[]; onToggle: (name: string) => void };
   onCopyMessage?: () => void;
   onSendToChannel?: () => void;
   onForwardMessage?: () => void;
@@ -95,6 +99,16 @@ export interface HoverActionsToolbarProps {
    * only the thread parent passes 'below'.
    */
   placement?: 'above' | 'below';
+  /**
+   * The message's current acts (stringified JSON array, or null). Presence of this prop is
+   * what renders the tag button — set only when the message is taggable, mirroring how the
+   * other optional actions gate themselves.
+   */
+  /**
+   * Reports the tag popover's open state so the shared overlay can pin itself open.
+   * Without it, moving the pointer up into the popover leaves the message row, the
+   * toolbar hides, and the popover unmounts before anything can be clicked.
+   */
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -112,6 +126,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onDeleteMessage,
   onPinMessage,
   onCopyLink,
+  threadTags,
   onCopyMessage,
   onSendToChannel,
   onForwardMessage,
@@ -154,6 +169,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
 
   // Check if there are any overflow actions to show in dropdown
   const hasOverflowActions =
+    threadTags ||
     onSendToChannel ||
     onCopyLink ||
     onCopyMessage ||
@@ -222,7 +238,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               handleEmojiOpenChange(false);
             }}
             customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: false }}
+            previewConfig={{ showPreview: true }}
           />
         </Popover>
       )}
@@ -434,6 +450,29 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   )}
 
                   {/* Remind Me */}
+                  {threadTags && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        data-testid='hover-action-thread-tags'
+                        data-track-category='HOVER_ACTIONS_TOOLBAR'
+                        data-track-name='OPEN_THREAD_TAG_MENU'
+                        data-track-metadata={JSON.stringify({ messageId })}
+                      >
+                        <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+                          <TagIcon className='w-4 h-4' />
+                        </span>
+                        Thread tags
+                        <ChevronRight className='w-4 h-4 ml-auto text-muted-foreground' />
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className='w-[220px]'>
+                        <ThreadTagMenuItems
+                          applied={threadTags.applied}
+                          onToggle={threadTags.onToggle}
+                        />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )}
+
                   {onRemindMeOption && (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger

@@ -181,6 +181,16 @@ FEATURE_LABELS=(
     "Feature Flags     (superposition)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
+
+if [ -n "${XYNE_FEATURES:-}" ]; then
+    SELECTED_FEATURES="$XYNE_FEATURES"
+    echo "$SELECTED_FEATURES" | grep -qw 1 || SELECTED_FEATURES="1,${SELECTED_FEATURES}"
+elif [ ! -t 0 ]; then
+
+    SELECTED_FEATURES="1"
+    echo -e "${YELLOW}  Not a terminal — starting Chat & Tickets only (set XYNE_FEATURES to pick more).${NC}"
+else
+
 CURSOR=1                          # start on Xyne-Claw (first toggleable item)
 declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
@@ -254,6 +264,8 @@ for i in $(seq 1 $((NUM_FEATURES - 1))); do
     fi
 done
 
+fi
+
 # Determine env vars and compose profiles
 ENABLE_STORAGE=1          # always on (Chat & Tickets needs fake-gcs + minio)
 ENABLE_OBSERVABILITY=0
@@ -309,9 +321,11 @@ for f in $(echo "$SELECTED_FEATURES" | tr ',' ' '); do
         2) SELECTED_NAMES="${SELECTED_NAMES}Xyne-Claw " ;;
         3) SELECTED_NAMES="${SELECTED_NAMES}Canvas " ;;
         4) SELECTED_NAMES="${SELECTED_NAMES}Calls " ;;
-        5) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
-        6) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
-        7) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
+        5) SELECTED_NAMES="${SELECTED_NAMES}Transcription " ;;
+        6) SELECTED_NAMES="${SELECTED_NAMES}Call-Recording " ;;
+        7) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
+        8) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
+        9) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
     esac
 done
 echo ""
@@ -559,6 +573,9 @@ else
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db OWNER xyne;" 2>/dev/null
 
+        echo -e "${BLUE}  Flushing Redis (stale queue jobs reference the dropped database)...${NC}"
+        $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+
         # Push schema with force-reset (first time setup - ensures tables are created)
         echo -e "${BLUE}  Creating database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
@@ -805,13 +822,15 @@ if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
         echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
         pnpm install
     fi
-    set -a && source .env && set +a
-    if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
-      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
-    fi
-    pnpm exec prisma db push --skip-generate --accept-data-loss
-    pnpm exec prisma generate
-    NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    (
+        set -a && source .env && set +a
+        if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
+          export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+        fi
+        pnpm exec prisma db push --skip-generate --accept-data-loss
+        pnpm exec prisma generate
+        NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    )
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
     cd "$REPO_ROOT"
 
