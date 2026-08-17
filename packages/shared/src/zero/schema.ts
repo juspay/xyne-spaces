@@ -404,6 +404,7 @@ export const userGroupMappingTable = table('user_group_mappings')
     roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

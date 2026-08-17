@@ -74,6 +74,47 @@ function filterUsersByResponsibility(
     .map(mapping => mapping.userId);
 }
 
+async function resolveStartOffsets(
+  pool: string[],
+  workloadMap: Map<string, number>,
+  hasWorkloadHistory: (userId: string) => boolean,
+  userGroupMappingByUserId: Map<string, UserGroupMapping>,
+): Promise<Map<string, number>> {
+  const offsets = new Map<string, number>();
+  const newcomers: string[] = [];
+
+  for (const userId of pool) {
+    const mapping = userGroupMappingByUserId.get(userId);
+    if (!mapping) continue;
+    if (mapping.startOffset != null) {
+      offsets.set(userId, mapping.startOffset);
+      continue;
+    }
+    if (hasWorkloadHistory(userId)) continue;
+    newcomers.push(userId);
+  }
+
+  if (newcomers.length === 0) return offsets;
+
+  const establishedLoads = pool
+    .filter(id => hasWorkloadHistory(id))
+    .map(id => workloadMap.get(id) ?? 0);
+  const baseline = establishedLoads.length > 0 ? Math.round(Math.min(...establishedLoads)) : 0;
+
+  for (const userId of newcomers) {
+    const mapping = userGroupMappingByUserId.get(userId)!;
+    offsets.set(userId, baseline);
+    try {
+      const persisted = await repositories.userGroupMapping.setStartOffsetIfNull(mapping.id, baseline);
+      logger.info(`[Assignment] startOffset resolved for userId ${userId}: ${baseline} (persisted=${persisted})`);
+    } catch (err) {
+      logger.error(`[Assignment] Failed to persist startOffset for userId ${userId}`, err);
+    }
+  }
+
+  return offsets;
+}
+
 async function filterMappingsToChannelParticipants(
   userGroupMappings: UserGroupMapping[],
   channelId: string,
@@ -175,6 +216,10 @@ export async function evaluateAssignmentRule(
   // Store full mapping objects for scoring
   const expertiseMap = new Map<string, UserExpertiseMapping>(
     expertiseMappings.map((e: UserExpertiseMapping) => [e.userId, e])
+  );
+
+  const userGroupMappingByUserId = new Map<string, UserGroupMapping>(
+    userGroupMappings.map((m: UserGroupMapping) => [m.userId, m])
   );
 
 
@@ -287,8 +332,14 @@ export async function evaluateAssignmentRule(
     .filter((w: UserWorkloadMapping) => w.boardId === boardId)
     .reduce((sum, w) => sum + (w.activeTasks || 0), 0);
 
+  const workloadHistoryUserIds = new Set(allWorkloadMappings.map((w: UserWorkloadMapping) => w.userId));
+  const hasWorkloadHistory = (userId: string) => workloadHistoryUserIds.has(userId);
+  const offsetMap = await resolveStartOffsets(finalEligibleUserIds, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
+
   for (const userId of finalEligibleUserIds) {
     const weightedActiveTasks = workloadMap.get(userId) || 0;
+    const startOffset = offsetMap.get(userId) ?? 0;
+    const effectiveActiveTasks = weightedActiveTasks + startOffset;
     const expertiseMapping = expertiseMap.get(userId);
     const hasExpertise = expertiseMapping?.hasExpertise === true;
     const percentage = expertiseMapping?.percentage ?? 100;
@@ -304,15 +355,17 @@ export async function evaluateAssignmentRule(
     const currentPercent = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
     const percentDiff = percentage - currentPercent;
 
-    // Scoring formula: weightedActiveTasks - expertiseBonus - percentDiff
+    // Scoring formula: effectiveActiveTasks - expertiseBonus - percentDiff
     const expertiseBonus = hasExpertise ? 10 : 0;
-    const score = weightedActiveTasks - expertiseBonus - percentDiff;
+    const score = effectiveActiveTasks - expertiseBonus - percentDiff;
 
     candidates.push({
       userId,
       score,
       details: {
         weightedActiveTasks,
+        startOffset,
+        effectiveActiveTasks,
         expertiseBonus,
         hasExpertise,
         percentage,
@@ -389,8 +442,11 @@ export async function evaluateAssignmentRule(
     
     // Calculate scores for fallback candidates
     const fallbackCandidates: AssignmentCandidate[] = [];
+    const fallbackOffsetMap = await resolveStartOffsets(fallbackUserIds, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
     for (const userId of fallbackUserIds) {
       const weightedActiveTasks = workloadMap.get(userId) || 0;
+      const startOffset = fallbackOffsetMap.get(userId) ?? 0;
+      const effectiveActiveTasks = weightedActiveTasks + startOffset;
       const expertiseMapping = expertiseMap.get(userId);
       const hasExpertise = expertiseMapping?.hasExpertise === true;
       const percentage = expertiseMapping?.percentage ?? 100;
@@ -405,13 +461,15 @@ export async function evaluateAssignmentRule(
       const percentDiff = percentage - currentPercent;
 
       const expertiseBonus = hasExpertise ? 10 : 0;
-      const score = weightedActiveTasks - expertiseBonus - percentDiff;
+      const score = effectiveActiveTasks - expertiseBonus - percentDiff;
 
       fallbackCandidates.push({
         userId,
         score,
         details: {
           weightedActiveTasks,
+          startOffset,
+          effectiveActiveTasks,
           expertiseBonus,
           hasExpertise,
           percentage,
@@ -474,30 +532,31 @@ export interface AllRolesResult {
 // ─── Shared context fetched once ─────────────────────────────────────────────
 
 interface SharedContext {
-  userGroupMappings:      UserGroupMapping[];
-  userStates:             UserAssignmentState[];
-  userStateMap:           Map<string, UserAssignmentState>;
-  expertiseMappings:      UserExpertiseMapping[];
-  allWorkloadMappings:    UserWorkloadMapping[];
-  boardWeightMap:         Map<string, number>;
-  workloadsByUserId:      Map<string, UserWorkloadMapping[]>;
-  workloadByUserAndBoard: Map<string, UserWorkloadMapping>;
-  expertiseMap:           Map<string, UserExpertiseMapping>;
-  totalTicketsOnBoard:    number;
+  userGroupMappings:        UserGroupMapping[];
+  userStates:               UserAssignmentState[];
+  userStateMap:             Map<string, UserAssignmentState>;
+  expertiseMappings:        UserExpertiseMapping[];
+  allWorkloadMappings:      UserWorkloadMapping[];
+  boardWeightMap:           Map<string, number>;
+  workloadsByUserId:        Map<string, UserWorkloadMapping[]>;
+  workloadByUserAndBoard:   Map<string, UserWorkloadMapping>;
+  expertiseMap:             Map<string, UserExpertiseMapping>;
+  userGroupMappingByUserId: Map<string, UserGroupMapping>;
+  totalTicketsOnBoard:      number;
 }
 
 /**
  * Score a pool of userIds against pre-fetched shared context.
  * Exact same scoring/fallback logic as evaluateAssignmentRule — no behaviour change.
  */
-function pickBest(
+async function pickBest(
   userIds: string[],
   assignmentType: AssignmentType,
   ctx: SharedContext,
   boardId: string,
   excludeUserId?: string,
-): AssignmentResult {
-  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, totalTicketsOnBoard } = ctx;
+): Promise<AssignmentResult> {
+  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, totalTicketsOnBoard } = ctx;
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
@@ -538,9 +597,14 @@ function pickBest(
     ? eligible.slice().sort((a, b) => (hasExpertise(b) ? 1 : 0) - (hasExpertise(a) ? 1 : 0))
     : eligible;
 
+  const hasWorkloadHistory = (id: string) => (workloadsByUserId.get(id)?.length ?? 0) > 0;
+  const offsetMap = await resolveStartOffsets(finalEligible, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
+
   // Score candidates
   const score = (userId: string): AssignmentCandidate => {
     const weightedActiveTasks = workloadMap.get(userId) ?? 0;
+    const startOffset   = offsetMap.get(userId) ?? 0;
+    const effectiveActiveTasks = weightedActiveTasks + startOffset;
     const em            = expertiseMap.get(userId);
     const expert        = em?.hasExpertise === true;
     const percentage    = em?.percentage ?? 100;
@@ -552,8 +616,8 @@ function pickBest(
     const expertBonus   = expert ? 10 : 0;
     return {
       userId,
-      score: weightedActiveTasks - expertBonus - percentDiff,
-      details: { weightedActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff },
+      score: effectiveActiveTasks - expertBonus - percentDiff,
+      details: { weightedActiveTasks, startOffset, effectiveActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff },
     };
   };
 
@@ -662,7 +726,11 @@ export async function evaluateAllRoles(
   const expertiseMap = new Map<string, UserExpertiseMapping>(
     expertiseMappings.map(e => [e.userId, e])
   );
-  
+
+  const userGroupMappingByUserId = new Map<string, UserGroupMapping>(
+    userGroupMappings.map(m => [m.userId, m])
+  );
+
   const totalTicketsOnBoard = allWorkloadMappings
     .filter(w => w.boardId === boardId)
     .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
@@ -677,6 +745,7 @@ export async function evaluateAllRoles(
     workloadsByUserId,
     workloadByUserAndBoard,
     expertiseMap,
+    userGroupMappingByUserId,
     totalTicketsOnBoard,
   };
 
@@ -685,13 +754,15 @@ export async function evaluateAllRoles(
     filterUsersByResponsibility(userGroupMappings, type);
 
   // Round 1: MANAGER, TEAM_LEAD, MEMBER, QA
-  const manager   = pickBest(poolFor(AssignmentType.MANAGER),   AssignmentType.MANAGER,   ctx, boardId);
-  const teamLead  = pickBest(poolFor(AssignmentType.TEAM_LEAD), AssignmentType.TEAM_LEAD, ctx, boardId);
-  const member    = pickBest(poolFor(AssignmentType.MEMBER),    AssignmentType.MEMBER,    ctx, boardId);
-  const qa        = pickBest(poolFor(AssignmentType.QA),        AssignmentType.QA,        ctx, boardId);
+  const [manager, teamLead, member, qa] = await Promise.all([
+    pickBest(poolFor(AssignmentType.MANAGER),   AssignmentType.MANAGER,   ctx, boardId),
+    pickBest(poolFor(AssignmentType.TEAM_LEAD), AssignmentType.TEAM_LEAD, ctx, boardId),
+    pickBest(poolFor(AssignmentType.MEMBER),    AssignmentType.MEMBER,    ctx, boardId),
+    pickBest(poolFor(AssignmentType.QA),        AssignmentType.QA,        ctx, boardId),
+  ]);
 
   // Round 2: PR_REVIEWER — exclude MEMBER to prevent self-review
-  const prReviewer = pickBest(
+  const prReviewer = await pickBest(
     poolFor(AssignmentType.PR_REVIEWER),
     AssignmentType.PR_REVIEWER,
     ctx,
@@ -787,6 +858,7 @@ export async function evaluateRoleSlots(
   const workloadByUserAndBoard = new Map<string, UserWorkloadMapping>();
   for (const w of allWorkloadMappings) workloadByUserAndBoard.set(`${w.userId}#${w.boardId}`, w);
   const expertiseMap = new Map<string, UserExpertiseMapping>(expertiseMappings.map(e => [e.userId, e]));
+  const userGroupMappingByUserId = new Map<string, UserGroupMapping>(userGroupMappings.map(m => [m.userId, m]));
   const totalTicketsOnBoard = allWorkloadMappings
     .filter(w => w.boardId === boardId)
     .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
@@ -801,6 +873,7 @@ export async function evaluateRoleSlots(
     workloadsByUserId,
     workloadByUserAndBoard,
     expertiseMap,
+    userGroupMappingByUserId,
     totalTicketsOnBoard,
   };
 
@@ -810,7 +883,7 @@ export async function evaluateRoleSlots(
   const summary: string[] = [];
   for (const roleId of roleIds) {
     const pool = filterUsersByRoleId(userGroupMappings, roleId);
-    const res = pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
+    const res = await pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
     result[roleId] = res;
     summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);
   }
