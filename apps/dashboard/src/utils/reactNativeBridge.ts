@@ -457,7 +457,7 @@ class ReactNativeBridge {
       return;
     }
 
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_info',
       message: String('[RN Bridge] <='),
       context: [message.type, message.payload ?? null],
@@ -546,7 +546,7 @@ class ReactNativeBridge {
     };
 
     try {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[RN Bridge] =>'),
         context: [type, payload ?? null],
@@ -620,7 +620,7 @@ class ReactNativeBridge {
   }
   // LiveKit native bridge methods
   livekitConnect(payload: LiveKitConnectPayload): boolean {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[RN Bridge] Sending LIVEKIT_CONNECT'),
       context: [
@@ -637,7 +637,7 @@ class ReactNativeBridge {
   }
 
   livekitDisconnect(): boolean {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[ReactNativeBridge] livekitDisconnect called'),
       context: [new Error().stack],
@@ -703,7 +703,7 @@ class ReactNativeBridge {
     // Replay any pending messages for this type (handles cold start race condition)
     const pendingMessage = this.pendingMessages.get(type);
     if (pendingMessage) {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('[RN Bridge] Replaying pending message for late listener:'),
         context: [type, pendingMessage.payload],
@@ -740,7 +740,7 @@ class ReactNativeBridge {
     if (!listeners || listeners.size === 0) {
       // Queue the message for late listeners if it's a queueable type
       if (this.queueableMessageTypes.has(message.type)) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[RN Bridge] Queuing message for late listener:'),
           context: [message.type, message.payload],

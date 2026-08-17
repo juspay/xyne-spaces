@@ -44,7 +44,7 @@ export function AIInviteDialog({
     if (isOpen) {
       setSelectedUserIds(new Set(users.map(u => u.id)));
       setMessage(suggestedMessage);
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('[AIInviteDialog] Opening with suggestedMessage:'),
         context: [suggestedMessage],
@@ -94,7 +94,7 @@ export function AIInviteDialog({
         // Create HTML with proper paragraph tags
         const messageContent = `<p>${messageText}</p>${linkText ? `<p>${linkText}</p>` : ''}`;
 
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[AIInviteDialog] Sending DM with message:'),
           context: [{ message, messageContent }],

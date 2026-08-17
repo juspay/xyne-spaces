@@ -192,7 +192,7 @@ export class ConversationService {
     data: CreateConversationRequest,
   ): Promise<CreateConversationResponse> {
     try {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('📤 [FRONTEND-ATTACHMENT] Starting conversation creation with files:'),
         context: [
@@ -220,7 +220,7 @@ export class ConversationService {
 
       // Add files if present
       if (data.files && data.files.length > 0) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('📎 [FRONTEND-ATTACHMENT] Processing files for upload:'),
           context: [
@@ -250,7 +250,7 @@ export class ConversationService {
         let thumbnailIndex = 0;
 
         data.files.forEach((file: File, fileIndex: number) => {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(`📤 [FRONTEND-ATTACHMENT] Adding file ${fileIndex} to form data:`),
             context: [
@@ -269,7 +269,7 @@ export class ConversationService {
           // Check if this file has a thumbnail
           const thumbnail = data.videoThumbnails?.get(file);
           if (thumbnail) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String(`🖼️ [FRONTEND-ATTACHMENT] Adding thumbnail for file ${fileIndex}:`),
               context: [
@@ -305,7 +305,7 @@ export class ConversationService {
 
         // Add metadata as JSON
         const fileMetadataJson = JSON.stringify(fileMetadata);
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('📋 [FRONTEND-ATTACHMENT] File metadata prepared:'),
           context: [fileMetadata],
@@ -313,7 +313,7 @@ export class ConversationService {
         formData.append('fileMetadata', fileMetadataJson);
       }
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('🚀 [FRONTEND-ATTACHMENT] Sending API request to create conversation:'),
         context: [
@@ -330,7 +330,7 @@ export class ConversationService {
         formData,
       );
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('✅ [FRONTEND-ATTACHMENT] Conversation created successfully:'),
         context: [

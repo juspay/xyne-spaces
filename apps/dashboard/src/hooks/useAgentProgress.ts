@@ -125,7 +125,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
       });
 
     const handler = (evt: SessionActivityEvent): void => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('Received session_activity event'),
         context: [evt],

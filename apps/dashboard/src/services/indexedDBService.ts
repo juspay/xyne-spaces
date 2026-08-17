@@ -281,7 +281,7 @@ class IndexedDBService {
       await Promise.all(dropPromises);
 
       if (userDatabases.length > 0) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`Dropped ${userDatabases.length} user-scoped databases`),
         });

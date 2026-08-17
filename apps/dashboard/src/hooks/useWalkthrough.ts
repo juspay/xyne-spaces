@@ -21,7 +21,7 @@ export const useWalkthrough = ({
 }: UseWalkthroughOptions): { startWalkthrough: (forceReplay?: boolean) => void } => {
   const startWalkthrough = useCallback(
     (forceReplay = false): void => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(
           `[Walkthrough] Attempting to start feature: ${feature}, forceReplay: ${forceReplay}`,
@@ -30,7 +30,7 @@ export const useWalkthrough = ({
 
       const hasSeen = localStorage.getItem(`walkthrough_${feature}`);
       if (!forceReplay && hasSeen === 'true') {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(
             `[Walkthrough] Skipped because it was already seen. localStorage check: true`,
@@ -41,14 +41,14 @@ export const useWalkthrough = ({
 
       const steps = walkthroughConfig[feature];
       if (!steps || steps.length === 0) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`[Walkthrough] No steps configured for feature: ${feature}`),
         });
         return;
       }
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(`[Walkthrough] Initializing driver.js with ${steps.length} steps.`),
       });
@@ -62,7 +62,7 @@ export const useWalkthrough = ({
             !driverObj.hasNextStep() ||
             confirm('Are you sure you want to skip the walkthrough?')
           ) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String(`[Walkthrough] Marking as seen in localStorage.`),
             });
@@ -82,7 +82,7 @@ export const useWalkthrough = ({
 
   useEffect(() => {
     if (autoPlay) {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(`[Walkthrough] autoPlay is true for ${feature}, setting up trigger...`),
       });
@@ -95,7 +95,7 @@ export const useWalkthrough = ({
           typeof firstStepElem === 'string' &&
           !document.querySelector(firstStepElem)
         ) {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `[Walkthrough] Element ${firstStepElem} not found in DOM yet. Trying anyway but Driver.js might fail.`,
@@ -106,7 +106,7 @@ export const useWalkthrough = ({
       }, 1000); // Increased wait time to 1 second
       return (): void => clearTimeout(timeout);
     } else {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(`[Walkthrough] autoPlay is false for ${feature}.`),
       });

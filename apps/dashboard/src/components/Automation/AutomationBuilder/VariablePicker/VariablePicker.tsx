@@ -83,7 +83,7 @@ export function VariablePicker({
     : groups;
 
   const handlePick = (entry: VariableEntry): void => {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_info',
       message: String('[automations] variable inserted'),
       context: [

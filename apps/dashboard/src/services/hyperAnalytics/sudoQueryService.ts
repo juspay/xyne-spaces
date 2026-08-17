@@ -51,7 +51,7 @@ class SudoQueryService {
       void this.flushEvents();
     }, this.FLUSH_INTERVAL);
 
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[SudoQuery] Flush interval started (10s)'),
     });
@@ -73,7 +73,7 @@ class SudoQueryService {
     const eventsToSend = [...this.eventQueue];
     this.eventQueue = [];
 
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[SudoQuery] Flushing'),
       context: [eventsToSend.length, 'events to backend'],
@@ -92,7 +92,7 @@ class SudoQueryService {
       );
 
       if (response.data.success) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[SudoQuery] Events flushed successfully:'),
           context: [response.data.data],
@@ -126,7 +126,7 @@ class SudoQueryService {
 
       const success = navigator.sendBeacon(this.API_ENDPOINT, blob);
       if (success) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[SudoQuery] Sent'),
           context: [eventsToSend.length, 'events via beacon'],
@@ -140,7 +140,7 @@ class SudoQueryService {
    * Queue an event to be sent to the backend (batched every 10 seconds)
    */
   track(eventName: string, properties?: EventProperties): void {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[SudoQuery] Track called:'),
       context: [eventName],
@@ -153,7 +153,7 @@ class SudoQueryService {
     };
 
     this.eventQueue.push(event);
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[SudoQuery] Event queued:'),
       context: [eventName, '(queue size:', this.eventQueue.length, ')'],
@@ -164,7 +164,7 @@ class SudoQueryService {
    * Manually flush queued events immediately
    */
   async flush(): Promise<void> {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('[SudoQuery] Manual flush called'),
     });

@@ -82,7 +82,7 @@ export function useRecordingConnectionState(
     };
 
     const handleOnline = (): void => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[RecordingsScreen] Browser came back online'),
       });
@@ -108,7 +108,7 @@ export function useRecordingConnectionState(
         // The blip was so brief LiveKit never lost the connection.
         // Clear the Reconnecting state we set from the offline event so the
         // overlay hides and the 30 s timeout is cancelled.
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_info',
           message: String('[RecordingsScreen] Room still connected after brief offline'),
         });
@@ -137,7 +137,7 @@ export function useRecordingConnectionState(
     setRoomConnectionState(room.state);
 
     const handleConnectionStateChanged = (state: ConnectionState): void => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String(`[RecordingsScreen] Connection state → ${state}`),
         context: [{ recordingStatus }],
@@ -194,7 +194,7 @@ export function useRecordingConnectionState(
               : quality === ConnectionQuality.Lost
                 ? 'lost'
                 : 'unknown';
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String(`[RecordingsScreen] Network quality: ${label}`),
       });

@@ -149,12 +149,12 @@ const OrgMembersSection = ({
   z,
 }: OrgMembersSectionProps): ReactElement => {
   const [members] = useCachedQuery(queries.getOrgMembers({ orgId }), { enabled: true });
-  logger.info(LogEvent.FRONTEND_ERROR, {
+  logger.info(LogEvent.INFO, {
     type: 'migrated_console_log',
     message: String('[DEBUG] OrgMembersSection query'),
     context: [{ orgId }],
   });
-  logger.info(LogEvent.FRONTEND_ERROR, {
+  logger.info(LogEvent.INFO, {
     type: 'migrated_console_log',
     message: String('[DEBUG] OrgMembersSection render'),
     context: [{ orgId, members }],

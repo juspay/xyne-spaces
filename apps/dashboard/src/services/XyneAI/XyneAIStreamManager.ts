@@ -285,7 +285,7 @@ class XyneAIStreamManager {
       const record = await xyneAIStreamStorage.getActiveStreamForThread(threadId);
       if (!record) continue;
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[XyneAIStreamManager] App foregrounded — restarting interrupted stream'),
         context: [state.streamId],

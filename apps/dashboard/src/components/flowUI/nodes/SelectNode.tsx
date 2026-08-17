@@ -54,7 +54,7 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
   const isLoading = state.loadingComponentIds.includes(node.id);
 
   const handleChange = (val: string) => {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String(`[SelectNode] value changed  name=${props.name}  value=${val}`),
     });
@@ -66,7 +66,7 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
     const action = props.action;
     if (action?.type === 'inputChange') {
       const ms = action.debounceMs ?? 0;
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(
           `[SelectNode] scheduling inputChange  actionId=${action.actionId}  debounceMs=${ms}`,
@@ -74,7 +74,7 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
       });
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`[SelectNode] firing inputChange  actionId=${action.actionId}`),
         });

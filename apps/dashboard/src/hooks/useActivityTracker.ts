@@ -85,7 +85,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
    * Handle idle event (user inactive for 60s)
    */
   const handleIdle = useCallback(() => {
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('🔵 ACTIVITY_TRACE [Frontend]: handleIdle() triggered - user went idle'),
     });
@@ -102,7 +102,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       lastActiveStartTime.current = null;
     }
 
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
       message: String('🔵 ACTIVITY_TRACE [Frontend]: Active period ended'),
       context: [
@@ -121,7 +121,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
    */
   const handleActive = useCallback(
     (event?: Event) => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(
           '🔵 ACTIVITY_TRACE [Frontend]: handleActive() triggered - user returned from idle',
@@ -134,7 +134,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       // Start new active period
       lastActiveStartTime.current = now;
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('🔵 ACTIVITY_TRACE [Frontend]: New active period started'),
         context: [
@@ -244,7 +244,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       // Use the ref to get the LATEST pathname, not the one from when timeout was set
       const finalPage = latestPathnameRef.current;
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(
           '🔵 ACTIVITY_TRACE [Frontend]: Initial active state after settle (debounced)',
@@ -316,7 +316,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
         const pageDurationMs = startTime - lastOnActionTime.current;
         const pageDurationSec = Math.round(pageDurationMs / 1000);
 
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('🔵 ACTIVITY_TRACE [Frontend]: Page changed (debounced)'),
           context: [

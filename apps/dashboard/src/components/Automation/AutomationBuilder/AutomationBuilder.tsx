@@ -289,7 +289,7 @@ export function AutomationBuilder({
       description: string;
       config: AutomationConfig;
     }): Promise<SaveResult> => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[automations] save attempted'),
         context: [
@@ -376,7 +376,7 @@ export function AutomationBuilder({
       }
       setSavedStatus(result.automation.status);
       setEditMode(false);
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[automations] save succeeded'),
         context: [
@@ -405,7 +405,7 @@ export function AutomationBuilder({
 
   const activateMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[automations] activate attempted'),
         context: [{ id }],
@@ -588,7 +588,7 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, cond);
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_info',
             message: String('[automations] step added'),
             context: [
@@ -611,7 +611,7 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, sw);
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_info',
             message: String('[automations] step added'),
             context: [
@@ -635,7 +635,7 @@ export function AutomationBuilder({
       };
       setConfig(prev => {
         const next = insertInto(prev.steps, action);
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_info',
           message: String('[automations] step added'),
           context: [
@@ -681,7 +681,7 @@ export function AutomationBuilder({
   const handleDeleteStep = useCallback((index: number): void => {
     setConfig(prev => {
       const removed = prev.steps[index];
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[automations] step removed'),
         context: [
@@ -698,7 +698,7 @@ export function AutomationBuilder({
   const handleMoveStep = useCallback((index: number, direction: -1 | 1): void => {
     setConfig(prev => {
       const moved = prev.steps[index];
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[automations] step reordered'),
         context: [

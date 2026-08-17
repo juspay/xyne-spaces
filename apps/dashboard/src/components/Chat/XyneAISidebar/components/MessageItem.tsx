@@ -2400,7 +2400,7 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 }: {
   participants: Participant[];
 }) => {
-  logger.info(LogEvent.FRONTEND_ERROR, {
+  logger.info(LogEvent.INFO, {
     type: 'migrated_console_log',
     message: String('[ParticipantsAvatars] Rendering:'),
     context: [{ participants, count: participants?.length }],
@@ -2416,7 +2416,7 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
     });
   }, [participants]);
 
-  logger.info(LogEvent.FRONTEND_ERROR, {
+  logger.info(LogEvent.INFO, {
     type: 'migrated_console_log',
     message: String('[ParticipantsAvatars] Unique participants:'),
     context: [

@@ -415,7 +415,7 @@ export function useScopedFind(
       const isPDF = isPDFContext(container);
 
       if (debug) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`Using ${isPDF ? 'overlay' : 'mark'} highlighting strategy`),
         });
@@ -487,7 +487,7 @@ export function useScopedFind(
           const currentTime = Date.now();
           if (currentTime - startTime > timeoutMs) {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Text layer wait timeout reached'),
               });
@@ -500,7 +500,7 @@ export function useScopedFind(
           const currentTextLength = text.length;
 
           if (debug && currentTextLength !== lastTextLength) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String(
                 `Text layer length changed: ${lastTextLength} -> ${currentTextLength}`,
@@ -526,7 +526,7 @@ export function useScopedFind(
             });
             matchOk = !!(result.success && result.matches && result.matches.length > 0);
             if (debug && !matchOk) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Text layer stable but chunk text not matchable yet; keep waiting'),
               });
@@ -535,7 +535,7 @@ export function useScopedFind(
 
           if (stableEnough && (!searchPhrase || matchOk)) {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String(
                   `Text layer ready (length ${currentTextLength}${searchPhrase ? ', match verified' : ''})`,
@@ -572,7 +572,7 @@ export function useScopedFind(
       const currentToken = callTokenRef.current;
 
       if (debug) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('highlightText called with:'),
           context: [text, 'token:', currentToken],
@@ -582,7 +582,7 @@ export function useScopedFind(
       const root = containerRef.current;
       if (!root) {
         if (debug)
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String('No container ref found'),
           });
@@ -590,7 +590,7 @@ export function useScopedFind(
       }
 
       if (debug) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('Container found:'),
           context: [root],
@@ -610,7 +610,7 @@ export function useScopedFind(
         // For PDFs / spreadsheets: goToPage → waitForPageReady (PDF) → extract on page scope.
         if (documentOperationsRef?.current?.goToPage) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('PDF or Spreadsheet detected'),
               context: [pageIndex],
@@ -620,7 +620,7 @@ export function useScopedFind(
             const waitForPageReadyFn = documentOperationsRef.current.waitForPageReady;
 
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Going to page or subsheet:'),
                 context: [pageIndex],
@@ -629,7 +629,7 @@ export function useScopedFind(
             await documentOperationsRef.current.goToPage(pageIndex);
             if (currentToken !== callTokenRef.current) {
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Stale call after goToPage, aborting'),
                 });
@@ -639,7 +639,7 @@ export function useScopedFind(
 
             if (waitForPageReadyFn) {
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Waiting for page ready (canvas + text + annotations)...'),
                 });
@@ -648,7 +648,7 @@ export function useScopedFind(
             }
             if (currentToken !== callTokenRef.current) {
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Stale call after waitForPageReady, aborting'),
                 });
@@ -660,7 +660,7 @@ export function useScopedFind(
               const pageRoot = findPdfPageRoot(root, pageIndex);
               if (!pageRoot) {
                 if (debug) {
-                  logger.info(LogEvent.FRONTEND_ERROR, {
+                  logger.info(LogEvent.INFO, {
                     type: 'migrated_console_log',
                     message: String(`PDF page ${pageIndex} not found, skipping highlight`),
                   });
@@ -673,7 +673,7 @@ export function useScopedFind(
             if (waitForPageReadyFn) {
               containerText = extractContainerText(highlightScope);
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Page ready; extracted text length:'),
                   context: [containerText.length],
@@ -681,7 +681,7 @@ export function useScopedFind(
               }
             } else {
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Waiting for text layer (non-PDF readiness)...'),
                 });
@@ -691,7 +691,7 @@ export function useScopedFind(
                 caseSensitive,
               });
               if (debug) {
-                logger.info(LogEvent.FRONTEND_ERROR, {
+                logger.info(LogEvent.INFO, {
                   type: 'migrated_console_log',
                   message: String('Text layer ready, proceeding with highlighting'),
                 });
@@ -699,7 +699,7 @@ export function useScopedFind(
             }
           } else {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('No page or subsheet index provided, skipping highlight'),
               });
@@ -719,7 +719,7 @@ export function useScopedFind(
 
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Stale call after text extraction, aborting'),
             });
@@ -751,7 +751,7 @@ export function useScopedFind(
 
         if (containerText.length === 0) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('No extractable text; skipping highlight and cache'),
             });
@@ -760,7 +760,7 @@ export function useScopedFind(
         }
 
         if (debug) {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String('Container text extracted, length:'),
             context: [containerText.length],
@@ -780,7 +780,7 @@ export function useScopedFind(
 
         if (cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_DURATION) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Using cached result for key:'),
               context: [cacheKey],
@@ -790,7 +790,7 @@ export function useScopedFind(
           // Check if this call is still the latest before using cached results
           if (currentToken !== callTokenRef.current) {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Stale call detected after cache lookup, aborting'),
               });
@@ -801,7 +801,7 @@ export function useScopedFind(
           matches = cachedEntry.matches;
         } else {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Cache miss, computing highlights client-side for key:'),
               context: [cacheKey],
@@ -818,7 +818,7 @@ export function useScopedFind(
           });
 
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Client-side highlighting result:'),
               context: [result],
@@ -827,7 +827,7 @@ export function useScopedFind(
 
           if (!result.success || !result.matches || result.matches.length === 0) {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('No matches found:'),
                 context: [result.message],
@@ -839,7 +839,7 @@ export function useScopedFind(
           // Check if this call is still the latest before processing results
           if (currentToken !== callTokenRef.current) {
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Stale call detected after computing matches, aborting'),
               });
@@ -857,14 +857,14 @@ export function useScopedFind(
             };
 
             if (debug) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('Cached successful result for key:'),
                 context: [cacheKey],
               });
             }
           } else if (!canUseCache && debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Skipping cache write (no documentId or empty text)'),
             });
@@ -874,7 +874,7 @@ export function useScopedFind(
         // Check if this call is still the latest before creating DOM highlights
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('Stale call detected before creating highlights, aborting'),
             });
@@ -906,13 +906,13 @@ export function useScopedFind(
         });
 
         if (debug) {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `Created ${allMarks.length} highlight marks from ${matches.length} matches`,
             ),
           });
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `Longest match index: ${longestMatchIndex} with length: ${longestMatchLength}`,
@@ -923,7 +923,7 @@ export function useScopedFind(
         // Final check before updating state
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String(
                 'Stale call detected before state update, aborting and cleaning up DOM',

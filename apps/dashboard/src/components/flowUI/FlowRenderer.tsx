@@ -160,7 +160,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         return;
       }
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(`[FlowRenderer] executeAction type=${action.type}`),
         context: [action],
@@ -220,7 +220,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           return next;
         });
       }
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String(
           `[FlowRenderer] → sending ${action.type} actionId=${action.actionId} values=`,
@@ -237,7 +237,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           conversationId,
         });
 
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`[FlowRenderer] ← response type=${response.type}`),
           context: [response],

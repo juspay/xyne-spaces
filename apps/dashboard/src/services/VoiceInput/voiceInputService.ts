@@ -155,7 +155,7 @@ class VoiceInputService {
     }
 
     const _blobSizeKB = (params.audioBlob.size / 1024).toFixed(1);
-    logger.info(LogEvent.FRONTEND_ERROR, {
+    logger.info(LogEvent.INFO, {
       type: 'migrated_console_info',
       message: String(
         `[VoiceInputService] Sending transcription request | size=${_blobSizeKB}KB` +
@@ -172,7 +172,7 @@ class VoiceInputService {
       );
 
       const elapsed = Date.now() - _t0;
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String(
           `[VoiceInputService] Transcription success | elapsed=${elapsed}ms` +

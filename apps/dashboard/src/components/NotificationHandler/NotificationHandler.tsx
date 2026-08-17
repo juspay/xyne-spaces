@@ -145,7 +145,7 @@ export const NotificationHandler: React.FC = () => {
             { workspaceId: targetWorkspaceId },
             { withCredentials: true },
           );
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `[NotificationHandler] Switched workspace from=${currentWorkspaceId} to=${targetWorkspaceId}`,
@@ -173,7 +173,7 @@ export const NotificationHandler: React.FC = () => {
   const handleNotification = useCallback(
     (data: NotificationData): void => {
       try {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(
             `[NotificationHandler] Notification received id=${data.notification.id} type=${data.notification.type} workspace=${data.notification.workspaceId ?? 'current'}`,
@@ -216,7 +216,7 @@ export const NotificationHandler: React.FC = () => {
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
         const notificationWorkspaceId = data.notification.workspaceId;
         if (notificationWorkspaceId && notificationWorkspaceId !== activeWorkspaceIdRef.current) {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `[NotificationHandler] Cross-workspace notification received id=${data.notification.id} from=${notificationWorkspaceId} current=${activeWorkspaceIdRef.current}`,
@@ -242,7 +242,7 @@ export const NotificationHandler: React.FC = () => {
           data.notification.data?.notificationType === 'sos_alert' ||
           data.notification.metadata?.notificationType === 'sos_alert';
         if (isSosAlert) {
-          logger.info(LogEvent.FRONTEND_ERROR, {
+          logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',
             message: String(
               `[NotificationHandler] SOS alert received id=${data.notification.id} workspace=${notificationWorkspaceId ?? 'current'}`,
@@ -384,14 +384,14 @@ export const NotificationHandler: React.FC = () => {
               | undefined;
 
             if (!pendingState) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('[NotificationHandler] No pending call state from native'),
               });
               return;
             }
 
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('[NotificationHandler] Received pending call state from native:'),
               context: [pendingState],
@@ -401,7 +401,7 @@ export const NotificationHandler: React.FC = () => {
 
             // If there's an active call that was joined, ensure it's in Zero
             if (activeCallId) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('[NotificationHandler] Syncing pending join:'),
                 context: [activeCallId],
@@ -414,7 +414,7 @@ export const NotificationHandler: React.FC = () => {
 
             // If there's a call that ended, sync the leave
             if (endedCallId) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('[NotificationHandler] Syncing pending leave:'),
                 context: [endedCallId],
@@ -422,14 +422,14 @@ export const NotificationHandler: React.FC = () => {
               // Clear native active call ID in callActor
               callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
               const timestamp = Date.now();
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('[NotificationHandler] Call ended:'),
                 context: [endedCallId, timestamp],
               });
             }
 
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('[NotificationHandler] Successfully synced pending call state'),
             });
@@ -457,7 +457,7 @@ export const NotificationHandler: React.FC = () => {
       NativeInboundMessageType.NATIVE_REQUEST_CALLBACK,
       message => {
         const payload = message.payload || {};
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[NotificationHandler] Received NATIVE_REQUEST_CALLBACK'),
           context: [payload],
@@ -485,7 +485,7 @@ export const NotificationHandler: React.FC = () => {
     const unsubscribe = reactNativeBridge.on(
       NativeInboundMessageType.NATIVE_CALL_JOINED,
       message => {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[NotificationHandler] Received NATIVE_CALL_JOINED:'),
           context: [message.payload],
@@ -498,7 +498,7 @@ export const NotificationHandler: React.FC = () => {
             // Set native active call ID in callActor FIRST
             // This immediately prevents IncomingCallModal from showing
             callActor.send({ type: 'SET_NATIVE_ACTIVE_CALL', callId });
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('[NotificationHandler] Call started:'),
               context: [callId],
@@ -526,7 +526,7 @@ export const NotificationHandler: React.FC = () => {
     const unsubscribe = reactNativeBridge.on(
       NativeInboundMessageType.LIVEKIT_CALL_ENDED,
       message => {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[NotificationHandler] Received LIVEKIT_CALL_ENDED:'),
           context: [message.payload],
@@ -541,7 +541,7 @@ export const NotificationHandler: React.FC = () => {
             // First ensure join was recorded (may have been missed during cold start)
             // This ensures participant has ACCEPTED response before we leave
             if (!nativeJoinedCallsRef.current.has(callId)) {
-              logger.info(LogEvent.FRONTEND_ERROR, {
+              logger.info(LogEvent.INFO, {
                 type: 'migrated_console_log',
                 message: String('[NotificationHandler] Call not tracked:'),
                 context: [callId],
@@ -551,7 +551,7 @@ export const NotificationHandler: React.FC = () => {
             // Clear native active call ID in callActor
             callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
 
-            logger.info(LogEvent.FRONTEND_ERROR, {
+            logger.info(LogEvent.INFO, {
               type: 'migrated_console_log',
               message: String('[NotificationHandler] Call ended:'),
               context: [callId],

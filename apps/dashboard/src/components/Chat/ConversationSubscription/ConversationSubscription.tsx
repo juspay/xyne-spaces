@@ -87,7 +87,7 @@ export const ConversationSubscription = React.forwardRef<
     const handleToggleSubscription = () => {
       const timestamp = Date.now();
 
-      logger.info(LogEvent.FRONTEND_ERROR, {
+      logger.info(LogEvent.INFO, {
         type: 'migrated_console_log',
         message: String('[ConversationSubscription] Toggle clicked:'),
         context: [
@@ -102,7 +102,7 @@ export const ConversationSubscription = React.forwardRef<
       });
 
       if (isSubscribed) {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[ConversationSubscription] Calling unsubscribeFromConversation mutator'),
         });
@@ -112,7 +112,7 @@ export const ConversationSubscription = React.forwardRef<
           }),
         );
       } else {
-        logger.info(LogEvent.FRONTEND_ERROR, {
+        logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String('[ConversationSubscription] Calling subscribeToConversation mutator'),
         });
