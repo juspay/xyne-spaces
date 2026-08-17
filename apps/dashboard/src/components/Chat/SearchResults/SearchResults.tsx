@@ -44,6 +44,7 @@ import { SearchQueryInput } from './SearchQueryInput';
 import {
   useAllVisibleChannels,
   useAllChannels,
+  useBrowsableChannels,
   useUserChannelStatuses,
 } from '../../../hooks/useChannels';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
@@ -64,7 +65,7 @@ import {
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
-import { Channel } from '@xyne/shared';
+import { Channel, ChannelVisibility } from '@xyne/shared';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -245,6 +246,7 @@ const SearchResults = (): ReactElement => {
   const isChannelsMode = filters.docType === 'channels';
   const allChannels = useAllVisibleChannels();
   const allChannelsForNav = useAllChannels();
+  const browsableChannels = useBrowsableChannels();
   const allUsers = useUsers();
   const authContext = useAuthContextValues();
   const currentUserId = authContext.userID;
@@ -261,6 +263,26 @@ const SearchResults = (): ReactElement => {
     () => groupChannelsByScope(allChannels, allChannelStatuses),
     [allChannels, allChannelStatuses],
   );
+
+  // Public channels the user is NOT a member of, surfaced in search so a member
+  // can discover / join a public channel without already being in it. Guarded on
+  // ChannelVisibility.PUBLIC (never leak private channels that Zero may have
+  // synced), archived channels are excluded, and the whole set is suppressed when
+  // the user scopes search to "only my channels". useBrowsableChannels already
+  // restricts to scopeType === DEFAULT (no DMs / ticket / document channels).
+  const memberChannelIds = useMemo(
+    () => new Set(allChannels.map(c => c.id)),
+    [allChannels],
+  );
+  const publicDiscoverableChannels = useMemo(() => {
+    if (filters.onlyMyChannels) return [];
+    return browsableChannels.filter(
+      c =>
+        c.visibility === ChannelVisibility.PUBLIC &&
+        !c.isArchived &&
+        !memberChannelIds.has(c.id),
+    );
+  }, [browsableChannels, memberChannelIds, filters.onlyMyChannels]);
 
   const allChannelsWithCategory = useMemo((): Array<{
     channel: Channel;
@@ -285,8 +307,22 @@ const SearchResults = (): ReactElement => {
         searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
       });
     }
+    for (const ch of publicDiscoverableChannels) {
+      result.push({
+        channel: ch,
+        category: ChannelCategory.PUBLIC_CHANNELS,
+        searchableNames: [ch.name],
+      });
+    }
     return result;
-  }, [starredChannels, regularChannels, dmChannels, currentUserId, usersById]);
+  }, [
+    starredChannels,
+    regularChannels,
+    dmChannels,
+    publicDiscoverableChannels,
+    currentUserId,
+    usersById,
+  ]);
 
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
@@ -980,6 +1016,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   [ChannelCategory.CHANNELS]: 'Channels',
   [ChannelCategory.DIRECT_MESSAGES]: 'Direct Messages',
   [ChannelCategory.GROUP_DMS]: 'Group DMs',
+  [ChannelCategory.PUBLIC_CHANNELS]: 'Public channels',
 };
 
 const LOCAL_SECTION_DISPLAY_LIMIT = 5;
@@ -1358,6 +1395,9 @@ function ResultsBody({
     const dmItems = filteredLocalChannels.filter(
       fc => fc.category === ChannelCategory.DIRECT_MESSAGES,
     );
+    const publicChannelItems = filteredLocalChannels.filter(
+      fc => fc.category === ChannelCategory.PUBLIC_CHANNELS,
+    );
     // cmdK only shows Group DMs in search mode — 1:1 DMs are not a separate section
     const groupDmItems = dmItems.filter(({ channel }) => isGroupDMChannel(channel.scopeType));
 
@@ -1485,6 +1525,7 @@ function ResultsBody({
             {renderUserSection()}
             {renderLocalChannelSection(ChannelCategory.GROUP_DMS, groupDmItems, false)}
             {renderLocalChannelSection(ChannelCategory.CHANNELS, regularItems)}
+            {renderLocalChannelSection(ChannelCategory.PUBLIC_CHANNELS, publicChannelItems)}
           </>
         )}
         {/* Backend results: grouped into per-docType sections when the backend

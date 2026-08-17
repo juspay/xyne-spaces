@@ -64,6 +64,7 @@ const CATEGORY_LABELS: Record<ChannelCategory, string> = {
   [ChannelCategory.CHANNELS]: 'Channels',
   [ChannelCategory.DIRECT_MESSAGES]: 'Direct Messages',
   [ChannelCategory.GROUP_DMS]: 'Group DMs',
+  [ChannelCategory.PUBLIC_CHANNELS]: 'Public channels',
 };
 
 /** Group-heading chrome copied from ChannelCommandMenu's Command.Group usage. */
