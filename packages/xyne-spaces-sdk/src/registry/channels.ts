@@ -27,9 +27,9 @@ export const channelsOperations = {
 
   /**
    * Create a channel and its associated server-owned rows atomically.
-   * Maps to: POST /api/v1/channels
+   * Maps to: POST /api/sdk/channels
    */
-  create: api<CreateChannelInput, { id: string }>('POST', '/api/v1/channels', {
+  create: api<CreateChannelInput, { id: string }>('POST', '/api/sdk/channels', {
     mapResult: (raw) => {
       const result = raw as { id: string; channelId?: string };
       return { id: result.channelId ?? result.id };
@@ -38,12 +38,12 @@ export const channelsOperations = {
 
   /**
    * Check channel-name uniqueness before presenting a create action.
-   * Maps to: POST /api/v1/channels/check-duplicate
+   * Maps to: POST /api/sdk/channels/check-duplicate
    */
   checkDuplicate: api<
     { name: string; projectId: string },
     CheckDuplicateChannelResponse
-  >('POST', '/api/v1/channels/check-duplicate'),
+  >('POST', '/api/sdk/channels/check-duplicate'),
 
   // ----- Reads -----
 

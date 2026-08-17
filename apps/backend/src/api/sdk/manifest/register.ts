@@ -11,7 +11,7 @@ import type { RouteDefinition } from './types';
  *
  * Ordering is deliberate: scope check before rate limit (an unauthorized caller
  * should not consume another caller's budget on a shared key), validation after
- * both, and every handler wrapped so a rejected promise reaches the v1 error
+ * both, and every handler wrapped so a rejected promise reaches the SDK error
  * handler rather than crashing the process.
  */
 export function registerRoutes(routes: readonly RouteDefinition[]): Router {
@@ -21,7 +21,7 @@ export function registerRoutes(routes: readonly RouteDefinition[]): Router {
   for (const route of routes) {
     const signature = `${route.method} ${route.path}`;
     if (seen.has(signature)) {
-      throw new Error(`Duplicate v1 route: ${signature}`);
+      throw new Error(`Duplicate SDK route: ${signature}`);
     }
     seen.add(signature);
 

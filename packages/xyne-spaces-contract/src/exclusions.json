@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "Catalog operations deliberately NOT exposed on /api/v1, each with a reason.",
+    "Catalog operations deliberately NOT exposed on /api/sdk, each with a reason.",
     "The coverage checker (tools/xyne-spaces-openapi-gen) requires every Zero query and",
     "mutator to be either bound to a route in the v1 manifest or listed here.",
     "Reason grammar: superseded-by:<name> | legacy-unused | internal | blocked-acl | deferred:<phase>"

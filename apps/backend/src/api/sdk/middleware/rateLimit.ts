@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { ApiError } from '../errors';
-import { v1Config } from '../config';
+import { sdkConfig } from '../config';
 
 /**
  * Redis token bucket keyed on (user, client), with separate read and write
@@ -56,8 +56,8 @@ export function rateLimit(kind: 'read' | 'write') {
     }
 
     const perMinute =
-      kind === 'read' ? v1Config.rateLimit.readPerMinute : v1Config.rateLimit.writePerMinute;
-    const capacity = Math.max(1, Math.floor(perMinute * v1Config.rateLimit.burstMultiplier));
+      kind === 'read' ? sdkConfig.rateLimit.readPerMinute : sdkConfig.rateLimit.writePerMinute;
+    const capacity = Math.max(1, Math.floor(perMinute * sdkConfig.rateLimit.burstMultiplier));
     const refillPerSec = perMinute / 60;
     const key = `sdk:rl:${kind}:${auth.authData.sub}:${auth.clientId}`;
 
@@ -90,7 +90,7 @@ export function rateLimit(kind: 'read' | 'write') {
     } catch (err) {
       // Fail open so a Redis outage cannot take the API down, but make it loud —
       // this is the one path where a dependency failure silently removes a control.
-      logger.error('[v1] rate limiter unavailable, allowing request', {
+      logger.error('[sdk] rate limiter unavailable, allowing request', {
         requestId: req.apiRequestId,
         err,
       });

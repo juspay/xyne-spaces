@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger';
 import { ApiError, toApiError } from '../errors';
 
 /**
- * Terminal error mapper for /api/v1 — the only place a status code is written.
+ * Terminal error mapper for /api/sdk — the only place a status code is written.
  *
  * Unlike the legacy `/api/zero/*-fallback` handlers, which return HTTP 200 with
  * `{success:false}`, every failure here carries a real status code and a stable
@@ -31,8 +31,8 @@ export function v1ErrorHandler(err: unknown, req: Request, res: Response, next: 
     clientId: req.sdkAuth?.clientId,
     err: apiError.cause ?? apiError,
   };
-  if (isServerError) logger.error('[v1] request failed', logPayload);
-  else logger.warn('[v1] request rejected', logPayload);
+  if (isServerError) logger.error('[sdk] request failed', logPayload);
+  else logger.warn('[sdk] request rejected', logPayload);
 
   if (apiError.retryAfterSeconds !== undefined) {
     res.setHeader('Retry-After', String(apiError.retryAfterSeconds));
@@ -54,7 +54,7 @@ export function v1ErrorHandler(err: unknown, req: Request, res: Response, next: 
   res.status(apiError.status).json(body);
 }
 
-/** 404 for unmatched /v1 paths, in the v1 envelope rather than the legacy one. */
+/** 404 for unmatched /sdk paths, in the SDK envelope rather than the legacy one. */
 export function v1NotFound(req: Request, _res: Response, next: NextFunction): void {
   next(new ApiError('not_found', `No such endpoint: ${req.method} ${req.path}`));
 }

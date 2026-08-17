@@ -37,7 +37,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { logger } from '@/utils/logger';
 import { ApiError, toApiError } from '../errors';
-import { v1Config } from '../config';
+import { sdkConfig } from '../config';
 
 export interface CallMutatorInput {
   readonly name: string;
@@ -100,7 +100,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
     });
   } catch (err) {
     if (err instanceof ApiError) throw err;
-    logger.warn('[v1] mutation failed', { name, endpoint, err });
+    logger.warn('[sdk] mutation failed', { name, endpoint, err });
     throw toApiError(err);
   }
 
@@ -140,7 +140,7 @@ export async function recordIdempotentResponse(
       },
     );
   } catch (err) {
-    logger.warn('[v1] failed to record idempotent response', { endpoint, err });
+    logger.warn('[sdk] failed to record idempotent response', { endpoint, err });
   }
 }
 
@@ -161,7 +161,7 @@ async function claimIdempotencyKey(
   endpoint: string,
   requestHash: string,
 ): Promise<ClaimResult> {
-  const expiresAt = new Date(Date.now() + v1Config.idempotency.ttlHours * 3600_000);
+  const expiresAt = new Date(Date.now() + sdkConfig.idempotency.ttlHours * 3600_000);
 
   const inserted = await pg.query(
     `INSERT INTO ${IDEMPOTENCY_TABLE} (id, key, "userId", "workspaceId", endpoint, request_hash, created_at, expires_at)
@@ -265,7 +265,7 @@ function drainSideEffects(
             },
           });
         } catch (dbError) {
-          logger.error('[v1] failed to log vespa enqueue error', { dbError });
+          logger.error('[sdk] failed to log vespa enqueue error', { dbError });
         }
       }
     }),

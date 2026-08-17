@@ -1,5 +1,5 @@
 /**
- * The single place /api/v1 touches @rocicorp/zero's unpublished internals.
+ * The single place /api/sdk touches @rocicorp/zero's unpublished internals.
  *
  * These modules are private implementation detail of the library, reached
  * through the `#zero-internal/*` import map in package.json. They are what

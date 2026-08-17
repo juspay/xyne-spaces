@@ -2,7 +2,7 @@
  * @xyne/spaces-contract — the shared contract for the Xyne Spaces public API.
  *
  * Consumed by:
- *  - apps/backend (`src/api/v1`) to enforce scopes and render error envelopes
+ *  - apps/backend (`src/api/sdk`) to enforce scopes and render error envelopes
  *  - tools/xyne-spaces-openapi-gen to emit the committed OpenAPI document
  *  - packages/xyne-spaces-sdk for typed error classes and scope constants
  *

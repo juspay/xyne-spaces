@@ -200,8 +200,8 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
-import { createV1Router } from '@/api/v1';
-import { v1Config } from '@/api/v1/config';
+import { createSdkRouter } from '@/api/sdk';
+import { sdkConfig } from '@/api/sdk/config';
 
 
 export class App {
@@ -356,11 +356,11 @@ export class App {
 
     // Public SDK API. It owns OAuth and bearer-token authentication, so it
     // must be mounted before the legacy catch-all `/api` session middleware.
-    if (v1Config.enabled) {
-      this.app.use('/api/v1', createV1Router());
-      logger.info('Public SDK API mounted at /api/v1');
+    if (sdkConfig.enabled) {
+      this.app.use('/api/sdk', createSdkRouter());
+      logger.info('Public SDK API mounted at /api/sdk');
     } else {
-      this.app.use('/api/v1', (_req, res) => {
+      this.app.use('/api/sdk', (_req, res) => {
         res.status(404).json({
           success: false,
           error: 'The public SDK API is not enabled on this deployment.',

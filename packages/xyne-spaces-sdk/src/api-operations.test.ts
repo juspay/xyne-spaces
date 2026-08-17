@@ -27,7 +27,7 @@ describe('direct API operations', () => {
     ).resolves.toEqual({ id: 'channel-1' });
 
     const request = requests[0];
-    expect(request?.url).toBe('https://spaces.example.com/api/v1/channels');
+    expect(request?.url).toBe('https://spaces.example.com/api/sdk/channels');
     expect(request?.init.method).toBe('POST');
     expect(request?.init.headers).toMatchObject({
       Authorization: 'Bearer token-1',
@@ -82,7 +82,7 @@ describe('direct API operations', () => {
 
     const request = requests[0];
     expect(request?.url).toBe(
-      'https://spaces.example.com/api/v1/channels/channel%2F1/conversations'
+      'https://spaces.example.com/api/sdk/channels/channel%2F1/conversations'
     );
     const headers = request?.init.headers as Record<string, string>;
     expect(headers['Content-Type']).toBeUndefined();
@@ -126,7 +126,7 @@ describe('OAuth catalog operations', () => {
     await expect(sdk.channels.list()).resolves.toHaveLength(1);
 
     const request = requests[0];
-    expect(request?.url).toBe('http://localhost:3001/api/v1/catalog/query');
+    expect(request?.url).toBe('http://localhost:3001/api/sdk/catalog/query');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer sdk-access-token' });
     expect(JSON.parse(String(request?.init.body))).toEqual({ name: 'userVisibleChannelsV3' });
   });
@@ -138,7 +138,7 @@ describe('OAuth catalog operations', () => {
     await sdk.channels.rename('channel-1', 'General');
 
     const request = requests[0];
-    expect(request?.url).toBe('http://localhost:3001/api/v1/catalog/mutate');
+    expect(request?.url).toBe('http://localhost:3001/api/sdk/catalog/mutate');
     expect(JSON.parse(String(request?.init.body))).toMatchObject({
       name: 'channel.renameChannel',
       args: { channelId: 'channel-1', name: 'General' },

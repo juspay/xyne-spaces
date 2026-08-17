@@ -10,15 +10,15 @@ the structure originally used only by `sdk.search`.
 
 | Operation | SDK method | Public SDK route | Existing product workflow |
 |---|---|---|---|
-| Create a channel | `sdk.channels.create` | `POST /api/v1/channels` | `POST /api/channels` |
-| Check channel-name uniqueness | `sdk.channels.checkDuplicate` | `POST /api/v1/channels/check-duplicate` | `POST /api/channels/check-duplicate` |
-| Create a ticket | `sdk.tickets.create` | `POST /api/v1/tickets` | `POST /api/tickets` |
-| Create a conversation with file bytes | `sdk.conversations.createWithAttachments` | `POST /api/v1/channels/:channelId/conversations` | `POST /api/channels/:channelId/conversations` |
-| Upload entity attachments | `sdk.attachments.upload` | `POST /api/v1/attachments` | `POST /api/attachments/upload` |
-| Upload draft attachments | `sdk.attachments.uploadDraft` | `POST /api/v1/draft-attachments` | `POST /api/drafts/attachments/upload` |
-| Search Vespa | `sdk.search.query` | `GET /api/v1/search` | `GET /api/vespaSearch` |
+| Create a channel | `sdk.channels.create` | `POST /api/sdk/channels` | `POST /api/channels` |
+| Check channel-name uniqueness | `sdk.channels.checkDuplicate` | `POST /api/sdk/channels/check-duplicate` | `POST /api/channels/check-duplicate` |
+| Create a ticket | `sdk.tickets.create` | `POST /api/sdk/tickets` | `POST /api/tickets` |
+| Create a conversation with file bytes | `sdk.conversations.createWithAttachments` | `POST /api/sdk/channels/:channelId/conversations` | `POST /api/channels/:channelId/conversations` |
+| Upload entity attachments | `sdk.attachments.upload` | `POST /api/sdk/attachments` | `POST /api/attachments/upload` |
+| Upload draft attachments | `sdk.attachments.uploadDraft` | `POST /api/sdk/draft-attachments` | `POST /api/drafts/attachments/upload` |
+| Search Vespa | `sdk.search.query` | `GET /api/sdk/search` | `GET /api/vespaSearch` |
 
-The `/api/v1` routes authenticate SDK OAuth access tokens, apply SDK scopes and
+The `/api/sdk` routes authenticate SDK OAuth access tokens, apply SDK scopes and
 rate limits, and then delegate to the established product controllers. This
 keeps sequence allocation, workspace checks, file storage, assignment, search
 indexing, and side effects in one implementation.
@@ -32,7 +32,7 @@ typed registry entry, just like search:
 ```typescript
 create: api<CreateChannelInput, { id: string }>(
   'POST',
-  '/api/v1/channels',
+  '/api/sdk/channels',
 )
 ```
 

@@ -65,7 +65,7 @@ export async function authn(req: Request, _res: Response, next: NextFunction): P
       // Verify the key ID matches (defense in depth for key rotation)
       const tokenKid = verified.protectedHeader.kid;
       if (tokenKid && tokenKid !== getKeyId()) {
-        logger.warn('[v1] token kid mismatch', {
+        logger.warn('[sdk] token kid mismatch', {
           requestId: req.apiRequestId,
           tokenKid,
           expectedKid: getKeyId(),
@@ -103,7 +103,7 @@ export async function authn(req: Request, _res: Response, next: NextFunction): P
     // Token verified but the principal no longer exists (deactivated user,
     // removed org membership). Fail closed rather than proceeding role-less.
     if (!user || !orgMember) {
-      logger.warn('[v1] token valid but principal missing', {
+      logger.warn('[sdk] token valid but principal missing', {
         requestId: req.apiRequestId,
         sub,
         memberId,

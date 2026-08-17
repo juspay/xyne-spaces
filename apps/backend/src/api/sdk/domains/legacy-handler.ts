@@ -1,4 +1,4 @@
-/** Adapter for reusing battle-tested legacy Express controllers under /api/v1. */
+/** Adapter for reusing battle-tested legacy Express controllers under /api/sdk. */
 
 import type { Request, Response } from 'express';
 import type { AuthenticatedUser } from '@/types/express';

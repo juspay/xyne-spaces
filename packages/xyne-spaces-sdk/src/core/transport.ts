@@ -2,9 +2,9 @@
  * Transport Layer
  *
  * Routes SDK operations to the appropriate backend:
- * - Zero queries via the OAuth-protected /api/v1/catalog/query adapter
- * - Zero mutators via the OAuth-protected /api/v1/catalog/mutate adapter
- * - Direct API calls via /api/v1/*
+ * - Zero queries via the OAuth-protected /api/sdk/catalog/query adapter
+ * - Zero mutators via the OAuth-protected /api/sdk/catalog/mutate adapter
+ * - Direct API calls via /api/sdk/*
  */
 
 import type { Operation } from '../registry/types.js';
@@ -65,7 +65,7 @@ export class Transport {
    * Execute a catalog query through the public OAuth API.
    */
   private async executeQuery(name: string, args: unknown): Promise<unknown> {
-    const response = await this.http.post<CatalogQueryResponse>('/api/v1/catalog/query', {
+    const response = await this.http.post<CatalogQueryResponse>('/api/sdk/catalog/query', {
       name,
       args,
     });
@@ -76,7 +76,7 @@ export class Transport {
    * Execute a catalog mutator through the public OAuth API.
    */
   private async executeMutator(name: string, args: unknown): Promise<unknown> {
-    return this.http.post('/api/v1/catalog/mutate', {
+    return this.http.post('/api/sdk/catalog/mutate', {
       name,
       args,
     });

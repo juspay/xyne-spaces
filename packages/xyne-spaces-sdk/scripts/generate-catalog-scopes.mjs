@@ -10,7 +10,7 @@ const repoRoot = resolve(sdkRoot, '../..');
 const registryDir = join(sdkRoot, 'src/registry');
 const output = join(
   repoRoot,
-  'apps/backend/src/api/v1/catalog-operation-scopes.generated.ts',
+  'apps/backend/src/api/sdk/catalog-operation-scopes.generated.ts',
 );
 
 const resourceFamilies = {

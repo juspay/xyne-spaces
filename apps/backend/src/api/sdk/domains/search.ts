@@ -8,8 +8,8 @@
  * disagree with product search.
  *
  * It writes its own Express response, so it is invoked through a capturing
- * adapter: the body is intercepted, then re-emitted in the v1 shape and its
- * failures translated into the v1 error envelope. `/api/vespaSearch` is left
+ * adapter: the body is intercepted, then re-emitted in the SDK shape and its
+ * failures translated into the SDK error envelope. `/api/vespaSearch` is left
  * completely untouched.
  */
 
@@ -80,7 +80,7 @@ async function capture(
   return captured;
 }
 
-/** Translate the legacy `{success,error}` body into the v1 error envelope. */
+/** Translate the legacy `{success,error}` body into the SDK error envelope. */
 function unwrap(captured: CapturedResponse): unknown {
   const body = captured.body as { success?: boolean; data?: unknown; error?: string } | undefined;
 
