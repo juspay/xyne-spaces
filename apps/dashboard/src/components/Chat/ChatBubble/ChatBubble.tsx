@@ -98,6 +98,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
 import { parseRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 export interface ThreadData {
@@ -472,6 +474,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleInitiateCall = (): void => {
     setShowParticipantsModal(true);
+  };
+
+  // Starts a headless ("take notes") recording anchored to this message's
+  // thread — directly via the recording store (no navigation), same as the
+  // ThreadPannel "Take notes" button. Only rendered for the thread's root
+  // message (see HoverActionsToolbar's messageId === initialMessageId gate).
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const handleStartRecordingFromMessage = (): void => {
+    const targetConversationId = conversation?.conversationId || message.conversationId;
+    if (!targetConversationId || !channelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: targetConversationId,
+      channelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
   };
 
   const handleAddBookmark = (): void => {
@@ -1022,6 +1048,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
           isCallDisabled: hasActiveCallForConversation,
+          onStartRecording: handleStartRecordingFromMessage,
+          isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
         }),
       ...(conversation &&
         (!isSystemMessage || isTicketCreationMessage) &&
@@ -1347,6 +1375,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,
                   isCallDisabled: hasActiveCallForConversation,
+                  onStartRecording: handleStartRecordingFromMessage,
+                  isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
                 })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&

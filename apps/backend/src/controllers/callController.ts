@@ -417,6 +417,32 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
+        // Thread-linked recording: validate the conversation up front (fail
+        // fast with a 404 instead of creating a LiveKit room for nothing) and
+        // stamp channelId/conversationId onto the room metadata. The actual
+        // Call DB row — and the thread's single anchor message — are created
+        // together by noteTakerWebhookController on first participant_joined,
+        // so nothing is posted into the thread unless the recording actually
+        // starts (e.g. mic permission denied / room creation failure after
+        // this point never leaves a ghost message behind).
+        if (channelId && conversationId) {
+          stage = 'thread_conversation_lookup';
+          const conversation = await repositories.conversations.findByIdAndWorkspace(
+            conversationId,
+            req.user!.workspaceId!,
+          );
+          if (!conversation || conversation.channelId !== channelId) {
+            res.status(404).json({ success: false, error: 'Conversation not found' });
+            return;
+          }
+          stage = 'thread_channel_membership_check';
+          const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+          if (!isMember) {
+            res.status(403).json({ success: false, error: 'Not a member of this channel' });
+            return;
+          }
+        }
+
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
@@ -424,6 +450,7 @@ export class CallController {
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
+          ...(channelId && conversationId ? { channelId, conversationId } : {}),
         });
 
         stage = 'livekit_room_creation';
@@ -459,6 +486,7 @@ export class CallController {
           roomLink,
           channelId: null,
           notesCanvasId,
+          ...(conversationId ? { conversationId } : {}),
         });
         return;
       }
