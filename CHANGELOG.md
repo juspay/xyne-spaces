@@ -1,3 +1,10 @@
+## [1.189.5](https://github.com/juspay/xyne-spaces/compare/v1.189.4...v1.189.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* Fix dynamic dashboard tls connection issue ([#518](https://github.com/juspay/xyne-spaces/issues/518)) ([51846cb](https://github.com/juspay/xyne-spaces/commit/51846cb10357323b3fcc767c7e66582544c18290))
+
 ## [1.189.4](https://github.com/juspay/xyne-spaces/compare/v1.189.3...v1.189.4) (2026-08-17)
 
 
