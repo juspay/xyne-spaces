@@ -39,6 +39,7 @@ export type KanbanCountsGroupBy =
   | 'assignee'
   | 'status'
   | 'priority'
+  | 'createdBy'
   | {
       type: 'formField';
       fieldId: string;
