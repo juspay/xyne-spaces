@@ -177,15 +177,14 @@ export class WorkflowManager {
 
       // Get all workflow steps for this execution
       const steps = await repositories.workflowSteps.findByWorkflowExecutionId(executionId)
-      const legacySteps = steps.filter(step => step.type === 'input' || step.type === 'output')
 
       // Analyze step completion
-      const completedSteps = legacySteps.filter(step => step.data !== null).map(step => step.stepName || step.id)
-      const pendingSteps = legacySteps.filter(step => step.data === null).map(step => step.stepName || step.id)
+      const completedSteps = steps.filter(step => step.data !== null).map(step => step.stepName || step.id)
+      const pendingSteps = steps.filter(step => step.data === null).map(step => step.stepName || step.id)
       const failedSteps: string[] = [] // TODO: Implement step failure tracking
 
       // Calculate progress
-      const totalSteps = legacySteps.length
+      const totalSteps = steps.length
       const completedCount = completedSteps.length
       const progress = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0
 
@@ -245,8 +244,7 @@ export class WorkflowManager {
       const workflowType = (execution.workflowType || workflow?.workflowType) as WorkflowType
 
       const steps = await repositories.workflowSteps.findByWorkflowExecutionId(executionId)
-      const legacySteps = steps.filter(step => step.type === 'input' || step.type === 'output')
-      const completedSteps = legacySteps.filter(step => step.data !== null)
+      const completedSteps = steps.filter(step => step.data !== null)
       const failedSteps = [] // TODO: Implement failure tracking
 
       const duration = execution.updatedAt.getTime() - execution.createdAt.getTime()
@@ -258,7 +256,7 @@ export class WorkflowManager {
         startedAt: execution.createdAt,
         completedAt: isTerminalStatus(execution.status as WorkflowExecutionStatus) ? execution.updatedAt : undefined,
         duration: isTerminalStatus(execution.status as WorkflowExecutionStatus) ? duration : undefined,
-        stepCount: legacySteps.length,
+        stepCount: steps.length,
         completedSteps: completedSteps.length,
         failedSteps: failedSteps.length,
         result: execution.output ? JSON.parse(execution.output) : undefined
