@@ -206,7 +206,7 @@ const OrganizationV2 = (): ReactElement => {
 
   return (
     <div className='max-w-ai-content mx-auto flex min-h-full w-full flex-col px-6'>
-      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+      <div className='bg-background sticky top-0 z-10 flex flex-col'>
         <div className='flex flex-col justify-center gap-1 pt-5'>
           <div className='flex min-w-0 items-center gap-2'>
             <h1 className='truncate text-2xl font-semibold leading-tight tracking-tight text-foreground'>
@@ -376,7 +376,7 @@ const OrganizationV2 = (): ReactElement => {
       </div>
 
       {activeTab === 'members' && total > 0 && (
-        <div className='sticky bottom-0 z-10 mt-auto bg-background py-3 empty:hidden'>
+        <div className='bg-background sticky bottom-0 z-10 mt-auto py-3 empty:hidden'>
           <AdminPager
             offset={offset}
             count={rows.length}

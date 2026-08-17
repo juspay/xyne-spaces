@@ -72,7 +72,7 @@ function CitationDocView({ doc }: { doc: CitationDoc }): ReactElement {
   }, [doc.fileId, doc.chunkIndex, doc.navSeq]);
 
   return (
-    <div className='flex h-full w-full flex-col ai-page-bg'>
+    <div className='flex h-full w-full flex-col bg-background'>
       <div className='min-h-0 flex-1'>
         {loading ? (
           <div className='flex h-full items-center justify-center'>
@@ -108,7 +108,7 @@ export function CitationDocsPanel(): ReactElement | null {
   const active = activeFileId ?? docs[docs.length - 1]?.fileId ?? null;
 
   return (
-    <div className='flex h-full w-full flex-col border-l border-border ai-page-bg'>
+    <div className='flex h-full w-full flex-col border-l border-border bg-background'>
       {/* Tab strip — one tab per open doc; click to switch, ✕ to close. */}
       <div className='flex h-9 flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2'>
         {docs.map(doc => {
