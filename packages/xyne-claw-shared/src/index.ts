@@ -9,14 +9,6 @@ export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
 export { isTwinDelivery } from "./types/twin-delivery.js";
-export type {
-  Finding, FindingMode, FindingEntityKind, FindingProject, FindingSource,
-  FindingPerson, FindingEntity, FindingEvidence, FindingVocabulary,
-} from "./types/findings.js";
-export {
-  FINDINGS_SCHEMA_VERSION, DEFAULT_FINDING_VOCABULARY,
-  validateFinding, buildIdempotencyKey, parseFindingsJsonl,
-} from "./types/findings.js";
 export {
   normalizeSkillContent,
   hashSkillContent,

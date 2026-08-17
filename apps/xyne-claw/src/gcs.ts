@@ -47,10 +47,6 @@ const DEBUG_RUN_PREFIX = "claw-debug-runs";
 // for the 2026-06-11 "completed sessions re-executed on restart" incident.
 // Source of truth for "did this finish?", independent of the lossy callback.
 const RESULT_MARKER_PREFIX = "claw-results";
-// People-KB findings, date-partitioned so the nightly merge reads one prefix.
-// Sharded by session because many extractor runs write concurrently — a shared
-// object would have them overwrite each other.
-const FINDINGS_PREFIX = "people-kb/findings";
 
 const GCS_TIMEOUT_MS = 15_000;
 
@@ -177,44 +173,6 @@ export async function gcsUploadSessionFromDisk(
     }
     noteIfCredsError(err);
     log.warn(`[gcs] direct upload failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
-    return false;
-  }
-}
-
-/**
- * Write one extraction session's findings.
- *
- * Partitioned by the date of the CONVERSATION, not of the run: a backfill spans
- * months, and filing it under the run date would collapse it into one prefix and
- * leave the merge unable to process days in order.
- *
- * Returns false rather than throwing — the caller logs the loss and the window
- * is retried, which is better than failing a session that has already done the
- * expensive part.
- */
-export async function gcsUploadFindings(
-  day: string,
-  projectCode: string,
-  sessionId: string,
-  jsonl: string,
-): Promise<boolean> {
-  const client = getStorage();
-  if (!client) return false;
-  const objectPath = `${FINDINGS_PREFIX}/dt=${day}/${projectCode}/${sessionId}.jsonl`;
-  try {
-    await client
-      .bucket(BUCKET)
-      .file(objectPath)
-      .save(Buffer.from(jsonl, "utf8"), {
-        resumable: false,
-        timeout: GCS_TIMEOUT_MS,
-        contentType: "application/x-ndjson",
-      });
-    log.info(`[gcs] findings written to ${objectPath}`);
-    return true;
-  } catch (err) {
-    noteIfCredsError(err);
-    log.error(`[gcs] findings upload FAILED for ${objectPath}:`, err instanceof Error ? err.message : String(err));
     return false;
   }
 }

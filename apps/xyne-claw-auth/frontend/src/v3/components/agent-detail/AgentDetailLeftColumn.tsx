@@ -1483,10 +1483,6 @@ interface Props {
   //                "USER"        = inherit caller's full KB; picker hidden.
   draftKbScope: "COLLECTIONS" | "USER";
   onDraftKbScopeChange: (next: "COLLECTIONS" | "USER") => void;
-  /** KB curation toggle (config.kbAccess === "files"). Admin-gated. */
-  draftKbAccess: boolean;
-  onDraftKbAccessChange: (next: boolean) => void;
-  isAdmin: boolean;
 
   // Triggers
   skillTriggers: Array<{
@@ -1702,9 +1698,6 @@ export function AgentDetailLeftColumn({
   onDraftKbResourcesChange,
   draftKbScope,
   onDraftKbScopeChange,
-  draftKbAccess,
-  onDraftKbAccessChange,
-  isAdmin,
   skillTriggers,
   onSkillTriggersChange,
   draftPromptInjection,
@@ -2371,29 +2364,6 @@ export function AgentDetailLeftColumn({
                   ? "No KB grants — the agent will not be able to read documents."
                   : `${draftKbResources.length} grant${draftKbResources.length === 1 ? "" : "s"} attached`}
               </p>
-
-              {/* KB curation. Admin-only because the server strips `kbAccess`
-                  for non-admins — showing it to everyone would look like it
-                  saved and silently do nothing. */}
-              {isAdmin && (
-                <label className="mt-3 flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={draftKbAccess}
-                    disabled={!canEdit}
-                    onChange={(e) => canEdit && onDraftKbAccessChange(e.target.checked)}
-                  />
-                  <span className="text-[11px] text-xyne-fg-secondary">
-                    Let this agent edit the knowledge base
-                    <span className="block text-xyne-fg-tertiary">
-                      Replaces search with file-style access — list, read, grep, write and
-                      edit pages by path. For curator agents that maintain the KB; leave off
-                      for agents that only answer questions from it. Pages cannot be deleted.
-                    </span>
-                  </span>
-                </label>
-              )}
             </>
           )}
         </Section>

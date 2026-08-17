@@ -49,7 +49,6 @@ import { TextField } from "../ui/TextField";
 import { Button } from "../ui/Button";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker, type KbSelection } from "../KnowledgeBasePicker";
-import { useAdminStatus } from "../../hooks/useAdminStatus";
 
 interface Props {
   userId: string;
@@ -93,8 +92,6 @@ interface State {
   /** KB scope mode. USER hides the picker and tells the server to ignore
    *  any grants — the agent inherits the running user's spaces access. */
   selectedKbScope: "COLLECTIONS" | "USER";
-  /** config.kbAccess === "files" — file-style KB curation. Admin-only. */
-  kbFileAccess: boolean;
   researchAgentProducts: ResearchAgentOption[]; researchAgentRepositories: ResearchAgentOption[];
   researchAgentProductId: string; researchAgentRepositoryId: string; researchAgentOptionsLoading: boolean;
   /** AI-suggested starter toolkit. Auto-fetched once step 2 opens with a
@@ -124,7 +121,6 @@ const INIT: State = {
   availableSkills: [], skillsLoading: false, selectedSkillIds: [],
   selectedKbResources: [],
   selectedKbScope: "COLLECTIONS",
-  kbFileAccess: false,
   researchAgentProducts: [], researchAgentRepositories: [],
   researchAgentProductId: "", researchAgentRepositoryId: "", researchAgentOptionsLoading: false,
   suggestion: null, suggestionLoading: false, suggestionApplied: false,
@@ -270,7 +266,6 @@ function riskDotCls(
 
 export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
   const [w, setW] = useState<State>(INIT);
-  const { isAdmin } = useAdminStatus();
   // Pinned detail = last clicked tool. Hovered detail = transient on hover/focus.
   const [pinnedDetail, setPinnedDetail] = useState<IntegrationToolEntry | null>(null);
   const [hoveredDetail, setHoveredDetail] = useState<IntegrationToolEntry | null>(null);
@@ -502,13 +497,11 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
       const hasSkills = w.selectedSkillIds.length > 0;
       const trimmedRepoUrl = w.repoUrl.trim();
       const hasRepoUrl = trimmedRepoUrl.length > 0;
-      const hasKbFileAccess = w.kbFileAccess && !isUserScopedKb && w.selectedKbResources.length > 0;
       const hasResearchAgentConfig = w.custom.includes("query-codebase") || w.custom.includes("review-pull-request") || w.researchAgentProductId || w.researchAgentRepositoryId;
-      if (hasTools || hasSkills || hasResearchAgentConfig || hasRepoUrl || hasKbFileAccess) {
+      if (hasTools || hasSkills || hasResearchAgentConfig || hasRepoUrl) {
         const { updateAgent } = await import("../../../lib/api");
         const config: Record<string, unknown> = {};
         if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway };
-        if (hasKbFileAccess) config["kbAccess"] = "files";
         if (hasResearchAgentConfig) {
           config["product_id"] = w.researchAgentProductId || null;
           config["repository_id"] = w.researchAgentRepositoryId || null;
@@ -1002,29 +995,6 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                       ? "No KB resources attached — the agent will not be able to read documents."
                       : `${w.selectedKbResources.length} grant${w.selectedKbResources.length === 1 ? "" : "s"} attached`}
                   </p>
-
-                  {/* KB curation. Only offered once a collection is attached —
-                      file access with nothing to act on is a no-op the server
-                      would warn about. Non-admins have `kbAccess` stripped on
-                      save, so the control stays hidden for them. */}
-                  {isAdmin && w.selectedKbResources.length > 0 && (
-                    <label className="flex cursor-pointer items-start gap-2 pt-1">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={w.kbFileAccess}
-                        onChange={(e) => setW((p) => ({ ...p, kbFileAccess: e.target.checked }))}
-                      />
-                      <span className="text-[11px] text-xyne-fg-secondary">
-                        Let this agent edit the knowledge base
-                        <span className="block text-xyne-fg-tertiary">
-                          Replaces search with file-style access — list, read, grep, write and
-                          edit pages by path. For curator agents that maintain the KB; leave off
-                          for agents that only answer questions from it. Pages cannot be deleted.
-                        </span>
-                      </span>
-                    </label>
-                  )}
                 </>
               )}
             </div>
