@@ -1,3 +1,10 @@
+## [1.189.0](https://github.com/juspay/xyne-spaces/compare/v1.188.0...v1.189.0) (2026-08-17)
+
+
+### Features
+
+* add 'Most recent' sort to Threads inbox (Part B) ([#593](https://github.com/juspay/xyne-spaces/issues/593)) ([7bbbfd5](https://github.com/juspay/xyne-spaces/commit/7bbbfd570c357b49c4247d633d078d267b95679d))
+
 ## [1.188.0](https://github.com/juspay/xyne-spaces/compare/v1.187.2...v1.188.0) (2026-08-17)
 
 
