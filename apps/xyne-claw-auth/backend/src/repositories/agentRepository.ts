@@ -196,6 +196,15 @@ export const agentRepository = {
           slug,
           name,
           systemPrompt,
+          // Carry the source agent's Behaviour tab over to the clone. Every
+          // Behaviour setting (constant reminders / promptInjection, structured
+          // outputFormat, suggest/always Goal, plan mode + primer, post-TODOs,
+          // verify-responses, citation reflection, auto tool citations) lives on
+          // agent.config, so the clone was previously born with default behaviour.
+          // config holds no secrets (provider API keys live in the separate
+          // agentProviderCredentials table, which is intentionally NOT cloned), so
+          // copying the whole blob is safe.
+          config: (source.config ?? {}) as Prisma.InputJsonValue,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
           ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),

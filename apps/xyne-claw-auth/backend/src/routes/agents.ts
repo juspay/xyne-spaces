@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
+import { getSubagentDefinition } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
@@ -1626,12 +1626,16 @@ router.post("/requests/:requestId/reject", requireClawAdmin, async (req: Request
 });
 
 // ── Agent cloning ─────────────────────────────────────────────────────────────
-// Clone copies ONLY the source agent's system prompt, tools, and skills into a
-// new personal agent owned by the caller (see agentRepository.cloneAgentForUser).
-// Owners / contributors / admins clone instantly; everyone else raises a
-// "clone" AgentRequest that the SOURCE agent's owner reviews — surfaced both on
-// this frontend (GET /clone-requests/incoming) and, best-effort, as an
-// Approve/Decline DM in Spaces.
+// Clone copies the source agent's system prompt, tools, skills, and behaviour
+// (agent.config) into a new personal agent owned by the caller (see
+// agentRepository.cloneAgentForUser). Cloning no longer needs the source agent
+// owner's approval: any user who can see the agent gets an instant personal
+// copy. Provider credentials, MCP connections, and knowledge collections are
+// intentionally NOT copied — they stay owner/credential-scoped.
+//
+// The AgentRequest "clone" type + GET /clone-requests/incoming + approve/decline
+// endpoints are retained only so any pre-existing pending clone requests can
+// still be resolved; the clone action itself never creates new ones.
 
 /**
  * Turn a clone error into a client-safe, actionable message. Schema-drift
@@ -1654,78 +1658,7 @@ function describeCloneError(err: unknown): string {
   return err instanceof Error ? err.message : "Internal server error";
 }
 
-/**
- * Best-effort Spaces DM to the source agent's owner announcing a pending clone
- * request. Silent no-op (logged) when the source agent has no Spaces app
- * identity or the DM API fails — the frontend inbox is the authoritative
- * surface, so notification failure must never fail the clone request.
- */
-async function notifyOwnerOfCloneRequestInSpaces(args: {
-  agent: { slug: string; name: string; ownerUserId: string | null; spacesAppId: string | null; spacesAppToken: string | null; spacesAppUserId: string | null };
-  requestId: string;
-  requesterName: string;
-}): Promise<void> {
-  const { agent, requestId, requesterName } = args;
-  if (!agent.ownerUserId) return;
-  if (!agent.spacesAppId || !agent.spacesAppToken || !agent.spacesAppUserId) {
-    log.info(`[agents/clone] owner DM skipped for ${agent.slug}: source agent not Spaces-registered`);
-    return;
-  }
-  try {
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return;
-    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-    // openDm requires the owner's own workspace. Resolve from the Spaces user
-    // row (or the claw SurfaceTenantLink fallback inside getWorkspaceIdForUser);
-    // never pin a per-user DM to the deployment-wide default workspace.
-    const workspaceId = (await getWorkspaceIdForUser(agent.ownerUserId, "clone-owner-dm")) ?? "";
-    if (!workspaceId) {
-      log.warn(`[agents/clone] owner DM skipped for ${agent.slug}: no workspaceId for owner ${agent.ownerUserId}`);
-      return;
-    }
-
-    const dm = (await spacesAppFetch("/channel/openDm", {
-      targetUserId: agent.ownerUserId,
-      workspaceId,
-    }, token)) as { channelId: string };
-
-    const flow = buildCloneApprovalFlow({
-      requestId,
-      ownerUserId: agent.ownerUserId,
-      agentSlug: agent.slug,
-      agentName: agent.name,
-      requesterName,
-      spacesBaseUrl: CONFIG.spacesAppUrl,
-    });
-
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: dm.channelId,
-      flow,
-      userId: agent.spacesAppUserId,
-    }, token);
-
-    log.info(`[agents/clone] sent clone-approval DM to owner ${agent.ownerUserId} for agent ${agent.slug}`);
-  } catch (err) {
-    log.warn(`[agents/clone] owner DM failed for ${agent.slug}:`, err instanceof Error ? err.message : String(err));
-  }
-}
-
-/**
- * Resolve the caller's relationship to an agent: owner (real ownership, not
- * admin-derived), contributor (EDITOR/CONTRIBUTOR share), or admin.
- */
-async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null }, requesterId: string) {
-  const isOwner = agent.ownerUserId === requesterId;
-  const admin = await isClawAdmin(requesterId);
-  let isContributor = false;
-  if (!isOwner && !admin) {
-    const share = await agentShareRepository.findByAgentAndUser(agent.id, requesterId);
-    isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
-  }
-  return { isOwner, admin, isContributor, privileged: isOwner || admin || isContributor };
-}
-
-// POST /agents/:slug/clone — clone now (privileged) or raise a clone request.
+// POST /agents/:slug/clone — instant personal clone for any user who can see the agent (no owner approval).
 router.post("/:slug/clone", async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req);
@@ -1735,67 +1668,32 @@ router.post("/:slug/clone", async (req: Request<{ slug: string }>, res: Response
     if (!agent) { logAgentScopedMiss(req, "agents/clone", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
 
     const { name } = req.body as { name?: string };
-    const { privileged } = await resolveCloneRelation(agent, requesterId);
 
-    if (privileged) {
+    // Cloning is unprivileged: anyone who can resolve the agent (findBySlug is
+    // org-scoped) gets an instant personal copy. No source-owner approval, no
+    // AgentRequest — the clone carries the source's prompt, tools, skills, and
+    // behaviour (agent.config); see agentRepository.cloneAgentForUser.
+    const cloneOpts = name ? { name } : {};
+    let clone;
+    try {
       // Retry once on a slug uniqueness race (P2002) — buildCloneSlug pre-checks
       // but the DB unique index is the real guard under concurrency.
-      const cloneOpts = name ? { name } : {};
-      let clone;
-      try {
+      clone = await agentRepository.cloneAgentForUser(agent.id, requesterId, cloneOpts);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         clone = await agentRepository.cloneAgentForUser(agent.id, requesterId, cloneOpts);
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-          clone = await agentRepository.cloneAgentForUser(agent.id, requesterId, cloneOpts);
-        } else {
-          throw e;
-        }
+      } else {
+        throw e;
       }
-      if (!clone) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      await writeAuditLog({
-        actorUserId: requesterId,
-        eventType: "AGENT_CREATED",
-        targetId: clone.id,
-        description: `Cloned "${agent.name}" (${agent.slug}) → "${clone.name}" (${clone.slug})`,
-      });
-      res.status(201).json({ success: true, data: clone, cloned: true });
-      return;
     }
-
-    // Non-privileged → owner-approval path. Dedupe on an existing pending
-    // request from the same user for the same agent.
-    const existing = await agentRequestRepository.findPendingClone(agent.id, requesterId);
-    if (existing) {
-      res.status(409).json({ success: false, error: "You already have a pending clone request for this agent", data: existing });
-      return;
-    }
-
-    const request = await agentRequestRepository.create({
-      agentId: agent.id,
-      agentSlug: agent.slug,
-      requestType: "clone",
-      requesterId,
-      orgId: agent.orgId ?? getOrgId(req) ?? null,
-      // Carry the requester's chosen name so the clone the owner approves later
-      // uses it (falls back to "<source> (Copy)" when unset).
-      requestedName: name?.trim() || null,
-    });
+    if (!clone) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
     await writeAuditLog({
       actorUserId: requesterId,
-      eventType: "REQUEST_CREATED",
-      targetId: agent.id,
-      description: `clone request for "${agent.name}"`,
+      eventType: "AGENT_CREATED",
+      targetId: clone.id,
+      description: `Cloned "${agent.name}" (${agent.slug}) → "${clone.name}" (${clone.slug})`,
     });
-
-    // Best-effort Spaces notification (does not block the response).
-    const requester = await userRepository.findById(requesterId);
-    void notifyOwnerOfCloneRequestInSpaces({
-      agent,
-      requestId: request.id,
-      requesterName: requester?.name ?? requester?.email ?? "A user",
-    });
-
-    res.status(202).json({ success: true, data: request, cloned: false, status: "pending_approval" });
+    res.status(201).json({ success: true, data: clone, cloned: true });
   } catch (err) {
     log.error("[agents] clone error:", err);
     res.status(500).json({ success: false, error: describeCloneError(err) });
