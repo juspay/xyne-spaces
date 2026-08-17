@@ -19,6 +19,7 @@ import {
   ExternalEntityType,
   EmailType,
   DeskType,
+  isAppLikeDeskType,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
@@ -2486,8 +2487,8 @@ export class TicketController {
         where: { channelId },
         select: { sendAsEmail: true, ownerUserId: true, boardId: true, deskType: true },
       });
-      if (!channelPref || channelPref.deskType !== DeskType.APP) {
-        res.status(400).json({ error: 'Channel is not an APP desk', code: 'NOT_APP_DESK' });
+      if (!channelPref || !isAppLikeDeskType(channelPref.deskType)) {
+        res.status(400).json({ error: 'Channel is not an APP or LOG desk', code: 'NOT_APP_OR_LOG_DESK' });
         return;
       }
 

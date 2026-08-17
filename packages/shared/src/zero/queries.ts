@@ -1628,6 +1628,20 @@ export const queries = defineQueries({
       return zql.email_channel_preferences.where('channelId', channelId);
     },
   ),
+  /**
+   * Fetches email channel preferences (incl. deskType) for multiple channels in
+   * a single query. Use this at the sidebar/list level instead of per-row
+   * fetches to avoid N identical subscriptions when rendering a channel list.
+   */
+  getEmailChannelPreferencesByChannelIds: defineQuery(
+    z.object({ channelIds: z.array(z.string()) }),
+    ({ args: { channelIds } }) => {
+      if (channelIds.length === 0) {
+        return zql.email_channel_preferences.where('channelId', 'nonexistent').limit(0);
+      }
+      return zql.email_channel_preferences.where('channelId', 'IN', channelIds);
+    },
+  ),
   getClassificationMappings: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {

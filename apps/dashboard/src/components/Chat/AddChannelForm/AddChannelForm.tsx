@@ -1,5 +1,5 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
+import { ANDROID_PACKAGE_NAME_PATTERN, DeskType, isAppLikeDeskType } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +16,7 @@ import {
   Smartphone,
   Phone,
   Share2,
+  ScrollText,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -39,7 +40,6 @@ import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
-import { DeskType } from '@xyne/shared';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
@@ -96,6 +96,12 @@ const DESK_SOURCES: ReadonlyArray<{
     label: 'Social media',
     description: 'Create support tickets from Google Play reviews',
     icon: Share2,
+  },
+  {
+    value: DeskType.LOG,
+    label: 'Log desk',
+    description: 'Ingest error/alert events (e.g. from Grafana) through a Xyne App',
+    icon: ScrollText,
   },
 ];
 
@@ -196,7 +202,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       const res = await apiInstance.get<{ apps: EligibleApp[] }>('/integrations/app-desk/apps');
       return res.data.apps;
     },
-    enabled: requireConnector && deskType === DeskType.APP,
+    enabled: requireConnector && isAppLikeDeskType(deskType),
   });
 
   const { data: workspaceMailbox } = useQuery({
@@ -280,7 +286,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         )
           return;
         if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
-        if (deskType === DeskType.APP && !selectedInstalledAppId) return;
+        if (isAppLikeDeskType(deskType) && !selectedInstalledAppId) return;
         if (
           deskType === DeskType.SOCIAL_MEDIA &&
           (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
@@ -308,12 +314,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             slackChannelId: selectedSlackChannelId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === DeskType.APP) {
+        } else if (isAppLikeDeskType(deskType)) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'APP',
-            deskType: DeskType.APP,
+            deskType,
             installedAppId: selectedInstalledAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
@@ -391,7 +397,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       deskType === DeskType.DL &&
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
-    (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
+    (requireConnector && isAppLikeDeskType(deskType) && !selectedInstalledAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
       (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
@@ -413,6 +419,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
+      if (isAppLikeDeskType(deskType) && !selectedInstalledAppId) return 'Please select a Xyne App';
       if (deskType === DeskType.SOCIAL_MEDIA) {
         if (googlePlayApplications.some(application => !application.displayName.trim()))
           return 'Please enter a display name for every application';
@@ -710,8 +717,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {/* Xyne App Selection */}
-      {requireConnector && deskType === DeskType.APP && (
+      {/* Xyne App Selection (shared by APP and LOG desks — both ingest via the same appDeskInbound webhook) */}
+      {requireConnector && isAppLikeDeskType(deskType) && (
         <div className='space-y-2'>
           <label htmlFor='app-desk-select' className='text-sm font-medium text-foreground'>
             Xyne App <span className='text-muted-foreground'>*</span>

@@ -13,6 +13,13 @@ export function isDeskChannelType(type: string | null | undefined): boolean {
   return DESK_CHANNEL_TYPES.has(type as ChannelType);
 }
 
+/** APP and LOG desks both ingest via the same app-desk webhook/query paths. */
+export const APP_LIKE_DESK_TYPES: ReadonlySet<DeskType> = new Set([DeskType.APP, DeskType.LOG]);
+
+export function isAppLikeDeskType(type: DeskType | string | null | undefined): boolean {
+  return APP_LIKE_DESK_TYPES.has(type as DeskType);
+}
+
 /** Desk type label for a channel — SLACK and APP desks store their settings in email_channel_preferences too. */
 export function deskTypeForChannelType(type: string | null | undefined): DeskType {
   switch (type) {

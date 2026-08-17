@@ -1245,7 +1245,9 @@ export class ChannelController {
           await this.emailChannelPreferenceRepository.create({
             channelId: channel.id,
             ownerUserId: userId,
-            deskType: DeskType.APP,
+            // LOG desks ingest via the same appDeskInbound webhook as APP desks
+            // (ticketController.ts:2489) — only the deskType label differs.
+            deskType: deskType === DeskType.LOG ? DeskType.LOG : DeskType.APP,
             boardId: appBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
             ...(assigneeUserGroupId && { assigneeUserGroupId }),

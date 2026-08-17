@@ -28,7 +28,7 @@ export interface CreateChannelRequest {
   participants?: string[];
   type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
   assigneeUserGroupId?: string;
-  deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+  deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'LOG';
   dlEmail?: string;
   slackChannelId?: string;
   installedAppId?: string;
@@ -40,6 +40,7 @@ export type EmailDeskOpts =
   | { deskType: DeskType.DL; dlEmail: string }
   | { deskType: DeskType.SLACK; slackChannelId: string }
   | { deskType: DeskType.APP; installedAppId: string }
+  | { deskType: DeskType.LOG; installedAppId: string }
   | { deskType: DeskType.CALL };
 
 export interface CreateChannelResponse {
@@ -147,7 +148,8 @@ export class ChannelService {
         }),
       ...(channelType === 'APP' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === DeskType.APP && {
+        (emailDeskOpts.deskType === DeskType.APP || emailDeskOpts.deskType === DeskType.LOG) && {
+          deskType: emailDeskOpts.deskType,
           installedAppId: emailDeskOpts.installedAppId,
         }),
       ...(channelType === 'CALL' &&

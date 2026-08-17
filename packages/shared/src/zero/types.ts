@@ -729,6 +729,7 @@ export enum DeskType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  LOG = 'LOG',
 }
 
 // @ts-ignore TS1294

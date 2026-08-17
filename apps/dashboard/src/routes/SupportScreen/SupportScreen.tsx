@@ -213,6 +213,10 @@ import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
+import { deriveLogIssueData } from '../../components/LogDesk/logIssue.utils';
+import { LogIssueHighlights } from '../../components/LogDesk/LogIssueHighlights/LogIssueHighlights';
+import { LogIssueTimeline } from '../../components/LogDesk/LogIssueTimeline/LogIssueTimeline';
+import { LogIssueStackTrace } from '../../components/LogDesk/LogIssueStackTrace/LogIssueStackTrace';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
@@ -1422,6 +1426,21 @@ const SupportScreen = (): ReactElement => {
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const emailChannelIds = useMemo(() => sortedEmailChannels.map(c => c.id), [sortedEmailChannels]);
+  const [emailChannelPreferences] = useCachedQuery(
+    queries.getEmailChannelPreferencesByChannelIds({ channelIds: emailChannelIds }),
+    { enabled: emailChannelIds.length > 0 },
+  );
+  // deskType (APP vs LOG) isn't on the Channel row itself — both share
+  // Channel.type === 'APP', so the sidebar badge needs this per-channel lookup
+  // to tell a Log desk apart from a regular App desk.
+  const deskTypeByChannelId = useMemo(() => {
+    const map = new Map<string, DeskType>();
+    for (const pref of emailChannelPreferences ?? []) {
+      if (pref.deskType) map.set(pref.channelId, pref.deskType);
+    }
+    return map;
+  }, [emailChannelPreferences]);
   const userChannelStatuses = useUserChannelStatuses();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
@@ -1764,7 +1783,7 @@ const SupportScreen = (): ReactElement => {
       connector?: 'google' | 'microsoft' | null;
       channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'LOG';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
@@ -1837,6 +1856,22 @@ const SupportScreen = (): ReactElement => {
         ...rest,
         channelType: 'APP',
         emailDeskOpts: { deskType: DeskType.APP, installedAppId },
+      });
+      return;
+    }
+
+    if (deskType === 'LOG') {
+      // LOG desks reuse the exact same appDeskInbound ingestion as APP desks
+      // (see apps/backend/src/apps/controllers/ticketController.ts:2489) —
+      // only deskType differs, so they need the same installedAppId wiring.
+      if (!installedAppId) {
+        toast.error('Please select a Xyne App');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'APP',
+        emailDeskOpts: { deskType: DeskType.LOG, installedAppId },
       });
       return;
     }
@@ -2102,26 +2137,31 @@ const SupportScreen = (): ReactElement => {
             className:
               'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-200',
           }
-        : c.type === ChannelType.APP
+        : c.type === ChannelType.APP && deskTypeByChannelId.get(c.id) === DeskType.LOG
           ? {
-              label: 'App',
-              className:
-                'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
+              label: 'Log',
+              className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
             }
-          : c.type === ChannelType.SOCIAL_MEDIA
+          : c.type === ChannelType.APP
             ? {
-                label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                label: 'App',
+                className:
+                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
               }
-            : c.type === ChannelType.CALL
+            : c.type === ChannelType.SOCIAL_MEDIA
               ? {
-                  label: 'Call',
-                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                  label: 'Social',
+                  className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
                 }
-              : {
-                  label: 'Mailbox',
-                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-                };
+              : c.type === ChannelType.CALL
+                ? {
+                    label: 'Call',
+                    className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                  }
+                : {
+                    label: 'Mailbox',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  };
     const isJoined = joinedChannelIds.has(c.id);
     const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
@@ -3788,7 +3828,9 @@ export const SupportTicketDetail = ({
   );
 
   const emails = useMemo(() => (allEmails as Email[] | undefined) ?? [], [allEmails]);
-  const emailCollapseState = useEmailCollapseState(emails);
+  const isLogDesk = channelPreference?.deskType === DeskType.LOG;
+  const emailCollapseState = useEmailCollapseState(emails, { collapseLatest: isLogDesk });
+  const logIssueData = useMemo(() => deriveLogIssueData(emails), [emails]);
 
   const initiator = useMemo(() => {
     const first = emailCollapseState.sortedEmails[0];
@@ -4119,7 +4161,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Reply',
       category: 'Support',
-      enabled: !composerOpen,
+      enabled: !composerOpen && !isLogDesk,
     },
   );
   useShortcut(
@@ -4133,7 +4175,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Reply all',
       category: 'Support',
-      enabled: !composerOpen,
+      enabled: !composerOpen && !isLogDesk,
     },
   );
 
@@ -4349,7 +4391,7 @@ export const SupportTicketDetail = ({
                     </>
                   )}
 
-                  {emails.length > 0 && (
+                  {emails.length > 0 && !isLogDesk && (
                     <>
                       <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
                         <button
@@ -4573,11 +4615,12 @@ export const SupportTicketDetail = ({
               ref={threadScrollRef}
               className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'
               style={{
-                paddingBottom: composerOverlayHeight + 12,
+                paddingBottom: isLogDesk ? 16 : composerOverlayHeight + 12,
                 transition: 'padding-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
-              {showEmailSummary &&
+              {!isLogDesk &&
+                showEmailSummary &&
                 (emailSummaryState === 'loading' ||
                   emailSummaryState === 'done' ||
                   emailSummaryState === 'error') && (
@@ -4761,11 +4804,86 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
+              {isLogDesk && logIssueData && (
+                <div className='mb-6 space-y-6'>
+                  <LogIssueHighlights
+                    levelSourceText={logIssueData.levelSourceText}
+                    occurrenceCount={logIssueData.occurrenceCount}
+                    firstSeenAt={logIssueData.firstSeenAt}
+                    lastSeenAt={logIssueData.lastSeenAt}
+                  />
+                  <LogIssueTimeline timestamps={logIssueData.timestamps} />
+                  <LogIssueStackTrace
+                    stack={logIssueData.stackTrace}
+                    lastSeenAt={logIssueData.lastSeenAt}
+                  />
+                  <div className='bg-background rounded-lg border border-border p-6'>
+                    <div className='flex items-center justify-between gap-3 mb-3'>
+                      <h2 className='text-lg font-semibold text-foreground'>AI Summary</h2>
+                      <button
+                        type='button'
+                        onClick={() => void fetchEmailSummary(emailSummaryState === 'done')}
+                        disabled={emailSummaryState === 'loading' || emails.length === 0}
+                        className='inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                        data-track-category='Support'
+                        data-track-name={
+                          emailSummaryState === 'done'
+                            ? 'RegenerateLogSummary'
+                            : 'GenerateLogSummary'
+                        }
+                      >
+                        {emailSummaryState === 'loading' ? (
+                          <Loader2 size={14} className='animate-spin' />
+                        ) : emailSummaryState === 'done' ? (
+                          <RefreshCw size={14} />
+                        ) : (
+                          <Wand2 size={14} />
+                        )}
+                        {emailSummaryState === 'done' ? 'Regenerate' : 'Generate'}
+                      </button>
+                    </div>
+                    {emailSummaryState === 'idle' && (
+                      <p className='text-sm text-muted-foreground'>
+                        Generate a concise summary from this log thread.
+                      </p>
+                    )}
+                    {emailSummaryState === 'loading' && (
+                      <p className='text-sm text-muted-foreground'>Generating summary...</p>
+                    )}
+                    {emailSummaryState === 'error' && (
+                      <p className='text-sm text-destructive'>{emailSummaryError}</p>
+                    )}
+                    {emailSummaryState === 'done' && (
+                      <div className='space-y-3'>
+                        {emailSummarySummary && (
+                          <p className='text-sm text-muted-foreground leading-relaxed'>
+                            {emailSummarySummary}
+                          </p>
+                        )}
+                        {emailSummaryPoints.length > 0 && (
+                          <ul className='space-y-2'>
+                            {emailSummaryPoints.map((point, i) => (
+                              <li
+                                key={i}
+                                className='flex items-start gap-2 text-sm text-foreground leading-relaxed'
+                              >
+                                <span className='mt-2 h-1.5 w-1.5 rounded-full bg-primary shrink-0' />
+                                <span>{point}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
-                  channel?.type === ChannelType.APP ||
-                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                  {!isLogDesk &&
+                  (channel?.type === ChannelType.SLACK ||
+                    channel?.type === ChannelType.APP ||
+                    channel?.type === ChannelType.SOCIAL_MEDIA) ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -4773,12 +4891,14 @@ export const SupportTicketDetail = ({
                     <EmailThread
                       collapseState={emailCollapseState}
                       ticketId={ticket?.id}
-                      onReplyToEmail={(emailId, mode) => {
-                        clearStoredRecipients(conversationId);
-                        setReplyToEmailId(emailId);
-                        setReplyMode(mode);
-                        setComposerOpen(true);
-                      }}
+                      {...(!isLogDesk && {
+                        onReplyToEmail: (emailId: string, mode: 'reply' | 'replyAll') => {
+                          clearStoredRecipients(conversationId);
+                          setReplyToEmailId(emailId);
+                          setReplyMode(mode);
+                          setComposerOpen(true);
+                        },
+                      })}
                       deskEmail={deskEmail}
                       onMailtoClick={onMailtoClick}
                       mergedSourceByConversationId={mergedSourceByConversationId}
@@ -4788,105 +4908,107 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
-            <div
-              className='absolute inset-x-0 bottom-0 z-20 bg-background'
-              ref={composerOverlayRef}
-            >
-              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                conversationId ? (
-                  <SocialMediaReplyComposer
-                    conversationId={conversationId}
-                    channelId={channel?.id ?? null}
-                    drafts={ticketEmailDrafts}
-                    replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
-                    maxLength={350}
-                    trackingCategory='social-media-composer'
-                  />
-                ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
-                conversationId ? (
-                  <SlackComposer
-                    conversationId={conversationId}
-                    channelId={channel?.id ?? null}
-                    drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
-                  />
-                ) : null
-              ) : channel?.type === ChannelType.EMAIL ? (
-                <AnimatePresence mode='popLayout' initial={false}>
-                  {composerOpen ? (
-                    <motion.div
-                      key='composer'
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 10 }}
-                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                    >
-                      <EmailComposer
-                        conversationId={conversationId}
-                        drafts={ticketEmailDrafts}
-                        channelConnectedEmail={deskEmail}
-                        emails={emails}
-                        onClose={() => {
-                          setComposerOpen(false);
-                          setReplyToEmailId(null);
-                        }}
-                        isAIPanelOpen={isAIPanelOpen}
-                        onToggleAIPanel={() => {
-                          if (isAIPanelOpen) {
-                            xyneAIActor.send({ type: 'CLOSE' });
-                          } else {
+            {!isLogDesk && (
+              <div
+                className='absolute inset-x-0 bottom-0 z-20 bg-background'
+                ref={composerOverlayRef}
+              >
+                {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                  conversationId ? (
+                    <SocialMediaReplyComposer
+                      conversationId={conversationId}
+                      channelId={channel?.id ?? null}
+                      drafts={ticketEmailDrafts}
+                      replyBasePath='/integrations/social-media'
+                      placeholder='Reply to this review…'
+                      maxLength={350}
+                      trackingCategory='social-media-composer'
+                    />
+                  ) : null
+                ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+                  conversationId ? (
+                    <SlackComposer
+                      conversationId={conversationId}
+                      channelId={channel?.id ?? null}
+                      drafts={ticketEmailDrafts}
+                      variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                      recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    />
+                  ) : null
+                ) : channel?.type === ChannelType.EMAIL ? (
+                  <AnimatePresence mode='popLayout' initial={false}>
+                    {composerOpen ? (
+                      <motion.div
+                        key='composer'
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                      >
+                        <EmailComposer
+                          conversationId={conversationId}
+                          drafts={ticketEmailDrafts}
+                          channelConnectedEmail={deskEmail}
+                          emails={emails}
+                          onClose={() => {
+                            setComposerOpen(false);
+                            setReplyToEmailId(null);
+                          }}
+                          isAIPanelOpen={isAIPanelOpen}
+                          onToggleAIPanel={() => {
+                            if (isAIPanelOpen) {
+                              xyneAIActor.send({ type: 'CLOSE' });
+                            } else {
+                              xyneAIActor.send({ type: 'OPEN' });
+                            }
+                          }}
+                          onOpenAskAISidebarFresh={() => {
                             xyneAIActor.send({ type: 'OPEN' });
-                          }
-                        }}
-                        onOpenAskAISidebarFresh={() => {
-                          xyneAIActor.send({ type: 'OPEN' });
-                        }}
-                        onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
-                        hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
-                        channelId={channelId}
-                        channelPreference={channelPreference}
-                        channelPreferenceLoaded={channelPreferenceLoaded}
-                        ticketId={ticketId}
-                        replyToEmailId={replyToEmailId}
-                        replyMode={replyMode}
-                        setReplyMode={mode => {
-                          clearStoredRecipients(conversationId);
-                          setReplyMode(mode);
-                        }}
-                        ticketSubject={title}
-                      />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key='pill'
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 8 }}
-                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                      className='px-6 py-3'
-                    >
-                      <ReplyPill
-                        emails={emails}
-                        deskEmail={deskEmail}
-                        replyMode={replyMode}
-                        setReplyMode={mode => {
-                          clearStoredRecipients(conversationId);
-                          setReplyMode(mode);
-                        }}
-                        onOpen={mode => {
-                          setReplyToEmailId(null);
-                          setReplyMode(mode);
-                          setComposerOpen(true);
-                        }}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              ) : null}
-            </div>
+                          }}
+                          onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
+                          hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
+                          channelId={channelId}
+                          channelPreference={channelPreference}
+                          channelPreferenceLoaded={channelPreferenceLoaded}
+                          ticketId={ticketId}
+                          replyToEmailId={replyToEmailId}
+                          replyMode={replyMode}
+                          setReplyMode={mode => {
+                            clearStoredRecipients(conversationId);
+                            setReplyMode(mode);
+                          }}
+                          ticketSubject={title}
+                        />
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key='pill'
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 8 }}
+                        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                        className='px-6 py-3'
+                      >
+                        <ReplyPill
+                          emails={emails}
+                          deskEmail={deskEmail}
+                          replyMode={replyMode}
+                          setReplyMode={mode => {
+                            clearStoredRecipients(conversationId);
+                            setReplyMode(mode);
+                          }}
+                          onOpen={mode => {
+                            setReplyToEmailId(null);
+                            setReplyMode(mode);
+                            setComposerOpen(true);
+                          }}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                ) : null}
+              </div>
+            )}
           </div>
         </Panel>
         {isRightPanelOpen && (
@@ -4994,6 +5116,7 @@ export const SupportTicketDetail = ({
 
 interface EmailCollapseState {
   collapsedIds: Set<string>;
+  collapseLatest: boolean;
   toggleOne: (id: string) => void;
   /** Force a specific email to be expanded (used for ?mail=X deep links). */
   expandOne: (id: string) => void;
@@ -5004,7 +5127,11 @@ interface EmailCollapseState {
   sortedEmails: Email[];
 }
 
-const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
+const useEmailCollapseState = (
+  emails: Email[],
+  options?: { collapseLatest?: boolean },
+): EmailCollapseState => {
+  const collapseLatest = options?.collapseLatest === true;
   const sortedEmails = useMemo(() => {
     return [...emails].sort((a, b) => {
       const aTime = a.createdAt || 0;
@@ -5014,39 +5141,51 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
   }, [emails]);
 
   const lastEmailId = sortedEmails[sortedEmails.length - 1]?.id;
+  // The email exempt from collapsing (kept expanded by default) — none when
+  // collapseLatest is on, otherwise the most recent email in the thread.
+  const protectedLastEmailId = collapseLatest ? undefined : lastEmailId;
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => {
-    if (sortedEmails.length <= 1) return new Set();
-    return new Set(sortedEmails.slice(0, -1).map(e => e.id));
+    return new Set(sortedEmails.filter(e => e.id !== protectedLastEmailId).map(e => e.id));
   });
 
   const emailIdsKey = useMemo(() => sortedEmails.map(e => e.id).join('|'), [sortedEmails]);
   const prevIdsRef = useRef<Set<string>>(new Set(sortedEmails.map(e => e.id)));
+  const prevCollapseLatestRef = useRef(collapseLatest);
   useEffect(() => {
     setCollapsedIds(prev => {
       const currentIds = new Set(sortedEmails.map(e => e.id));
       const previousIds = prevIdsRef.current;
+      const didEnableCollapseLatest = collapseLatest && !prevCollapseLatestRef.current;
+      if (didEnableCollapseLatest) {
+        prevIdsRef.current = currentIds;
+        prevCollapseLatestRef.current = collapseLatest;
+        return new Set(currentIds);
+      }
       const next = new Set(prev);
       for (const id of Array.from(next)) {
         if (!currentIds.has(id)) next.delete(id);
       }
       for (const email of sortedEmails) {
-        if (!previousIds.has(email.id) && email.id !== lastEmailId) {
+        if (!previousIds.has(email.id) && email.id !== protectedLastEmailId) {
           next.add(email.id);
         }
       }
-      if (lastEmailId) next.delete(lastEmailId);
+      if (protectedLastEmailId) next.delete(protectedLastEmailId);
       prevIdsRef.current = currentIds;
+      prevCollapseLatestRef.current = collapseLatest;
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailIdsKey]);
+  }, [emailIdsKey, collapseLatest]);
 
-  const collapsibleEmails = sortedEmails.slice(0, -1);
+  const collapsibleEmails = protectedLastEmailId
+    ? sortedEmails.filter(e => e.id !== protectedLastEmailId)
+    : sortedEmails;
   const anyExpanded = collapsibleEmails.some(e => !collapsedIds.has(e.id));
-  const canToggleAll = sortedEmails.length > 1;
+  const canToggleAll = collapsibleEmails.length > 0;
 
   const toggleOne = (id: string): void => {
-    if (id === lastEmailId) return;
+    if (id === protectedLastEmailId) return;
     setCollapsedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -5074,6 +5213,7 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
 
   return {
     collapsedIds,
+    collapseLatest,
     toggleOne,
     expandOne,
     toggleAll,
@@ -5107,7 +5247,8 @@ const EmailThread = ({
     sourceTicketXyneId?: string | null,
   ) => void | Promise<void>;
 }): ReactElement => {
-  const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
+  const { sortedEmails, collapsedIds, collapseLatest, toggleOne, lastEmailId } = collapseState;
+  const protectedLastEmailId = collapseLatest ? undefined : lastEmailId;
   useMarkEmailRead(ticketId, lastEmailId ?? null, true);
   const threadAttachments = useMemo(
     () => sortedEmails.flatMap(e => e.attachments ?? []),
@@ -5144,7 +5285,7 @@ const EmailThread = ({
             key={email.id}
             email={email}
             isCollapsed={collapsedIds.has(email.id)}
-            canCollapse={email.id !== lastEmailId}
+            canCollapse={email.id !== protectedLastEmailId}
             onToggleCollapse={() => toggleOne(email.id)}
             threadAttachments={threadAttachments}
             {...(onReplyToEmail &&
