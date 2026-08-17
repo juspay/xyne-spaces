@@ -60,9 +60,6 @@ router.get(
 // Download attachment by ID
 router.get('/attachments/:attachmentId/download', attachmentController.downloadAttachment.bind(attachmentController));
 
-// Generate short-lived signed URL for direct attachment download
-router.get('/attachments/:attachmentId/signed-url', attachmentController.getSignedDownloadUrl.bind(attachmentController));
-
 // Download thumbnail by attachment ID
 router.get('/attachments/:attachmentId/thumbnail', attachmentController.downloadThumbnail.bind(attachmentController));
 
