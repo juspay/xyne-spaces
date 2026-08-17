@@ -6,7 +6,6 @@ import type { CredentialField } from "../mcp/types.js";
 import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js";
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { isOAuthServer } from "../lib/oauth-server-types.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("servers");
@@ -153,10 +152,9 @@ router.get("/", async (req: Request, res: Response) => {
       orderBy: { name: "asc" },
     });
     const visible = servers.filter((s: any) => isVisibleToUser(parseConnectorMeta(s.connectorMeta), requesterId));
-    // Decorate with `oauth` so the UI can tell OAuth connectors apart (they
-    // need the browser flow, can't be pinned credential-less) without
-    // hardcoding a google/microsoft list in the frontend.
-    const decorated = visible.map((s: any) => ({ ...s, oauth: isOAuthServer(s.type, s.connectorMeta) }));
+    // Decorate with `oauth` so the UI can tell OAuth connectors apart
+    // (reads directly from the isOauth DB flag).
+    const decorated = visible.map((s: any) => ({ ...s, oauth: Boolean(s.isOauth) }));
     res.json({ success: true, data: decorated });
   } catch (err) {
     log.error("[servers] list error:", err);
