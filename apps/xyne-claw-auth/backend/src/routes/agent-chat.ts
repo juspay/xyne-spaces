@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
@@ -25,9 +26,11 @@ import {
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
@@ -570,7 +573,7 @@ router.post(
   uploadMiddleware.fields([
     { name: "files", maxCount: 10 },
     { name: "thumbnails", maxCount: 10 },
-  ]),
+  ]) as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
     try {
       const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
@@ -770,8 +773,12 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
     }
 
     const rawType = String(req.query["type"] ?? "all").trim() as ContextSearchType;
-    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call") {
-      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call" });
+    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "repository") {
+      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
+      return;
+    }
+    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
 
@@ -858,6 +865,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId,
       disableTools,
       additionalInstructions,
+      studioMode,
+      designArtifactAttachmentId,
+      designSelection,
+      researchContext,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -878,6 +889,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId?: string;
       disableTools?: boolean;
       additionalInstructions?: string;
+      studioMode?: "design";
+      designArtifactAttachmentId?: string;
+      designSelection?: unknown;
+      researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
 
@@ -889,11 +904,82 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
+    if (studioMode !== undefined && studioMode !== "design") {
+      res.status(400).json({ success: false, error: "Unknown studioMode" });
+      return;
+    }
+    if (
+      designArtifactAttachmentId !== undefined &&
+      (studioMode !== "design" || typeof designArtifactAttachmentId !== "string" || designArtifactAttachmentId.length > 200)
+    ) {
+      res.status(400).json({ success: false, error: "Invalid Design Studio artifact" });
+      return;
+    }
+
+    const normalizedDesignSelection = (() => {
+      if (studioMode !== "design" || !designSelection || typeof designSelection !== "object") return null;
+      const value = designSelection as Record<string, unknown>;
+      const scope = value["scope"];
+      const selector = value["selector"];
+      const tagName = value["tagName"];
+      if (
+        (scope !== "element" && scope !== "component" && scope !== "design-system") ||
+        typeof selector !== "string" || !selector.trim() || selector.length > 600 ||
+        typeof tagName !== "string" || !tagName.trim() || tagName.length > 80
+      ) return null;
+      const strings = (input: unknown, limit: number, itemLimit: number): string[] =>
+        Array.isArray(input)
+          ? input.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+          : [];
+      const styles = Object.fromEntries(
+        Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          .slice(0, 30)
+          .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+      );
+      return {
+        scope,
+        selector: selector.trim(),
+        tagName: tagName.trim(),
+        label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName.trim(),
+        id: typeof value["id"] === "string" ? value["id"].slice(0, 160) : undefined,
+        classes: strings(value["classes"], 16, 120),
+        text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+        ancestors: strings(value["ancestors"], 6, 600),
+        styles,
+      };
+    })();
+
+    const designSelectionInstruction = normalizedDesignSelection
+      ? [
+          "## Design Studio selection (captured by the preview inspector)",
+          `- Edit scope: ${normalizedDesignSelection.scope}`,
+          `- Stable selector: ${normalizedDesignSelection.selector}`,
+          `- Node: ${normalizedDesignSelection.tagName}`,
+          `- Label: ${normalizedDesignSelection.label}`,
+          ...(normalizedDesignSelection.id ? [`- ID: ${normalizedDesignSelection.id}`] : []),
+          ...(normalizedDesignSelection.classes.length ? [`- Classes: ${normalizedDesignSelection.classes.join(" ")}`] : []),
+          ...(normalizedDesignSelection.ancestors.length ? [`- Ancestors: ${normalizedDesignSelection.ancestors.join(" -> ")}`] : []),
+          ...(normalizedDesignSelection.text ? [`- Current text: ${normalizedDesignSelection.text}`] : []),
+          `- Computed styles: ${JSON.stringify(normalizedDesignSelection.styles)}`,
+          "Apply the user's instruction to this exact node. For component scope, update the reusable component/pattern behind it. " +
+            "For design-system scope, update shared tokens/rules and every semantically matching instance; do not merely patch one inline style.",
+        ].join("\n")
+      : "";
 
     const agent = await agentRepository.findBySlug(slug, getOrgId(req));
     if (!agent) {
       log.warn(`[agent-chat/chat] agent org-scoped miss slug=${slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
+
+    const sdlcResolution = slug === "sdlc-agent"
+      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
+      : { ok: true as const, repository: undefined };
+    if (!sdlcResolution.ok) {
+      res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
     }
 
@@ -919,7 +1005,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
-    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
     const normalized = normalizeAttachedContext(attachedContext);
     if (normalized.error) {
       res.status(400).json({ success: false, error: normalized.error });
@@ -959,6 +1044,25 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let cloneSourcePiConversationId: string | null = null;
     let cloneBranchMode: "lastUser" | "beforeLastUser" = "lastUser";
     let hydratedAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    let designArtifactAttachment: { fileName: string; mimeType: string; data: string } | null = null;
+
+    if (studioMode === "design" && designArtifactAttachmentId) {
+      const [artifact] = await chatAttachmentRepository.findManyByIdsForUser([designArtifactAttachmentId], userId);
+      if (!artifact || (!artifact.mimeType.toLowerCase().includes("html") && !artifact.originalFilename.toLowerCase().endsWith(".html"))) {
+        res.status(400).json({ success: false, error: "Design Studio artifact is unavailable" });
+        return;
+      }
+      if (artifact.size > 10 * 1024 * 1024) {
+        res.status(400).json({ success: false, error: "Design Studio artifact exceeds the 10 MB HTML limit" });
+        return;
+      }
+      const buf = await gcsService.getFileBuffer(artifact.url);
+      designArtifactAttachment = {
+        fileName: artifact.originalFilename,
+        mimeType: "text/html",
+        data: buf.toString("base64"),
+      };
+    }
 
     if (isRegenerate && parentUserMessageId) {
       const userMsgRow = existingMessages.find((m) => m.id === parentUserMessageId && m.role === "user");
@@ -1042,6 +1146,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
+    // A delivered design belongs to the previous assistant message, so never
+    // relink it to this new user turn. Rehydrate a user-owned HTML copy only
+    // for the run input; this keeps revisions working after sandbox expiry.
+    if (
+      designArtifactAttachment &&
+      !hydratedAttachments.some((attachment) => attachment.fileName === designArtifactAttachment.fileName)
+    ) {
+      hydratedAttachments.push(designArtifactAttachment);
+    }
+
     // Pre-create the running assistant placeholder. Its id powers PI session
     // branching, AgentRun linkage, and the SSE `done` payload.
     const assistantMsg = await chatMessageRepository.create({
@@ -1088,12 +1202,27 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Set up SSE
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
     });
 
     // Send conversationId immediately
     res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
+
+    // Heartbeat: every LB/proxy hop kills idle SSE connections, and tool-heavy
+    // runs (/design sandbox creation, long generations) go 60s+ with no events
+    // — the browser then freezes on the last event with no error while the run
+    // continues server-side (prod 2026-08-08). SSE comment frames are invisible
+    // to EventSource parsers, so this keeps every hop's idle timer at zero with
+    // no client change. res "close" fires on ALL end paths (server res.end()
+    // and client disconnect), so the interval can never leak.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) {
+        try { res.write(":hb\n\n"); } catch { /* client gone; close handler clears */ }
+      }
+    }, 15_000);
+    res.on("close", () => clearInterval(heartbeat));
 
     const callbackId = randomUUID();
 
@@ -1233,6 +1362,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // their config's model. providerOrder is cleared so a quota fallback can't
     // silently swap providers mid-eval.
     let runAgentConfig = agent?.config as Record<string, unknown> | undefined;
+    if (sdlcResolution.repository) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        sdlcContext: sdlcResolution.repository.agentContext,
+      };
+    }
     if (override?.provider) {
       if (override.provider === "spaces") {
         resolvedParentProvider = "spaces";
@@ -1275,7 +1410,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: message.trim(),
+      task: studioMode === "design" ? `/design ${message.trim()}` : message.trim(),
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -1295,6 +1430,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(additionalInstructions && additionalInstructions.trim()
         ? { additionalInstructions: additionalInstructions.trim() }
         : {}),
+      ...(designSelectionInstruction
+        ? {
+            additionalInstructions: [additionalInstructions?.trim(), designSelectionInstruction]
+              .filter(Boolean)
+              .join("\n\n"),
+          }
+        : {}),
+      ...(researchContext ? { researchContext } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled, toolPermissions,
       // skillTriggers, promptInjections, custom-tool config values.
@@ -1466,21 +1609,11 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
 
-    const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // S2S key is now required (xyne-claw fails closed). x-user-id lets
-        // xyne-claw enforce object-level authz on the cancel (ownership was
-        // already checked above, this pins it across the hop).
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
-      },
-    });
-
-    if (!cancelRes.ok) {
-      const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
-      res.status(502).json({ success: false, error: body.error ?? `Cancel failed: HTTP ${cancelRes.status}` });
+    // Ownership was checked above; preserve it across the S2S hop.
+    try {
+      await cancelRunSession(sessionId, userId);
+    } catch (err) {
+      res.status(502).json({ success: false, error: err instanceof Error ? err.message : String(err) });
       return;
     }
 
@@ -1828,6 +1961,87 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   }
 });
 
+// POST /agents/:slug/chat/:convId/fork — copy a finished conversation into a
+// NEW conversation owned by the requesting user.
+router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    const { targetConversationId } = (req.body ?? {}) as { targetConversationId?: string };
+    if (!targetConversationId || typeof targetConversationId !== "string") {
+      res.status(400).json({ success: false, error: "targetConversationId is required" });
+      return;
+    }
+
+    const sourceMessages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    if (sourceMessages.length === 0) {
+      res.status(404).json({ success: false, error: "Source conversation is empty" });
+      return;
+    }
+
+    // Refuse to write into a conversation that already holds messages — a
+    // retried fork would otherwise duplicate the whole history.
+    const existingTarget = await chatMessageRepository.findByConversationAndAgent(targetConversationId, slug);
+    if (existingTarget.length > 0) {
+      res.status(409).json({ success: false, error: "Target conversation already has messages" });
+      return;
+    }
+
+    // Which PI session backs this conversation: the base id when the tree is
+    // linear, else the deepest non-first assistant's branch suffix.
+    const tree = sourceMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parentId: (m as { parentId?: string | null }).parentId ?? null,
+      createdAt: m.createdAt,
+    }));
+    const leafId = tree[tree.length - 1]?.id ?? null;
+    const sourcePiConversationId = resolvePiConversationIdForPath(tree, leafId, convId);
+
+    const cloned = await cloneBranchSession({
+      sourceConversationId: piSessionStoreKey(sourcePiConversationId, slug),
+      targetConversationId: piSessionStoreKey(targetConversationId, slug),
+      branchMode: "full",
+    });
+    if (!cloned.success) {
+      log.warn(`[agent-chat/fork] session clone failed ${convId} → ${targetConversationId}: ${cloned.error ?? "unknown"}`);
+      res.status(502).json({ success: false, error: cloned.error ?? "Failed to clone session" });
+      return;
+    }
+
+    // Copy the visible history, chained linearly so the tree stays on the
+    // first-child rail — otherwise resolvePiConversationIdForPath would read
+    // the fork as a branch and the follow-up would open a fresh PI session,
+    // discarding the context we just cloned.
+    let parentId: string | null = null;
+    let copied = 0;
+    for (const msg of sourceMessages) {
+      const created = await chatMessageRepository.create({
+        conversationId: targetConversationId,
+        agentSlug: slug,
+        userId,
+        role: msg.role,
+        content: msg.content ?? "",
+        ...(msg.reasoning ? { reasoning: msg.reasoning } : {}),
+        parentId,
+        orgId: (msg as { orgId: string }).orgId,
+      });
+      parentId = created.id;
+      copied += 1;
+    }
+
+    log.info(`[agent-chat/fork] ${convId} → ${targetConversationId} slug=${slug} owner=${userId} copied=${copied}`);
+    res.json({ success: true, conversationId: targetConversationId, copied });
+  } catch (err) {
+    log.error(`[agent-chat/fork] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to fork conversation" });
+  }
+});
+
 // GET /agents/:slug/chat/:convId/messages — get conversation history
 router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
@@ -2001,6 +2215,51 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
 // mid-run is covered by an initial Postgres snapshot, since Redis pub/sub has no
 // replay. ACL matches /messages: scoped by agentSlug; non-admins only get events
 // for runs they triggered; tool results are redacted for admins viewing others.
+
+/**
+ * Real cancel for an in-flight chat run. The input-bar Stop button previously
+ * only aborted the CLIENT fetch — the run kept burning sandbox + LLM server-
+ * side by design (req close ≠ cancel). This endpoint kills the run itself:
+ * recovery first (so the watchdog can't resurrect it), then the runtime's
+ * per-session cancel. Ownership: the AgentRun row must belong to the caller.
+ */
+router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
+  try {
+    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const sessionId = typeof (req.body as { sessionId?: unknown }).sessionId === "string"
+      ? ((req.body as { sessionId: string }).sessionId).trim()
+      : "";
+    if (!userId || !sessionId || sessionId.length > 200) {
+      res.status(400).json({ success: false, error: "userId and sessionId are required" });
+      return;
+    }
+    const run = await prisma.agentRun.findFirst({
+      where: { sessionId, userId },
+      select: { sessionId: true, status: true },
+    });
+    if (!run) {
+      res.status(404).json({ success: false, error: "Run not found" });
+      return;
+    }
+    await cancelRunRecovery(sessionId).catch(() => {});
+    const cancelRes = await fetch(
+      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          "x-user-id": userId,
+        },
+      },
+    ).catch(() => null);
+    res.json({ success: true, data: { cancelled: cancelRes?.ok ?? false } });
+  } catch (err) {
+    log.error("[agent-chat] cancel failed", err);
+    res.status(500).json({ success: false, error: "Failed to cancel run" });
+  }
+});
+
 router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   if (!CONFIG.liveToolCallsEnabled) {
     res.status(404).json({ success: false, error: "Live streaming disabled" });
@@ -2026,6 +2285,13 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
   });
   res.write(`event: open\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`);
+  // Same idle-timeout protection as the chat stream: comment-frame heartbeat.
+  const liveHeartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      try { res.write(":hb\n\n"); } catch { /* close handler clears */ }
+    }
+  }, 15_000);
+  res.on("close", () => clearInterval(liveHeartbeat));
   log.info(`[agent-chat] /live connected: conv=${convId} agent=${slug} user=${userId} admin=${isAdmin}`);
 
   // Only cross-user (admin + All Runs) viewers receive events for other users'
@@ -2564,7 +2830,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     // Only the intended user can approve an action (XYNE-12145 — same rule as
-    // the Spaces Flow UI flow in flow-action.ts / legacy frontmatter in app-callback.ts).
+    // the Spaces Flow UI flow in flow-action.ts).
     if (callerUserId !== action.userId) {
       res.status(403).json({ success: false, error: "Only the intended user can approve this action" });
       return;

@@ -533,8 +533,9 @@ Full email thread for an Xyne Desk ticket — subject, from, to, cc, bcc, body, 
 
 - **conversationId** (string, required) — From `spaces-tickets` results (desk ticket's conversationId).
 - **limit** (number, 1–100, default 20).
+- **from** (`first | last`, default `first`) — Start from the oldest or latest email.
 
-**Notes:** Sorted chronologically. Bodies are HTML — stripped to 500 chars in display. For full body or attachments, use `spaces-thread-attachments`.
+**Notes:** Sorted chronologically. With `from=last`, the latest `limit` emails are selected and then displayed oldest-to-newest. Bodies are HTML — stripped to 500 chars in display. For full body or attachments, use `spaces-thread-attachments`.
 
 ---
 

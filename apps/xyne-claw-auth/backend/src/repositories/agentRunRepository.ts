@@ -544,7 +544,7 @@ export const agentRunRepository = {
 
   /**
    * Conversation-keyed variant for the write-action approval paths
-   * (app-callback / flow-action), which execute a user-credential write at
+   * (flow-action), which executes a user-credential write at
    * APPROVAL time and only know conversationId + agentSlug (no sessionId — and
    * the executing `writeUserId` may differ from the run's asker, so the
    * queue-time mark can miss it). Marks the most recent run of the

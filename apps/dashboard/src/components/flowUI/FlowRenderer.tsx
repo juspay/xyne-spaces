@@ -295,10 +295,25 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     const Component = NodeRegistry.get(component.type);
     if (!Component) {
       logger.warn(LogEvent.FRONTEND_ERROR, {
-        type: 'migrated_console_warn',
+        type: 'unknown_component_type',
         message: String(`[FlowRenderer] Unknown component type: ${component.type}`),
       });
-      return null;
+      // Render a visible fallback instead of silently dropping the card, so a node
+      // emitted by a newer @xyne/shared than this deploy ships stays visible and the
+      // version skew is obvious rather than surfacing as a blank message.
+      return (
+        <details
+          key={component.id}
+          className='my-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs'
+        >
+          <summary className='cursor-pointer text-muted-foreground'>
+            Unsupported card (<code>{component.type}</code>) — update to view it properly
+          </summary>
+          <pre className='mt-2 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-snug'>
+            {JSON.stringify(component, null, 2)}
+          </pre>
+        </details>
+      );
     }
     return (
       <Component key={component.id} node={component}>

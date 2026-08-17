@@ -10,6 +10,7 @@ import { AgentChat } from "./components/AgentChat";
 import { DigitalTwinPage } from "./components/DigitalTwinPage";
 import { AppV2 } from "./v2/AppV2";
 import { AppV3 } from "./v3/AppV3";
+import { PublicDesignSharePage } from "./v3/components/PublicDesignSharePage";
 import { checkIsAdmin } from "./lib/api";
 
 function AdminLink() {
@@ -61,6 +62,12 @@ export function App() {
       checkIsAdmin(auth.user.id).then(setIsAdmin).catch(() => {});
     }
   }, [auth.status, auth.status === "authenticated" ? auth.user.id : ""]);
+
+  // Public Design links deliberately bypass every auth shell. The bearer is
+  // kept in the URL fragment and validated by claw-auth's public share API.
+  if (location.pathname === "/v3/design/shared") {
+    return <PublicDesignSharePage />;
+  }
 
   // Pass /v2/* straight through — AppV2 owns its own full-screen layout
   if (location.pathname.startsWith("/v2")) {

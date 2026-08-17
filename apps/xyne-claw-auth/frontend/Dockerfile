@@ -4,10 +4,10 @@
 # mirror needs no auth and isn't rate-limited; tags match Docker Hub 1:1.
 FROM public.ecr.aws/docker/library/node:22.22.3-slim AS builder
 WORKDIR /app
-COPY xyne-claw-auth/frontend/package*.json ./
+COPY apps/xyne-claw-auth/frontend/package*.json ./
 RUN npm ci
-COPY xyne-claw-auth/frontend/tsconfig.json xyne-claw-auth/frontend/vite.config.ts xyne-claw-auth/frontend/vite-env.d.ts xyne-claw-auth/frontend/index.html ./
-COPY xyne-claw-auth/frontend/src ./src
+COPY apps/xyne-claw-auth/frontend/tsconfig.json apps/xyne-claw-auth/frontend/vite.config.ts apps/xyne-claw-auth/frontend/vite-env.d.ts apps/xyne-claw-auth/frontend/index.html ./
+COPY apps/xyne-claw-auth/frontend/src ./src
 RUN npm run build
 
 FROM public.ecr.aws/docker/library/nginx:stable-alpine AS runner

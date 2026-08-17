@@ -135,12 +135,15 @@ export function ProviderTabV3({ agent, userId }: Props) {
    * mentions keep the full provider order.
    * Stored at agent.config.automationProvider; undefined ⇒ same as chat.
    */
-  const seedAutomationMode: "default" | "platform" =
-    (agent.config as Record<string, unknown> | undefined)?.["automationProvider"] === "platform"
-      ? "platform"
-      : "default";
-  const [automationMode, setAutomationMode] = useState<"default" | "platform">(seedAutomationMode);
-  const [savedAutomationMode, setSavedAutomationMode] = useState<"default" | "platform">(seedAutomationMode);
+  const rawAutomationProvider = (agent.config as Record<string, unknown> | undefined)?.["automationProvider"];
+  // "default" (unset) | "platform" | a concrete provider key. The backend has
+  // always accepted any known provider here (resolveAgentProviderConfigs);
+  // only this control was limited to platform, so an agent could not send its
+  // automations to a cheap provider it already had credentials for.
+  const seedAutomationMode: string =
+    typeof rawAutomationProvider === "string" && rawAutomationProvider ? rawAutomationProvider : "default";
+  const [automationMode, setAutomationMode] = useState<string>(seedAutomationMode);
+  const [savedAutomationMode, setSavedAutomationMode] = useState<string>(seedAutomationMode);
 
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderSaved, setOrderSaved] = useState(false);
@@ -413,7 +416,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
       else delete cfg.subagentProviderMode;
       // Automation/scheduled downgrade. Omit when "default" so the JSON stays
       // minimal — the backend treats undefined as "same provider as chat".
-      if (automationMode === "platform") cfg.automationProvider = "platform";
+      if (automationMode !== "default") cfg.automationProvider = automationMode;
       else delete cfg.automationProvider;
       await updateAgent(agent.slug, { config: cfg });
       // Mirror the just-saved state so future edits compute against it
@@ -643,41 +646,28 @@ export function ProviderTabV3({ agent, userId }: Props) {
               <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
                 {automationMode === "default"
                   ? "Same as chat — automation, scheduled, and error-pipeline runs use this agent's full provider order."
-                  : "Platform default — automation, scheduled, and error-pipeline runs use the platform model; chat and mentions keep the premium provider."}
+                  : automationMode === "platform"
+                    ? "Platform default — automation, scheduled, and error-pipeline runs use the platform model; chat and mentions keep the premium provider."
+                    : `${PROVIDER_DISPLAY[automationMode] ?? automationMode} — automation, scheduled, and error-pipeline runs go to this provider only; chat and mentions keep the premium provider.`}
               </p>
             </div>
-            <div
-              role="radiogroup"
+            <select
               aria-label="Which provider automation and scheduled runs use"
-              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+              value={automationMode}
+              onChange={(e) => setAutomationMode(e.target.value)}
+              className="shrink-0 rounded-full border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[11px] font-medium text-xyne-fg-primary"
             >
-              <button
-                type="button"
-                role="radio"
-                aria-checked={automationMode === "default"}
-                onClick={() => setAutomationMode("default")}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  automationMode === "default"
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                }`}
-              >
-                Same as chat
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={automationMode === "platform"}
-                onClick={() => setAutomationMode("platform")}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  automationMode === "platform"
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                }`}
-              >
-                Platform default
-              </button>
-            </div>
+              <option value="default">Same as chat</option>
+              <option value="platform">Platform default</option>
+              {/* Only providers this agent actually has selected — routing
+                  automations at a provider with no credentials would fail every
+                  headless run, and the failure is silent (falls through). */}
+              {providerOrder.map((key) => (
+                <option key={key} value={key}>
+                  {PROVIDER_DISPLAY[key] ?? key}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
