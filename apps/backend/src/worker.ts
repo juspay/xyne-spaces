@@ -10,6 +10,10 @@ import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
+import {
+  startDriveImportWorker,
+  closeDriveImportQueue,
+} from '@/services/driveImport/driveImportWorker'
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
@@ -127,6 +131,13 @@ class WorkerService {
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.start()
+      }
+
+      // Google Drive import worker. When disabled, the API process runs imports
+      // in-process as a fallback (see collectionController.uploadFromDriveLink).
+      if (appConfig.enableDriveImportWorker) {
+        logger.info('Starting Drive import worker...')
+        startDriveImportWorker()
       }
 
       // Async OCR (Docling/LightOn) scheduler roles — fire-and-forget loops.
@@ -419,6 +430,9 @@ class WorkerService {
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.shutdown()
+      }
+      if (appConfig.enableDriveImportWorker) {
+        await closeDriveImportQueue()
       }
       if(workflowType){
         logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only stopping workers compatible with this workflow type.`)

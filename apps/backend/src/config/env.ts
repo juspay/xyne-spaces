@@ -376,6 +376,9 @@ const envSchema = Joi.object({
   CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
+  // When true, Drive imports are handed to the dedicated background worker (run in
+  // worker.ts). When false, the API process runs the import itself (fallback).
+  ENABLE_DRIVE_IMPORT_WORKER: Joi.boolean().default(false),
   VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion'),
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8080'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
@@ -921,6 +924,7 @@ export const config = {
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
+  enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,

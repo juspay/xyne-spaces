@@ -29,8 +29,10 @@ router.get('/items/:itemId/download-folder', collectionController.downloadFolder
 // Upload files to collection (streaming — files go directly to GCS, no memory buffer)
 router.post('/:collectionId/upload', collectionUpload.array('files', 50), collectionController.uploadFiles);
 
-// Import a PUBLIC Google Drive file/folder link into the collection (JSON body).
+// Import a Google Drive file/folder link into the collection (JSON body). Enqueues a
+// background job and returns a sessionId; the client polls the status route below.
 router.post('/:collectionId/upload-drive-link', collectionController.uploadFromDriveLink);
+router.get('/:collectionId/drive-import/:sessionId', collectionController.getDriveImportStatus);
 
 // Version history routes
 router.post('/items/:itemId/versions', versionUpload.single('file'), collectionController.uploadNewVersion);

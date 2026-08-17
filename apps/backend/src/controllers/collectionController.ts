@@ -18,7 +18,6 @@ import {
     parseDriveTarget,
     getMetadata,
     listFolderRecursive,
-    downloadFile,
     DriveNotAccessibleError,
     DriveInvalidLinkError,
     DriveRateLimitedError,
@@ -26,6 +25,14 @@ import {
     type DriveFile,
 } from '@/services/googleDriveImportService';
 import { getDriveAccessToken, clearDriveCredentials } from '@/services/driveTokenService';
+import { randomUUID } from 'crypto';
+import {
+    enqueueDriveImport,
+    processDriveImportJob,
+    writeDriveImportProgress,
+    readDriveImportProgress,
+} from '@/services/driveImport/driveImportWorker';
+import { config } from '@/config/env';
 import {
     resolveCollectionAccess,
     listAccessibleRootCollections,
@@ -336,82 +343,48 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             }
 
             const baseParentFolderId = validated.parentId ?? collectionId;
-            const results: any[] = [];
-            const errors: any[] = [];
-            let skipped = 0;
-            // Set when the connected token is rejected mid-import — prompt a reconnect.
-            let needsDriveAuth = false;
 
-            for (const df of workList) {
-                try {
-                    const downloaded = await downloadFile(df, driveToken);
-                    if (!downloaded) {
-                        skipped++;
-                        results.push({ fileName: df.name, status: 'skipped', reason: 'unsupported-type' });
-                        continue;
-                    }
-
-                    const uploaded = await storageService.uploadFile(downloaded.buffer, {
-                        filename: downloaded.name,
-                        contentType: downloaded.contentType,
-                        scopeType: 'collection',
-                        scopeId: collectionId,
-                    });
-
-                    const parentFolderId = df.relPath
-                        ? await this.ensureFolderPath(collectionId, df.relPath, baseParentFolderId, user.id)
-                        : baseParentFolderId;
-
-                    let finalFileName = downloaded.name;
-                    const existingItem = await this.collectionRepository.findItemByPath(parentFolderId, finalFileName);
-                    if (existingItem) {
-                        if (validated.duplicateStrategy === DuplicateStrategy.SKIP) {
-                            await storageService.deleteFile(uploaded.path).catch(() => undefined);
-                            skipped++;
-                            results.push({ fileName: finalFileName, status: 'skipped', reason: 'duplicate' });
-                            continue;
-                        } else if (validated.duplicateStrategy === DuplicateStrategy.RENAME) {
-                            const siblings = await this.collectionRepository.findItemsByCollectionAndParentId(parentFolderId);
-                            finalFileName = this.generateUniqueName(finalFileName, siblings.map(s => s.name));
-                        } else if (validated.duplicateStrategy === DuplicateStrategy.OVERWRITE) {
-                            await this.collectionRepository.softDeleteItem(existingItem.id);
-                        }
-                    }
-
-                    const item = await this.collectionRepository.createFileItem({
-                        rootCollectionId: collectionId,
-                        collectionId: parentFolderId,
-                        name: finalFileName,
-                        storageKey: uploaded.path,
-                        mimeType: downloaded.contentType,
-                        fileSize: uploaded.size,
-                        ownerId: user.id,
-                        workspaceId: user.workspaceId,
-                        ingestionStatus: IngestionStatus.PENDING,
-                    });
-
-                    await vespaQueue.addJob({ schema: 'file', docId: item.fileId, jobType: 'feed', userId: user.id, app: SubApp.COLLECTIONS });
-                    results.push({ fileName: finalFileName, itemId: item.id, status: 'success' });
-                } catch (err) {
-                    logger.error(`[DRIVE_IMPORT] Failed to import ${df.name}:`, err);
-                    if (err instanceof DriveUnauthorizedError) {
-                        // The connected token was rejected — clear the stale row and
-                        // re-prompt to connect.
-                        needsDriveAuth = true;
-                        await clearDriveCredentials(user.id);
-                    }
-                    errors.push({ fileName: df.name, error: err instanceof Error ? err.message : 'Unknown error' });
-                }
+            if (workList.length === 0) {
+                res.status(200).json({ sessionId: null, total: 0, files: [] });
+                return;
             }
 
-            res.status(200).json({
-                success: errors.length === 0,
-                imported: results.filter(r => r.status === 'success').length,
-                skipped,
-                failed: errors.length,
-                results,
-                errors: errors.length > 0 ? errors : undefined,
-                needsDriveAuth: needsDriveAuth || undefined,
+            // The download loop moves to the background worker so a big folder never
+            // blocks (or times out) this request. We list synchronously (fast, and it
+            // surfaces access errors early), then hand off and let the client poll.
+            const sessionId = randomUUID();
+            await writeDriveImportProgress(sessionId, {
+                collectionId,
+                userId: user.id,
+                total: workList.length,
+                processed: 0,
+                done: false,
+                files: workList.map(f => ({ name: f.name, status: 'pending' as const })),
+            });
+            const jobData = {
+                collectionId,
+                baseParentFolderId,
+                files: workList,
+                userId: user.id,
+                workspaceId: user.workspaceId,
+                sessionId,
+                duplicateStrategy: validated.duplicateStrategy,
+            };
+            if (config.enableDriveImportWorker) {
+                // Dedicated worker (worker.ts) picks the job up and downloads off-process.
+                await enqueueDriveImport(jobData);
+            } else {
+                // Fallback: no worker running — download in this (API) process. Still
+                // fire-and-forget + Redis progress, so the client polls the same way.
+                void processDriveImportJob(jobData).catch(err =>
+                    logger.error('[DRIVE_IMPORT] In-process import failed', err),
+                );
+            }
+
+            res.status(202).json({
+                sessionId,
+                total: workList.length,
+                files: workList.map(f => ({ name: f.name })),
             });
         } catch (error) {
             if (error instanceof z.ZodError) {
@@ -442,6 +415,27 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             logger.error('[DRIVE_IMPORT] Error in uploadFromDriveLink:', error);
             res.status(500).json({ error: 'Internal server error' });
         }
+    };
+
+    /**
+     * GET /api/collections/:collectionId/drive-import/:sessionId
+     *
+     * Poll the progress of a background Drive import started by uploadFromDriveLink.
+     * The client polls this to fill the upload card live and know when it's done.
+     */
+    getDriveImportStatus = async (req: Request, res: Response): Promise<void> => {
+        const user = req.user;
+        if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+        const { sessionId } = req.params;
+        if (!sessionId) { res.status(400).json({ error: 'sessionId is required' }); return; }
+
+        const progress = await readDriveImportProgress(sessionId);
+        // Scope to the owner so one user can't read another's import session.
+        if (!progress || progress.userId !== user.id) {
+            res.status(404).json({ error: 'Unknown or expired import session' });
+            return;
+        }
+        res.json(progress);
     };
 
     /**
