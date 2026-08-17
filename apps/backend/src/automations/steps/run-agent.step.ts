@@ -63,21 +63,20 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
+    const stepName = store.stepName ?? `step_${Math.max(0, Object.keys(context.steps).length - 1)}`;
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
-    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const runUserId = resolveAutomationRunUserId(context);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} stepName=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -93,7 +92,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepName=${stepName}:`,
         err,
       );
       throw err;
@@ -166,7 +165,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const stepName =
       typeof rowData['stepName'] === 'string'
         ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
+        : (store.stepName ?? deriveStepNameFromCtx(context));
     if (!stepName) {
       throw new Error('[RUN_AGENT] cannot derive stepName for retry');
     }
@@ -181,7 +180,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       cfg.outputSchema ?? {},
     );
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
-    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const runUserId = resolveAutomationRunUserId(context);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
@@ -234,6 +233,22 @@ function resolveVisibleConversationContext(
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * Attribute an automation agent run to the human who caused it. Pending write
+ * actions are signed for this user, and only that user can approve them.
+ * Event-less triggers fall back to the automation creator.
+ */
+function resolveAutomationRunUserId(context: AutomationContext): string {
+  const trigger = context.trigger as Record<string, unknown>;
+  const performedBy = trigger.performedBy as Record<string, unknown> | undefined;
+
+  return (
+    asNonEmptyString(trigger.authorId) ??
+    asNonEmptyString(performedBy?.id) ??
+    context.automation.createdById
+  );
 }
 
 function buildCallbackUrl(executionId: string, stepName: string): string {
@@ -307,25 +322,6 @@ async function appBelongsToWorkspace(appId: string, workspaceId: string): Promis
     select: { id: true },
   });
   return Boolean(member);
-}
-
-async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Promise<string> {
-  try {
-    const install = await db.installedApps.findFirst({
-      where: { appId: spacesAppId },
-      select: { userId: true },
-    });
-    if (install?.userId) return install.userId;
-    logger.info(
-      `[RUN_AGENT] app ${spacesAppId} has no installation — attributing to automation creator ${fallbackUserId}`,
-    );
-  } catch (err) {
-    logger.warn(
-      `[RUN_AGENT] failed to resolve app user for ${spacesAppId}; falling back to creator:`,
-      err,
-    );
-  }
-  return fallbackUserId;
 }
 
 /**

@@ -1,6 +1,13 @@
+export interface PauseBranchSegment {
+  branchKey: string;
+  index: number;
+  stepName: string;
+}
+
 export class PauseStep extends Error {
   readonly externalRef: string | undefined;
   readonly statePatch: Record<string, unknown> | undefined;
+  readonly branchPath: PauseBranchSegment[] = [];
 
   constructor(
     reason: string,

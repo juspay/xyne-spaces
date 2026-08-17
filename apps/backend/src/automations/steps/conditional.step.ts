@@ -38,7 +38,7 @@ export class ConditionalStep extends BaseControlFlowStep<typeof ConditionalConfi
   ): Promise<ConditionalOutput> {
     const result = this.evaluator.evaluate(config.condition, context);
     const branch = (result ? config.if_true : (config.if_false ?? [])) as AutomationStepConfig[];
-    await ctx.walkBranch(branch, context);
+    await ctx.walkBranch(branch, context, result ? 'if_true' : 'if_false');
     return { result };
   }
 }
