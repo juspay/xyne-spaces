@@ -33,6 +33,9 @@ const SUGGESTION_CHIP_CLASS_NAME =
 const READ_ONLY_TRIGGER_CLASS_NAME =
   'inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
 
+const LIST_INHERITS_POPOVER_CLASS_NAME =
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
+
 function LabelChip({ label }: { label: string }): ReactElement {
   return (
     <span className={CHIP_CLASS_NAME}>
@@ -111,6 +114,7 @@ export function RecordingLabelPicker({
   const options = useMemo<SearchableMultiSelectOption[]>(
     () =>
       normalizeRecordingTags([...suggestions, ...labels])
+        .filter(label => resolveMethod(label) !== TagMethod.LLM)
         .map(label => ({ value: label, displayLabel: resolveLabel(label) }))
         .sort((left, right) => left.displayLabel.localeCompare(right.displayLabel))
         .map(({ value, displayLabel }) => ({
@@ -125,7 +129,7 @@ export function RecordingLabelPicker({
             />
           ),
         })),
-    [labels, suggestions, resolveLabel],
+    [labels, suggestions, resolveLabel, resolveMethod],
   );
 
   const visibleLabels = confirmedLabels.slice(0, MAX_VISIBLE_LABELS);
@@ -201,6 +205,7 @@ export function RecordingLabelPicker({
         selectedValues={labels}
         onSelectedValuesChange={onChange}
         onCreateOption={handleCreate}
+        className={LIST_INHERITS_POPOVER_CLASS_NAME}
         isOpen={isOpen}
         onOpenChange={setIsOpen}
         searchPlaceholder='Search or create...'
@@ -215,7 +220,7 @@ export function RecordingLabelPicker({
             variant='outline'
             size='sm'
             className={cn(
-              'h-7 gap-1.5 rounded-lg text-xs font-normal',
+              'h-7 gap-1.5 rounded-lg text-xs font-normal ',
               confirmedLabels.length === 0
                 ? 'border-dashed border-muted-foreground/40 px-3 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
                 : 'px-2',
