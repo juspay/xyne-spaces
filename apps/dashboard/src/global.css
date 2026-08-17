@@ -3948,16 +3948,6 @@ img.inline-emoji,
   background-image: url("/images/404-dark.png");
 }
 
-/* AI page background — soft neutral for light themes, near-black for midnight */
-[data-theme="classic"] .ai-page-bg,
-[data-theme="summer_breeze"] .ai-page-bg {
-  background-color: hsl(220 16% 97%);
-}
-
-[data-theme="midnight"] .ai-page-bg {
-  background-color: #0e0f11;
-}
-
 /* Knowledge Base section header/footer backgrounds */
 [data-theme="classic"] .ai-kb-section,
 [data-theme="summer_breeze"] .ai-kb-section {
@@ -3968,10 +3958,10 @@ img.inline-emoji,
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* AI composer — match the page bg in the soft-neutral palette */
+/* AI composer — match the page bg (overrides the component's own literal) */
 [data-theme="classic"] .ai-composer-wrapper,
 [data-theme="summer_breeze"] .ai-composer-wrapper {
-  background-color: hsl(220 16% 97%);
+  background-color: hsl(var(--background));
 }
 
 /* AI composer dark mode overrides */
