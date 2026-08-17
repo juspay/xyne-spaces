@@ -68,7 +68,10 @@ const FencedCodeBlock = ({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          message: 'Failed to copy code snippet to clipboard',
+          error,
+        });
       });
   };
 

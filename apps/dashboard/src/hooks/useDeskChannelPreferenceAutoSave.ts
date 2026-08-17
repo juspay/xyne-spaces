@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
@@ -28,7 +29,11 @@ export function useDeskChannelPreferenceAutoSave(channelId: string | null) {
       try {
         await updateEmailChannelPreference.mutateAsync({ channelId, ...patch });
       } catch (error) {
-        console.error('Failed to save channel preference:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to save channel preference:'),
+          error: error,
+        });
         toast.error('Failed to save settings', {
           description: 'Your change was not saved. Please try again.',
         });

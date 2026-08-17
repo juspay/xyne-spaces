@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 
@@ -283,7 +284,11 @@ const saveContextToIndexedDB = async (context: Partial<XyneAIContext>): Promise<
     const store = transaction.objectStore(STORE_NAME);
     store.put(context, 'xyneai-context');
   } catch (error) {
-    console.error('Failed to save XyneAI context to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save XyneAI context to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -300,7 +305,11 @@ export const loadContextFromIndexedDB = async (): Promise<Partial<XyneAIContext>
         reject(new Error(request.error?.message || 'Failed to get context from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load XyneAI context from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -313,7 +322,11 @@ const clearContextFromIndexedDB = async (): Promise<void> => {
     const store = transaction.objectStore(STORE_NAME);
     store.delete('xyneai-context');
   } catch (error) {
-    console.error('Failed to clear XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear XyneAI context from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -345,7 +358,11 @@ export const saveMermaidDiagram = async (
 
     store.put(mermaidData, messageId);
   } catch (error) {
-    console.error('Failed to save mermaid diagram to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save mermaid diagram to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -363,7 +380,11 @@ export const loadMermaidDiagram = async (messageId: string): Promise<MermaidDiag
         reject(new Error(request.error?.message || 'Failed to get mermaid diagram from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load mermaid diagram from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -376,7 +397,11 @@ export const deleteMermaidDiagram = async (messageId: string): Promise<void> => 
     const store = transaction.objectStore(MERMAID_STORE_NAME);
     store.delete(messageId);
   } catch (error) {
-    console.error('Failed to delete mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to delete mermaid diagram from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -401,7 +426,11 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
       }
     };
   } catch (error) {
-    console.error('Failed to clear old mermaid diagrams from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear old mermaid diagrams from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -846,7 +875,11 @@ const initializeActor = async (): Promise<void> => {
     // Clean up old mermaid diagrams on app startup
     void clearOldMermaidDiagrams();
   } catch (error) {
-    console.error('Failed to initialize XyneAI actor with persisted state:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to initialize XyneAI actor with persisted state:'),
+      error: error,
+    });
   }
 };
 

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { AxiosResponse, isAxiosError } from 'axios';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 
@@ -60,7 +61,11 @@ class VoiceInputService {
         // A failed send must not vanish silently: the recorder would keep running,
         // dropping every subsequent chunk, while the UI still shows "transcribing".
         // Close the socket so the existing onClose cleanup path stops the session.
-        console.error('[VoiceInputService] Stream send failed, closing session', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[VoiceInputService] Stream send failed, closing session'),
+          error: error,
+        });
         if (
           ws.readyState === window.WebSocket.OPEN ||
           ws.readyState === window.WebSocket.CONNECTING
@@ -150,11 +155,14 @@ class VoiceInputService {
     }
 
     const _blobSizeKB = (params.audioBlob.size / 1024).toFixed(1);
-    console.info(
-      `[VoiceInputService] Sending transcription request | size=${_blobSizeKB}KB` +
-        ` | mime=${mimeType} | language=${params.language ?? '(default)'}` +
-        ` | hints=${params.hints?.length ?? 0}`,
-    );
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_info',
+      message: String(
+        `[VoiceInputService] Sending transcription request | size=${_blobSizeKB}KB` +
+          ` | mime=${mimeType} | language=${params.language ?? '(default)'}` +
+          ` | hints=${params.hints?.length ?? 0}`,
+      ),
+    });
     const _t0 = Date.now();
 
     try {
@@ -164,10 +172,13 @@ class VoiceInputService {
       );
 
       const elapsed = Date.now() - _t0;
-      console.info(
-        `[VoiceInputService] Transcription success | elapsed=${elapsed}ms` +
-          ` | chars=${response.data.text?.length ?? 0} | language=${response.data.language ?? 'unknown'}`,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String(
+          `[VoiceInputService] Transcription success | elapsed=${elapsed}ms` +
+            ` | chars=${response.data.text?.length ?? 0} | language=${response.data.language ?? 'unknown'}`,
+        ),
+      });
       return {
         text: response.data.text || '',
         ...(response.data.language ? { language: response.data.language } : {}),
@@ -181,13 +192,21 @@ class VoiceInputService {
         // Surface the structured error message from the backend when available.
         const backendError =
           (error.response?.data as VoiceInputResponse | undefined)?.error || error.message;
-        console.error(
-          `[VoiceInputService] Transcription failed | elapsed=${elapsed}ms` +
-            ` | status=${error.response?.status ?? 'network'} | error=${backendError}`,
-        );
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String(
+            `[VoiceInputService] Transcription failed | elapsed=${elapsed}ms` +
+              ` | status=${error.response?.status ?? 'network'} | error=${backendError}`,
+          ),
+          error,
+        });
         throw new Error(backendError);
       }
-      console.error(`[VoiceInputService] Unexpected error | elapsed=${elapsed}ms`, error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String(`[VoiceInputService] Unexpected error | elapsed=${elapsed}ms`),
+        error: error,
+      });
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import {
   Component,
   useMemo,
@@ -451,8 +452,11 @@ export class AILandingHeroErrorBoundary extends Component<
   }
 
   override componentDidCatch(error: Error): void {
-    // eslint-disable-next-line no-console
-    console.error('AILandingHero failed to render:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('AILandingHero failed to render:'),
+      error: error,
+    });
   }
 
   override render(): ReactNode {
