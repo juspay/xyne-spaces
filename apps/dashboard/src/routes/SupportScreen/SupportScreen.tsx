@@ -155,9 +155,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
-import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
-import { AppThread, AppComposer } from '../../components/xyne-desk/AppThread';
-import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { SlackThread } from '../../components/xyne-desk/SlackThread';
+import { AppThread } from '../../components/xyne-desk/AppThread';
+import { DeskComposer } from '../../components/xyne-desk/DeskComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
@@ -4796,19 +4796,19 @@ export const SupportTicketDetail = ({
             >
               {channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
-                  <SocialMediaReplyComposer
+                  <DeskComposer
+                    variant='social'
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    replyBasePath='/integrations/social-media'
                     placeholder='Reply to this review…'
                     maxLength={350}
-                    trackingCategory='social-media-composer'
                   />
                 ) : null
               ) : channel?.type === ChannelType.APP ? (
                 conversationId ? (
-                  <AppComposer
+                  <DeskComposer
+                    variant='app'
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
@@ -4818,11 +4818,11 @@ export const SupportTicketDetail = ({
                 ) : null
               ) : channel?.type === ChannelType.SLACK ? (
                 conversationId ? (
-                  <SlackComposer
+                  <DeskComposer
+                    variant='slack'
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant='slack'
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (
