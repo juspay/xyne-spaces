@@ -101,6 +101,7 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -578,12 +579,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const canEdit =
-    isCreating ||
-    isEditingMessage ||
-    isCreatingMessage ||
-    selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
-    selectedCanvas?.accessLevel === CanvasRole.OWNER ||
-    selectedCanvas?.createdBy === user?.id;
+    !selectedCanvas?.isArchived &&
+    (isCreating ||
+      isEditingMessage ||
+      isCreatingMessage ||
+      selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
+      selectedCanvas?.accessLevel === CanvasRole.OWNER ||
+      selectedCanvas?.createdBy === user?.id);
   const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
@@ -620,40 +622,17 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     onCreated: handleVersionCopyCreated,
   });
 
-  const handleArchiveToggleCanvas = useCallback(
-    (canvas: Canvas) => {
-      const nextIsArchived = !canvas.isArchived;
-
-      void (async (): Promise<void> => {
-        try {
-          const result = z.mutate(
-            nextIsArchived
-              ? mutators.canvas.archiveCanvas({ canvasId: canvas.id })
-              : mutators.canvas.unarchiveCanvas({ canvasId: canvas.id }),
-          );
-          const serverResult = await result.server;
-
-          if (serverResult.type === 'error') {
-            throw new Error(
-              serverResult.error.message ||
-                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
-            );
-          }
-
-          setSelectedCanvas(current =>
-            current?.id === canvas.id ? { ...current, isArchived: nextIsArchived } : current,
-          );
-          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
-        } catch (error) {
-          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
-          toast.error('Error', {
-            description: error instanceof Error ? error.message : fallback,
-          });
-        }
-      })();
+  const handleArchivedStateChange = useCallback(
+    (canvasId: string, isArchived: boolean): void => {
+      setSelectedCanvas(current =>
+        current?.id === canvasId ? { ...current, isArchived } : current,
+      );
     },
-    [z],
+    [],
   );
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle({
+    onArchivedStateChange: handleArchivedStateChange,
+  });
 
   const handleUnarchiveSelectedCanvas = useCallback((): void => {
     if (!selectedCanvas) return;

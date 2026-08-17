@@ -65,6 +65,7 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface CanvasTabProps {
   channelId: string;
@@ -147,12 +148,10 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const canvases = useMemo(
     () =>
       filterExcludedCallGeneratedCanvases(
-        canvasItems.filter(canvas =>
-          onlyArchivedCanvases ? canvas.isArchived : !canvas.isArchived,
-        ),
+        canvasItems,
         excludeCallGeneratedCanvases,
       ),
-    [canvasItems, excludeCallGeneratedCanvases, onlyArchivedCanvases],
+    [canvasItems, excludeCallGeneratedCanvases],
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
@@ -243,9 +242,10 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const effectiveAccessLevel = resolveCanvasAccessLevel(canvas);
   const canEdit =
-    canvas?.createdBy === user?.id ||
-    effectiveAccessLevel === CanvasRole.EDITOR ||
-    effectiveAccessLevel === CanvasRole.OWNER;
+    !canvas?.isArchived &&
+    (canvas?.createdBy === user?.id ||
+      effectiveAccessLevel === CanvasRole.EDITOR ||
+      effectiveAccessLevel === CanvasRole.OWNER);
   const canArchiveCanvas = canvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
@@ -650,40 +650,15 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [z],
   );
 
-  const handleArchiveToggleCanvas = useCallback(
-    (selected: Canvas) => {
-      const nextIsArchived = !selected.isArchived;
-
-      void (async (): Promise<void> => {
-        try {
-          const result = z.mutate(
-            nextIsArchived
-              ? mutators.canvas.archiveCanvas({ canvasId: selected.id })
-              : mutators.canvas.unarchiveCanvas({ canvasId: selected.id }),
-          );
-          const serverResult = await result.server;
-
-          if (serverResult.type === 'error') {
-            throw new Error(
-              serverResult.error.message ||
-                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
-            );
-          }
-
-          setCanvas(current =>
-            current?.id === selected.id ? { ...current, isArchived: nextIsArchived } : current,
-          );
-          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
-        } catch (error) {
-          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
-          toast.error('Error', {
-            description: error instanceof Error ? error.message : fallback,
-          });
-        }
-      })();
+  const handleArchivedStateChange = useCallback(
+    (canvasId: string, isArchived: boolean): void => {
+      setCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
     },
-    [z],
+    [],
   );
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle({
+    onArchivedStateChange: handleArchivedStateChange,
+  });
 
   const handleUnarchiveCurrentCanvas = useCallback((): void => {
     if (!canvas) return;

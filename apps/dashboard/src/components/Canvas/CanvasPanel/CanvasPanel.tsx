@@ -46,6 +46,7 @@ import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
@@ -205,37 +206,7 @@ const CanvasPanel = (): ReactElement => {
     [z],
   );
 
-  const handleArchiveToggleCanvas = useCallback(
-    (canvas: Canvas) => {
-      const nextIsArchived = !canvas.isArchived;
-
-      void (async (): Promise<void> => {
-        try {
-          const result = z.mutate(
-            nextIsArchived
-              ? mutators.canvas.archiveCanvas({ canvasId: canvas.id })
-              : mutators.canvas.unarchiveCanvas({ canvasId: canvas.id }),
-          );
-          const serverResult = await result.server;
-
-          if (serverResult.type === 'error') {
-            throw new Error(
-              serverResult.error.message ||
-                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
-            );
-          }
-
-          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
-        } catch (error) {
-          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
-          toast.error('Error', {
-            description: error instanceof Error ? error.message : fallback,
-          });
-        }
-      })();
-    },
-    [z],
-  );
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle();
 
   const handleDuplicateCanvas = useCallback(
     (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {

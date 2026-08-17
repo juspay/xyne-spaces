@@ -88,7 +88,7 @@
     "prepare": "pnpm run build"
   },
   "dependencies": {
-    "@rocicorp/zero": "1.6.1",
+    "@rocicorp/zero": "1.9.0",
     "@standard-schema/spec": "^1.1.0",
     "fast-xml-parser": "^5.10.1",
     "fuse.js": "^7.1.0",

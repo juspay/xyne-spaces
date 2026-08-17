@@ -2024,6 +2024,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: var(--mention-color);
   border-radius: 4px;
   padding: 2px 4px;
+  white-space: nowrap;
 }
 
 .mention-text::before {
