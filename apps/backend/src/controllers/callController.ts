@@ -43,11 +43,9 @@ import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import {
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
-} from '@/services/recordingSummaryTemplates';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -61,10 +59,7 @@ const UpdateHeadlessRecordingSchema = z
   });
 
 const RegenerateHeadlessSummarySchema = z.object({
-  summaryTemplateId: z.string().refine(
-    value => !!getBuiltinRecordingSummaryTemplate(value),
-    'Invalid recording summary template',
-  ),
+  summaryTemplateId: z.string().trim().min(1),
 });
 
 export class CallController {
@@ -422,7 +417,7 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
-        const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+        const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
           sttModel: sttModel || 'azure',
@@ -588,7 +583,7 @@ export class CallController {
             livekitUrl: livekitService.getServerUrl(),
             externalId: existingCall.externalId,
             callId: existingCall.externalId,
-            roomLink: existingCall.roomLink || `${livekitService.getClientUrl()}/call/${existingCall.externalId}?type=${callType}`,
+            roomLink: existingCall.roomLink,
             channelId: finalChannelId,
             scopeType: channel.scopeType, // Add scopeType for CallKit filtering
           });
@@ -620,7 +615,7 @@ export class CallController {
         // This path should never execute since we already fetched channel above
       }
       // Generate room link
-      const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+      const roomLink = buildCallInviteUrl(callExternalId);
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -730,12 +725,20 @@ export class CallController {
 
       let call = await repositories.calls.findByExternalId(callId);
 
+      // Calls are tenant-scoped by the repository ACL. Fail closed before any
+      // LiveKit lookup so an authenticated user in workspace B cannot receive
+      // a token for an already-running workspace A room whose UUID they know.
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
       // --- Recurring series link resolution ---
       // If the requested call belongs to a recurring series, try to redirect the
       // participant to the currently active instance (someone shared an old link).
       // Fallback: use the current in-window SCHEDULED instance, or the next one
       // when the requested link points to an occurrence whose window has ended.
-      if (call?.recurringSeriesId) {
+      if (call.recurringSeriesId) {
         const activeSeriesCall = await repositories.calls.findActiveCallByRecurringSeriesId(call.recurringSeriesId);
         if (activeSeriesCall) {
           logger.info(`[joinCall] Recurring series redirect: old call ${callId} → active call ${activeSeriesCall.externalId}`);
@@ -756,6 +759,16 @@ export class CallController {
         }
       }
 
+      // Defense in depth after recurring resolution: the final call instance
+      // must belong to the workspace identity selected by authentication.
+      if (!user.workspaceId || call.workspaceId !== user.workspaceId) {
+        logger.warn(
+          `[CallController] join denied, workspace mismatch | callId=${callId}, userId=${user.id}`,
+        );
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
       if (call && call.status === CallStatus.ENDED) {
         res.status(400).json({ success: false, error: 'Cannot join an ended call' });
         return;
@@ -764,7 +777,7 @@ export class CallController {
       // Fetch channel to get scopeType for CallKit filtering and participant gating
       let scopeType = null;
       let callChannel = null;
-      if (call?.channelId) {
+      if (call.channelId) {
         callChannel = await repositories.channels.findById(call.channelId);
         scopeType = callChannel?.scopeType || null;
       }
@@ -799,6 +812,7 @@ export class CallController {
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           projectId: channel.projectId,
+          createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
 
@@ -1337,8 +1351,12 @@ export class CallController {
       }
 
       if (input.summaryTemplateId) {
-        const template = await repositories.summaryTemplates.findById(input.summaryTemplateId);
-        if (!template || template.workspaceId !== req.user!.workspaceId) {
+        const template = await summaryTemplateService.findAccessibleById(
+          input.summaryTemplateId,
+          req.user!.workspaceId,
+          userId,
+        );
+        if (!template) {
           res.status(400).json({ success: false, error: 'Invalid summary template' });
           return;
         }
@@ -1422,7 +1440,7 @@ export class CallController {
 
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
-        input.summaryTemplateId as BuiltinRecordingSummaryTemplateId,
+        input.summaryTemplateId,
       );
       if (!result) {
         res.status(404).json({

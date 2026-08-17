@@ -768,13 +768,12 @@ const XyneAISidebar = ({
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
-    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    // `block: 'nearest'` ALWAYS — not just for forced/embedded instances.
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth',
-      ...(isAgentForced && { block: 'nearest' }),
+      block: 'nearest',
     });
-  }, [isAgentForced]);
+  }, []);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming

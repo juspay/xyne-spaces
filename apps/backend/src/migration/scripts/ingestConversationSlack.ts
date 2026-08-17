@@ -517,33 +517,39 @@ export async function ingestConversationSlack(
       try {
         // Skip main message ingestion if onlyReplies is true
         if (!onlyReplies) {
-          // Check for duplicate top-level message
+          // Check for duplicate top-level message.
+          //
+          // IMPORTANT: if the parent was already migrated (e.g. a previous run
+          // was OOM-killed mid-thread, leaving the parent + some replies written
+          // but the rest missing), we must NOT skip the whole thread. Doing so
+          // permanently drops the un-migrated replies. Instead we only skip
+          // re-inserting the parent and fall through to the reply loop below,
+          // which back-fills any missing replies. Each reply is de-duped
+          // independently, so re-running is fully idempotent.
           const existingTopLevel = await externalMessageRepo.findByExternalId(
             externalSourceId,
             slackMessage.externalId
           );
 
-          if (existingTopLevel) {
-            continue; // Skip duplicate
+          if (!existingTopLevel) {
+            // Ingest top-level message (throws on failure)
+            // Use userId if available, otherwise use userEmail/userName or botId
+            await ingestMessage(
+              slackMessage.externalId,
+              slackMessage.externalId, // externalThreadId same for top-level
+              slackMessage.content,
+              slackMessage.userId,
+              slackMessage.userEmail,
+              slackMessage.userName,
+              slackMessage.isDeactivated || false,
+              slackMessage.files,
+              undefined,
+              slackMessage.botId,
+              slackMessage.botName,
+              slackMessage.botUserId,
+              slackMessage.isPinned
+            );
           }
-
-          // Ingest top-level message (throws on failure)
-          // Use userId if available, otherwise use userEmail/userName or botId
-          await ingestMessage(
-            slackMessage.externalId,
-            slackMessage.externalId, // externalThreadId same for top-level
-            slackMessage.content,
-            slackMessage.userId,
-            slackMessage.userEmail,
-            slackMessage.userName,
-            slackMessage.isDeactivated || false,
-            slackMessage.files,
-            undefined,
-            slackMessage.botId,
-            slackMessage.botName,
-            slackMessage.botUserId,
-            slackMessage.isPinned
-          );
         }
 
         // Process thread replies

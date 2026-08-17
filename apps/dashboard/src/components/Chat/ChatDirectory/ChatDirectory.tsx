@@ -1,4 +1,13 @@
-import { ReactElement, ReactNode, useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  ReactElement,
+  ReactNode,
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  type ComponentType,
+} from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -16,26 +25,26 @@ import {
   SearchDefault,
   ClockDefault,
   PencilEdit,
-  ChevronSortVertical,
-  ListSortAlphabetically,
-  CheckTickSingle,
-  NotificationBellOn,
   MultipleCrossCancelDefault,
   Star,
   Hashtag,
   ChatDefault,
+  ThreeDotsMenuVertical,
+  type PikaIconProps,
 } from '@xyne/icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { keyBetween, sumSectionUnread } from './ChatDirectory.utils';
+import { keyBetween } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
+import { useAllMentionCount } from '../../../hooks/useMentionCount';
 import UnreadMentionsPill, { useOffscreenUnreadSections } from './UnreadMentionsPill';
 import { useMutation } from '@tanstack/react-query';
 import { useSelector } from '@xstate/react';
@@ -56,7 +65,11 @@ import Dialog, { cn } from '../../ui/Dialog';
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { useChannelSort } from '../../../hooks/useChannelSort';
+import {
+  useChannelSort,
+  type SidebarGroup,
+  type SidebarGroupPreference,
+} from '../../../hooks/useChannelSort';
 import {
   useChannelSectionDnd,
   STARRED_CONTAINER,
@@ -64,17 +77,18 @@ import {
   DM_CONTAINER,
 } from './useChannelSectionDnd';
 import {
-  ChannelSortOrder,
   ChannelSection,
   ChannelType,
   ChannelScopeType,
   isDeskChannelType,
+  NotificationLevel,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
 import { createPortal } from 'react-dom';
 import SortableSection from './SortableSection';
+import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
@@ -100,6 +114,100 @@ const ContainerDropZone = ({
     <div ref={setNodeRef} className={className}>
       {children}
     </div>
+  );
+};
+
+const GroupSettingsMenu = ({
+  group,
+  trackName,
+  groupPreferences,
+  setGroupPreference,
+  onOpenChange,
+  alwaysVisible = false,
+  actions = [],
+  allowMentionsFilter = true,
+}: {
+  group: SidebarGroup;
+  trackName: string;
+  groupPreferences: Record<SidebarGroup, SidebarGroupPreference>;
+  setGroupPreference: (group: SidebarGroup, patch: Partial<SidebarGroupPreference>) => void;
+  onOpenChange?: (open: boolean) => void;
+  alwaysVisible?: boolean;
+  allowMentionsFilter?: boolean;
+  actions?: {
+    label: string;
+    icon: ComponentType<PikaIconProps>;
+    trackName: string;
+    onSelect: () => void;
+  }[];
+}): ReactElement => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { filterMode, sortOrder } = groupPreferences[group];
+  return (
+    <DropdownMenu
+      open={menuOpen}
+      onOpenChange={open => {
+        setMenuOpen(open);
+        onOpenChange?.(open);
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <button
+          className={cn(
+            'group/child flex items-center justify-center rounded-md p-1 shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-opacity ease-in-out duration-300 focus:outline-none',
+            alwaysVisible || menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          aria-label='Section options'
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name={trackName}
+        >
+          <ThreeDotsMenuVertical strokeWidth={2.33} size={14} className='shrink-0' />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side='right'
+        align='start'
+        alignOffset={-4}
+        sideOffset={8}
+        className='min-w-[230px]'
+        onCloseAutoFocus={e => e.preventDefault()}
+      >
+        {actions.map(action => {
+          const Glyph = action.icon;
+          return (
+            <DropdownMenuItem
+              key={action.label}
+              className={MENU_ROW}
+              onClick={e => {
+                e.stopPropagation();
+                action.onSelect();
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name={action.trackName}
+            >
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <Glyph size={16} />
+              </span>
+              <span className='flex-1'>{action.label}</span>
+            </DropdownMenuItem>
+          );
+        })}
+        {actions.length > 0 && <DropdownMenuSeparator />}
+        <SectionSettingsMenu
+          allowMentionsFilter={allowMentionsFilter}
+          filterMode={filterMode}
+          sortOrder={sortOrder}
+          onSetFilter={mode => setGroupPreference(group, { filterMode: mode })}
+          onSetSort={order => {
+            if (order) setGroupPreference(group, { sortOrder: order });
+          }}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
@@ -136,14 +244,10 @@ const ChatDirectory = ({
   const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
-  const {
-    starred,
-    channels,
-    directMessages,
-    allDirectMessages,
-    channelSortOrder,
-    setChannelSortOrder,
-  } = useChannelSort(channelData, allChannelsUserStatus, context.userID, activeChannelId);
+  const unreadCounts = useAllUnreadCount();
+  const mentionCounts = useAllMentionCount();
+  const { starred, channels, directMessages, groupPreferences, setGroupPreference } =
+    useChannelSort(channelData, allChannelsUserStatus, context.userID);
   const {
     channelSections,
     sectioned,
@@ -153,6 +257,10 @@ const ChatDirectory = ({
     defaultDisplayChannels,
     dmDisplayChannels,
     starredDisplayChannels,
+    sectionUnreadCounts,
+    defaultUnreadCount,
+    dmUnreadCount,
+    starredUnreadCount,
     activeOverlayChannel,
     activeOverlaySection,
     moveChannelToSection,
@@ -160,10 +268,13 @@ const ChatDirectory = ({
   } = useChannelSectionDnd({
     channels,
     directMessages,
-    allDirectMessages,
     starred,
     channelData,
     allChannelsUserStatus,
+    groupPreferences,
+    unreadCounts,
+    mentionCounts,
+    activeChannelId,
   });
 
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
@@ -224,10 +335,7 @@ const ChatDirectory = ({
       return Array.from(next);
     });
   }, [sectioned]);
-  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
-
-  // Get unread counts for all channels (for DMs)
-  const unreadCounts = useAllUnreadCount();
+  const [isSectionMenuOpen, setIsSectionMenuOpen] = useState(false);
   const unreadSectionIds = useMemo(() => {
     const hasBadge = (list: VisibleChannel[]): boolean =>
       list.some(c => (unreadCounts[c.id] ?? 0) > 0 && c.id !== activeChannelId);
@@ -292,6 +400,7 @@ const ChatDirectory = ({
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
       let isUnread = hasUnreadCount;
       if (!isDM) {
@@ -326,14 +435,6 @@ const ChatDirectory = ({
 
   useShortcutById('sidebar.nextUnreadConversation', () => navigateRelativeUnreadChannel(1));
   useShortcutById('sidebar.prevUnreadConversation', () => navigateRelativeUnreadChannel(-1));
-
-  const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
-  const channelsUnreadCount = sumSectionUnread(
-    defaultDisplayChannels,
-    unreadCounts,
-    activeChannelId,
-  );
-  const dmUnreadCount = sumSectionUnread(dmDisplayChannels, unreadCounts, activeChannelId);
 
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
@@ -442,6 +543,9 @@ const ChatDirectory = ({
   // sidebar); Enter navigates without the param so normal auto-focus kicks in.
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
+      // Only bare j/k/Enter navigate; ignore ⌘/⌃/⌥ combos so browser and
+      // app shortcuts (e.g. ⌘K search) still work while the sidebar is focused.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k' && e.key !== 'Enter') return;
       const active = document.activeElement;
       if (!listContainerRef.current || !active || !listContainerRef.current.contains(active)) {
@@ -722,24 +826,34 @@ const ChatDirectory = ({
                     value={ChannelCategory.STARRED}
                     data-sidebar-section={ChannelCategory.STARRED}
                   >
-                    <Accordion.Trigger asChild>
-                      <button className='group flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium px-3'>
-                        <span className='size-4 flex items-center justify-center shrink-0'>
-                          <Star size={14} className='group-hover:hidden' />
-                          <ChevronRight
-                            strokeWidth={2.33}
-                            size={12}
-                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                          />
-                        </span>
-                        <span className='text-left truncate block'>Starred</span>
+                    <Accordion.Header asChild>
+                      <div className='group px-3 flex items-center justify-between gap-2'>
+                        <Accordion.Trigger asChild>
+                          <button className='flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium'>
+                            <span className='size-4 flex items-center justify-center shrink-0'>
+                              <Star size={14} className='group-hover:hidden' />
+                              <ChevronRight
+                                strokeWidth={2.33}
+                                size={12}
+                                className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                              />
+                            </span>
+                            <span className='text-left truncate block'>Starred</span>
+                          </button>
+                        </Accordion.Trigger>
                         {starredUnreadCount > 0 && (
-                          <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+                          <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
                             {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
                           </Badge>
                         )}
-                      </button>
-                    </Accordion.Trigger>
+                        <GroupSettingsMenu
+                          group='starred'
+                          trackName='STARRED_SECTION_OPTIONS'
+                          groupPreferences={groupPreferences}
+                          setGroupPreference={setGroupPreference}
+                        />
+                      </div>
+                    </Accordion.Header>
                     <Accordion.Content>
                       <div className='min-h-[4px]'>
                         {starredDisplayChannels.length === 0 ? (
@@ -776,6 +890,7 @@ const ChatDirectory = ({
                     channels={sectionChannels}
                     sections={channelSections ?? []}
                     unreadCounts={unreadCounts}
+                    sectionUnreadCount={sectionUnreadCounts[section.id] ?? 0}
                     activeChannelId={activeChannelId}
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
@@ -787,6 +902,15 @@ const ChatDirectory = ({
                         mutators.channelSection.update({
                           id: sectionId,
                           sortOrder: order,
+                          timestamp: Date.now(),
+                        }),
+                      );
+                    }}
+                    onSetFilterMode={(sectionId, mode) => {
+                      void zero.mutate(
+                        mutators.channelSection.update({
+                          id: sectionId,
+                          filterMode: mode,
                           timestamp: Date.now(),
                         }),
                       );
@@ -835,13 +959,13 @@ const ChatDirectory = ({
                         <span className='text-left truncate block'>Channels</span>
                       </button>
                     </Accordion.Trigger>
-                    {channelsUnreadCount > 0 && (
+                    {defaultUnreadCount > 0 && (
                       <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
-                        {channelsUnreadCount > 9 ? '9+' : channelsUnreadCount}
+                        {defaultUnreadCount > 9 ? '9+' : defaultUnreadCount}
                       </Badge>
                     )}
                     <div
-                      className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     >
                       <Tooltip
                         content='Browse channels'
@@ -892,95 +1016,34 @@ const ChatDirectory = ({
                           />
                         </button>
                       </Tooltip>
-                      <Tooltip content='New section' side='top' sideOffset={0} delayDuration={500}>
-                        <button
-                          className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
-                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setShowAddSectionForm(true);
-                          }}
-                          data-track-category='CHAT_SIDEBAR'
-                          data-track-name='CREATE_NEW_SECTION'
-                        >
-                          <FolderPlus
-                            strokeWidth={2.33}
-                            size={14}
-                            className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
-                          />
-                        </button>
-                      </Tooltip>
-                      <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
-                        <Tooltip
-                          content='Sort channels'
-                          side='top'
-                          sideOffset={0}
-                          delayDuration={500}
-                        >
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1 focus:outline-none'
-                              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                              }}
-                              data-track-category='CHAT_SIDEBAR'
-                              data-track-name='SORT_CHANNELS'
-                            >
-                              <ChevronSortVertical
-                                strokeWidth={2.33}
-                                size={14}
-                                className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
-                              />
-                            </button>
-                          </DropdownMenuTrigger>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align='end'
-                          className='min-w-[160px]'
-                          onCloseAutoFocus={e => e.preventDefault()}
-                        >
-                          <DropdownMenuItem
-                            onClick={e => {
-                              e.stopPropagation();
-                              setChannelSortOrder(ChannelSortOrder.UNREAD);
-                            }}
-                            className='gap-2'
-                          >
-                            <NotificationBellOn size={14} className='shrink-0' />
-                            <span className='flex-1'>Unread & Activity</span>
-                            {channelSortOrder === ChannelSortOrder.UNREAD && (
-                              <CheckTickSingle size={14} className='shrink-0' />
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={e => {
-                              e.stopPropagation();
-                              setChannelSortOrder(ChannelSortOrder.RECENCY);
-                            }}
-                            className='gap-2'
-                          >
-                            <ClockDefault size={14} className='shrink-0' />
-                            <span className='flex-1'>By recency</span>
-                            {channelSortOrder === ChannelSortOrder.RECENCY && (
-                              <CheckTickSingle size={14} className='shrink-0' />
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={e => {
-                              e.stopPropagation();
-                              setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
-                            }}
-                            className='gap-2'
-                          >
-                            <ListSortAlphabetically size={14} className='shrink-0' />
-                            <span className='flex-1'>Alphabetical A-Z</span>
-                            {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
-                              <CheckTickSingle size={14} className='shrink-0' />
-                            )}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <GroupSettingsMenu
+                        group='channels'
+                        trackName='CHANNELS_SECTION_OPTIONS'
+                        groupPreferences={groupPreferences}
+                        setGroupPreference={setGroupPreference}
+                        onOpenChange={setIsSectionMenuOpen}
+                        alwaysVisible
+                        actions={[
+                          {
+                            label: 'Browse channels',
+                            icon: SearchDefault,
+                            trackName: 'BROWSE_CHANNELS',
+                            onSelect: () => void navigate('/chat/search?mode=channels'),
+                          },
+                          {
+                            label: 'Create channel',
+                            icon: PlusDefault,
+                            trackName: 'CREATE_NEW_CHANNEL',
+                            onSelect: () => setShowAddChannelForm(true),
+                          },
+                          {
+                            label: 'New section',
+                            icon: FolderPlus,
+                            trackName: 'CREATE_NEW_SECTION',
+                            onSelect: () => setShowAddSectionForm(true),
+                          },
+                        ]}
+                      />
                     </div>
                   </div>
                 </Accordion.Header>
@@ -1054,6 +1117,21 @@ const ChatDirectory = ({
                         />
                       </button>
                     </Tooltip>
+                    <GroupSettingsMenu
+                      group='dms'
+                      trackName='DM_SECTION_OPTIONS'
+                      allowMentionsFilter={false}
+                      groupPreferences={groupPreferences}
+                      setGroupPreference={setGroupPreference}
+                      actions={[
+                        {
+                          label: 'Add direct message',
+                          icon: PlusDefault,
+                          trackName: 'CREATE_DIRECT_MESSAGE',
+                          onSelect: handleAddDirectMessage,
+                        },
+                      ]}
+                    />
                   </div>
                 </Accordion.Header>
                 <Accordion.Content data-testid='dm-list'>

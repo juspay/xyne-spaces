@@ -65,14 +65,25 @@ export const getPlaceholderGroupTransition = (
  */
 export const animateSummaryProgress = (
   progressWidth: MotionValue<string>,
+  initialProgress = 0,
 ): AnimationPlaybackControls => {
+  const clampedProgress = Math.min(96, Math.max(0, initialProgress));
+  progressWidth.set(`${clampedProgress}%`);
+
+  if (clampedProgress >= 96) {
+    return animate(progressWidth, '96%', { duration: 0 });
+  }
+
+  if (clampedProgress > 0) {
+    const remainingDuration = PROGRESS_DURATION_SECONDS * ((96 - clampedProgress) / 96);
+    return animate(progressWidth, '96%', { duration: remainingDuration, ease: 'linear' });
+  }
+
   const transition: ValueAnimationTransition<string> = {
     duration: PROGRESS_DURATION_SECONDS,
     times: PROGRESS_STOPS.map(([seconds]) => seconds / PROGRESS_DURATION_SECONDS),
     ease: 'linear',
   };
-
-  progressWidth.set(INITIAL_PROGRESS_WIDTH);
 
   return animate(
     progressWidth,

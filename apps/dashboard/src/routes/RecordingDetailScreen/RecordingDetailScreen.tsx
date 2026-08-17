@@ -5,6 +5,8 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -112,6 +114,7 @@ function RecordingNotesSection({ notesCanvasId }: { notesCanvasId: string }): Re
 }
 
 export default function RecordingDetailScreen(): ReactElement {
+  const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -311,6 +314,15 @@ export default function RecordingDetailScreen(): ReactElement {
 
   return (
     <div className='h-full overflow-auto bg-muted'>
+      {/* This root is itself the scroll container, so a zero-height sticky wrapper
+          pins the navigator without contributing layout height. */}
+      {!isMobile && (
+        <div className='sticky left-0 top-0 z-30 hidden h-0 w-fit md:block'>
+          <div className='h-[52px] w-fit'>
+            <AppNavigator />
+          </div>
+        </div>
+      )}
       <div className='max-w-4xl mx-auto p-6'>
         {/* Header */}
         <div className='mb-6'>

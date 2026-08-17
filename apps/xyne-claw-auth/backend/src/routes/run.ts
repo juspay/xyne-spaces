@@ -23,7 +23,7 @@ import {
 } from "../lib/callable-agent-resolver.js";
 import { ClawSseParser, parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
 import { mintSessionToken } from "../lib/session-tokens.js";
-import { consumeAlreadyOpenStream } from "../lib/consume-claw-stream.js";
+import { consumeAlreadyOpenStream, streamDispatcher } from "../lib/consume-claw-stream.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, type ProviderConfig } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { redisService } from "../redis.js";
@@ -76,7 +76,11 @@ async function fetchClawRunWithRetry(init: RequestInit, label: string): Promise<
   let retried = false;
   for (;;) {
     try {
-      const response = await fetch(`${CONFIG.xyneClawUrl}/run`, init);
+      const response = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+        ...init,
+        // `dispatcher` is an undici extension not in the DOM RequestInit type.
+        dispatcher: streamDispatcher,
+      } as unknown as RequestInit);
       if (response.status === 503 && !retried) {
         retried = true;
         log.warn(`[run] proxy: retrying claw /run once after 503 (${label})`);
@@ -2070,6 +2074,10 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
       },
       onPlan: async (sid, todos) => {
         await postProgress({ sessionId: sid, kind: "plan", todos });
+      },
+      onPr: async (sid, pr) => {
+        log.info(`[run] proxy: bridging kind:pr → progress session=${sid}`);
+        await postProgress({ sessionId: sid, kind: "pr", pr });
       },
       onProgressLabel: async (sid, payload) => {
         await postProgress({ sessionId: sid, ...payload });

@@ -16,6 +16,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
+import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -1363,6 +1364,10 @@ export class AuthV2Controller {
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
         await this.userSessionService.revokeSession(sessionId);
+      }
+
+      if (req.user && sessionId) {
+        await getEncryptionProvider().revokeSessionKey(sessionId);
       }
 
       // Clear global session cookie

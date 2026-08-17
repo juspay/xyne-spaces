@@ -13,12 +13,14 @@ export class CollectionsACL extends BaseQueryACL<'collections'> {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('isPrivate', '=', false),
-        cmp('ownerId', '=', this.ctx.userID),
-        exists('permissions', (p) => p.where('userId', this.ctx.userID))
-      )
-    );
+    return query
+      .where('workspaceId', '=', this.ctx.workspaceId)
+      .where(({ or, cmp, exists }) =>
+        or(
+          cmp('isPrivate', '=', false),
+          cmp('ownerId', '=', this.ctx.userID),
+          exists('permissions', (p) => p.where('userId', this.ctx.userID))
+        )
+      );
   }
 }

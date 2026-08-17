@@ -13,10 +13,32 @@ function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
 }
 
+function isStructuredSection(
+  section: Prisma.JsonValue
+): section is Prisma.JsonObject & { title: string; description?: string } {
+  return (
+    typeof section === 'object' &&
+    section !== null &&
+    !Array.isArray(section) &&
+    typeof section.title === 'string' &&
+    (section.description === undefined || typeof section.description === 'string')
+  );
+}
+
 export function formatSummaryTemplateSections(sections: Prisma.JsonValue): string {
   if (typeof sections === 'string') return sections.trim();
   if (sections === null) return '';
   if (Array.isArray(sections) && sections.length === 0) return '';
+  if (Array.isArray(sections) && sections.every(isStructuredSection)) {
+    return sections
+      .map((section) => {
+        const title = typeof section.title === 'string' ? section.title.trim() : '';
+        const description =
+          typeof section.description === 'string' ? section.description.trim() : '';
+        return `### ${title}${description ? `\n${description}` : ''}`;
+      })
+      .join('\n---\n');
+  }
   if (
     typeof sections === 'object' &&
     !Array.isArray(sections) &&

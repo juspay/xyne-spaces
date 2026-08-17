@@ -8,7 +8,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
   recordingService,
-  type BuiltinRecordingSummaryTemplateId,
   type RecordingDetail,
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
@@ -25,9 +24,13 @@ import {
 } from '../../utils/recordingTabPreference';
 import {
   clearSummaryRequested,
-  isSummaryRequested,
+  getSummaryProgress,
+  getSummaryRequest,
   markSummaryRequested,
+  saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
@@ -81,21 +84,13 @@ import { parseMarkedItems, type MarkedItem } from './components/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
+import { SummaryTemplatesModal, getTemplateIcon } from './components/SummaryTemplatesModal';
+import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 interface RecordingNavState {
   recordingIds?: string[];
 }
-
-const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<RecordingSummaryTemplate> = [
-  { id: 'default', name: 'Default summary', icon: '⚡' },
-  { id: 'product_sync', name: 'Product sync', icon: '🔁' },
-  { id: 'customer_discovery', name: 'Customer: Discovery', icon: '💰' },
-  { id: 'one_on_one', name: '1 to 1', icon: '👥' },
-  { id: 'hiring', name: 'Hiring', icon: '💼' },
-  { id: 'standup', name: 'Stand-Up', icon: '🧍' },
-  { id: 'sprint_review', name: 'Sprint review', icon: '📈' },
-  { id: 'customer_feedback', name: 'Customer feedback', icon: '🔄' },
-];
 
 const AUDIO_POLL_INTERVAL_MS = 10_000;
 const AUDIO_POLL_MAX_ATTEMPTS = 30;
@@ -103,6 +98,12 @@ const AUDIO_POLL_MAX_ATTEMPTS = 30;
 // the whole poll window and still has no audio, stitching is not pending — the
 // recording simply has no playable audio, so we skip polling and mark it unavailable.
 const AUDIO_STITCH_GRACE_MS = AUDIO_POLL_INTERVAL_MS * AUDIO_POLL_MAX_ATTEMPTS;
+
+const DEFAULT_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
+  id: 'default',
+  name: 'Default summary',
+  icon: '✨',
+};
 
 const POST_SPLIT_BUTTON_CLASS =
   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
@@ -123,6 +124,7 @@ function isSameRecordingSnapshot(a: RecordingDetail, b: RecordingDetail): boolea
 }
 
 export default function RecordingDetailV2Screen(): ReactElement {
+  const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -142,9 +144,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
+  const [templatesModalMode, setTemplatesModalMode] = useState<'browse' | 'new' | null>(null);
+  const [shouldLoadSummaryTemplates, setShouldLoadSummaryTemplates] = useState(false);
+  const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } = useSummaryTemplates(
+    shouldLoadSummaryTemplates || templatesModalMode !== null,
+  );
+  const storedSummaryTemplateId = recording?.summaryTemplateId ?? '';
+  const shouldQueryStoredSummaryTemplate =
+    storedSummaryTemplateId.length > 0 && storedSummaryTemplateId !== 'default';
+  const [storedSummaryTemplate] = useCachedQuery(
+    queries.summaryTemplateById({ templateId: storedSummaryTemplateId }),
+    { enabled: shouldQueryStoredSummaryTemplate },
+  );
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
-  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
-    useState<BuiltinRecordingSummaryTemplateId | null>(null);
+  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] = useState<string | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   // Summary Generation panel states
@@ -314,7 +327,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   // A summary asked for on a previous visit is still pending, so restore the skeleton.
   useEffect(() => {
-    setAwaitingSummary(isSummaryRequested(recordingId));
+    const request = getSummaryRequest(recordingId);
+    setAwaitingSummary(request !== null);
+    setPendingSummaryTemplateId(request?.templateId ?? null);
+    if (request?.templateId) setShouldLoadSummaryTemplates(true);
     setSummaryFailed(false);
     setLocalSessionEnded(false);
     ownedLiveSessionRef.current = null;
@@ -398,10 +414,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recordingRow]);
 
   useEffect(() => {
-    if (!recording?.detailedSummaryCanvasId) return;
+    const request = getSummaryRequest(recordingId);
+    if (!request || recording?.externalId !== recordingId) return;
+    const requestedSummaryIsReady = request.templateId
+      ? recording?.summaryTemplateId === request.templateId
+      : !!recording?.detailedSummaryCanvasId;
+    if (!requestedSummaryIsReady) return;
     setAwaitingSummary(false);
+    setPendingSummaryTemplateId(null);
     clearSummaryRequested(recordingId);
-  }, [recording?.detailedSummaryCanvasId, recordingId]);
+  }, [
+    recording?.detailedSummaryCanvasId,
+    recording?.externalId,
+    recording?.summaryTemplateId,
+    recordingId,
+  ]);
 
   // The audio is stitched after the room closes, so `hasRecording` is still false for
   // a while once a recording ends — and it is REST-only, so nothing pushes it here.
@@ -508,9 +535,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setRecording(current => (current ? { ...current, ...ticketLink } : current));
   };
 
-  const handleSummaryTemplateSelect = async (
-    summaryTemplateId: BuiltinRecordingSummaryTemplateId,
-  ): Promise<void> => {
+  const handleRegenerateSummary = async (summaryTemplateId?: string): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
     // Picking the template the existing summary was already written with is a no-op
@@ -519,17 +544,19 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return;
     }
 
-    setPendingSummaryTemplateId(summaryTemplateId);
+    const resolvedTemplateId = summaryTemplateId || 'default';
     handleTabSelect('summary');
-    markSummaryRequested(recordingId);
+    markSummaryRequested(recordingId, resolvedTemplateId);
     setSummaryRunNonce(value => value + 1);
     setAwaitingSummary(true);
     setSummaryFailed(false);
     setIsRegeneratingSummary(true);
     try {
+      // The default template is code-backed and intentionally has no database row.
+      setPendingSummaryTemplateId(resolvedTemplateId);
       const result = await recordingService.regenerateSummary(
         recording.externalId,
-        summaryTemplateId,
+        resolvedTemplateId,
       );
       setRecording(current =>
         current
@@ -544,14 +571,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
       setSummaryCanvasNonce(value => value + 1);
       setAwaitingSummary(false);
       clearSummaryRequested(recordingId);
-      const selected = RECORDING_SUMMARY_TEMPLATES.find(
-        template => template.id === result.summaryTemplateId,
-      );
-      toast.success(
-        selected?.id === 'default'
-          ? 'Default summary generated'
-          : `${selected?.name ?? 'Recording'} summary generated`,
-      );
+      const selected = summaryTemplates.find(template => template.id === result.summaryTemplateId);
+      const selectedName =
+        selected?.name ?? (result.summaryTemplateId === 'default' ? 'Default' : 'Recording');
+      toast.success(`${selectedName} summary generated`);
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -644,6 +667,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     });
   }, [recording, message, notesCanvasId]);
 
+  const handleSummaryProgressPause = useCallback(
+    (progress: number): void => saveSummaryProgress(recordingId, progress),
+    [recordingId],
+  );
+
   const transcriptText =
     speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
       ? (recording.identifiedTranscript ?? recording.transcript)
@@ -699,10 +727,26 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
-  const selectedSummaryTemplate =
-    RECORDING_SUMMARY_TEMPLATES.find(
-      template => template.id === (pendingSummaryTemplateId ?? recording.summaryTemplateId),
-    ) ?? RECORDING_SUMMARY_TEMPLATES[0]!;
+  const summaryTemplateOptions: RecordingSummaryTemplate[] = [
+    DEFAULT_SUMMARY_TEMPLATE_OPTION,
+    ...summaryTemplates
+      .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
+      .map(template => ({
+        id: template.id,
+        name: template.name,
+        icon: getTemplateIcon(template.name),
+      })),
+  ];
+  const activeSummaryTemplateId = pendingSummaryTemplateId ?? storedSummaryTemplateId;
+  const selectedSummaryTemplate: RecordingSummaryTemplate =
+    summaryTemplateOptions.find(template => template.id === activeSummaryTemplateId) ??
+    (storedSummaryTemplate?.id === activeSummaryTemplateId
+      ? {
+          id: storedSummaryTemplate.id,
+          name: storedSummaryTemplate.name,
+          icon: getTemplateIcon(storedSummaryTemplate.name),
+        }
+      : DEFAULT_SUMMARY_TEMPLATE_OPTION);
 
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
@@ -728,9 +772,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setShowTranscriptPanel(true);
   };
 
-  /** The bare "Generate summary" offer runs the currently selected template. */
-  const handleGenerateSummaryClick = (): void => {
-    void handleSummaryTemplateSelect(selectedSummaryTemplate.id);
+  const handleShowSummaryShimmer = (): void => {
+    markSummaryRequested(recordingId);
+    setSummaryRunNonce(value => value + 1);
+    setSummaryFailed(false);
+    setAwaitingSummary(true);
+  };
+
+  const handleOpenSummaryTemplates = (): void => {
+    setShouldLoadSummaryTemplates(true);
+    setTemplatesModalMode('browse');
+  };
+
+  const handleNewSummaryTemplate = (): void => {
+    setShouldLoadSummaryTemplates(true);
+    setTemplatesModalMode('new');
   };
 
   return (
@@ -738,6 +794,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
       data-testid='recording-detail-v2-page'
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
     >
+      {/* Outside the scroller below, so it stays pinned. z-30 clears the sticky
+          header's z-20 at widths where the centred column reaches the left edge. */}
+      {!isMobile && (
+        <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
+          <AppNavigator />
+        </div>
+      )}
       {/* layoutScroll: the tab indicator animates inside this scroller, so Motion has
           to account for its scroll offset when measuring positions. */}
       <motion.div
@@ -790,10 +853,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   {...(isLive || !isOwner
                     ? {}
                     : {
-                        templates: RECORDING_SUMMARY_TEMPLATES,
-                        isRegenerating: isRegeneratingSummary,
-                        onTemplateSelect: (templateId: BuiltinRecordingSummaryTemplateId) =>
-                          void handleSummaryTemplateSelect(templateId),
+                        isRegenerating: isRegeneratingSummary || awaitingSummary,
+                        templates: summaryTemplateOptions,
+                        templatesLoading: summaryTemplatesLoading,
+                        onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
+                        onTemplateSelect: summaryTemplateId =>
+                          void handleRegenerateSummary(summaryTemplateId),
+                        onRegenerate: () =>
+                          void handleRegenerateSummary(selectedSummaryTemplate.id),
+                        onOpenTemplates: handleOpenSummaryTemplates,
+                        onNewTemplate: handleNewSummaryTemplate,
                       })}
                 />
 
@@ -946,9 +1015,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 <SummaryGenerationPanel
                   isAwaiting={awaitingSummary}
                   canGenerate={hasTranscript}
-                  onGenerate={handleGenerateSummaryClick}
+                  onGenerate={handleShowSummaryShimmer}
+                  onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
+                  initialProgress={getSummaryProgress(recordingId)}
+                  onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
@@ -1020,6 +1092,28 @@ export default function RecordingDetailV2Screen(): ReactElement {
             onClose={() => setShowGoogleDocPreviewModal(false)}
             onExport={exportGoogleDoc}
             isExporting={isExportingGoogleDoc}
+          />
+        </Dialog>
+      )}
+
+      {isOwner && currentUser && templatesModalMode && (
+        <Dialog
+          open={templatesModalMode !== null}
+          onOpenChange={open => !open && setTemplatesModalMode(null)}
+          title='Summary Templates'
+          description='Choose, create, edit, and share a recording summary template.'
+          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
+          testId='summary-templates-dialog'
+        >
+          <SummaryTemplatesModal
+            templates={summaryTemplates}
+            loading={summaryTemplatesLoading}
+            selectedTemplateId={selectedSummaryTemplate.id || null}
+            currentUserId={currentUser.id}
+            currentUserName={getUserDisplayName(currentUser)}
+            startWithNewTemplate={templatesModalMode === 'new'}
+            onClose={() => setTemplatesModalMode(null)}
+            onApply={template => handleRegenerateSummary(template.id)}
           />
         </Dialog>
       )}

@@ -415,17 +415,21 @@ export function AutomationBuilder({
   });
 
   const disableMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => {
+    mutationFn: ({ id, cancelQueued }: { id: string; cancelQueued: boolean }): Promise<void> => {
       setSavedStatus(AutomationStatusValues.DISABLED);
       setErrorMessage(null);
-      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now() }));
-      toast.success('Automation disabled');
+      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now(), cancelQueued }));
+      toast.success(
+        cancelQueued ? 'Automation disabled, queued runs will not fire' : 'Automation disabled',
+      );
       return Promise.resolve();
     },
     onError: err => {
       setErrorMessage(err instanceof Error ? err.message : 'Disable failed');
     },
   });
+
+  const [disableDialogOpen, setDisableDialogOpen] = useState(false);
 
   const archiveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -685,8 +689,8 @@ export function AutomationBuilder({
 
   const handleDisable = useCallback((): void => {
     if (!savedId) return;
-    disableMutation.mutate(savedId);
-  }, [disableMutation, savedId]);
+    setDisableDialogOpen(true);
+  }, [savedId]);
 
   const handleArchive = useCallback((): void => {
     if (!savedId) return;
@@ -840,8 +844,9 @@ export function AutomationBuilder({
                   </Button>
                 )
               ) : null}
-              {/* Admin-only: permanently retire a live automation. */}
-              {isLiveRow && savedId && isAutomationsAdmin ? (
+              {/* Admin-only: permanently retire an automation. Only offered once it is
+                  DISABLED, so it has to be switched off first. */}
+              {savedId && isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED ? (
                 <Button
                   variant='outline'
                   size='sm'
@@ -1277,6 +1282,58 @@ export function AutomationBuilder({
               data-track-name='reject-confirm'
             >
               Reject
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={disableDialogOpen}
+        onOpenChange={setDisableDialogOpen}
+        title='Disable automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-2 px-5 py-4 text-sm'>
+          <p className='text-base font-semibold text-foreground'>
+            Disable {name || 'this automation'}?
+          </p>
+          <p className='text-muted-foreground'>What should happen to the runs already queued?</p>
+          <div className='flex flex-wrap items-center justify-end gap-2 pt-4'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDisableDialogOpen(false)}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: false });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-keep-queued'
+            >
+              Let them finish
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={disableMutation.isPending}
+              loading={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: true });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel-queued'
+            >
+              Stop them
             </Button>
           </div>
         </div>
