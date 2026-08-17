@@ -11,13 +11,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./exclusions.json": "./src/exclusions.json"
+    }
   },
   "files": [
-    "dist",
-    "src/exclusions.json",
-    "openapi"
+    "dist"
   ],
   "scripts": {
     "build": "tsc",

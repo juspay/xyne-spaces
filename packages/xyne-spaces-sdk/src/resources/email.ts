@@ -281,9 +281,13 @@ export class EmailResource extends Resource {
     return { mappingId };
   }
 
-  /** Remove the label from a conversation. */
-  removeLabel(conversationId: string): Promise<void> {
-    return this.call(emailOperations.removeLabel, { conversationId });
+  /**
+   * Remove a label from a conversation.
+   *
+   * Takes the label as well as the conversation — one thread can carry several.
+   */
+  removeLabel(conversationId: string, labelId: string): Promise<void> {
+    return this.call(emailOperations.removeLabel, { conversationId, labelId });
   }
 
   /** Delete a label everywhere it is used. */

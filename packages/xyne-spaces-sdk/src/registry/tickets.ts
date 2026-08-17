@@ -409,7 +409,8 @@ export const ticketsOperations = {
    * Remove a tag from a ticket.
    * Maps to: Zero mutator 'ticketTagV2.delete'
    */
-  removeTag: mutator<{ tagId: string }, void>('ticketTagV2.delete'),
+  // Both ids are required: the tag itself and the row linking it to the ticket.
+  removeTag: mutator<{ tagId: string; mappingId: string }, void>('ticketTagV2.delete'),
 
   // ----- References between tickets -----
 

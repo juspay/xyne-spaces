@@ -123,18 +123,3 @@ export const searchSchemaQuerySchema = z.object({
   schema: z.enum(VESPA_SCHEMAS),
 });
 
-/**
- * Search results are heterogeneous by design — a hit may be a message, ticket,
- * file, or user, each with its own field set — and grouped or flat depending on
- * the request. The envelope is typed; individual hits stay open.
- */
-export const searchResponseSchema = z.object({
-  grouped: z.boolean(),
-  groups: z
-    .array(z.object({ app: z.string().optional(), count: z.number(), results: z.array(z.unknown()) }))
-    .optional(),
-  results: z.array(z.unknown()).optional(),
-  totalCount: z.number().optional(),
-  offset: z.number(),
-  limit: z.number(),
-});

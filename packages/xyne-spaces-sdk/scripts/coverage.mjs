@@ -84,37 +84,78 @@ function readRequiredArgs(src, open) {
   const end = matchBracket(src, brace);
   if (brace === -1 || end === -1) return null;
 
-  // Group the body into top-level fields, carrying each field's full text.
+  /*
+   * Split into top-level fields by scanning characters, not lines.
+   *
+   * A line-based split silently misses every field after the first on a shared
+   * line — `z.object({ callId: z.string(), notesCanvasId: z.string() })` looked
+   * like a one-field schema, which made the checks below report arguments as
+   * unaccepted when they were declared perfectly well.
+   */
+  // Comments must go first: prose like `// pagination is optional: ...` contains
+  // `word:` at depth 0 and would be read as a field name.
+  const body = src
+    .slice(brace + 1, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
   const fields = [];
   let depth = 0;
-  let current = null;
-  for (const line of src.slice(brace + 1, end).split('\n')) {
-    const field = depth === 0 ? /^\s*([a-zA-Z][a-zA-Z0-9_]*)\s*:/.exec(line) : null;
-    if (field) {
-      if (current) fields.push(current);
-      current = { name: field[1], text: line };
-    } else if (current) {
-      current.text += `\n${line}`;
-    }
-    depth += (line.match(/[{[(]/g) ?? []).length - (line.match(/[}\])]/g) ?? []).length;
-  }
-  if (current) fields.push(current);
+  let fieldStart = 0;
+  let name = null;
 
-  return fields.filter((f) => !f.text.includes('.optional()')).map((f) => f.name);
+  for (let i = 0; i <= body.length; i++) {
+    const ch = body[i];
+    if (i === body.length || (ch === ',' && depth === 0)) {
+      if (name) fields.push({ name, text: body.slice(fieldStart, i) });
+      name = null;
+      fieldStart = i + 1;
+      continue;
+    }
+    if ('{[('.includes(ch)) depth++;
+    else if ('}])'.includes(ch)) depth--;
+    else if (depth === 0 && name === null) {
+      const rest = body.slice(i);
+      const m = /^\s*([a-zA-Z][a-zA-Z0-9_]*)\s*:/.exec(rest);
+      if (m) {
+        name = m[1];
+        i += m[0].length - 1;
+      }
+    }
+  }
+
+  return {
+    required: fields.filter((f) => !f.text.includes('.optional()')).map((f) => f.name),
+    all: fields.map((f) => f.name),
+  };
 }
 
-/** Catalog query names and their required arguments. */
+/**
+ * Catalog query names, their arguments, and whether each returns a single row.
+ *
+ * `.one()` in the query body is what decides single-vs-list. The SDK declares that
+ * as `X | null` or `X[]`, and nothing else verifies the two agree.
+ */
 function readQueries() {
   const src = readFileSync(QUERIES, 'utf8');
   const names = new Set();
   const required = new Map();
+  const declared = new Map();
+  const single = new Set();
 
-  for (const m of src.matchAll(/^ {2}([a-zA-Z0-9_]+): defineQuery\(/gm)) {
+  const matches = [...src.matchAll(/^ {2}([a-zA-Z0-9_]+): defineQuery\(/gm)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
     names.add(m[1]);
     const args = readRequiredArgs(src, m.index + m[0].length - 1);
-    if (args) required.set(m[1], args);
+    if (args) {
+      required.set(m[1], args.required);
+      declared.set(m[1], new Set(args.all));
+    }
+    // Body runs to the start of the next operation.
+    const bodyEnd = matches[i + 1]?.index ?? src.length;
+    if (/\.one\(\)/.test(src.slice(m.index, bodyEnd))) single.add(m[1]);
   }
-  return { names, required };
+  return { names, required, declared, single };
 }
 
 /** Catalog mutator names and their required arguments. */
@@ -126,6 +167,7 @@ function readMutators() {
 
   const names = new Set();
   const required = new Map();
+  const declared = new Map();
   let namespace = null;
   let cursor = 0; // char offset of the current line within `body`
 
@@ -139,11 +181,14 @@ function readMutators() {
       const full = `${namespace}.${mut[1]}`;
       names.add(full);
       const args = readRequiredArgs(body, cursor + mut[0].length - 1);
-      if (args) required.set(full, args);
+      if (args) {
+        required.set(full, args.required);
+        declared.set(full, new Set(args.all));
+      }
     }
     cursor += line.length + 1;
   }
-  return { names, required };
+  return { names, required, declared };
 }
 
 /** Operation names referenced by the registries, with their source positions. */
@@ -196,17 +241,10 @@ function suppliedArgs(info) {
     // A bare `...args` forwards everything, so nothing can be proven missing.
     if (/\.\.\.\s*args\b/.test(body)) return null;
 
-    const keys = new Set();
-    let depth = 0;
-    for (const line of body.split('\n')) {
-      if (depth === 0) {
-        for (const k of line.matchAll(/(?:^|[{,\s])([a-zA-Z][a-zA-Z0-9_]*)\s*:/g)) keys.add(k[1]);
-        // `...(args.foo ? { foo } : {})` supplies foo conditionally.
-        for (const k of line.matchAll(/\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}/g)) keys.add(k[1]);
-      }
-      depth += (line.match(/[{[(]/g) ?? []).length - (line.match(/[}\])]/g) ?? []).length;
-    }
-    return keys;
+    // Character scan, for the same reason the declared-field parser uses one: a
+    // line-based pass reads `updates: { role: … }` as supplying `role` at the top
+    // level, and then reports a correctly-nested argument as unaccepted.
+    return topLevelKeys(body);
   }
 
   // No mapArgs: args are forwarded verbatim, so the entry's own generic is the
@@ -218,11 +256,61 @@ function suppliedArgs(info) {
   return keys;
 }
 
-const { names: queries, required: queryArgs } = readQueries();
-const { names: mutators, required: mutatorArgs } = readMutators();
+
+/**
+ * Keys at the top level of an object literal body, ignoring nested ones.
+ *
+ * Also recognises `...(args.foo ? { foo } : {})`, which supplies `foo`
+ * conditionally, and bails on nothing — callers decide what a missing key means.
+ */
+function topLevelKeys(body) {
+  const clean = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const keys = new Set();
+  let depth = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if ('{[('.includes(ch)) depth++;
+    else if ('}])'.includes(ch)) depth--;
+    else if (depth === 0) {
+      const m = /^([a-zA-Z][a-zA-Z0-9_]*)\s*:/.exec(clean.slice(i));
+      if (m && !/[a-zA-Z0-9_.]/.test(clean[i - 1] ?? '')) {
+        keys.add(m[1]);
+        i += m[0].length - 1;
+      }
+    }
+  }
+  // Conditional spreads live one level down but do supply their key.
+  for (const m of clean.matchAll(/\?\s*\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*[:}]/g)) keys.add(m[1]);
+  return keys;
+}
+
+/** The declared result type — the generic's second parameter. */
+function resultType(info) {
+  const generic = /<([\s\S]*)>\($/.exec(info.generic);
+  if (!generic) return null;
+  // Split on the top-level comma only; result types contain their own commas.
+  let depth = 0;
+  const text = generic[1];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if ('<{[('.includes(ch)) depth++;
+    else if ('>}])'.includes(ch)) depth--;
+    else if (ch === ',' && depth === 0) return text.slice(i + 1).trim();
+  }
+  return null;
+}
+
+const {
+  names: queries,
+  required: queryArgs,
+  declared: queryDeclared,
+  single: singleRowQueries,
+} = readQueries();
+const { names: mutators, required: mutatorArgs, declared: mutatorDeclared } = readMutators();
 
 // One lookup for both kinds. Names cannot collide: mutators are namespaced.
 const required = new Map([...queryArgs, ...mutatorArgs]);
+const declaredArgs = new Map([...queryDeclared, ...mutatorDeclared]);
 const used = readRegistryUsage();
 const excluded = new Map(
   JSON.parse(readFileSync(EXCLUSIONS, 'utf8')).exclusions.map((e) => [e.name, e])
@@ -249,6 +337,48 @@ for (const [name, info] of used) {
   if (missing.length > 0) {
     problems.push(
       `${info.kind} "${name}" (registry/${info.file}) never supplies required arg(s): ${missing.join(', ')}`
+    );
+  }
+}
+
+// 2b. Nothing may send an argument the operation does not declare.
+//     Zod strips unknown keys silently, so a removed or renamed backend argument
+//     leaves the SDK sending a field that is quietly discarded — the call still
+//     "succeeds" while doing less than the caller asked for.
+for (const [name, info] of used) {
+  const accepts = declaredArgs.get(name);
+  if (!accepts) continue;
+  const supplied = suppliedArgs(info);
+  if (!supplied) continue;
+  const extra = [...supplied].filter((field) => !accepts.has(field));
+  if (extra.length > 0) {
+    problems.push(
+      `${info.kind} "${name}" (registry/${info.file}) sends arg(s) it does not accept: ` +
+        `${extra.join(', ')}`
+    );
+  }
+}
+
+// 2c. A query declared `.one()` returns a row or nothing; without it, a list.
+//     The SDK states that in its result type, and a mismatch means every caller
+//     is typed against the wrong shape.
+for (const [name, info] of used) {
+  if (info.kind !== 'query' || !queries.has(name)) continue;
+  const result = resultType(info);
+  if (!result) continue;
+  const isSingle = singleRowQueries.has(name);
+  const looksList = /\[\]\s*$/.test(result);
+  const looksNullable = /\|\s*(null|undefined)\s*$/.test(result);
+
+  if (isSingle && looksList) {
+    problems.push(
+      `query "${name}" (registry/${info.file}) returns one row (.one()) but the SDK ` +
+        `declares "${result}"`
+    );
+  } else if (!isSingle && looksNullable && !looksList) {
+    problems.push(
+      `query "${name}" (registry/${info.file}) returns a list but the SDK declares ` +
+        `"${result}"`
     );
   }
 }

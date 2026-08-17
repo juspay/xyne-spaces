@@ -164,24 +164,31 @@ export class HttpClient {
       (typeof body.error === 'string' ? body.error : undefined) ||
       response.statusText;
 
+    // The API's envelope is `{ error: { code, message } }`. That `code` is the only
+    // way to tell apart failures sharing a status — `insufficient_scope` from
+    // `forbidden`, `idempotency_key_conflict` from a plain `conflict` — so carry it
+    // onto the thrown error instead of discarding it. Vocabulary is the contract's.
+    const serverCode = nestedError?.code ?? body.code;
+
     switch (response.status) {
       case 401:
-        throw new AuthError(message);
+        throw new AuthError(message, serverCode);
       case 403:
-        throw new SdkError('forbidden', message);
+        throw new SdkError('forbidden', message, serverCode);
       case 404:
-        throw new NotFoundError(message);
+        throw new NotFoundError(message, serverCode);
       case 422:
-        throw new SdkError('validation_error', message);
+        throw new SdkError('validation_error', message, serverCode);
       case 429: {
         const retryAfter = response.headers.get('Retry-After');
         throw new RateLimitError(
           message,
-          retryAfter ? parseInt(retryAfter, 10) : undefined
+          retryAfter ? parseInt(retryAfter, 10) : undefined,
+          serverCode
         );
       }
       default:
-        throw new SdkError('api_error', message);
+        throw new SdkError('api_error', message, serverCode);
     }
   }
 }

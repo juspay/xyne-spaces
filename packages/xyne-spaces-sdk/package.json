@@ -27,7 +27,8 @@
     "test:watch": "vitest",
     "generate:catalog-scopes": "node scripts/generate-catalog-scopes.mjs",
     "coverage": "node scripts/generate-catalog-scopes.mjs --check && node scripts/coverage.mjs",
-    "verify": "npm run typecheck && npm run coverage"
+    "verify": "npm run typecheck && npm run coverage && npm run contract-check",
+    "contract-check": "node scripts/contract-check.mjs"
   },
   "dependencies": {},
   "devDependencies": {

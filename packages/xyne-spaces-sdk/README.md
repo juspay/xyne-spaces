@@ -482,17 +482,30 @@ and delete anything you leave out. Read the current set first:
 `conversations.togglePin`, and `canvases.toggleStarred` flip the current value.
 Read the current state first if you need a specific outcome.
 
-**Errors are typed.**
+**Errors are typed, and carry the server's code.** The class tells you the broad
+shape; `serverCode` tells you exactly what happened. Two failures can share a
+status — `forbidden` and `insufficient_scope` are both 403 — so branch on
+`serverCode` when the distinction matters:
 
 ```typescript
-import { AuthError, NotFoundError, RateLimitError } from '@xyne/spaces-sdk';
+import { AuthError, NotFoundError, RateLimitError, SdkError } from '@xyne/spaces-sdk';
 
 try {
-  await sdk.tickets.get('missing');
+  await sdk.tickets.update({ ticketId, status: 'COMPLETED' });
 } catch (err) {
-  if (err instanceof NotFoundError) { /* ... */ }
+  if (err instanceof NotFoundError) { /* gone, or not visible to this token */ }
+  else if (err instanceof RateLimitError) { await wait(err.retryAfter); }
+  else if (err instanceof SdkError && err.serverCode === 'insufficient_scope') {
+    // A scope was never granted — retrying will not help.
+  }
 }
 ```
+
+`serverCode` is one of the 17 codes defined by
+[`@xyne/spaces-contract`](../xyne-spaces-contract) (`validation_failed`,
+`insufficient_scope`, `idempotency_key_conflict`, `mixed_update_fields`,
+`upstream_unavailable`, …). It is absent for purely local failures — `code` is
+`network_error` or `timeout` in those cases.
 
 **Support tickets are read-only here.** `sdk.supportTickets` is the desk view of
 the same rows `sdk.tickets` writes to — reassigning or restaging a support ticket
@@ -562,11 +575,41 @@ Search established the direct API pattern; server-side channel/ticket creation
 and multipart uploads now use it too. Moving an operation between transports
 does not change the resource method callers use.
 
+### The shared contract
+
+[`@xyne/spaces-contract`](../xyne-spaces-contract) holds the facts this SDK and the
+backend must agree on: the 17 error codes with their statuses and retryability, the
+21 OAuth scope families, and the request/response schemas for the endpoints that
+have them.
+
+The SDK does **not** import it at runtime. The contract depends on zod; this package
+ships zero runtime dependencies and has to load in a browser. Instead the agreement
+is enforced at build time by `npm run contract-check`, which reads the contract and
+backend sources and verifies:
+
+1. every parameter `registry/search.ts` sends exists in `searchQuerySchema`
+2. every `SearchOptions` key is a contract parameter, or is marked `@deprecated`
+3. every field a direct-API input type declares is declared by its route's request
+   body — otherwise the server silently ignores it
+4. every field of an entity interface (`Channel`, `Ticket`, `Call`, …) is a real
+   column on the table it mirrors
+5. every error code the SDK branches on is one the contract defines
+
+Catalog operations need none of this — their arguments are checked against the Zero
+schemas by `npm run coverage`. This covers what that cannot see.
+
+That check exists because its absence cost real bugs: the SDK once sent `sortBy`,
+`sortOrder`, and `channelId` — none of which the server accepts. Because unknown
+query parameters are *rejected* rather than ignored, every call that set one failed,
+and the sort capability looked missing when it had shipped all along. The contract
+had the correct `orderBy` the whole time; nothing was comparing the two.
+
 ## Development
 
 ```bash
-npm run build       # compile to dist/
-npm run typecheck   # tsc --noEmit
-npm run coverage    # catalog coverage gate
-npm run verify      # typecheck + coverage
+npm run build           # compile to dist/
+npm run typecheck       # tsc --noEmit
+npm run coverage        # catalog coverage gate
+npm run contract-check  # conformance with @xyne/spaces-contract
+npm run verify          # all three
 ```

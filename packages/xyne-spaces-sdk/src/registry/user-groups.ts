@@ -115,13 +115,17 @@ export const userGroupsOperations = {
    * Deactivate a group without deleting it — it stops receiving assignments.
    * Maps to: Zero mutator 'userGroup.deactivate'
    */
-  deactivate: mutator<{ userGroupId: string }, void>('userGroup.deactivate'),
+  deactivate: mutator<{ userGroupId: string }, void>('userGroup.deactivate', {
+    mapArgs: (args) => ({ userGroupId: args.userGroupId, timestamp: now() }),
+  }),
 
   /**
    * Reactivate a group.
    * Maps to: Zero mutator 'userGroup.reactivate'
    */
-  reactivate: mutator<{ userGroupId: string }, void>('userGroup.reactivate'),
+  reactivate: mutator<{ userGroupId: string }, void>('userGroup.reactivate', {
+    mapArgs: (args) => ({ userGroupId: args.userGroupId, timestamp: now() }),
+  }),
 
   /**
    * Add users to a group.

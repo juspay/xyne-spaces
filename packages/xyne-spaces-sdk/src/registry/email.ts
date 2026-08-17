@@ -345,7 +345,9 @@ export const emailOperations = {
    * Remove the label from a conversation.
    * Maps to: Zero mutator 'conversationLabel.removeLabel'
    */
-  removeLabel: mutator<{ conversationId: string }, void>('conversationLabel.removeLabel'),
+  removeLabel: mutator<{ conversationId: string; labelId: string }, void>(
+    'conversationLabel.removeLabel'
+  ),
 
   /**
    * Delete a label everywhere it is used.
