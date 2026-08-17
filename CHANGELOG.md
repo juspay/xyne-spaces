@@ -1,3 +1,10 @@
+## [1.187.2](https://github.com/juspay/xyne-spaces/compare/v1.187.1...v1.187.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* Fixing auto assignment for very new user joining in group and adding visibility ([#529](https://github.com/juspay/xyne-spaces/issues/529)) ([770ff6c](https://github.com/juspay/xyne-spaces/commit/770ff6cb6a18fa4298dbde0598a6ae3ee9dbc371))
+
 ## [1.187.1](https://github.com/juspay/xyne-spaces/compare/v1.187.0...v1.187.1) (2026-08-17)
 
 
