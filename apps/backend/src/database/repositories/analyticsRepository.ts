@@ -350,6 +350,13 @@ export class AnalyticsRepository {
    * Helper method to extract start and end dates from date condition
    * Centralizes the logic to avoid code duplication across time-series methods
    */
+  /**
+   * Normalize a date filter (single Date or a {gte,lte} range) into a Prisma date condition.
+   */
+  private toDateCondition(dateFilter: Date | { gte: Date; lte?: Date }): { gte: Date; lte?: Date } {
+    return typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
+  }
+
   private getDateRange(dateCondition: Date | { gte: Date; lte?: Date }): { startDate: Date; endDate: Date } {
     const startDate = typeof dateCondition === 'object' && 'gte' in dateCondition 
       ? dateCondition.gte 
@@ -559,9 +566,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Total workflows in time period
     const totalWorkflows = await this.prisma.workflow.count({
@@ -628,9 +633,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract dates for current period
     const currentStartDate = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -817,9 +820,7 @@ export class AnalyticsRepository {
   async getWorkflowMetrics(filters: AnalyticsFilters) {
     const dateFilter = getDateFilter(filters);
     const workspaceFilter = this.getWorkspaceFilter(filters);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const groupedData = await this.prisma.workflow.groupBy({
       by: ['workflowType', 'status'],
@@ -846,9 +847,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Get all completed workflow executions
     const result = await this.prisma.workflow.findMany({
@@ -1005,9 +1004,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
@@ -1051,9 +1048,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const steps = await this.prisma.workflowStep.findMany({
       where: {
@@ -1116,9 +1111,7 @@ export class AnalyticsRepository {
       const workspaceFilter = this.getWorkspaceFilter(filters);
 
       // Build date condition for Prisma query
-      const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-        ? dateFilter
-        : { gte: dateFilter };
+      const dateCondition = this.toDateCondition(dateFilter);
 
       // Get all workflow executions with their steps
       const executions = await this.prisma.workflowExecution.findMany({
@@ -1258,9 +1251,7 @@ export class AnalyticsRepository {
     const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
@@ -1513,136 +1504,6 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get active users statistics
-   * Counts distinct users who performed any activity (messages, reactions, file uploads)
-   */
-  async getActiveUsers(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-
-    // Use getFilteredMessages for robust message filtering
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get all user IDs from different activity types using Promise.all for parallel execution
-    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      // Users who posted reactions
-      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
-        where: { createdAt: dateCondition, userId: { in: userIds } },
-        select: { userId: true },
-        distinct: ['userId'],
-      })),
-
-      // Users who uploaded files
-      this.prisma.messageAttachment.findMany({
-        where: { createdAt: dateCondition, workspaceId },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-
-      // Users who created tickets
-      this.prisma.ticket.findMany({
-        where: { createdAt: dateCondition, workspaceId },
-        select: { createdBy: true},
-        distinct: ['createdBy'],
-      }),
-
-      // Users who update ticket_activities
-      this.prisma.ticketActivity.findMany({
-        where: { timestamp: dateCondition, ticket: { workspaceId } },
-        select: { updatedBy: true},
-        distinct: ['updatedBy'],
-      }),
-
-      // Users who created canvas
-      this.prisma.canvas.findMany({
-        where: { createdAt: dateCondition, createdBy: { in: userIds } },
-        select: { createdBy: true},
-        distinct: ['createdBy'],
-      }),
-
-      // Users who edited canvas
-      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: dateCondition, userId: { in: userIds } },
-        select: { userId: true},
-        distinct: ['userId'],
-      }))
-    ]);
-
-    const allActiveUserIds = new Set<string>();
-
-    // Add valid message senders
-    validMessages.forEach(message => {
-      if (message.senderId) {
-        allActiveUserIds.add(message.senderId);
-      }
-    });
-
-    // Add reaction users
-    reactionUsers.forEach(user => {
-      if (user.userId) {
-        allActiveUserIds.add(user.userId);
-      }
-    });
-
-    // Add file uploaders
-    attachmentUsers.forEach(user => {
-      if (user.createdBy) {
-        allActiveUserIds.add(user.createdBy);
-      }
-    });
-
-    ticketCreators.forEach(user => {
-      if (user.createdBy) {
-        allActiveUserIds.add(user.createdBy);
-      }
-    });
-
-    ticketActivityUsers.forEach(user => {
-      if (user.updatedBy) {
-        allActiveUserIds.add(user.updatedBy);
-      }
-    });
-
-    canvasCreators.forEach(user => {
-      if (user.createdBy) {
-        allActiveUserIds.add(user.createdBy);
-      }
-    });
-
-    canvasParticipants.forEach(user => {
-      if (user.userId) {
-        allActiveUserIds.add(user.userId);
-      }
-    });
-
-    return allActiveUserIds.size;
-  }
-
-  /**
-   * Get overall messages per user average for the entire time period
-   */
-  async getOverallMessagesPerUser(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-    const validMessages = await this.getFilteredMessages(dateCondition, this.requireWorkspaceId(filters.workspaceId));
-
-    const totalMessages = validMessages.length;
-    const uniqueUserCount = new Set(validMessages.map(m => m.senderId).filter(id => !!id)).size;
-    return uniqueUserCount > 0
-      ? Math.round((totalMessages / uniqueUserCount) * 100) / 100 // Round to 2 decimal places
-      : 0;
-  }
-
-
-  /**
    * Get current active users grouped by presence status
    */
   async getCurrentActiveUsers(workspaceId: string): Promise<{ userStatus: string; userCount: number; percentage: number }[]> {
@@ -1688,9 +1549,7 @@ export class AnalyticsRepository {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
@@ -1723,7 +1582,7 @@ export class AnalyticsRepository {
   async getMessagesExchangedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use centralized helper for filtering. Channel + scopeType ride along on each
@@ -1830,9 +1689,7 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -1948,59 +1805,6 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get messages per user time-series data
-   */
-  async getMessagesPerUserTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
-    // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, { totalMessages: number; uniqueUsers: Set<string> }>();
-
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, { totalMessages: 0, uniqueUsers: new Set<string>() });
-    });
-
-    // Group valid messages by time buckets
-    validMessages.forEach(message => {
-      if (message.senderId) {
-        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-        const istTime = new Date(message.createdAt.getTime() + IST_OFFSET_MS);
-        const bucketKey = istTime.toISOString().split('T')[0];
-        if (bucketData.has(bucketKey)) {
-          const bucket = bucketData.get(bucketKey)!;
-          bucket.totalMessages += 1;
-          bucket.uniqueUsers.add(message.senderId);
-        }
-      }
-    });
-
-    // Convert to array format with average calculation
-    return timeBuckets.map(bucketKey => {
-      const data = bucketData.get(bucketKey)!;
-      const avgMessagesPerUser = data.uniqueUsers.size > 0
-        ? Math.round((data.totalMessages / data.uniqueUsers.size) * 100) / 100
-        : 0;
-      return {
-        date: bucketKey,
-        value: avgMessagesPerUser
-      };
-    }).sort((a, b) => a.date.localeCompare(b.date));
-  }
-
-  /**
    * Get active channels aggregate count (efficient database query)
    * Returns unique channels that had activity based on messages over the entire period
    * Uses the same logic as the time-series to ensure consistency
@@ -2008,9 +1812,7 @@ export class AnalyticsRepository {
   async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     if (validMessages.length === 0) {
       return 0;
@@ -2035,9 +1837,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -2082,9 +1882,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Count users onboarded in the selected time period
     const usersOnboardedCount = await this.prisma.userPresence.count({
@@ -2107,9 +1905,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -2228,9 +2024,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -2255,9 +2049,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -2310,9 +2102,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -2336,9 +2126,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -2396,9 +2184,7 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Get all calls in the date range
     const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
@@ -2492,9 +2278,7 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Get calls that have both start and end times
     const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
@@ -2533,9 +2317,7 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -2591,9 +2373,7 @@ export class AnalyticsRepository {
   async getTopUsersByMessages(filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     // userType : USER ensures we only count messages from real users, excluding bots
     const userIds = new Set(await this.getUsersId(workspaceId));
@@ -2646,9 +2426,7 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+    const dateCondition = this.toDateCondition(dateFilter);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
