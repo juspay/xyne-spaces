@@ -7,7 +7,7 @@
 import { Resource } from './base.js';
 import { boardsOperations, type StageInput } from '../registry/boards.js';
 import { newId } from '../core/ids.js';
-import type { Board, Stage, TicketPriority } from '../types/index.js';
+import type { Board, FlowPlan, Stage, TicketPriority } from '../types/index.js';
 
 export class BoardsResource extends Resource {
   /** List every board in the workspace. */
@@ -165,5 +165,23 @@ export class BoardsResource extends Resource {
    */
   syncTransitions(boardId: string, transitions: unknown[]): Promise<void> {
     return this.call(boardsOperations.syncTransitions, { boardId, transitions });
+  }
+
+  /**
+   * Replace a flow board's plan — its step nodes, groups, and decision routing.
+   *
+   * A whole-plan **replace**, not a patch: any node absent from `plan.nodes` is
+   * removed, along with the routing that pointed at it. Read the current plan,
+   * edit it, and write the whole thing back.
+   *
+   * @example
+   * await sdk.boards.updateFlowPlan('board-1', {
+   *   version: 2,
+   *   nodes: [{ id: 'n1', title: 'Review', parentIds: [], order: 0 }],
+   *   updatedAt: Date.now(),
+   * });
+   */
+  updateFlowPlan(boardId: string, plan: FlowPlan): Promise<void> {
+    return this.call(boardsOperations.updateFlowPlan, { boardId, plan });
   }
 }

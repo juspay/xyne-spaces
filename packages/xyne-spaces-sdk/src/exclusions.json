@@ -122,6 +122,12 @@
       "note": "Older version of a covered operation."
     },
     {
+      "name": "supportTicketDetail",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketDetailV2",
+      "note": "Same arguments; V2 drops the caller-scoped emailDrafts/emailReads and conversation relations, none of which were in the declared result."
+    },
+    {
       "name": "supportTicketRow",
       "kind": "query",
       "reason": "superseded-by:supportTicketRowV3",

@@ -16,6 +16,18 @@ export class FormsResource extends Resource {
    * @example
    * const forms = await sdk.forms.list();
    */
+  /**
+   * Get one form by id, without its fields.
+   *
+   * Fields come separately from `listFields` — this returns the form row alone.
+   *
+   * @example
+   * const form = await sdk.forms.get('form-1');
+   */
+  get(formId: string): Promise<Form | null> {
+    return this.call(formsOperations.get, { formId });
+  }
+
   list(): Promise<Form[]> {
     return this.call(formsOperations.list, undefined);
   }

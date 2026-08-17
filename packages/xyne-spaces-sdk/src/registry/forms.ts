@@ -31,6 +31,14 @@ export const formsOperations = {
   // ----- Reads -----
 
   /**
+   * One form by id, without its fields.
+   * Maps to: Zero query 'getFormById'
+   *
+   * Fields come separately via `listFields` — this returns the form row alone.
+   */
+  get: query<{ formId: string }, Form | null>('getFormById'),
+
+  /**
    * Every form, with its fields and context mappings resolved.
    * Maps to: Zero query 'getAllForms'
    */

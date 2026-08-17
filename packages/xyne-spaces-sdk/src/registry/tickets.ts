@@ -35,6 +35,12 @@ export interface TicketCursor {
   createdAt: number;
 }
 
+/** Page cursor for the cross-ticket activity feed, ordered by timestamp then id. */
+export interface TicketActivityCursor {
+  timestamp: number;
+  id: string;
+}
+
 export const ticketsOperations = {
   // ----- Direct API operations -----
 
@@ -142,6 +148,15 @@ export const ticketsOperations = {
   getMany: query<{ ticketIds: string[] }, Ticket[]>('ticketsByIds'),
 
   /**
+   * The bare ticket row, with no relations resolved.
+   * Maps to: Zero query 'ticketRowById'
+   *
+   * Cheaper than `get` when only the ticket's own columns are needed — `get`
+   * additionally pulls project, tags, assignments, references, and stage data.
+   */
+  getRow: query<{ ticketId: string }, Ticket | null>('ticketRowById'),
+
+  /**
    * Free-text ticket search by title.
    * Maps to: Zero query 'ticketsSearch'
    */
@@ -158,6 +173,24 @@ export const ticketsOperations = {
    * Maps to: Zero query 'ticketActivities'
    */
   listActivities: query<{ ticketId: string }, unknown[]>('ticketActivities'),
+
+  /**
+   * Activities across several tickets at once, newest first, paginated.
+   * Maps to: Zero query 'ticketActivitiesForTickets'
+   *
+   * The batch counterpart to `listActivities`. `start` is nullable rather than
+   * optional server-side, so it is always sent — as null on the first page.
+   */
+  listActivitiesForTickets: query<
+    { ticketIds: string[]; limit?: number; start?: TicketActivityCursor },
+    unknown[]
+  >('ticketActivitiesForTickets', {
+    mapArgs: (args) => ({
+      ticketIds: args.ticketIds,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    }),
+  }),
 
   /**
    * Assignment history for a ticket.
@@ -224,6 +257,17 @@ export const ticketsOperations = {
    * Maps to: Zero query 'subTicketsByIds'
    */
   getSubTickets: query<{ subTicketIds: string[] }, SubTicket[]>('subTicketsByIds'),
+
+  /**
+   * Sub-ticket mappings for several parent tickets at once.
+   * Maps to: Zero query 'subTicketMappingsForTickets'
+   *
+   * Returns the mapping rows (each carrying its sub-ticket), not bare sub-tickets,
+   * so a caller batching many parents can tell which parent each one belongs to.
+   */
+  listSubTicketMappings: query<{ ticketIds: string[] }, unknown[]>(
+    'subTicketMappingsForTickets'
+  ),
 
   /**
    * Create a sub-ticket. The row id and its mapping id are supplied by the
