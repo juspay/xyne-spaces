@@ -13,6 +13,14 @@ router.post(
   canvasController.uploadFile
 );
 
+router.get('/labels/suggestions', canvasController.getCanvasLabelSuggestions);
+
+router.get('/labels', canvasController.getCanvasLabels);
+
+router.post('/:canvasId/labels', canvasController.addCanvasLabel);
+
+router.delete('/:canvasId/labels/:labelId', canvasController.removeCanvasLabel);
+
 router.post(
   '/:canvasId/mentions',
   canvasController.handleMentions

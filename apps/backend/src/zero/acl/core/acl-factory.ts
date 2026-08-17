@@ -5,7 +5,6 @@ import { GuestAccessACL } from '../tables/guest-access-acl';
 import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
-import { CanvasLabelsACL } from '../tables/canvas-labels-acl';
 import { CanvasCommentsACL } from '../tables/canvas-comments-acl';
 import { CanvasCommentThreadsACL } from '../tables/canvas-comment-threads-acl';
 import { CanvasParticipantsACL } from '../tables/canvas-participants-acl';
@@ -209,8 +208,6 @@ export class ACLFactory {
         return new CallsACL(ctx);
       case 'canvas_folders':
         return new CanvasFoldersACL(ctx);
-      case 'canvas_labels':
-        return new CanvasLabelsACL(ctx);
       case 'canvas_comment_threads':
         return new CanvasCommentThreadsACL(ctx);
       case 'canvas_comments':
@@ -431,6 +428,8 @@ export class ACLFactory {
         return new BaseACL<any>(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
+      default:
+        return new BaseACL<any>(ctx, table);
     }
   }
 }

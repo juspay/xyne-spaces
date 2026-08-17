@@ -526,9 +526,7 @@ const applyCanvasVisibilityQueryFilter = (
   );
 
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
-  query
-    .related('labels', (labels: any) => labels.orderBy('name', 'asc'))
-    .related('userStatuses', (status: any) => status.where('userId', userId));
+  query.related('userStatuses', (status: any) => status.where('userId', userId));
 
 // Keep in sync with the identical helper in apps/backend/src/zero/queries.ts if archive-filter behavior changes.
 const applyArchiveFilter = <T extends { where: Function }>(
@@ -2766,7 +2764,6 @@ export const queries = defineQueries({
         );
       })
       .related('participants')
-      .related('labels', labels => labels.orderBy('name', 'asc'))
       .related('channel'),
       ctx.userID,
     ).one();
@@ -3446,14 +3443,6 @@ export const queries = defineQueries({
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
       return zql.conversation_labels.where('channelId', channelId).orderBy('name', 'asc');
-    },
-  ),
-  workspaceCanvasLabels: defineQuery(
-    z.object({ workspaceId: z.string() }),
-    ({ ctx, args: { workspaceId } }) => {
-      return zql.canvas_labels
-        .where('workspaceId', workspaceId || ctx.workspaceId)
-        .orderBy('name', 'asc');
     },
   ),
   // Labels applied to a single conversation (for chips on the email thread view).

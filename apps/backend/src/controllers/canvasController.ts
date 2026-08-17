@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
+import type { Tag } from '@prisma/client';
+import { AttachmentEntityType, ActivityClassification, CanvasRole, TagMethod } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -17,6 +18,51 @@ import { v4 as uuidv4 } from 'uuid';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 
+const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
+const CANVAS_LABEL_CATEGORY = 'label';
+const MAX_CANVAS_LABEL_BULK_IDS = 200;
+
+const CanvasLabelBodySchema = z.object({
+  name: z.string().min(1),
+});
+
+const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
+
+const normalizeCanvasLabelKey = (name: string): string => normalizeCanvasLabelName(name).toLowerCase();
+
+const parseCanvasIds = (value: unknown): string[] => {
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return Array.from(new Set(value.split(',').map(id => id.trim()).filter(Boolean))).slice(
+    0,
+    MAX_CANVAS_LABEL_BULK_IDS,
+  );
+};
+
+const isUniqueConstraintError = (error: unknown): boolean => {
+  if (error && typeof error === 'object') {
+    const { code, cause } = error as { code?: unknown; cause?: unknown };
+    if (code === 'P2002' || code === '23505' || code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return true;
+    }
+    if (cause && cause !== error && isUniqueConstraintError(cause)) {
+      return true;
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /unique|constraint|duplicate/i.test(message);
+};
+
+const toCanvasLabelResponse = (row: Tag) => ({
+  id: row.id,
+  canvasId: row.sourceId,
+  name: row.tag,
+  createdAt: row.createdAt.getTime(),
+});
+
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
 
@@ -24,7 +70,294 @@ export class CanvasController {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
 
-    createCanvas = async (req: Request, res: Response): Promise<void> => {
+  private async getAccessibleCanvasId(
+    canvasId: string,
+    userId: string,
+    workspaceId: string,
+    requiredAccess: 'view' | 'edit',
+  ): Promise<string | null> {
+    const auth = await canvasAuthService.checkCanvasAccess(canvasId, userId);
+    const hasAccess = requiredAccess === 'edit' ? auth.canEdit : auth.canView;
+    if (!hasAccess || !auth.canvas?.id) {
+      return null;
+    }
+
+    const prisma = DatabaseClient.getInstance();
+    const canvas = await prisma.canvas.findUnique({
+      where: { id: auth.canvas.id },
+      select: { id: true, workspaceId: true },
+    });
+
+    if (!canvas || canvas.workspaceId !== workspaceId) {
+      return null;
+    }
+
+    return canvas.id;
+  }
+
+  getCanvasLabelSuggestions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const query = typeof req.query.query === 'string' ? normalizeCanvasLabelKey(req.query.query) : '';
+      const prisma = DatabaseClient.getInstance();
+      const rows = await prisma.tag.findMany({
+        where: {
+          workspaceId,
+          sourceType: CANVAS_LABEL_SOURCE_TYPE,
+          tagCategory: CANVAS_LABEL_CATEGORY,
+          isDeleted: false,
+        },
+        distinct: ['tag'],
+        select: { tag: true },
+        orderBy: { tag: 'asc' },
+        take: 200,
+      });
+
+      const seen = new Set<string>();
+      const labels: string[] = [];
+      for (const row of rows) {
+        const key = normalizeCanvasLabelKey(row.tag);
+        if (!key || seen.has(key)) {
+          continue;
+        }
+        if (query && !key.includes(query)) {
+          continue;
+        }
+        seen.add(key);
+        labels.push(row.tag);
+        if (labels.length >= 50) {
+          break;
+        }
+      }
+
+      res.status(200).json({ labels });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to fetch label suggestions:', error);
+      res.status(500).json({ error: 'Failed to fetch canvas label suggestions' });
+    }
+  };
+
+  getCanvasLabels = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const requestedCanvasIds = parseCanvasIds(req.query.canvasIds);
+      if (requestedCanvasIds.length === 0) {
+        res.status(400).json({ error: 'canvasIds query param is required' });
+        return;
+      }
+
+      const labelsByCanvasId: Record<string, ReturnType<typeof toCanvasLabelResponse>[]> =
+        Object.fromEntries(requestedCanvasIds.map(canvasId => [canvasId, []]));
+
+      const canonicalToRequested = new Map<string, string[]>();
+      await Promise.all(
+        requestedCanvasIds.map(async requestedCanvasId => {
+          const canonicalCanvasId = await this.getAccessibleCanvasId(
+            requestedCanvasId,
+            userId,
+            workspaceId,
+            'view',
+          );
+          if (!canonicalCanvasId) {
+            return;
+          }
+          const requestedIds = canonicalToRequested.get(canonicalCanvasId) ?? [];
+          requestedIds.push(requestedCanvasId);
+          canonicalToRequested.set(canonicalCanvasId, requestedIds);
+        }),
+      );
+
+      const accessibleCanvasIds = Array.from(canonicalToRequested.keys());
+      if (accessibleCanvasIds.length === 0) {
+        res.status(200).json({ labels: labelsByCanvasId });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const rows = await prisma.tag.findMany({
+        where: {
+          workspaceId,
+          sourceId: { in: accessibleCanvasIds },
+          sourceType: CANVAS_LABEL_SOURCE_TYPE,
+          tagCategory: CANVAS_LABEL_CATEGORY,
+          isDeleted: false,
+        },
+        orderBy: [{ tag: 'asc' }, { createdAt: 'asc' }],
+      });
+
+      for (const row of rows) {
+        const label = toCanvasLabelResponse(row);
+        const requestedIds = canonicalToRequested.get(row.sourceId) ?? [row.sourceId];
+        for (const requestedCanvasId of requestedIds) {
+          labelsByCanvasId[requestedCanvasId] = [...(labelsByCanvasId[requestedCanvasId] ?? []), label];
+        }
+      }
+
+      res.status(200).json({ labels: labelsByCanvasId });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to fetch labels:', error);
+      res.status(500).json({ error: 'Failed to fetch canvas labels' });
+    }
+  };
+
+  addCanvasLabel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      const { canvasId } = req.params;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      if (!canvasId) {
+        res.status(400).json({ error: 'Canvas ID is required' });
+        return;
+      }
+
+      const parsedBody = CanvasLabelBodySchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'Label name is required' });
+        return;
+      }
+
+      const labelName = normalizeCanvasLabelName(parsedBody.data.name);
+      const labelKey = normalizeCanvasLabelKey(labelName);
+      if (!labelKey) {
+        res.status(400).json({ error: 'Label name cannot be empty' });
+        return;
+      }
+
+      const canonicalCanvasId = await this.getAccessibleCanvasId(canvasId, userId, workspaceId, 'edit');
+      if (!canonicalCanvasId) {
+        res.status(403).json({ error: 'Permission denied' });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const existingRows = await prisma.tag.findMany({
+        where: {
+          workspaceId,
+          sourceId: canonicalCanvasId,
+          sourceType: CANVAS_LABEL_SOURCE_TYPE,
+          tagCategory: CANVAS_LABEL_CATEGORY,
+          isDeleted: false,
+        },
+      });
+      const existing = existingRows.find(row => normalizeCanvasLabelKey(row.tag) === labelKey);
+      if (existing) {
+        res.status(200).json({ label: toCanvasLabelResponse(existing) });
+        return;
+      }
+
+      try {
+        const label = await prisma.tag.create({
+          data: {
+            sourceId: canonicalCanvasId,
+            sourceType: CANVAS_LABEL_SOURCE_TYPE,
+            workspaceId,
+            configKey: null,
+            tagCategory: CANVAS_LABEL_CATEGORY,
+            tag: labelName,
+            method: TagMethod.MANUAL,
+            reason: null,
+            createdBy: userId,
+            updatedBy: userId,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isDeleted: false,
+          },
+        });
+        res.status(201).json({ label: toCanvasLabelResponse(label) });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          const fallback = await prisma.tag.findFirst({
+            where: {
+              workspaceId,
+              sourceId: canonicalCanvasId,
+              sourceType: CANVAS_LABEL_SOURCE_TYPE,
+              tagCategory: CANVAS_LABEL_CATEGORY,
+              tag: labelName,
+              isDeleted: false,
+            },
+          });
+          if (fallback) {
+            res.status(200).json({ label: toCanvasLabelResponse(fallback) });
+            return;
+          }
+        }
+        throw error;
+      }
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to add label:', error);
+      res.status(500).json({ error: 'Failed to add canvas label' });
+    }
+  };
+
+  removeCanvasLabel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      const { canvasId, labelId } = req.params;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      if (!canvasId || !labelId) {
+        res.status(400).json({ error: 'Canvas ID and label ID are required' });
+        return;
+      }
+
+      const canonicalCanvasId = await this.getAccessibleCanvasId(canvasId, userId, workspaceId, 'edit');
+      if (!canonicalCanvasId) {
+        res.status(403).json({ error: 'Permission denied' });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const existing = await prisma.tag.findFirst({
+        where: {
+          id: labelId,
+          workspaceId,
+          sourceId: canonicalCanvasId,
+          sourceType: CANVAS_LABEL_SOURCE_TYPE,
+          tagCategory: CANVAS_LABEL_CATEGORY,
+          isDeleted: false,
+        },
+      });
+
+      if (!existing) {
+        res.status(200).json({ success: true });
+        return;
+      }
+
+      await prisma.tag.update({
+        where: { id: existing.id },
+        data: {
+          isDeleted: true,
+          updatedAt: new Date(),
+          updatedBy: userId,
+        },
+      });
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to remove label:', error);
+      res.status(500).json({ error: 'Failed to remove canvas label' });
+    }
+  };
+
+  createCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       if (!userId) {

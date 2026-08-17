@@ -15,7 +15,6 @@ import {
   CallParticipantsACL,
   CallsACL,
   CanvasFoldersACL,
-  CanvasLabelsACL,
   CanvasParticipantsACL,
   CanvasUserStatusACL,
   CanvasesACL,
@@ -160,8 +159,6 @@ export class QueryACLFactory {
         return new SummaryTemplatesACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_folders':
         return new CanvasFoldersACL(ctx) as BaseQueryACL<TTable>;
-      case 'canvas_labels':
-        return new CanvasLabelsACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_participants':
         return new CanvasParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_user_status':
