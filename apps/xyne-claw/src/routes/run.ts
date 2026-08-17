@@ -217,7 +217,9 @@ function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined
     deadlineAt,
     ...(focus ? { focus } : {}),
     ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
-    ...(obj["kind"] === "understanding" ? { kind: "understanding" as const } : {}),
+    ...(obj["kind"] === "understanding" || obj["kind"] === "framework" || obj["kind"] === "security"
+      ? { kind: obj["kind"] as "understanding" | "framework" | "security" }
+      : {}),
   };
 }
 
@@ -571,7 +573,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       focus?: string;
       /** "understanding" = coverage-gated variant: exit on an exhausted
        *  code-path frontier instead of the deadline. Set by claw-auth. */
-      kind?: "understanding";
+      kind?: "understanding" | "framework" | "security";
     };
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
@@ -2737,6 +2739,10 @@ async function processTask(
       log(
         experiment.mode === "review"
           ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
+          : experiment.kind === "security"
+          ? `Security mode — injected experiment tools (epoch ${experiment.epoch}, observation-gated closes)`
+          : experiment.kind === "framework"
+          ? `Framework mode — injected experiment tools (epoch ${experiment.epoch}, candidate-gated exit)`
           : experiment.kind === "understanding"
           ? `Understanding mode — injected experiment tools (epoch ${experiment.epoch}, coverage-gated exit)`
           : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
@@ -3537,8 +3543,16 @@ async function processTask(
       ...(experiment?.kind === "understanding" ? [UNDERSTANDING_SKILL_PATH] : []),
     ];
 
+    const securityGuide = `\n\n## Security mode\nYou are in a security run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). Keep TWO TIERS apart, because mixing them is what makes a security report untrustworthy.\n\nLEAD (status=conjecture) — you read the code and the defect looks real. Cite file:line. Most findings belong here, and there is no shame in it.\nCONFIRMED (status=proved) — you EXECUTED it and captured the result: the request you sent, the status or output you got back, and where you verified the effect. The ledger refuses a close without an observation, so do not try to word around it. A script that greps source and asserts a vulnerable pattern is present is not a confirmation — it re-proves what you already read.\n\nDEFENDED is a real result. If you try it and a guard stops you, close it refuted and name the guard. Also check whether a SAFE SIBLING already exists — the same operation done correctly elsewhere in the repo. That has been the single most common shape, and it is the cheapest fix to recommend.\n\nDo not promote a lead because it looks obvious. Confirming a wrong finding is expensive: it becomes a ticket someone has to disprove.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry. The sandbox recycles — if the file is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
+
+    const frameworkGuide = `\n\n## Framework mode\nYou are in a framework run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). You are NOT hunting bugs. You are looking for places where the same thing is written over and over and should be ONE abstraction — a helper, a base class, a middleware, a codegen step, a lint rule.\n\nAn opportunity is only closed with a COUNT and the LIST: at least 3 occurrences, each cited as file.ext:LINE. Two is a coincidence, three is a pattern — the ledger enforces this, so a close without three citations is refused. For each one say what the abstraction would be, what it replaces, and WHAT IT WOULD HAVE PREVENTED. If you cannot name a bug, an inconsistency or a drift that the abstraction would have stopped, it is taste rather than an opportunity: refute it and move on.\n\nRefuting is real progress. Repetition that is deliberately explicit, or that varies more than it repeats, must be closed as refuted with the reason — a wrong extraction costs more than the duplication it replaces, and a report full of speculative abstractions is worse than a short one.\n\nThe exit is exhaustion, not the clock: enumerate the candidate areas in scope as open conjectures first, then close each. When open reaches 0 and the report is delivered, end.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename you reuse every epoch — never epoch1.md, epoch2.md. Each opportunity gets: the pattern, the occurrence count, the file:line list, the proposed abstraction, and an honest migration cost. Extend the same file each epoch; the sandbox recycles, so if it is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
+
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
+      : experiment?.kind === "security"
+      ? securityGuide
+      : experiment?.kind === "framework"
+      ? frameworkGuide
       : experiment?.kind === "understanding"
       ? `\n\n## Understanding mode\nYou are in a coverage-gated understanding run (epoch ${experiment.epoch}; focus ${experiment.focus ?? "unspecified"}). Your job is to UNDERSTAND every reachable code path in scope, not to accumulate trivially-provable facts. The exit is exhaustion, not the clock: end-experiment unlocks only when the open-conjecture frontier reaches 0 (with at least one path closed). Loop: read the ledger -> if the frontier is empty, enumerate every entrypoint and branch in scope as an open conjecture (experiment-ledger action=record status=conjecture, one per path) -> pick ONE open path, trace it to real behavior, and ADD every new callee or branch you discover as a new open conjecture BEFORE you close the current one (proved/refuted) with file:line evidence and a description of what the code actually does and why. The frontier grows as you explore and shrinks only when a path is genuinely explained — never close a path with a shallow structural restatement. When open reaches 0 the scope is exhausted: deliver the artifact and end.\n\nThe DELIVERABLE is one self-contained .html explanation document, authored in the sandbox and sent with sandbox-deliver-files — not chat prose and not the ledger, which no reader will open. Follow the loaded understanding skills for its structure, its inline-SVG diagrams (no mermaid: the file must render with no network and no JavaScript) and the file:line citation discipline. Build it incrementally as paths close rather than all at once at the end, so a run that hits the safety cap still delivers a document covering what it did explain.\n\nONE CANONICAL DOCUMENT, NOT ONE PER EPOCH. The deliverable has a single STABLE filename you reuse every epoch (e.g. <topic>-explained.html) — never epoch1.html, epoch2.html. Each epoch EXTENDS the same document; do not start a new one. The sandbox is ephemeral and recycles across a long run, so at the START of each epoch, if that file is not on local disk, it means you are in a fresh sandbox: recover the latest version you already delivered — spaces-thread-attachments to find your canonical .html, spaces-fetch-attachment to pull it back — and extend THAT, rather than rebuilding from nothing or emitting a fragment. Re-deliver the same filename after each extension so the newest version always wins.\n\nAn incrementally-built document is in the order you EXPLORED, which is the wrong order to READ: before you deliver, do a consolidation pass that reorganises it into reading order — TL;DR and mental model first, then the end-to-end flows (each with its own diagram), then per-component detail grouped by role, then the exhaustive per-entity reference LAST, then the lookup table. Renumber sections contiguously, merge anything stated twice, and push deep detail down out of the overview. A document whose sections jump out of sequence or open with deep internals was never reorganised.`
       : experiment

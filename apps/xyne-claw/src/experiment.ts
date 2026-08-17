@@ -17,7 +17,7 @@ export interface ExperimentContext {
    *  Each unexplored path is recorded as an open conjecture; closing every one of
    *  them (proved/refuted, with evidence) is the exit. The deadline still applies
    *  as a hard safety cap so the loop stays bounded. */
-  kind?: "understanding";
+  kind?: "understanding" | "framework" | "security";
 }
 
 /** Minimum closed paths before an "exhausted" frontier is believed. Guards the
@@ -318,6 +318,44 @@ export function buildExperimentTools(
             // the behaviour lives, so requiring the citation shape up front is
             // what separates the two. claw-auth enforces the same rule; this
             // check just fails fast with an actionable message.
+            // A security close must be an OBSERVATION, not a code reading.
+            // Measured across the first three live runs: 67 findings recorded
+            // as proved, 8 survived testing — the rest were scripts asserting a
+            // vulnerable pattern exists in source, which only re-proves what the
+            // agent already read. `proved` therefore requires evidence that
+            // something was actually executed; everything else is a lead.
+            if (ctx.kind === "security" && status === "proved") {
+              const note = typeof p["note"] === "string" ? p["note"] : "";
+              const observed =
+                /\bHTTP[ /]?\d{3}\b/i.test(note) ||
+                /\b(?:status|code)\s*[=:]\s*\d{3}\b/i.test(note) ||
+                /\b(?:observed|captured|returned|responded)\b/i.test(note);
+              if (!observed) {
+                return textResult(
+                  "Cannot mark this proved: `note` shows no observed result. A CONFIRMED finding needs what you actually got back — the status code, the response, or the row that changed (e.g. \"POST /api/x -> HTTP 200, returned another workspace's row\"). Reading the code and asserting the pattern exists is a LEAD: record it with status=conjecture instead. If a guard stopped you, close it as refuted and say what stopped you.",
+                  { error: true, needsObservation: true },
+                );
+              }
+              if (!CITATION_RE.test(note)) {
+                return textResult(
+                  "Cannot mark this proved: `note` needs a file:line citation for the code path you exploited, alongside the observed result.",
+                  { error: true, needsCitation: true },
+                );
+              }
+            }
+            // A framework opportunity is a COUNT, not an opinion. The failure
+            // mode is "this could be abstracted" with nothing behind it, so a
+            // close must cite at least 3 occurrences — two is a coincidence.
+            if (ctx.kind === "framework" && status === "proved") {
+              const note = typeof p["note"] === "string" ? p["note"] : "";
+              const citations = note.match(/[\w./-]+\.[A-Za-z][\w]*:\d+/g) ?? [];
+              if (citations.length < 3) {
+                return textResult(
+                  `Cannot close this opportunity: \`note\` cites ${citations.length} occurrence(s); a framework opportunity needs at least 3, each as file.ext:LINE. Two occurrences is a coincidence, three is a pattern. If you cannot find a third, refute it — the repetition is probably incidental.`,
+                  { error: true, needsOccurrences: true, found: citations.length },
+                );
+              }
+            }
             if (ctx.kind === "understanding" && status === "proved") {
               const note = typeof p["note"] === "string" ? p["note"] : "";
               if (!CITATION_RE.test(note)) {
@@ -399,7 +437,7 @@ export function buildExperimentTools(
         const report = typeof p["report"] === "string" ? p["report"] : "";
         const deadline = deadlineMs(ctx);
         const pastDeadline = Date.now() >= deadline;
-        if (ctx.kind === "understanding") {
+        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "security") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
           // runs out. The deadline is only a hard safety cap so the loop stays

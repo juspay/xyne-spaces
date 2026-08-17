@@ -13,7 +13,7 @@ const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
-  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding"; droppedFocus?: string }
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding" | "framework" | "security"; droppedFocus?: string }
   | { sub: "status" }
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
@@ -37,11 +37,19 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   // dispatch payload's `kind`). Everything below is shared parsing.
   const commandWord = lower.startsWith("/understanding")
     ? "/understanding"
-    : lower.startsWith("/experiment")
-      ? "/experiment"
-      : null;
+    : lower.startsWith("/framework")
+      ? "/framework"
+      : lower.startsWith("/security-scan")
+        ? "/security-scan"
+        : lower.startsWith("/experiment")
+          ? "/experiment"
+          : null;
   if (!commandWord) return null;
-  const kind = commandWord === "/understanding" ? ("understanding" as const) : undefined;
+  const kind =
+    commandWord === "/understanding" ? ("understanding" as const) :
+    commandWord === "/framework" ? ("framework" as const) :
+    commandWord === "/security-scan" ? ("security" as const) :
+    undefined;
   const rest = trimmed.slice(commandWord.length).trim();
   if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS, ...(kind ? { kind } : {}) };
   const [first, ...tail] = rest.split(/\s+/);
@@ -313,7 +321,11 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   // understanding run whose frontier had closed kept looping to the safety cap
   // instead of ending. The agent was obeying the prompt, not being refused —
   // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
-  const exitInstruction = run.kind === "understanding"
+  const exitInstruction = run.kind === "security"
+    ? `EXIT: this is a security run. It ends when every candidate surface in scope has been closed — CONFIRMED with an observed result, or REFUTED as defended. When ZERO remain open and the report is delivered, call end-experiment. Do NOT keep looping to the safety cap restating findings you already closed.`
+    : run.kind === "framework"
+    ? `EXIT: this is a framework run — it ends when the candidate list is EXHAUSTED, not on the clock. Enumerate the duplication candidates in scope as open conjectures, then close each one (proved = a real extraction opportunity, refuted = the repetition is incidental and should stay). When ZERO remain open and the report is delivered, call end-experiment. Do NOT keep looping to the safety cap re-describing opportunities you already closed.`
+    : run.kind === "understanding"
     ? `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`
     : `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`;
   return [
@@ -321,7 +333,36 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     sandboxInstruction,
     `Deadline: ${run.deadlineAt.toISOString()} (${remaining} remaining).`,
     ``,
-    `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
+    // A framework run hunts DUPLICATION, not defects, so the generic
+    // "gather PROOF" line is the wrong instruction — the evidence here is a
+    // count and a file list, not a failing test. The failure mode is a taste
+    // claim ("this could be abstracted") with nothing behind it, so the rule is
+    // that an opportunity without occurrences is not an opportunity.
+    // A security run's failure mode is measured, not hypothetical: the first
+    // three live runs produced 67 "proved" findings of which 8 survived
+    // testing, because a script asserting that a vulnerable PATTERN exists in
+    // source was being recorded as proof. So this prompt separates the two
+    // tiers explicitly and the ledger refuses `proved` without an observation.
+    run.kind === "security"
+      ? `Read the ledger below before doing anything. You are hunting exploitable defects, and there are TWO tiers — keep them apart or the report is worthless.
+
+LEAD (status=conjecture): you read the code and the defect looks real. Cite file:line. This is where most findings belong.
+CONFIRMED (status=proved): you EXECUTED it and captured what came back — the request you sent, the status code or output you observed, and where you verified the effect (a row that changed, a document returned, a measured timing). A script that greps source and asserts a pattern is present is NOT a confirmation; it proves the code says what you already read.
+
+Before proposing a fix, check whether a CORRECT implementation already exists nearby — the same call done safely elsewhere in the repo. Across earlier runs that was the single most common shape: the safe sibling existed and was simply not used. Name it, because it is also the cheapest fix.
+
+DEFENDED is a first-class result. If you try it and a guard stops you, close it as refuted with what stopped you. A finding you cannot execute stays a conjecture — never promote it because it looks obvious.
+
+Deliver ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry.`
+      : run.kind === "framework"
+      ? `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: places where the same thing is written repeatedly and should be ONE abstraction. Pick or advance ONE candidate per epoch.
+
+A candidate is only proved with a COUNT and the LIST: at least 3 occurrences, each cited as file.ext:LINE. Two occurrences is a coincidence; three is a pattern. Say what the abstraction would be, what it would replace, and what it would have prevented — if you cannot name a bug or drift the abstraction would have stopped, it is probably taste, so refute it and move on.
+
+Refuting is real progress here. Repetition that is deliberately explicit, or that varies more than it repeats, should be closed as refuted with the reason — a wrong extraction is more expensive than the duplication it replaces.
+
+Deliver ONE markdown report listing each opportunity: the pattern, the occurrence count, the file:line list, the proposed abstraction, and the migration cost. Extend the same file each epoch rather than starting a new one.`
+      : `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
     deliveredLine,
@@ -374,7 +415,9 @@ async function dispatchExperimentRun(
       ...(opts.mode ? { mode: opts.mode } : {}),
       // Understanding runs advertise their coverage-gated intent to the epoch
       // runtime, which keeps end-experiment locked until the frontier empties.
-      ...(run.kind === "understanding" ? { kind: "understanding" as const } : {}),
+      ...(run.kind === "understanding" || run.kind === "framework" || run.kind === "security"
+        ? { kind: run.kind as "understanding" | "framework" | "security" }
+        : {}),
     },
   };
 
