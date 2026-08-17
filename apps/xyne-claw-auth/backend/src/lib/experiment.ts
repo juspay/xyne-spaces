@@ -322,7 +322,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   // instead of ending. The agent was obeying the prompt, not being refused —
   // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
   const exitInstruction = run.kind === "security"
-    ? `EXIT: this is a security run. It ends when every candidate surface in scope has been closed — CONFIRMED with an observed result, or REFUTED as defended. When ZERO remain open and the report is delivered, call end-experiment. Do NOT keep looping to the safety cap restating findings you already closed.`
+    ? `EXIT: this run is TIME-BOXED — end-experiment refuses until the deadline. Attack surface cannot be exhausted the way a code-path frontier can: there is always one more endpoint, so "I have checked everything" would be a false claim of completeness. Use the whole window. When you run out of leads in one area, move to a different surface rather than restating findings you already closed, and keep the report current every epoch so a run that ends at the deadline still delivers everything it found.`
     : run.kind === "framework"
     ? `EXIT: this is a framework run — it ends when the candidate list is EXHAUSTED, not on the clock. Enumerate the duplication candidates in scope as open conjectures, then close each one (proved = a real extraction opportunity, refuted = the repetition is incidental and should stay). When ZERO remain open and the report is delivered, call end-experiment. Do NOT keep looping to the safety cap re-describing opportunities you already closed.`
     : run.kind === "understanding"

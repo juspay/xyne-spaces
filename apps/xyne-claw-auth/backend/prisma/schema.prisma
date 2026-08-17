@@ -1251,6 +1251,12 @@ enum AgentAuditEvent {
   PROVIDER_CREDENTIAL_UNBOUND
   PROVIDER_CREDENTIAL_ADOPTED
   PROVIDER_CREDENTIAL_DELETED
+  // Agent-authoring tools (create/update-subagent, create-mcp). Added by
+  // migration 20260818090000_agent_authoring_audit_events (ALTER TYPE ADD
+  // VALUE) — kept here so a fresh `prisma generate` accepts them.
+  SUBAGENT_CREATED
+  SUBAGENT_UPDATED
+  MCP_SERVER_CREATED
 }
 
 model AgentAuditLog {
