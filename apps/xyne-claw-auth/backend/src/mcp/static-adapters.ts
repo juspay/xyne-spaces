@@ -48,9 +48,11 @@ import { redditAdapter } from "./adapters/reddit.js";
 import { xNewsAdapter } from "./adapters/x-news.js";
 import { jusbizMcpAdapter } from "./adapters/jusbiz-mcp.js";
 import { heisenbergAdapter } from "./adapters/heisenberg.js";
+import { jenkinsAdapter } from "./adapters/jenkins.js";
 
 export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   grafana: grafanaAdapter,
+  jenkins: jenkinsAdapter,
   bitbucket: bitbucketAdapter,
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,

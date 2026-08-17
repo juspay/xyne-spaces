@@ -22,7 +22,6 @@ import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
 import * as createPdf from "./create-pdf/index.js";
 import * as fillPdfForm from "./fill-pdf-form/index.js";
-import * as jenkins from "./jenkins/index.js";
 import * as getAgentRuns from "./get-agent-runs/index.js";
 import * as postmanSbx from "./postman-sbx/index.js";
 import * as todo from "./todo/index.js";
@@ -166,11 +165,6 @@ register(createPdf.editPdfTool);
 register(fillPdfForm.inspectPdfForm);
 register(fillPdfForm.fillPdfForm);
 
-// Register jenkins tools
-register(jenkins.jenkinsTriggerBuild);
-register(jenkins.jenkinsGetBuildStatus);
-register(jenkins.jenkinsListBuilds);
-register(jenkins.jenkinsGetBuildLogs);
 // get-agent-runs (custom:system) DEREGISTERED 2026-07-15: it returned
 // cross-user run history — task text + user emails — to ANY agent without
 // admin privileges (privacy leak). Superseded by the privacy-bounded

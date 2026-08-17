@@ -254,13 +254,6 @@ const envSchema = Joi.object({
   SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default('test'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
-  // Jenkins Configuration
-  JENKINS_BASE_URL: Joi.string()
-    .uri()
-    .default(''),
-  JENKINS_JOB_PATH: Joi.string().default(''),
-  JENKINS_USERNAME: Joi.string().allow('').default(''),
-  JENKINS_API_TOKEN: Joi.string().allow('').default(''),
   // OpenCode Configuration
   OPENCODE_ENABLED: Joi.boolean().default(false),
   OPENCODE_SPAWN_SERVER: Joi.boolean().default(false),
@@ -741,10 +734,6 @@ export const config = {
     timeout: envVars.SUPERPOSITION_TIMEOUT,
   },
   jenkins: {
-    baseUrl: envVars.JENKINS_BASE_URL,
-    jobPath: envVars.JENKINS_JOB_PATH,
-    username: envVars.JENKINS_USERNAME,
-    apiToken: envVars.JENKINS_API_TOKEN,
     webhookSecret: envVars.JENKINS_WEBHOOK_SECRET,
   },
   openCode: {
