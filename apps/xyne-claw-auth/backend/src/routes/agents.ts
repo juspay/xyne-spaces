@@ -10,6 +10,7 @@ import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
+import { checkHealth } from "../health.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
@@ -3253,6 +3254,110 @@ router.delete(
       res.json({ success: true });
     } catch (err) {
       log.error("[agents] delete mcp connection error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// Health-check a single agent-pinned MCP instance. Mirrors the global
+// connection health route (routes/connections.ts) but loads credentials
+// from agentMcpConnection instead of userMcpConnection, so an agent owner
+// can see whether a pinned token (e.g. an expired Grafana token) is
+// actually reachable. The agent MCP tab previously showed a hardcoded
+// "connected" badge that never reflected reality.
+//
+// The first arg to checkHealth() is used purely as an MCP session-cache
+// key. We pass a synthetic `agent:<agentId>:<slug>` id (NEVER a real
+// userId) so probing an agent connection cannot evict or rebuild the
+// requesting user's own GLOBAL MCP session for the same server type.
+router.get(
+  "/:slug/mcp/connections/:mcpServerType/:instanceSlug/health",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string; mcpServerType: string; instanceSlug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const { mcpServerType, instanceSlug } = req.params;
+      if (!isValidSlug(instanceSlug)) {
+        res.status(400).json({ success: false, error: "Invalid instance slug" });
+        return;
+      }
+      const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+      if (!server) {
+        res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+        return;
+      }
+      const connection = await prisma.agentMcpConnection.findUnique({
+        where: { agentId_mcpServerId_slug: { agentId: agent.id, mcpServerId: server.id, slug: instanceSlug } },
+      });
+      if (!connection) {
+        res.status(404).json({ success: false, error: "Connection not found" });
+        return;
+      }
+
+      const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
+      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
+
+      // Isolated session key - never a real userId (see note above).
+      const healthSessionId = `agent:${agent.id}:${instanceSlug}`;
+
+      // Google / Microsoft are OAuth-token connectors, not MCP adapters -
+      // check them directly, mirroring the global connection health route.
+      if (server.type === "google") {
+        const start = Date.now();
+        const token = (credentials as { accessToken?: string }).accessToken;
+        if (!token) {
+          res.json({ success: true, data: { healthy: false, message: "No access token stored", latencyMs: 0 } });
+          return;
+        }
+        try {
+          const gRes = await fetch("https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" + encodeURIComponent(token));
+          const latencyMs = Date.now() - start;
+          if (gRes.ok) {
+            const info = (await gRes.json()) as { email?: string; expires_in?: number };
+            res.json({ success: true, data: { healthy: true, message: `Connected as ${info.email ?? "unknown"} (expires in ${info.expires_in ?? "?"}s)`, latencyMs } });
+          } else {
+            const refreshToken = (credentials as { refreshToken?: string }).refreshToken;
+            res.json({ success: true, data: refreshToken
+              ? { healthy: true, message: "Token expired but refresh token available - will auto-refresh on next use", latencyMs }
+              : { healthy: false, message: "Token expired and no refresh token", latencyMs } });
+          }
+        } catch (err) {
+          res.json({ success: true, data: { healthy: false, message: err instanceof Error ? err.message : "Health check failed", latencyMs: Date.now() - start } });
+        }
+        return;
+      }
+
+      if (server.type === "microsoft") {
+        const start = Date.now();
+        const token = (credentials as { accessToken?: string }).accessToken;
+        if (!token) {
+          res.json({ success: true, data: { healthy: false, message: "No access token stored", latencyMs: 0 } });
+          return;
+        }
+        try {
+          const msRes = await fetch("https://graph.microsoft.com/v1.0/me", { headers: { Authorization: `Bearer ${token}` } });
+          const latencyMs = Date.now() - start;
+          if (msRes.ok) {
+            const info = (await msRes.json()) as { displayName?: string; mail?: string };
+            res.json({ success: true, data: { healthy: true, message: `Connected as ${info.displayName ?? info.mail ?? "unknown"}`, latencyMs } });
+          } else if (msRes.status === 401) {
+            const refreshToken = (credentials as { refreshToken?: string }).refreshToken;
+            res.json({ success: true, data: refreshToken
+              ? { healthy: true, message: "Token expired but refresh token available - will auto-refresh on next use", latencyMs }
+              : { healthy: false, message: "Token expired and no refresh token", latencyMs } });
+          } else {
+            res.json({ success: true, data: { healthy: false, message: `Health check failed (HTTP ${msRes.status})`, latencyMs } });
+          }
+        } catch (err) {
+          res.json({ success: true, data: { healthy: false, message: err instanceof Error ? err.message : "Health check failed", latencyMs: Date.now() - start } });
+        }
+        return;
+      }
+
+      const result = await checkHealth(healthSessionId, server.type, server.name, credentials);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      log.error("[agents] agent mcp health check error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
