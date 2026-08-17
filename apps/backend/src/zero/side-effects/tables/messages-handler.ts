@@ -135,7 +135,7 @@ function cleanNotificationText(raw: string): string {
  * component tree (suitable for mention scanning and notification preview).
  * Returns null for non-flow-json content.
  */
-function getFlowJsonContentForNotification(content: string): string | null {
+export function getFlowJsonContentForNotification(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractCleanTextFromFlowJson(content) || null;
 }

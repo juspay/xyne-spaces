@@ -1193,6 +1193,7 @@ export const callTable = table('calls')
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
   })
   .primaryKey('id');
 
@@ -1313,6 +1314,7 @@ export const canvasTable = table('canvases')
     editAccessId: string().optional(),
     visibility: enumeration<CanvasVisibility>(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     isCollaborative: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),

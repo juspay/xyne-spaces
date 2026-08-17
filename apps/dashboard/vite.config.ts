@@ -44,7 +44,8 @@ export default defineConfig({
     }),
   ],
   build: {
-    manifest: true
+    manifest: true,
+    reportCompressedSize: false,
   },
   optimizeDeps: {
     exclude: ['@terrastruct/d2'],

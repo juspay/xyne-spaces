@@ -8,7 +8,7 @@ import {
   Spinner,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
+import { Archive, PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
@@ -46,6 +46,7 @@ import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
@@ -76,6 +77,7 @@ const CanvasPanel = (): ReactElement => {
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases] = useState(true);
   const [onlyCallGeneratedCanvases, setOnlyCallGeneratedCanvases] = useState(false);
+  const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
   const [listOptionsOpen, setListOptionsOpen] = useState(false);
   const debouncedGroupedSearchQuery = useDebouncedValue(groupedSearchQuery, 300);
@@ -203,6 +205,8 @@ const CanvasPanel = (): ReactElement => {
     },
     [z],
   );
+
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle();
 
   const handleDuplicateCanvas = useCallback(
     (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {
@@ -359,6 +363,25 @@ const CanvasPanel = (): ReactElement => {
                       }}
                     />
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
+                    onSelect={event => event.preventDefault()}
+                    data-track-category='CANVAS'
+                    data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
+                  >
+                    <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <span className='min-w-0 flex-1'>
+                      <span className='block leading-5'>Only archived</span>
+                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                        Show archived canvases only
+                      </span>
+                    </span>
+                    <Switch
+                      id='only-archived-canvases'
+                      checked={onlyArchivedCanvases}
+                      onCheckedChange={setOnlyArchivedCanvases}
+                    />
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -392,12 +415,14 @@ const CanvasPanel = (): ReactElement => {
               selectedCanvasId={selectedCanvasId}
               onDelete={handleDeleteCanvas}
               onDuplicate={handleDuplicateCanvas}
+              onArchiveToggle={handleArchiveToggleCanvas}
               isPersonalSectionCollapsed={isPersonalSectionCollapsed}
               onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
               excludeCallGeneratedCanvases={
                 onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
               }
               showStarredOnly={false}
+              onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
               searchQuery={effectiveGroupedSearchQuery}
             />
@@ -407,6 +432,7 @@ const CanvasPanel = (): ReactElement => {
               onSelect={handleSelectCanvas}
               onDelete={handleDeleteCanvas}
               onDuplicate={handleDuplicateCanvas}
+              onArchiveToggle={handleArchiveToggleCanvas}
               currentUserId={user?.id}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
@@ -415,6 +441,7 @@ const CanvasPanel = (): ReactElement => {
               }
               onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
               showStarredOnly={false}
+              onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
               {...(selectedCanvasId ? { selectedCanvasId } : {})}
             />

@@ -2243,6 +2243,7 @@ export function createMutators(
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
+            ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
         },
@@ -4318,6 +4319,7 @@ export function createMutators(
             updatedAt: now,
             labels: [],
             markedItems: [],
+            xyneManaged: false,
             metadata: {
               systemMessageId,
               conversationId,
@@ -8466,6 +8468,7 @@ export function createMutators(
             createdBy: authData.sub,
             visibility: visibility || CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: false,
             docType: DocType.Canvas,
             lastEditedBy: authData.sub,
@@ -9201,6 +9204,46 @@ export function createMutators(
           }
 
           await tx.mutate.canvases.delete({ id });
+        },
+      ),
+      archiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can archive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: true,
+          });
+        },
+      ),
+      unarchiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can unarchive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: false,
+          });
         },
       ),
     },
@@ -16210,6 +16253,14 @@ export function createMutators(
           }
 
           const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+
+          logger.info(`[MUTATOR-NON-LINEAR] stage transitions for board ${boardId} updated by ${authData.sub}`, {
+            boardId,
+            userId: authData.sub,
+            oldTransitionIds: existing.map(t => t.id),
+            newTransitionIds: transitions.map(t => t.id),
+          });
+
           for (const t of existing) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', t.id),

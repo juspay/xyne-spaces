@@ -189,7 +189,7 @@ export class ExternalSourceRepository {
    * List all external sources
    */
   async findAll(filter?: {
-    sourceType?: string;
+    sourceType?: string | { in: string[] };
     isActive?: boolean;
   }) {
     return await this.db.externalSource.findMany({
@@ -273,6 +273,22 @@ export class ExternalSourceRepository {
   private calendarName(ownerUserId: string, provider: CalendarProvider): string {
     const suffix = provider === 'GOOGLE' ? 'google' : 'microsoft';
     return `calendar-${suffix}-${ownerUserId}`;
+  }
+
+  /**
+   * Fully disconnect a calendar source: clears the stored refresh/access
+   * tokens (not just the watch channel) and marks it inactive. Used by the
+   * "Disconnect" action in Calendar preferences so a subsequent reconnect
+   * goes through Google's/Microsoft's OAuth consent screen again from
+   * scratch — required to pick up newly-added scopes (e.g. calendar.events)
+   * that an existing token grant wouldn't otherwise include.
+   */
+  async disconnectCalendarSource(id: string): Promise<void> {
+    await this.update(id, {
+      externalIdentifier: null,
+      isActive: false,
+      credentials: serializeCalendarCredentials({ refreshToken: '' }),
+    });
   }
 
   async findCalendarSourceByOwner(

@@ -457,7 +457,7 @@ async function resolveUserInfo(userIds: Iterable<string>): Promise<Map<string, {
 function formatUserRef(
   id: string | undefined | null,
   info: Map<string, { name?: string; email?: string }>,
-  withId = false,
+  withId = true,
 ): string {
   if (!id) return "unknown";
   const u = info.get(id);
@@ -2098,7 +2098,7 @@ const spacesMessageDetail: ToolDef = {
 
       const parts = [
         `Message: ${m.messageId}`,
-        `From: ${formatUserRef(m.senderId, userInfo, true)}`,
+        `From: ${formatUserRef(m.senderId, userInfo)}`,
         `Type: ${m.msgType}${m.edited ? " (edited)" : ""}`,
         `Date: ${toIST(m.createdAt)}`,
         ...(channelName ? [`Channel: #${channelName}`] : []),
@@ -2239,7 +2239,7 @@ const spacesChannels: ToolDef = {
       const citations: Citation[] = [];
       const lines = rows.map((c, idx) => {
         const convId = c.conversationId ?? latestConv.get(c.id);
-        const parts = [`#${c.name} (${c.scopeType}, ${c.visibility})${c.isArchived ? " [archived]" : ""}`];
+        const parts = [`#${c.name} (id: ${c.id}) (${c.scopeType}, ${c.visibility})${c.isArchived ? " [archived]" : ""}`];
         if (c.description) parts.push(`  ${c.description}`);
         // Real membership from channel_participants (the deprecated
         // Channel.participantCount scalar is unmaintained and reads 0). The count
@@ -2261,7 +2261,7 @@ const spacesChannels: ToolDef = {
         } else {
           parts.push(`  Members: ${countLabel}`);
         }
-        if (c.createdBy) parts.push(`  Created by: ${formatUserRef(c.createdBy, creatorInfo, true)}`);
+        if (c.createdBy) parts.push(`  Created by: ${formatUserRef(c.createdBy, creatorInfo)}`);
         if (c.project) parts.push(`  Project: ${c.project.name}`);
         const times: string[] = [];
         if (c.createdAt) times.push(`Created: ${toIST(c.createdAt)} IST`);
@@ -2773,6 +2773,7 @@ const spacesActivity: ToolDef = {
         const when = toIST(a.createdAt);
         const read = a.isRead ? "" : " (unread)";
         const refs: string[] = [];
+        if (a.actorId) refs.push(`actorId: ${a.actorId}`);
         if (a.messageId) refs.push(`messageId: ${a.messageId}`);
         if (a.conversationId) refs.push(`conversationId: ${a.conversationId}`);
         if (a.ticketId) refs.push(`ticketId: ${a.ticketId}`);

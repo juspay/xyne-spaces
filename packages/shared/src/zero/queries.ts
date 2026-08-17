@@ -529,6 +529,16 @@ const applyCanvasVisibilityQueryFilter = (
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
 
+// Keep in sync with the identical helper in apps/backend/src/zero/queries.ts if archive-filter behavior changes.
+const applyArchiveFilter = <T extends { where: Function }>(
+  query: T,
+  { includeArchived, onlyArchived }: { includeArchived?: boolean; onlyArchived?: boolean },
+): T => {
+  if (onlyArchived) return query.where('isArchived', true);
+  if (!includeArchived) return query.where('isArchived', false);
+  return query;
+};
+
 
 export const queries = defineQueries({
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
@@ -2416,8 +2426,10 @@ export const queries = defineQueries({
       folderId: z.string(),
       projectId: z.string(),
       includeQuartoDocs: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      onlyArchived: z.boolean().optional(),
     }),
-    ({ ctx, args: { folderId, projectId, includeQuartoDocs } }) => {
+    ({ ctx, args: { folderId, projectId, includeQuartoDocs, includeArchived, onlyArchived } }) => {
       let query = zql.canvases
         .where('folderId', folderId)
         .where('projectId', projectId)
@@ -2426,6 +2438,8 @@ export const queries = defineQueries({
       if (!includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
       }
+
+      query = applyArchiveFilter(query, { includeArchived, onlyArchived });
 
       return includeCurrentUserCanvasStatus(
         applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc'),
@@ -2437,11 +2451,13 @@ export const queries = defineQueries({
     z.object({
       channelId: z.string(),
       includeQuartoDocs: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      onlyArchived: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
       direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { channelId, includeQuartoDocs, limit, start, direction } }) => {
+    ({ ctx, args: { channelId, includeQuartoDocs, includeArchived, onlyArchived, limit, start, direction } }) => {
       const isBackward = direction === 'backward';
       let query = zql.canvases.where(helpers =>
         helpers.or(
@@ -2453,6 +2469,8 @@ export const queries = defineQueries({
       if (!includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
       }
+
+      query = applyArchiveFilter(query, { includeArchived, onlyArchived });
 
       query = applyCanvasVisibilityQueryFilter(query, ctx.userID);
 
@@ -2659,13 +2677,15 @@ export const queries = defineQueries({
       folderId: z.string().optional(),
       projectId: z.string().optional(),
       includeQuartoDocs: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      onlyArchived: z.boolean().optional(),
     }).refine(args => {
       const scope = args.scope ?? (args.folderId ? 'folder' : 'channel');
       if (scope === 'folder') return Boolean(args.folderId) && !args.channelId;
       if (scope === 'personal_root') return !args.folderId && !args.channelId;
       return Boolean(args.channelId) && !args.folderId;
     }, 'Provide folderId for folder scope or channelId for channel scope'),
-    ({ ctx, args: { scope, channelId, folderId, includeQuartoDocs } }) => {
+    ({ ctx, args: { scope, channelId, folderId, includeQuartoDocs, includeArchived, onlyArchived } }) => {
       const resolvedScope = scope ?? (folderId ? 'folder' : 'channel');
       let query =
         resolvedScope === 'folder'
@@ -2683,6 +2703,8 @@ export const queries = defineQueries({
       if (!includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
       }
+
+      query = applyArchiveFilter(query, { includeArchived, onlyArchived });
 
       if (resolvedScope === 'channel_root') {
         query = query.where('folderId', 'IS', null);
@@ -2787,6 +2809,8 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
       includeQuartoDocs: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      onlyArchived: z.boolean().optional(),
       direction: z.enum(['forward', 'backward']).optional(),
     }),
     ({ ctx, args }) => {
@@ -2796,6 +2820,8 @@ export const queries = defineQueries({
       if (!args.includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
       }
+
+      query = applyArchiveFilter(query, args);
 
       query = query.orderBy('updatedAt', isBackward ? 'asc' : 'desc').orderBy(
         'id',
@@ -3505,6 +3531,13 @@ export const queries = defineQueries({
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
       return zql.board_complexity_scores.where('userGroupId', userGroupId).related('board');
+    },
+  ),
+  // Query for user workload mappings (activeTasks/totalTasks per user per board)
+  getUserWorkloadMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_workload_mappings.where('userGroupId', userGroupId);
     },
   ),
   // Query for user expertise mappings for a board

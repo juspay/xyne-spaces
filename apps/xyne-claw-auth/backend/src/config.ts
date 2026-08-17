@@ -123,6 +123,12 @@ export const CONFIG = {
   dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
   dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
   dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
+  // OTLP/HTTP metrics → the shared collector (same one the spaces backend and
+  // dashboard export to). Set ENABLE_OTEL_METRICS=false where no collector runs.
+  otelMetricsEnabled: (process.env["ENABLE_OTEL_METRICS"] ?? "true").trim().toLowerCase() !== "false",
+  otelBaseUrl: (process.env["OTEL_BASE_URL"] ?? "http://localhost:4318").replace(/\/+$/, ""),
+  otelServiceName: process.env["OTEL_SERVICE_NAME"] ?? "xyne-claw-auth",
+  otelExportIntervalMs: Number(process.env["OTEL_EXPORT_INTERVAL_MS"] ?? 60_000),
   redisHost: process.env["REDIS_HOST"] ?? "localhost",
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
