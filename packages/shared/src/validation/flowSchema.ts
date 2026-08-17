@@ -623,6 +623,44 @@ export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
+// ── MCP configure card ────────────────────────────────────────────────────────
+// The agent asks for an account it needs but the user hasn't connected. It posts
+// this card; the USER types the credentials in the dashboard and they go
+// browser → claw-auth directly.
+//
+// INVARIANT: no secret ever appears in these props. `fields` describes WHICH
+// inputs to render (name/label/type), never their values — a credential passed
+// as a tool argument would land in the model's context, the run transcript and
+// the logs. `mcpServerId` is the only thing the server acts on, and the whole
+// flowJSON round-trips through the client, so props are untrusted regardless.
+export const mcpCredentialFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    type: z.enum(['text', 'password']),
+    placeholder: z.string().optional(),
+    optional: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpConfigurePropsSchema = z
+  .object({
+    serverType: z.string().min(1),
+    serverName: z.string().min(1),
+    mcpServerId: z.string().min(1),
+    reason: z.string().optional(),
+    fields: z.array(mcpCredentialFieldSchema).min(1),
+  })
+  .strict();
+
+export const mcpConfigureComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcpConfigure'),
+  props: mcpConfigurePropsSchema,
+});
+
+export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
+export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
+
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
     textComponentSchema,
@@ -643,6 +681,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prApprovalComponentSchema,
     callScheduleComponentSchema,
     agentComponentSchema,
+    mcpConfigureComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
@@ -679,7 +718,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema

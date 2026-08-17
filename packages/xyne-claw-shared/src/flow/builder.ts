@@ -29,6 +29,7 @@ type FlowComponentType =
   | 'link'
   | 'plan'
   | 'agent'
+  | 'mcpConfigure'
   | 'pr';
 
 interface FlowComponentStyle {
@@ -968,4 +969,57 @@ export function buildSkillUpdateApprovalFlow(
       ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
     });
   return b.build();
+}
+
+/**
+ * MCP configure card — the agent needs an account the user hasn't connected, so
+ * it posts this instead of failing or guessing.
+ *
+ * CREDENTIALS NEVER PASS THROUGH THE AGENT. This describes which inputs to
+ * render; the user types them in the dashboard and the values go browser →
+ * claw-auth. A tool that accepted credentials as arguments would write them into
+ * the model's context, the run transcript and the logs.
+ *
+ * Rendered by apps/dashboard McpConfigureNode, validated by @xyne/shared
+ * mcpConfigureComponentSchema — all three must ship together, since an unknown
+ * component type is rejected at Spaces' postMessage ingest.
+ */
+export function buildMcpConfigureFlow(context: {
+  serverType: string;
+  serverName: string;
+  mcpServerId: string;
+  fields: Array<{ name: string; label: string; type: 'text' | 'password'; placeholder?: string; optional?: boolean }>;
+  reason?: string;
+  userId: string;
+  agentSlug?: string;
+  spacesAppId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`mcp-configure-${context.serverType}-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'mcp-configure',
+      type: 'mcpConfigure',
+      props: {
+        serverType: context.serverType,
+        serverName: context.serverName,
+        mcpServerId: context.mcpServerId,
+        fields: context.fields.map((field) => ({
+          name: field.name,
+          label: field.label,
+          type: field.type,
+          ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+          ...(field.optional ? { optional: true } : {}),
+        })),
+        ...(context.reason?.trim() ? { reason: context.reason.trim() } : {}),
+      },
+    })
+    .setData({
+      actionType: 'mcp-configure',
+      userId: context.userId,
+      mcpServerId: context.mcpServerId,
+      serverType: context.serverType,
+      serverName: context.serverName,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    })
+    .build();
 }

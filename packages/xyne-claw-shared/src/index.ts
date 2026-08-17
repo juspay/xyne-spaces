@@ -21,11 +21,13 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
 export { buildAgentCardFlow, agentIdentity, AGENT_COMPONENT_ID } from "./flow/agent-card.js";
+export { validateMcpProposal } from "./flow/mcp-proposal.js";
+export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
   AgentCardProps,
   AgentCardData,
