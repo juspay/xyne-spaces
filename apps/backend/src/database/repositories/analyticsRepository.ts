@@ -347,6 +347,52 @@ export class AnalyticsRepository {
   }
 
   /**
+   * Reduce a list of records into a per-bucket numeric time series.
+   * Materializes every bucket (zero-filled) in the given order, adds each
+   * record's amount (default 1) to the bucket its key falls in, and returns the
+   * points sorted by date. Records whose key is null/undefined or not a known
+   * bucket are ignored, matching the previous hand-rolled loops exactly.
+   */
+  private bucketCounts<T>(
+    records: readonly T[],
+    timeBuckets: string[],
+    keyOf: (record: T) => string | null | undefined,
+    amountOf: (record: T) => number = () => 1,
+  ): { date: string; value: number }[] {
+    const bucketData = new Map<string, number>();
+    timeBuckets.forEach(bucket => bucketData.set(bucket, 0));
+
+    records.forEach(record => {
+      const bucketKey = keyOf(record);
+      if (bucketKey != null && bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + amountOf(record));
+      }
+    });
+
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Compute the UTC instant for the start of "today" in IST, plus a
+   * minute-floored "now". Shared by getMessagesToday and its time-series so the
+   * two resolve the same scan window.
+   */
+  private getIstDayBounds(): { startOfTodayUTC: Date; now: Date } {
+    const now = floorToMinute(new Date());
+    const istTime = new Date(now.getTime() + IST_OFFSET_MS);
+    const startOfTodayIST = new Date(Date.UTC(
+      istTime.getUTCFullYear(),
+      istTime.getUTCMonth(),
+      istTime.getUTCDate()
+    ));
+    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
+    return { startOfTodayUTC, now };
+  }
+
+  /**
    * Helper method to extract start and end dates from date condition
    * Centralizes the logic to avoid code duplication across time-series methods
    */
@@ -1918,28 +1964,12 @@ export class AnalyticsRepository {
 
     // Generate time buckets
     const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
-
-    // Group user onboarding by time buckets
-    userPresenceRecords.forEach(record => {
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(record.createdAt.getTime() + IST_OFFSET_MS);
-      const bucketKey = istTime.toISOString().split('T')[0];
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return this.bucketCounts(
+      userPresenceRecords,
+      timeBuckets,
+      record => this.getBucketKey(record.createdAt, 'day'),
+    );
   }
 
   /**
@@ -1948,20 +1978,7 @@ export class AnalyticsRepository {
    */
   async getMessagesToday(workspaceId?: string): Promise<number> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30), quantized so this range matches the
-    // one getMessagesTodayTimeSeries resolves and the two can share a scan.
-    const now = floorToMinute(new Date());
-    const istTime = new Date(now.getTime() + IST_OFFSET_MS);
-    
-    // Get start of today in IST
-    const startOfTodayIST = new Date(Date.UTC(
-      istTime.getUTCFullYear(),
-      istTime.getUTCMonth(),
-      istTime.getUTCDate()
-    ));
-    
-    // Subtract IST offset to get UTC time for start of today IST
-    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
+    const { startOfTodayUTC, now } = this.getIstDayBounds();
 
     const validMessages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
 
@@ -1973,45 +1990,18 @@ export class AnalyticsRepository {
    */
   async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30), quantized so this range matches the
-    // one getMessagesToday resolves and the two can share a scan.
-    const now = floorToMinute(new Date());
-    const istTime = new Date(now.getTime() + IST_OFFSET_MS);
-
-    // Get start of today in IST
-    const startOfTodayIST = new Date(Date.UTC(
-      istTime.getUTCFullYear(),
-      istTime.getUTCMonth(),
-      istTime.getUTCDate()
-    ));
-
-    // Subtract IST offset to get UTC time for start of today IST
-    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
+    const { startOfTodayUTC, now } = this.getIstDayBounds();
 
     const messages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
 
     // Generate hourly buckets for today
     const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
-
-    // Group messages by hour
-    messages.forEach(message => {
-      const bucketKey = this.getBucketKey(message.createdAt, 'hour');
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return this.bucketCounts(
+      messages,
+      timeBuckets,
+      message => this.getBucketKey(message.createdAt, 'hour'),
+    );
   }
 
   /**
@@ -2070,26 +2060,12 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
-
-    // Group tickets by time buckets
-    tickets.forEach(ticket => {
-      const bucketKey = this.getBucketKey(ticket.createdAt, groupBy);
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return this.bucketCounts(
+      tickets,
+      timeBuckets,
+      ticket => this.getBucketKey(ticket.createdAt, groupBy),
+    );
   }
 
   /**
@@ -2146,28 +2122,12 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
-
-    // Group canvases by time buckets
-    canvases.forEach(canvas => {
-      if (canvas.lastEditedAt) {
-        const bucketKey = this.getBucketKey(canvas.lastEditedAt, groupBy);
-        if (bucketData.has(bucketKey)) {
-          bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-        }
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return this.bucketCounts(
+      canvases,
+      timeBuckets,
+      canvas => canvas.lastEditedAt ? this.getBucketKey(canvas.lastEditedAt, groupBy) : null,
+    );
   }
 
   /**
@@ -2339,30 +2299,19 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
+    // Sum qualifying call durations (seconds) per bucket, then convert to minutes
+    const durationSecondsSeries = this.bucketCounts(
+      calls.filter(call => call.endedAt && (call.endedAt.getTime() - call.startedAt.getTime()) / 1000 > 60),
+      timeBuckets,
+      call => this.getBucketKey(call.startedAt, groupBy),
+      call => (call.endedAt!.getTime() - call.startedAt.getTime()) / 1000,
+    );
 
-    // Group calls by time buckets and sum durations (in seconds initially)
-    calls.forEach(call => {
-      if (!call.endedAt) return;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      if (duration <= 60) return;
-
-      const bucketKey = this.getBucketKey(call.startedAt, groupBy);
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + duration);
-      }
-    });
-
-    // Convert to array format with values in minutes
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: Math.round((bucketData.get(bucketKey) || 0) / 60 * 10) / 10 // Convert to minutes with 1 decimal
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return durationSecondsSeries.map(point => ({
+      date: point.date,
+      value: Math.round(point.value / 60 * 10) / 10 // Convert to minutes with 1 decimal
+    }));
   }
 
   /**
@@ -2444,26 +2393,12 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
-    });
-
-    // Group attachments by time buckets
-    attachments.forEach(attachment => {
-      const bucketKey = this.getBucketKey(attachment.createdAt, groupBy);
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return this.bucketCounts(
+      attachments,
+      timeBuckets,
+      attachment => this.getBucketKey(attachment.createdAt, groupBy),
+    );
   }
 
 }
