@@ -34,7 +34,7 @@ const isMcpConfigureProps = (value: unknown): value is McpConfigureProps => {
     typeof record['serverName'] === 'string' &&
     typeof record['mcpServerId'] === 'string' &&
     Array.isArray(record['fields']) &&
-    record['fields'].every((field) => {
+    record['fields'].every(field => {
       if (!field || typeof field !== 'object') return false;
       const f = field as Record<string, unknown>;
       return (
@@ -49,7 +49,7 @@ const isMcpConfigureProps = (value: unknown): value is McpConfigureProps => {
 const titleForServer = (name: string): string => {
   const trimmed = name.trim();
   if (!trimmed) return 'MCP';
-  return trimmed.replace(/\b\w/g, (char) => char.toUpperCase());
+  return trimmed.replace(/\b\w/g, char => char.toUpperCase());
 };
 
 export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
@@ -60,12 +60,12 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
   const requiredMissing = useMemo(() => {
     if (!props) return [];
     return props.fields
-      .filter((field) => !field.optional)
-      .filter((field) => {
+      .filter(field => !field.optional)
+      .filter(field => {
         const value = state.values[field.name];
         return typeof value !== 'string' || value.trim().length === 0;
       })
-      .map((field) => field.name);
+      .map(field => field.name);
   }, [props, state.values]);
 
   if (!props) return null;
@@ -76,7 +76,11 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
   const onSubmit = async (): Promise<void> => {
     setShowErrors(true);
     if (requiredMissing.length > 0) return;
-    await executeAction({ type: 'submit', actionId: 'mcp-configure-submit', errorMessage: `Could not configure ${title}` });
+    await executeAction({
+      type: 'submit',
+      actionId: 'mcp-configure-submit',
+      errorMessage: `Could not configure ${title}`,
+    });
   };
 
   return (
@@ -88,7 +92,9 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
         <McpServerIcon server={{ type: props.serverType, name: props.serverName }} size='md' />
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <p className='truncate text-base font-semibold leading-[1.25] text-foreground'>Configure {title}</p>
+            <p className='truncate text-base font-semibold leading-[1.25] text-foreground'>
+              Configure {title}
+            </p>
             <span className='shrink-0 rounded px-1 py-px text-xs font-semibold leading-[18px] bg-muted text-muted-foreground'>
               Required
             </span>
@@ -100,7 +106,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
       </div>
 
       <div className='mt-3 grid gap-2'>
-        {props.fields.map((field) => {
+        {props.fields.map(field => {
           const rawValue = state.values[field.name];
           const value = typeof rawValue === 'string' ? rawValue : '';
           const hasError = showErrors && missing.has(field.name);
@@ -109,20 +115,24 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
             <label key={field.name} className='grid gap-1.5'>
               <span className='text-xs font-medium leading-none text-foreground/75'>
                 {field.label}
-                {field.optional ? <span className='font-normal text-muted-foreground'> optional</span> : null}
+                {field.optional ? (
+                  <span className='font-normal text-muted-foreground'> optional</span>
+                ) : null}
               </span>
               <input
                 type={field.type}
                 value={value}
                 placeholder={field.placeholder}
                 autoComplete='off'
-                onChange={(event) => updateFieldValue(field.name, event.target.value)}
+                onChange={event => updateFieldValue(field.name, event.target.value)}
                 data-track-category='MCP_CONFIGURE_ARTIFACT'
                 data-track-name='MCP_CONFIGURE_FIELD_CHANGE'
                 className={cn(
                   'h-9 rounded-lg border bg-background px-3 text-sm text-foreground outline-none',
                   'placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/25',
-                  hasError ? 'border-destructive focus:border-destructive focus:ring-destructive/20' : 'border-border',
+                  hasError
+                    ? 'border-destructive focus:border-destructive focus:ring-destructive/20'
+                    : 'border-border',
                 )}
               />
               {hasError ? <span className='text-xs text-destructive'>Required</span> : null}
