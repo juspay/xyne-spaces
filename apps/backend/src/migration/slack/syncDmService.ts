@@ -17,6 +17,7 @@
  */
 
 import { WebClient } from '@slack/web-api';
+import { AuthProvider, OrgRole } from '@xyne/shared';
 import { Request, Response } from 'express';
 import { logger } from '../../utils/logger';
 import { checkUserAuthorization } from './command';
@@ -31,7 +32,6 @@ import { getUserInfo, UserInfoCache } from './utils/extractConversation';
 import { config } from '../../config/env';
 import { getBotConfigByTeamId, getBotConfigByWorkspaceId, getWorkspaceIdByTeamId } from './slackMigrationBotConfig';
 import { db } from '../../database/client';
-import { AuthProvider } from '@prisma/client';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Command handler — opens the modal
@@ -464,7 +464,7 @@ async function resolveSlackToXyneUser(
         create: {
           orgId: wsOrg.orgId,
           email: email.toLowerCase(),
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
         },
       });
 

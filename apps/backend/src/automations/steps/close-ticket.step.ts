@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { TicketStatusV2 } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
-import { TicketStatusV2 } from '@prisma/client';
 
 const CloseTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),

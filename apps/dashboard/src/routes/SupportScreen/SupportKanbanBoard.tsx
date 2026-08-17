@@ -18,10 +18,17 @@ import {
   KeyboardSensor,
 } from '@dnd-kit/core';
 import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
-import { TicketPriority, TicketStatusV2, BoardType, TicketStageRequestStatus } from '@xyne/shared';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  BoardType,
+  TicketStageRequestStatus,
+  ApproverType,
+} from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
@@ -49,12 +56,21 @@ const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: numbe
   ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
 });
 
+const DESK_KANBAN_VISIBLE_COLUMNS = new Set([
+  'assignee',
+  'dueDate',
+  'priority',
+  'tags',
+  'createdAt',
+]);
+
 export interface SupportKanbanBoardProps {
   channelId: string;
   boardId: string | null;
   onBoardIdResolved: (boardId: string) => void;
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -63,7 +79,10 @@ export interface SupportKanbanBoardProps {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -119,6 +138,7 @@ export const SupportKanbanBoard = ({
       JSON.stringify({
         c: channelId,
         a: ticketFilter.assignedTo ?? null,
+        cb: ticketFilter.createdBy ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         ac: ticketFilter.aiCategory ?? null,
@@ -127,11 +147,15 @@ export const SupportKanbanBoard = ({
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        cs: ticketFilter.createdAtStart ?? null,
+        ce: ticketFilter.createdAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
+        l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
       ticketFilter.assignedTo,
+      ticketFilter.createdBy,
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.aiCategory,
@@ -140,7 +164,10 @@ export const SupportKanbanBoard = ({
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      ticketFilter.createdAtStart,
+      ticketFilter.createdAtEnd,
       dynamicFieldEntries,
+      ticketFilter.conversationLabelId,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
@@ -288,10 +315,14 @@ export const SupportKanbanBoard = ({
       formId: t.formId ?? null,
       requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
+        (a: {
+          userId: string | null;
+          roleId: string | null;
+          approverType?: ApproverType | null;
+        }) => ({
           approverId: a.userId ?? a.roleId ?? '',
           // NULL approverType (legacy rows) is treated as USER.
-          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
+          approverType: a.approverType ?? ApproverType.USER,
         }),
       ),
     }));
@@ -419,6 +450,7 @@ export const SupportKanbanBoard = ({
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           showEmailReads={true}
+          visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
           {...(activeTicketId !== undefined && { activeTicketId })}
           slaPolicies={slaPolicies}
         />
@@ -427,6 +459,7 @@ export const SupportKanbanBoard = ({
             <TicketCard
               ticket={activeTicket}
               isCompact={true}
+              visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
               onClick={() => {}}
               data-track-category='Support'
               data-track-name='DragOverlayTicketClick'
@@ -483,12 +516,15 @@ export const SupportKanbanBoard = ({
                         fromSequenceNumber: backwardStageChange.fromSequenceNumber,
                       }),
                     );
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        updatedAt: Date.now(),
-                      }),
+                    void surfaceMutationError(
+                      zero.mutate(
+                        mutators.ticket.update({
+                          id: backwardStageChange.ticketId,
+                          stageName: backwardStageChange.stageName,
+                          updatedAt: Date.now(),
+                        }),
+                      ),
+                      'Failed to move ticket',
                     );
                   }
                   setShowBackwardConfirmDialog(false);

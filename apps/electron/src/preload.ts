@@ -6,6 +6,13 @@ declare const window: {
   location: { protocol: string; hostname: string; origin: string };
 };
 
+interface RecordingPillState {
+  startTime: number;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
 // ── Renderer trust boundary ────────────────────────────────────────────────
 // This preload injects a *privileged* IPC bridge: mTLS key generation,
 // certificate storage, cookie/session control, screen recording, native file
@@ -149,6 +156,24 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('reload-active-browser-tab', listener);
   },
 
+  onRecordingSystemSuspend: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:system-suspend', listener);
+    return () => ipcRenderer.removeListener('recording:system-suspend', listener);
+  },
+
+  onRecordingResumeRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:resume-requested', listener);
+    return () => ipcRenderer.removeListener('recording:resume-requested', listener);
+  },
+
+  onRecordingPauseRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:pause-requested', listener);
+    return () => ipcRenderer.removeListener('recording:pause-requested', listener);
+  },
+
   onAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
     const listener = (_event: unknown, data?: ElectronAuthData) => callback(data);
     ipcRenderer.on('auth:success', listener);
@@ -249,7 +274,14 @@ const electronAPI = {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped'];
+    const allowed = [
+      'app:theme-changed',
+      'meeting-popup:content-height',
+      'recording-pill:recording-stopped',
+      'recording:renderer-ready',
+      'recording:set-minimized',
+      'recording:state-changed',
+    ];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 
@@ -316,8 +348,8 @@ const electronAPI = {
 
   // Recording pill (persistent floating pill while recording is active)
   recordingPill: {
-    onShow: (callback: (startTime: number) => void) => {
-      const listener = (_event: unknown, startTime: number) => callback(startTime);
+    onShow: (callback: (state: RecordingPillState) => void) => {
+      const listener = (_event: unknown, state: RecordingPillState) => callback(state);
       ipcRenderer.on('recording-pill:show', listener);
       return () => ipcRenderer.removeListener('recording-pill:show', listener);
     },
@@ -326,8 +358,44 @@ const electronAPI = {
       ipcRenderer.on('recording-pill:hide', listener);
       return () => ipcRenderer.removeListener('recording-pill:hide', listener);
     },
+    onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => {
+      const listener = (_event: unknown, theme: 'light' | 'dark') => callback(theme);
+      ipcRenderer.on('recording-pill:theme-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:theme-changed', listener);
+    },
+    onMinimizedChanged: (callback: (minimized: boolean) => void) => {
+      const listener = (_event: unknown, minimized: boolean) => callback(minimized);
+      ipcRenderer.on('recording:minimized-changed', listener);
+      return () => ipcRenderer.removeListener('recording:minimized-changed', listener);
+    },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
-    cancelRecording: () => ipcRenderer.send('recording-pill:cancel-recording'),
+    resumeRecording: () => ipcRenderer.send('recording-pill:resume-recording'),
+    openApp: () => ipcRenderer.send('recording-pill:open-app'),
+    setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('recording-pill:set-ignore-mouse', ignore),
+    dragStart: () => ipcRenderer.send('recording-pill:drag-start'),
+    dragEnd: () => ipcRenderer.send('recording-pill:drag-end'),
+  },
+
+  platform: process.platform,
+
+  tray: {
+    getVisible: () => ipcRenderer.invoke('tray:get-visible'),
+    setVisible: (visible: boolean) => ipcRenderer.send('tray:set-visible', visible),
+    onVisibleChanged: (callback: (visible: boolean) => void) => {
+      const listener = (_event: unknown, visible: boolean) => callback(visible);
+      ipcRenderer.on('tray:visible-changed', listener);
+      return () => ipcRenderer.removeListener('tray:visible-changed', listener);
+    },
+  },
+
+  recordingPillSettings: {
+    getEnabled: () => ipcRenderer.invoke('recording-pill:get-enabled'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('recording-pill:set-enabled', enabled),
+    onEnabledChanged: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+      ipcRenderer.on('recording-pill:enabled-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:enabled-changed', listener);
+    },
   },
 
   clawOverlay: {

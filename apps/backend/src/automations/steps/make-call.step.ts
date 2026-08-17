@@ -7,11 +7,11 @@ import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
 import { livekitService } from '@/services/liveKitService';
 import { callSideEffectService } from '@/services/callSideEffectService';
-import { CallOrigin, CallStatus, ProjectType, UserType } from '@prisma/client';
-import { CallType } from '@xyne/shared';
+import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -238,7 +238,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     const callId = uuidv4();
     const conversationId = uuidv4();
     const messageId = uuidv4();
-    const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${callType}`;
+    const roomLink = buildCallInviteUrl(externalId);
     const now = new Date();
 
     // Create the LiveKit room BEFORE committing the DB transaction. This removes

@@ -328,6 +328,14 @@ export function isScheduledCallJoinable(call: Call, now = Date.now()): boolean {
   return now >= new Date(call.startsAt).getTime();
 }
 
+export function canJoinCall(call: Call): boolean {
+  return (
+    call.status === CallStatus.SCHEDULED ||
+    call.status === CallStatus.ACTIVE ||
+    call.status === CallStatus.IN_PROGRESS
+  );
+}
+
 export function isScheduledCallManageable(call: Call, currentUserId: string | undefined): boolean {
   if (!currentUserId || call.status !== CallStatus.SCHEDULED) return false;
 

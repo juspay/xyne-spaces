@@ -19,6 +19,7 @@ import { logger } from '@/utils/logger';
 import { AutomationStatus } from '../types/status';
 import {
   workflowExecutionToRun,
+  workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
   triggerTypeToEventType,
@@ -27,7 +28,7 @@ import {
 import {
   getAutomationPauseState,
   getExecutionState,
-  stitchExecutionStateMany,
+  stitchExecutionContextMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
 import { approvalService, ApprovalError } from '../services/approval.service';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
@@ -50,7 +51,7 @@ router.use((_req, res, next) => {
 
 const OPERATOR_METADATA: Record<
   ConditionOperator,
-  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' }
+  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag' }
 > = {
   [ConditionOperator.EQ]: { label: 'equals', valueType: 'string' },
   [ConditionOperator.NEQ]: { label: 'does not equal', valueType: 'string' },
@@ -60,6 +61,7 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.LT]: { label: 'is less than', valueType: 'number' },
   [ConditionOperator.LTE]: { label: 'is less than or equal to', valueType: 'number' },
   [ConditionOperator.EXISTS]: { label: 'exists', valueType: 'none' },
+  [ConditionOperator.HAS_TAG]: { label: 'has tag', valueType: 'tag' },
 };
 
 const AutomationPayloadSchema = z.object({
@@ -610,6 +612,13 @@ router.get(
           ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
           : {}),
       },
+      select: {
+        id: true,
+        workflowId: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
@@ -619,13 +628,13 @@ router.get(
     const page = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
 
-    const stitched = await stitchExecutionStateMany(page);
+    const stitched = await stitchExecutionContextMany(page);
 
     res.json({
       success: true,
       data: {
         runs: stitched.map(row =>
-          workflowExecutionToRun(row, { context: row.context }),
+          workflowExecutionToRunSummary(row, { context: row.context }),
         ),
         nextCursor,
       },

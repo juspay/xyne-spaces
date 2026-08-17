@@ -12,6 +12,7 @@ export const ALLOWED_MODELS = new Set([
   'channel',
   'channelParticipant',
   'conversation',
+  'conversationParticipant',
   'message',
   'workflow',
   'workflowExecution',

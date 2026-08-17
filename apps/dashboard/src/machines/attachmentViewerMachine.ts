@@ -1,5 +1,6 @@
 import { createMachine, createActor, fromPromise, assign } from 'xstate';
 import { fetchFile } from '../services/clients/fileFetchService';
+import { MessageType } from '@xyne/shared';
 
 export interface AttachmentRef {
   attachmentId: string;
@@ -22,7 +23,7 @@ export interface AttachmentRef {
     senderId: string;
     content: string;
     createdAt: number;
-    msgType: 'USER' | 'BOT' | 'SYSTEM' | 'FORWARDED';
+    msgType: MessageType;
     hasAttachment?: boolean;
     attachments?: readonly {
       id: string;

@@ -16,6 +16,7 @@ import { mutators } from '../../zero/mutators';
 import { toast } from 'sonner';
 import { Plus, AppWindow, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
+import { AccessType } from '@xyne/shared';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -256,8 +257,8 @@ const AppsScreen = (): ReactElement => {
   const appAccessLevel = permissions
     .filter(p => p.resourceName === 'XYNE-APPS')
     .map(p => p.accessType)[0];
-  const canCreateApp = appAccessLevel === 'WRITE' || appAccessLevel === 'ADMIN';
-  const isXyneAppsAdmin = appAccessLevel === 'ADMIN';
+  const canCreateApp = appAccessLevel === AccessType.WRITE || appAccessLevel === AccessType.ADMIN;
+  const isXyneAppsAdmin = appAccessLevel === AccessType.ADMIN;
 
   // Install / Update both hit the install endpoint (Update = re-install latest snapshot).
   const installAppMutation = useMutation({

@@ -123,6 +123,12 @@ export const CONFIG = {
   dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
   dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
   dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
+  // OTLP/HTTP metrics → the shared collector (same one the spaces backend and
+  // dashboard export to). Set ENABLE_OTEL_METRICS=false where no collector runs.
+  otelMetricsEnabled: (process.env["ENABLE_OTEL_METRICS"] ?? "true").trim().toLowerCase() !== "false",
+  otelBaseUrl: (process.env["OTEL_BASE_URL"] ?? "http://localhost:4318").replace(/\/+$/, ""),
+  otelServiceName: process.env["OTEL_SERVICE_NAME"] ?? "xyne-claw-auth",
+  otelExportIntervalMs: Number(process.env["OTEL_EXPORT_INTERVAL_MS"] ?? 60_000),
   redisHost: process.env["REDIS_HOST"] ?? "localhost",
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
@@ -142,6 +148,16 @@ export const CONFIG = {
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",
+  // Object storage provider — 'gcs' (default) or 's3'; see @xyne/storage.
+  // Env names match the Spaces backend (config/env.ts) and xyne-claw so one
+  // set of envs configures all three apps.
+  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
+  s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
+  s3BucketName: process.env["S3_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
+  s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
+  s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
+  s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
+  isProduction: process.env["NODE_ENV"] === "production",
   /**
    * Bitbucket Server creds used by the admin dashboard to count PRs/commits
    * authored by the xyne-doctor bot identity (`john.doe@gmail.com`).

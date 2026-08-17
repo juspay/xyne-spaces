@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
-import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
 import { ActivitySource } from '@/types/ticket';
@@ -14,7 +14,7 @@ const UpdateTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
   title: variableRef(z.string()).optional(),
   description: variableRef(z.string()).optional(),
-  priority: z.nativeEnum(TicketPriority).optional(),
+  priority: variableRef(z.union([z.nativeEnum(TicketPriority), z.string()])).optional(),
   status: z.nativeEnum(TicketStatusV2).optional(),
   stageName: variableRef(z.string()).optional(),
   assignedTo: variableRef(z.string()).optional(),
@@ -88,7 +88,17 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
     if (config.title !== undefined) fields.title = config.title as string;
     if (config.description !== undefined) fields.description = config.description as string;
-    if (config.priority !== undefined) fields.priority = config.priority;
+    if (config.priority !== undefined) {
+      const normalized = (config.priority as string).toUpperCase();
+      if (Object.values(TicketPriority).includes(normalized as TicketPriority)) {
+        fields.priority = normalized as TicketPriority;
+      } else {
+        logger.warn(`[automations] UPDATE_TICKET skipping priority — "${config.priority}" is not a valid TicketPriority for ticket ${ticketId}`);
+      }
+      // Always stamp aiPriority — prevents AI retrigger from re-classifying this ticket.
+      // If enum was valid, mirrors priority. If invalid, raw value still blocks retrigger.
+      fields.aiPriority = fields.priority ?? normalized;
+    }
     if (config.status !== undefined) fields.statusV2 = config.status;
 
     if (Object.keys(fields).length > 0) {

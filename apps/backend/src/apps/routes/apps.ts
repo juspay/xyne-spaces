@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { AppController } from '../controllers/appController';
 import { incomingWebhookController } from '../controllers/incomingWebhookController';
 import { ChatController } from '../controllers/chatController';
 import { CommandController } from '../controllers/commandController';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import chatRoutes from './chat';
 import fileRoutes from './files';
 import ticketRoutes from './ticket';
@@ -32,7 +32,15 @@ const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
 
+// Type-prefixed webhook routes must stay ABOVE the 3-segment catch-all below,
+// otherwise the prefix is captured as :workspaceId.
 router.post('/webhooks/sentinel/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleSentinelIncoming);
+// Amazon SNS posts JSON with `Content-Type: text/plain`, which the global
+// express.json() ignores — parse the body as text here and JSON.parse it in the
+// controller.
+router.post('/webhooks/sns/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handleAmazonSnsIncoming);
+router.post('/webhooks/pingdom/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handlePingdomIncoming);
+router.post('/webhooks/gcp/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handleGcpIncoming);
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
 const commandController = new CommandController();
 

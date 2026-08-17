@@ -2,6 +2,10 @@
  * Shared type definitions for Xyne Spaces
  */
 
+// Flow-board plan types, schema, and the FlowPlanModel read-model live in
+// their own module; re-exported here so `@xyne/shared` consumers are unchanged.
+export * from './flow-plan';
+
 export interface TicketFormConfig {
   userGroupsOnly?: {
     enabled: boolean;
@@ -96,4 +100,9 @@ export interface BoardMetadata {
    * schema migration and defaults gracefully to `'stages'` when absent.
    */
   slaPolicyType?: 'stages' | 'priority';
+  /**
+   * Per-custom-field visibility in the create ticket modal, keyed by field id.
+   * Absent = treat as visible (backward compat for boards saved before this existed).
+   */
+  customFieldVisibility?: Record<string, boolean>;
 }

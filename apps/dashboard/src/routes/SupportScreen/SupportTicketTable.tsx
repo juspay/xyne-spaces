@@ -20,13 +20,17 @@ export interface SupportTicketTableProps {
   channelId: string;
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     conversationIdWhitelist: string[] | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
   visibleColumns?: Set<string>;
@@ -87,26 +91,34 @@ export const SupportTicketTable = ({
       JSON.stringify({
         c: channelId,
         a: ticketFilter.assignedTo ?? null,
+        cb: ticketFilter.createdBy ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         ci: ticketFilter.conversationIdWhitelist ?? null,
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        cs: ticketFilter.createdAtStart ?? null,
+        ce: ticketFilter.createdAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
         cols: displayFieldIds ?? null,
+        l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
       ticketFilter.assignedTo,
+      ticketFilter.createdBy,
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.conversationIdWhitelist,
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      ticketFilter.createdAtStart,
+      ticketFilter.createdAtEnd,
       dynamicFieldEntries,
       displayFieldIds,
+      ticketFilter.conversationLabelId,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());

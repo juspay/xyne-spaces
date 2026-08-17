@@ -17,6 +17,7 @@ import { gatewaysRouter } from "./routes/gateways.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { flowActionRouter } from "./routes/flow-action.js";
 import { twinDraftInternalRouter } from "./routes/twin-draft.js";
+import { attachmentsInternalRouter } from "./routes/attachments.js";
 import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
@@ -94,10 +95,13 @@ import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
+import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
+import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 
 import { requireAuth, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
+import { connectDb } from "./db.js";
 
 const app = express();
 // Capture the raw request body so verify-spaces-signature middleware can
@@ -185,6 +189,7 @@ app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
+app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
@@ -281,9 +286,16 @@ app.use(`${BASE}/entity-extraction`, requireAuth, requireClawAdmin, entityExtrac
 // MCP Gateway routes (for backend service registration)
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
 
+initializeOpenTelemetry();
+registerDailyBriefGauges();
+
 const server = app.
 listen(CONFIG.port, () => {
   log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
+
+  void connectDb().catch(err => {
+    log.error('[xyne-claw-auth] Database warmup failed:', err);
+  });
   // npx cache scrub: prior deploys left half-installed package trees in
   // ~/.npm/_npx (e.g. node-fetch present, data-uri-to-buffer missing),
   // which made every stdio MCP spawn (github, etc.) die with
@@ -362,6 +374,7 @@ async function shutdown(signal: string): Promise<void> {
     await closeAgentBackfillQueue().catch(() => {});
   }
   await redisService.disconnect().catch(() => {});
+  await shutdownOpenTelemetry().catch(() => {});
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
 }

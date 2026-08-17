@@ -108,6 +108,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       type: 'call',
       id: transcript.id,
       title: transcript.title,
+      ...(transcript.conversationId ? { threadId: transcript.conversationId } : {}),
     });
   }
 
@@ -116,6 +117,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       type: 'call',
       id: recording.id,
       title: recording.title,
+      ...(recording.conversationId ? { threadId: recording.conversationId } : {}),
     });
   }
 
@@ -127,7 +129,7 @@ import { toast } from 'sonner';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_CHANNELS = 5;
-const MAX_CONTEXT_ITEMS = 5;
+const MAX_CONTEXT_ITEMS = 20;
 
 const ENABLED_TABS: TabType[] = [
   TabType.CHANNELS,

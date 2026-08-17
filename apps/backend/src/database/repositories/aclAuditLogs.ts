@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
 import {
   ACLAuditLog,
   CreateACLAuditLogInput,
@@ -8,7 +9,6 @@ import {
   PaginatedResult,
   ACLAuditLogWithActor,
 } from '@/types/database';
-import { ACLAuditEventType, ACLAuditTargetType } from '@prisma/client';
 
 export class ACLAuditLogRepository extends BaseRepository<ACLAuditLog, CreateACLAuditLogInput, UpdateACLAuditLogInput> {
   constructor() {

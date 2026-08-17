@@ -6,7 +6,7 @@
  */
 
 import { createPortal } from 'react-dom';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Square, Pause, Play, Mic, ArrowUpRight } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -15,141 +15,49 @@ import {
   useTranscriptStream,
 } from '../../../hooks/useRecordingStore';
 import { useAudioAmplitude } from '../../../hooks/useAudioAmplitude';
-import { formatRecordingDuration, generateRecordingTitle } from '../../../utils/recordingUtils';
+import {
+  calculateRecordingElapsedMs,
+  formatRecordingDuration,
+  generateRecordingTitle,
+} from '../../../utils/recordingUtils';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { SaveTitleModal } from '../../../routes/RecordingsScreen/components/SaveTitleModal';
 import Button from '../../../components/ui/Button';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
-
-interface DragState {
-  startX: number;
-  startY: number;
-  initialX: number;
-  initialY: number;
-}
-
-interface Position {
-  x: number;
-  y: number;
-}
-
-/**
- * Custom hook for draggable overlay functionality
- * Handles mouse and touch events for dragging the overlay
- */
-const useDraggableOverlay = (
-  containerRef: React.RefObject<HTMLDivElement | null>,
-  initialPosition: Position,
-): {
-  position: Position;
-  isDragging: boolean;
-  handleMouseDown: (e: React.MouseEvent) => void;
-  handleTouchStart: (e: React.TouchEvent) => void;
-} => {
-  const [position, setPosition] = useState<Position>(initialPosition);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<DragState | null>(null);
-
-  const startDrag = useCallback(
-    (clientX: number, clientY: number): void => {
-      setIsDragging(true);
-      dragRef.current = {
-        startX: clientX,
-        startY: clientY,
-        initialX: position.x,
-        initialY: position.y,
-      };
-    },
-    [position],
-  );
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent): void => {
-      e.preventDefault();
-      startDrag(e.clientX, e.clientY);
-    },
-    [startDrag],
-  );
-
-  const handleTouchStart = useCallback(
-    (e: React.TouchEvent): void => {
-      const touch = e.touches[0];
-      if (touch) {
-        startDrag(touch.clientX, touch.clientY);
-      }
-    },
-    [startDrag],
-  );
-
-  useEffect(() => {
-    if (!isDragging) return;
-
-    const handleMove = (clientX: number, clientY: number): void => {
-      if (!dragRef.current || !containerRef.current) return;
-
-      const dx = clientX - dragRef.current.startX;
-      const dy = clientY - dragRef.current.startY;
-      const rect = containerRef.current.getBoundingClientRect();
-
-      setPosition({
-        x: Math.max(0, Math.min(window.innerWidth - rect.width, dragRef.current.initialX + dx)),
-        y: Math.max(0, Math.min(window.innerHeight - rect.height, dragRef.current.initialY - dy)),
-      });
-    };
-
-    const onMouseMove = (e: MouseEvent): void => handleMove(e.clientX, e.clientY);
-    const onTouchMove = (e: TouchEvent): void => {
-      const touch = e.touches[0];
-      if (touch) {
-        handleMove(touch.clientX, touch.clientY);
-      }
-    };
-
-    const endDrag = (): void => {
-      setIsDragging(false);
-      dragRef.current = null;
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', endDrag);
-    window.addEventListener('touchmove', onTouchMove);
-    window.addEventListener('touchend', endDrag);
-
-    return (): void => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', endDrag);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', endDrag);
-    };
-  }, [isDragging, containerRef]);
-
-  return { position, isDragging, handleMouseDown, handleTouchStart };
-};
+import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
 
 /**
  * Custom hook for elapsed time tracking
  * Updates every second while recording is active
  */
-const useElapsedTime = (isActive: boolean, isPaused: boolean, startTime: number | null): number => {
+const useElapsedTime = (
+  isActive: boolean,
+  isPaused: boolean,
+  startTime: number | null,
+  pauseStartedAt: number | null,
+  accumulatedPausedMs: number,
+): number => {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   useEffect(() => {
-    if (!isActive || !startTime || isPaused) {
+    if (!isActive || !startTime) {
       // No active timer — clear the stale value so the next recording doesn't flash the previous
-      // one's duration. Skip on pause so the paused reading stays put.
-      if (!isActive || !startTime) setElapsedTime(0);
+      // one's duration.
+      setElapsedTime(0);
       return;
     }
 
     // Recompute immediately (don't wait up to 1s for the first tick), matching RecordingControlBar.
-    setElapsedTime(Date.now() - startTime);
+    setElapsedTime(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+    if (isPaused) return;
+
     const interval = setInterval(() => {
-      setElapsedTime(Date.now() - startTime);
+      setElapsedTime(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
     }, 1000);
 
     return (): void => clearInterval(interval);
-  }, [isActive, isPaused, startTime]);
+  }, [isActive, isPaused, startTime, pauseStartedAt, accumulatedPausedMs]);
 
   return elapsedTime;
 };
@@ -161,6 +69,8 @@ export function RecordingOverlay(): React.ReactElement | null {
 
   const status = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
+  const pauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
+  const accumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
@@ -175,7 +85,13 @@ export function RecordingOverlay(): React.ReactElement | null {
   const isOnRecordingsPage = location.pathname.split('/').includes('recordings');
 
   // Use custom hooks
-  const elapsedTime = useElapsedTime(isActive, isPaused, startTime);
+  const elapsedTime = useElapsedTime(
+    isActive,
+    isPaused,
+    startTime,
+    pauseStartedAt,
+    accumulatedPausedMs,
+  );
   const { position, isDragging, handleMouseDown, handleTouchStart } = useDraggableOverlay(
     containerRef,
     { x: 64, y: 32 },
@@ -325,9 +241,9 @@ export function RecordingOverlay(): React.ReactElement | null {
             <div className='flex items-center gap-3 min-w-0'>
               <div className='relative mt-0.5'>
                 {isRecording && (
-                  <span className='flex h-3 w-3'>
+                  <span className='flex h-3.5 w-3.5'>
                     <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
-                    <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
+                    <span className='relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500' />
                   </span>
                 )}
                 {isPaused && (

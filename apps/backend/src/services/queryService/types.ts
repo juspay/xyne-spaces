@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FormEntityType } from '@prisma/client';
+import { FormEntityType } from '@xyne/shared';
 
 export const SUPPORTED_ENTITY_TYPES = [
   FormEntityType.TICKET,

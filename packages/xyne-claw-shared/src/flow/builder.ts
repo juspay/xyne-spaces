@@ -27,7 +27,9 @@ type FlowComponentType =
   | 'divider'
   | 'image'
   | 'link'
-  | 'plan';
+  | 'plan'
+  | 'agent'
+  | 'pr';
 
 interface FlowComponentStyle {
   padding?: string;

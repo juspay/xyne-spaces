@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MessageType } from '@prisma/client';
+import { MessageType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';
@@ -14,6 +14,7 @@ import {
   matchTicketScopeFilters,
 } from './ticket-context';
 import type { TicketCommentedEventPayload } from '../types/automation-events';
+import type { TicketLike } from './ticket-context';
 
 export const TICKET_COMMENTED_EVENT = 'TICKET_COMMENTED';
 
@@ -167,7 +168,7 @@ async function hydrateTicketCommentedPayload(
   if (!channelId) return { ...payload };
 
   const [context, messageRow, authorUser] = await Promise.all([
-    buildTicketContext(ticket),
+    buildTicketContext(ticket as TicketLike),
     db.message.findUnique({ where: { messageId } }).catch(() => null),
     repositories.users.findById(authorId).catch(() => null),
   ]);

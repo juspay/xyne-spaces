@@ -29,12 +29,14 @@ import {
   Atom,
   ChatChatting,
   Bot,
+  RocketShip,
   type PikaIconProps,
 } from '@xyne/icons';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
+import { AccessType } from '@xyne/shared';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -75,6 +77,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/memory', label: 'Context', icon: Database },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01 },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault },
+  { path: '/releaseManager', label: 'Release Manager', icon: RocketShip },
   { path: '/jira-migration', label: 'Jira Migration', icon: SwapArrowHorizontal, iconSize: 18 },
   { path: '/migration/confluence', label: 'Confluence Migration', icon: Notebook, iconSize: 18 },
   {
@@ -98,6 +101,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/support',
   '/chat/activity',
   '/guide',
+  '/releaseManager',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
@@ -126,14 +130,14 @@ export const filterNavItemsByPermission = (
         hasAccess = permissions.some(
           p =>
             p.resourceName === resourceName &&
-            (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
+            (p.accessType === AccessType.ADMIN || p.accessType === AccessType.WRITE),
         );
         if (resourceName === 'USER-GROUPS') {
           hasAccess ||= canManageOwnUserGroups;
         }
       } else {
         hasAccess = permissions.some(
-          p => p.resourceName === resourceName && p.accessType === 'ADMIN',
+          p => p.resourceName === resourceName && p.accessType === AccessType.ADMIN,
         );
       }
     }

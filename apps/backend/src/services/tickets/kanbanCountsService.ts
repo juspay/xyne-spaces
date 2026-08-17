@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { FormFieldType } from '@xyne/shared';
 import {
   buildKanbanTicketWhere,
   type KanbanFormFieldGroup,
@@ -156,7 +157,7 @@ export const getFormFieldGroupKeys = (
     ?.find(value => value.fieldId === groupBy.fieldId);
   const actualValue = fieldEntry?.actualFieldValue ?? null;
 
-  if (groupBy.fieldType === 'MULTI_SELECT') {
+  if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = getJsonValueStrings(actualValue);
     if (values.length === 0) {
       return [{ groupKey: NO_VALUE_GROUP, displayName: NO_VALUE_GROUP }];
@@ -165,7 +166,7 @@ export const getFormFieldGroupKeys = (
     return values.map(value => ({ groupKey: value, displayName: value }));
   }
 
-  if (groupBy.fieldType === 'USER') {
+  if (groupBy.fieldType === FormFieldType.USER) {
     const userIds = getJsonValueStrings(actualValue);
     if (userIds.length === 0) {
       return [{ groupKey: UNASSIGNED_GROUP, displayName: UNASSIGNED_GROUP }];

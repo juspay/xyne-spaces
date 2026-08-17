@@ -4,12 +4,12 @@
  */
 
 import { logger } from '../../utils/logger';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType, MessageType, OrgRole, UserStatus } from '@xyne/shared';
 import { UserRepository } from '../../database/repositories/users';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType} from '@prisma/client';
 import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import {
@@ -114,7 +114,7 @@ export const findOrCreateUser = async (
         data: {
           orgId: workspace.orgId,
           email: userEmail,
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
         },
         select: { memberId: true },
       });
@@ -167,7 +167,7 @@ const installAppForWorkspace = async (
   let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
   if (!orgMember) {
     orgMember = await db.orgMember.create({
-      data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+      data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
       select: { memberId: true },
     });
   }
@@ -179,7 +179,7 @@ const installAppForWorkspace = async (
       providerUserId: `xyne-app-${appId}-${workspaceId}`,
       authProvider: AuthProvider.API_KEY,
       userType: UserType.APP,
-      status: 'ACTIVE',
+      status: UserStatus.ACTIVE,
       workspace: { connect: { id: workspaceId } },
       orgMember: { connect: { memberId: orgMember.memberId } },
     },
@@ -465,7 +465,7 @@ export async function ingestConversationSlack(
           channelId,
           userId: resolvedUserId,
           content,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           isBot: false,
           createdAt,
@@ -484,14 +484,14 @@ export async function ingestConversationSlack(
           conversationId,
           userId: resolvedUserId,
           content,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           replyBroadcast: replyBroadcast ?? false,
           isBot: false,
           lastActivityAt: createdAt,
           createdAt,
           isAddingParticipant: false,
-          isMigration: true,
+          markParticipantsRead: true,
         });
 
         message = result.message;
@@ -517,33 +517,39 @@ export async function ingestConversationSlack(
       try {
         // Skip main message ingestion if onlyReplies is true
         if (!onlyReplies) {
-          // Check for duplicate top-level message
+          // Check for duplicate top-level message.
+          //
+          // IMPORTANT: if the parent was already migrated (e.g. a previous run
+          // was OOM-killed mid-thread, leaving the parent + some replies written
+          // but the rest missing), we must NOT skip the whole thread. Doing so
+          // permanently drops the un-migrated replies. Instead we only skip
+          // re-inserting the parent and fall through to the reply loop below,
+          // which back-fills any missing replies. Each reply is de-duped
+          // independently, so re-running is fully idempotent.
           const existingTopLevel = await externalMessageRepo.findByExternalId(
             externalSourceId,
             slackMessage.externalId
           );
 
-          if (existingTopLevel) {
-            continue; // Skip duplicate
+          if (!existingTopLevel) {
+            // Ingest top-level message (throws on failure)
+            // Use userId if available, otherwise use userEmail/userName or botId
+            await ingestMessage(
+              slackMessage.externalId,
+              slackMessage.externalId, // externalThreadId same for top-level
+              slackMessage.content,
+              slackMessage.userId,
+              slackMessage.userEmail,
+              slackMessage.userName,
+              slackMessage.isDeactivated || false,
+              slackMessage.files,
+              undefined,
+              slackMessage.botId,
+              slackMessage.botName,
+              slackMessage.botUserId,
+              slackMessage.isPinned
+            );
           }
-
-          // Ingest top-level message (throws on failure)
-          // Use userId if available, otherwise use userEmail/userName or botId
-          await ingestMessage(
-            slackMessage.externalId,
-            slackMessage.externalId, // externalThreadId same for top-level
-            slackMessage.content,
-            slackMessage.userId,
-            slackMessage.userEmail,
-            slackMessage.userName,
-            slackMessage.isDeactivated || false,
-            slackMessage.files,
-            undefined,
-            slackMessage.botId,
-            slackMessage.botName,
-            slackMessage.botUserId,
-            slackMessage.isPinned
-          );
         }
 
         // Process thread replies

@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
   buildAppDeskSourceName,
   buildSlackDeskSourceName,
-  extractInstalledAppId,
+  resolveAppDeskInstalledAppId,
   extractSlackChannelId,
 } from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
@@ -14,9 +15,22 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode, AppPermissionStatus, AppPermissionType, ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
+import {
+  createForwardedMessageXml,
+  parseForwardedMessageXml,
+  ChannelScopeType,
+  ChannelVisibility,
+  MessageType,
+  AttachmentEntityType,
+  DeskType,
+  EmailMergeMode,
+  AppPermissionStatus,
+  AppPermissionType,
+  ActivityClassification,
+  ActivityClassificationJobType, ChannelType, ChannelRole,
+} from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
@@ -237,7 +251,7 @@ export class ChannelController {
           channelId,
           conversationId: conversation.conversationId,
           senderId,
-          scopeType: targetChannel.scopeType,
+          scopeType: targetChannel.scopeType as ChannelScopeType,
         });
       }
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
@@ -371,7 +385,7 @@ export class ChannelController {
         initialMessage: {
           messageId: createdMessage.messageId,
           content: createdMessage.content,
-          msgType: createdMessage.msgType,
+          msgType: createdMessage.msgType as MessageType,
           hasAttachment: createdMessage.hasAttachment,
           attachments: [],
           createdAt: createdMessage.createdAt,
@@ -535,7 +549,7 @@ export class ChannelController {
             channelId,
             conversationId: conversation.conversationId,
             senderId,
-            scopeType: targetChannel.scopeType,
+            scopeType: targetChannel.scopeType as ChannelScopeType,
             tx,
           });
         }
@@ -733,7 +747,7 @@ export class ChannelController {
         forwardedMessage: {
           messageId: result.createdMessage.messageId,
           content: result.createdMessage.content,
-          msgType: result.createdMessage.msgType,
+          msgType: result.createdMessage.msgType as MessageType,
           hasAttachment: result.createdMessage.hasAttachment,
           attachments: result.copiedAttachments,
           createdAt: result.createdMessage.createdAt,
@@ -923,15 +937,6 @@ export class ChannelController {
           res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
           return;
         }
-        const sourceName = buildAppDeskSourceName(installedAppId);
-        const existingSource = await db.externalSource.findUnique({
-          where: { name: sourceName },
-          select: { id: true, isActive: true },
-        });
-        if (existingSource?.isActive) {
-          res.status(409).json({ error: 'A desk already exists for this app' });
-          return;
-        }
       }
 
       // For DM channels, ensure scopeId is provided (other user's ID)
@@ -979,11 +984,11 @@ export class ChannelController {
         scopeType,
         name: channelName,
         description,
-        visibility: visibility || 'PUBLIC',
+        visibility: (visibility || 'PUBLIC') as ChannelVisibility,
         createdBy: userId,
         projectId,
         workspaceId: req.user!.workspaceId!,
-        type: channelType || 'DEFAULT',
+        type: (channelType || 'DEFAULT') as ChannelType,
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -992,7 +997,7 @@ export class ChannelController {
       await this.channelParticipantRepository.addParticipant(
         channel.id,
         userId,
-        'ADMIN'
+        ChannelRole.ADMIN
       );
 
       // For DM channels, add the other user as participant
@@ -1000,7 +1005,7 @@ export class ChannelController {
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           scopeId,
-          'MEMBER'
+          ChannelRole.MEMBER
         );
       }
 
@@ -1021,7 +1026,7 @@ export class ChannelController {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
                 participantId,
-                'MEMBER'
+                ChannelRole.MEMBER
               );
               participantAddResults.push({ userId: participantId, success: true });
             } else {
@@ -1246,35 +1251,23 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          const sourceName = buildAppDeskSourceName(installedAppId);
-          const appCredentials = encrypt(JSON.stringify({ installedAppId }));
-          const existingAppSource = await db.externalSource.findUnique({
-            where: { name: sourceName },
-            select: { id: true },
+          await db.externalSource.create({
+            data: {
+              name: buildAppDeskSourceName(channel.id),
+              sourceType: 'app-desk',
+              displayName: name!,
+              channelId: channel.id,
+              externalIdentifier: installedAppId,
+              credentials: encrypt(JSON.stringify({ installedAppId })),
+              isActive: true,
+              workspaceId: req.user!.workspaceId!,
+            },
           });
-          if (existingAppSource) {
-            await db.externalSource.update({
-              where: { id: existingAppSource.id },
-              data: { isActive: true, credentials: appCredentials, channelId: channel.id, displayName: name! },
-            });
-          } else {
-            await db.externalSource.create({
-              data: {
-                name: sourceName,
-                sourceType: 'app-desk',
-                displayName: name!,
-                channelId: channel.id,
-                credentials: appCredentials,
-                isActive: true,
-                workspaceId: req.user!.workspaceId!,
-              },
-            });
-          }
 
           await this.channelParticipantRepository.addParticipant(
             channel.id,
             installedApp.userId,
-            'MEMBER'
+            ChannelRole.MEMBER
           );
         } catch (error) {
           logger.error('Failed to create app desk resources, rolling back channel', error);
@@ -1283,7 +1276,7 @@ export class ChannelController {
           });
           const code = (error as { code?: string })?.code;
           if (code === 'P2002') {
-            res.status(409).json({ error: 'A desk already exists for this app' });
+            res.status(409).json({ error: 'A desk already exists for this channel' });
           } else {
             res.status(500).json({ error: 'Failed to create app desk' });
           }
@@ -1310,9 +1303,9 @@ export class ChannelController {
         channelId: channel.id,
         id: channel.id,
         name: channel.name,
-        scopeType: channel.scopeType,
+        scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
-        visibility: channel.visibility,
+        visibility: channel.visibility as ChannelVisibility,
         projectId: channel.projectId,
         createdAt: channel.createdAt,
       };
@@ -1443,21 +1436,49 @@ export class ChannelController {
         return;
       }
 
+      // This endpoint returns the channel's connected desk mailbox / owner account
+      // email. Gate it with the same rule the socket layer uses (canAccessChannel):
+      // workspace boundary + participant-only for PRIVATE channels.
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const channel = await this.channelRepository.findById(channelId);
+      if (!channel || channel.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+      if (channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Forbidden' });
+          return;
+        }
+      }
+
       res.setHeader('Cache-Control', 'private, no-cache');
 
       const source = await db.externalSource.findFirst({
-        where: { channelId },
-        select: { name: true, displayName: true, sourceType: true, isActive: true },
+        where: { channelId, workspaceId },
+        select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
-      const isConnected = source?.isActive === true;
+      let isConnected = source?.isActive === true;
       const sourceType = source?.sourceType ?? null;
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      if (source?.sourceType === 'app-desk') {
-        const installedAppId = extractInstalledAppId(source.name) ?? '';
+      let googlePlayApps: Array<{
+        id: string;
+        displayName: string;
+        packageName: string | null;
+        isActive: boolean;
+      }> = [];
+      if (source?.sourceType === ExternalSourcePlatform.APP_DESK) {
+        const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
           select: { webhookUrl: true, app: { select: { name: true, signingSecret: true } } },
@@ -1466,8 +1487,30 @@ export class ChannelController {
         outboundConfigured = Boolean(
           installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
         );
-      } else if (source?.sourceType === 'slack-desk') {
+      } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+        const reviewSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
+        isConnected = activeReviewSources.length > 0;
+        googlePlayApps = reviewSources.map(reviewSource => ({
+          id: reviewSource.id,
+          displayName: reviewSource.displayName,
+          packageName: reviewSource.externalIdentifier,
+          isActive: reviewSource.isActive,
+        }));
+        connectedLabel = activeReviewSources
+          .map(reviewSource => reviewSource.displayName)
+          .join(', ') || 'No active Google Play apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1475,7 +1518,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
         return;
       }
 
@@ -1492,12 +1535,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1761,7 +1804,7 @@ export class ChannelController {
       const allChannels = await this.channelRepository.getChannelsByIds(channelIds);
 
       const docsChannels = allChannels.filter(channel =>
-        channel.scopeType === 'DEFAULT' || channel.scopeType === 'DOCUMENT'
+        channel.scopeType === ChannelScopeType.DEFAULT || channel.scopeType === ChannelScopeType.DOCUMENT
       );
 
       res.status(200).json({
@@ -1802,7 +1845,7 @@ export class ChannelController {
 
       // Filter to only include USER (1-on-1 DMs) and GROUP_DM scope types
       const dmChannels = allDMChannels.filter(channel =>
-        channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM'
+        channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM
       );
 
       if (dmChannels.length === 0) {
@@ -1878,7 +1921,7 @@ export class ChannelController {
 
         // Get DM partner info - determine who the partner is relative to current user
         let partnerInfo = null;
-        if (channel.scopeType === 'DM') {
+        if (channel.scopeType === ChannelScopeType.DM) {
           const otherParticipant = participants.find(p => p.userId !== userId);
           // If no other participant, this is a self-DM - use current user info
           if (otherParticipant?.userId) {
@@ -1890,7 +1933,7 @@ export class ChannelController {
         }
 
         let participantsName = null;
-        if (channel.scopeType === 'GROUP_DM') {
+        if (channel.scopeType === ChannelScopeType.GROUP_DM) {
           const otherParticipants = participants.filter(p => p.userId !== userId);
           participantsName = otherParticipants
             .map(p => userMap.get(p.userId)?.name)
@@ -2065,10 +2108,10 @@ export class ChannelController {
 
         // Create new self-DM
         const channelData: CreateChannelInput = {
-          scopeType: 'DM',
+          scopeType: ChannelScopeType.DM,
           name: currentUserId,
           description: 'Saved messages',
-          visibility: 'PRIVATE',
+          visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
           workspaceId,
@@ -2077,7 +2120,7 @@ export class ChannelController {
         const channel = await this.channelRepository.create(channelData);
 
         // Add current user as the only participant
-        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, ChannelRole.ADMIN);
 
         // If message or forwarded message is provided, create initial conversation and message
         let initialConversation = null;
@@ -2182,10 +2225,10 @@ export class ChannelController {
 
         // Create new 1-on-1 DM
         const channelData: CreateChannelInput = {
-          scopeType: 'DM',
+          scopeType: ChannelScopeType.DM,
           name: v.sort().join(","),
           description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.displayName || u.name)} and ${targetUser.displayName || targetUser.name}`,
-          visibility: 'PRIVATE',
+          visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
           workspaceId,
@@ -2199,10 +2242,10 @@ export class ChannelController {
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           currentUserId,
-          'ADMIN',
+          ChannelRole.ADMIN,
           shouldHideCreator,
         );
-        await this.channelParticipantRepository.addParticipant(channel.id, targetUserId, 'MEMBER', true);
+        await this.channelParticipantRepository.addParticipant(channel.id, targetUserId, ChannelRole.MEMBER, true);
 
         // If message or forwarded message is provided, create initial conversation and message using helper method
         let initialConversation = null;
@@ -2302,9 +2345,9 @@ export class ChannelController {
 
         // Create new group DM
         const channelData: CreateChannelInput = {
-          scopeType: 'GROUP_DM',
+          scopeType: ChannelScopeType.GROUP_DM,
           name: titleForGroupDms,
-          visibility: 'PRIVATE',
+          visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
           workspaceId,
@@ -2318,13 +2361,13 @@ export class ChannelController {
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           currentUserId,
-          'ADMIN',
+          ChannelRole.ADMIN,
           shouldHideCreator,
         );
 
         const participantAddResults = [];
         for (const participantId of uniqueParticipantIds) {
-          await this.channelParticipantRepository.addParticipant(channel.id, participantId, 'MEMBER', true);
+          await this.channelParticipantRepository.addParticipant(channel.id, participantId, ChannelRole.MEMBER, true);
           participantAddResults.push({
             userId: participantId,
             user: participantUsers.find(u => u.id === participantId),
@@ -2446,7 +2489,7 @@ export class ChannelController {
       }
 
       // 2. Validate channel is GROUP_DM
-      if (channel.scopeType !== 'GROUP_DM') {
+      if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
         res.status(400).json({
           error: 'This endpoint is only for GROUP_DM channels',
           channelScopeType: channel.scopeType
@@ -2545,7 +2588,7 @@ export class ChannelController {
             // Check if already a participant
             const alreadyParticipant = currentParticipants.some(p => p.userId === userId);
             if (!alreadyParticipant) {
-              await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+              await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
               participantsAddedList.push(userId);
               participantsAdded++;
             }
@@ -2605,9 +2648,9 @@ export class ChannelController {
         } else {
           // Create new GROUP_DM with all participants
           const channelData: CreateChannelInput = {
-            scopeType: 'GROUP_DM',
+            scopeType: ChannelScopeType.GROUP_DM,
             name: allParticipantIds.join(','),
-            visibility: 'PRIVATE',
+            visibility: ChannelVisibility.PRIVATE,
             createdBy: currentUserId,
             projectId: dmProjectId,
             workspaceId,
@@ -2619,7 +2662,7 @@ export class ChannelController {
           let participantsAdded = 0;
           for (const participantId of allParticipantIds) {
             const role = participantId === currentUserId ? 'ADMIN' : 'MEMBER';
-            await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role);
+            await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role as ChannelRole);
             participantsAdded++;
           }
 

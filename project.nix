@@ -12,6 +12,7 @@
 
     packages = with pkgs; [
       nodejs
+      pnpm
       just
     ];
 

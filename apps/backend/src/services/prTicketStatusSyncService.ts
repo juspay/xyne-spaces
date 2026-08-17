@@ -1,8 +1,8 @@
 // PR to Ticket Status Sync Service
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
-import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType, UserResponsibility } from '@xyne/shared';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
@@ -12,6 +12,7 @@ import { evaluateAssignmentRule, evaluateRoleSlots, AssignmentType } from '@/uti
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { userResponsibilityFromRoleId, roleIdFromEnum } from '@/utils/roleFrameworkUtils';
 import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
+import { prThreadNotificationService } from '@/services/prThreadNotificationService';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
 import { db } from '@/database/client';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
@@ -410,7 +411,7 @@ export class PRTicketStatusSyncService {
         sourceBranchName: true,
         destinationBranchName: true,
       },
-    });
+    }) as PRInfo;
   }
 
   /**
@@ -439,7 +440,7 @@ export class PRTicketStatusSyncService {
       });
       if (ticket) {
         logger.info(`[PR-Ticket-Sync] Found ticket via direct ticketId: ${pr.ticketId}`);
-        return ticket;
+        return ticket as TicketInfo;
       }
     }
 
@@ -496,7 +497,7 @@ export class PRTicketStatusSyncService {
               }
             }
 
-            return ticket;
+            return ticket as TicketInfo;
           }
         }
       }
@@ -521,6 +522,32 @@ export class PRTicketStatusSyncService {
     stageChange?: { oldStageName: string | null; newStageName: string },
     remainingOpenPRs?: number
   ): Promise<void> {
+    let message: string;
+    try {
+      message = this.formatPRMessage(pr, params, stageChange, remainingOpenPRs);
+    } catch (error) {
+      logger.error(`[PR-Ticket-Sync] Failed to format PR message:`, error);
+      return;
+    }
+
+    // Mirror the update to channel threads where the PR link was posted
+    // (e.g. -merge channels). Fire-and-forget; the service handles errors.
+    // Deliberately BEFORE the no-conversation early-return below: subscribed
+    // threads must get updates even when the ticket has no thread of its own.
+    void prThreadNotificationService.broadcastPRUpdate({
+      prUrl: pr.prUrl,
+      content: message,
+      senderId,
+      excludeConversationId: ticket.conversationId ?? undefined,
+      metadata: {
+        activityType: 'PR',
+        prWebhook: true,
+        prUrl: pr.prUrl,
+        prId: pr.prId,
+        prEvent: params.prEvent,
+      },
+    });
+
     if (!ticket.conversationId) {
       logger.debug(
         `[PR-Ticket-Sync] No conversation for ticket ${ticket.xyneId}, skipping message`
@@ -529,14 +556,12 @@ export class PRTicketStatusSyncService {
     }
 
     try {
-      const message = this.formatPRMessage(pr, params, stageChange, remainingOpenPRs);
-
       await recordTicketTimelineEvent({
         message: {
           conversationId: ticket.conversationId,
           senderId,
           content: message,
-          activityType: 'PR',
+          activityType: ActivityType.PR,
           workspaceId: ticket.workspaceId,
           extraMetadata: {
             prWebhook: true,
@@ -622,7 +647,7 @@ export class PRTicketStatusSyncService {
   private async assignUserToTicket(
     ticket: TicketInfo,
     assignedUserId: string,
-    assignmentKey: { roleId: string } | { responsibility: 'PR_REVIEWER' | 'QA' },
+    assignmentKey: { roleId: string } | { responsibility: UserResponsibility.PR_REVIEWER | UserResponsibility.QA },
     eventKey: 'prOpenedRoleId' | 'prMergedRoleId',
     fieldName: 'prReviewerId' | 'qaId',
     roleName: string,
@@ -715,7 +740,7 @@ export class PRTicketStatusSyncService {
         ticketId: ticket.id,
         workspaceId: ticket.workspaceId,
         updatedBy,
-        activityType: 'ASSIGNED_TO',
+        activityType: ActivityType.ASSIGNED_TO,
         value: {
           field: fieldName,
           oldValue: isPrOpened ? null : oldValue,
@@ -944,7 +969,7 @@ export class PRTicketStatusSyncService {
     }
 
     const assignedUserId = assignmentResult.assignedUserId;
-    const responsibility = fieldToUpdate === 'prReviewerId' ? 'PR_REVIEWER' : 'QA';
+    const responsibility = fieldToUpdate === 'prReviewerId' ? UserResponsibility.PR_REVIEWER : UserResponsibility.QA;
 
     await this.assignUserToTicket(
       ticket,

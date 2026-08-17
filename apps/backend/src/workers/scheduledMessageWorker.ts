@@ -1,9 +1,9 @@
 import Bull from 'bull';
+import { MessageType, AuthProvider, UserStatus, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { conversationService } from '@/services/conversationService';
-import { MessageType, AuthProvider, UserStatus, UserType } from '@prisma/client';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import {
   scheduledMessageQueue,
@@ -83,7 +83,7 @@ class ScheduledMessageWorker {
           data: {
             email: botEmail,
             orgId: workspace.orgId,
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           },
           select: { memberId: true },
         });

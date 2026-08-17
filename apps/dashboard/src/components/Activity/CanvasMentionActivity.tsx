@@ -23,10 +23,18 @@ export const CanvasMentionActivity = ({
   const canvas = activity.canvas;
   const actorId = activity.actorId ?? canvas?.lastEditedBy ?? '';
   const sender = useUser(actorId);
+  const isCommentMention = activity.actionSource === 'canvas_comment';
+  const commentThreadId =
+    isCommentMention && activity.actionSourceId !== canvasId ? activity.actionSourceId : undefined;
 
   if (!canvasId || !canvas) return null;
 
-  const targetPath = `${baseRoute}/canvas/${canvasId}${canvasBlockId ? `?blockId=${encodeURIComponent(canvasBlockId)}` : ''}`;
+  const canvasParams = new URLSearchParams();
+  if (canvasBlockId) canvasParams.set('blockId', canvasBlockId);
+  if (commentThreadId) canvasParams.set('commentThreadId', commentThreadId);
+  const targetPath = `${baseRoute}/canvas/${canvasId}${
+    canvasParams.toString() ? `?${canvasParams.toString()}` : ''
+  }`;
 
   return (
     <ActivityItemCard
@@ -36,15 +44,21 @@ export const CanvasMentionActivity = ({
       channelId={activity.channelId ?? undefined}
       badgeIcon={<AtMark className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
-      description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
+      description={
+        <span className='text-muted-foreground text-sm'>
+          {isCommentMention ? 'mentioned you in a comment on' : 'mentioned you in'}
+        </span>
+      }
       targetPath={targetPath}
       isExpanded={isExpanded}
       className='flex items-start'
     >
       <div className='text-muted-foreground text-sm'>
-        {isExpanded
+        {isCommentMention
           ? `Canvas: ${canvas.title ?? 'Untitled'}`
-          : `View canvas: ${canvas.title ?? 'Untitled'}`}
+          : isExpanded
+            ? `Canvas: ${canvas.title ?? 'Untitled'}`
+            : `View canvas: ${canvas.title ?? 'Untitled'}`}
       </div>
     </ActivityItemCard>
   );

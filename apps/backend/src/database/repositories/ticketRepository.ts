@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient, EmailType } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
@@ -7,14 +7,30 @@ import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { BaseTicketType, isReleaseTicket, PRActivityValue } from '@xyne/shared';
+import {
+  BaseTicketType,
+  isReleaseTicket,
+  PRActivityValue,
+  TicketStatusV2,
+  TicketPriority,
+  ActivityType,
+  PRStatusEvent,
+  EmailType,
+} from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
-import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
+import {
+  emitTicketUpdated,
+  type TicketChanges,
+  type FormFieldChanges,
+} from '@/automations/triggers/ticket-updated.trigger';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
+import { dispatchCommittedTicketStatusChange } from '@/services/flowStatusChangeDispatcher';
+import { updateWhileFlowRunActive } from '@/services/flowActiveRunGuard';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -67,7 +83,15 @@ export class TicketRepository {
    * @param data - Ticket data
    * @param tx - Optional transaction client for atomic operations
    */
-  async createTicket(data: CreateTicketRequest & { xyneId: string; createdBy: string; updatedBy: string }, tx?: PrismaTransaction) {
+  async createTicket(
+    data: CreateTicketRequest & {
+      xyneId: string;
+      createdBy: string;
+      updatedBy: string;
+      formFieldChanges?: FormFieldChanges;
+    },
+    tx?: PrismaTransaction,
+  ) {
     const db = tx || prisma; // Use transaction if provided, else default prisma
 
     // Validate required fields
@@ -151,6 +175,7 @@ export class TicketRepository {
     // Create ticket with the conversationId, auto-assigned stageName, and calculated ETA
     const ticket = await db.ticket.create({
       data: {
+        ...(data.id && { id: data.id }),
         title: data.title,
         description: data.description,
         createdBy: data.createdBy,
@@ -168,6 +193,7 @@ export class TicketRepository {
         priority: data.priority || TicketPriority.LOW,
         ...(resolvedEta && { eta: resolvedEta }),
         metadata: data.metadata as Prisma.InputJsonValue,
+        ...(data.rootId && { rootId: data.rootId }),
         closedAt: data.closedAt,
         closedBy: data.closedBy,
         merchantId: data.merchantId,
@@ -208,7 +234,7 @@ export class TicketRepository {
       await dualWriteTicketTag(ticket.id, 'hotfix');
       logger.info(`Hotfix tag added to ticket ${ticket.id}`);
     }
-    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket);
+    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'insert',
       ticket: createdSnapshot,
@@ -218,7 +244,14 @@ export class TicketRepository {
     void (async (): Promise<void> => {
       try {
         await eventRouter.emit(
-          { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+          {
+            type: TICKET_CREATED_EVENT,
+            payload: {
+              ticketId: ticket.id,
+              formFieldChanges: data.formFieldChanges,
+              performedBy: { id: data.createdBy },
+            },
+          },
           ticket.workspaceId,
         );
       } catch (err) {
@@ -252,6 +285,11 @@ export class TicketRepository {
       prAuthor?: string;
       remainingOpenPRs?: number;
     },
+    options: {
+      cascadeFlow?: boolean;
+      allowedCurrentStatuses?: readonly TicketStatusV2[];
+      requiredActiveFlowRootId?: string;
+    } = {},
   ) {
 
     // Get current ticket to capture old stage name, boardId, and statusV2
@@ -280,7 +318,7 @@ export class TicketRepository {
     }
 
     const oldStageName = currentTicket.stageName;
-    const oldStatusV2 = currentTicket.statusV2;
+    const oldStatusV2 = currentTicket.statusV2 as TicketStatusV2;
     const stageChanged = oldStageName !== newStageName;
 
     // Fetch current and target stages to determine movement direction
@@ -297,6 +335,50 @@ export class TicketRepository {
 
     if (!targetStage) {
       throw new Error(`Target stage "${newStageName}" not found in board ${currentTicket.boardId}`);
+    }
+
+    const newStatusV2 = targetStage.defaultTicketStatusV2 as TicketStatusV2;
+    const statusChanged = newStatusV2 !== oldStatusV2;
+    let guardedUpdatedTicket = null;
+    if (options.allowedCurrentStatuses) {
+      if (!options.allowedCurrentStatuses.includes(oldStatusV2)) return null;
+      try {
+        const update = (client: Prisma.TransactionClient | PrismaClient) =>
+          client.ticket.update({
+            where: {
+              id: ticketId,
+              statusV2: oldStatusV2,
+              stageName: oldStageName,
+            },
+            data: {
+              stageName: newStageName,
+              statusV2: newStatusV2,
+              updatedBy: updatedBy,
+              updatedAt: new Date(),
+            },
+          });
+        guardedUpdatedTicket = options.requiredActiveFlowRootId
+          ? await updateWhileFlowRunActive({
+              runTransaction: operation => prisma.$transaction(operation),
+              lockAndReadRootStatus: async tx => {
+                const [root] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
+                  SELECT "statusV2"
+                  FROM "tickets"
+                  WHERE "id" = ${options.requiredActiveFlowRootId}
+                  FOR UPDATE
+                `;
+                return root?.statusV2 ?? null;
+              },
+              update,
+            })
+          : await update(prisma);
+        if (!guardedUpdatedTicket) return null;
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+          return null;
+        }
+        throw error;
+      }
     }
 
     const isForwardMovement = !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
@@ -421,19 +503,26 @@ export class TicketRepository {
       }
     }
 
-    const newStatusV2 = targetStage?.defaultTicketStatusV2;
-    const statusChanged = newStatusV2 && newStatusV2 !== oldStatusV2;
-
     // Update the ticket stage and status (synced with stage's default status)
-    const updatedTicket = await prisma.ticket.update({
-      where: { id: ticketId },
-      data: {
-        stageName: newStageName,
-        ...(newStatusV2 && { statusV2: newStatusV2 }),
-        updatedBy: updatedBy,
-        updatedAt: new Date()
-      }
-    });
+    const updatedTicket =
+      guardedUpdatedTicket ??
+      (await prisma.ticket.update({
+        where: { id: ticketId },
+        data: {
+          stageName: newStageName,
+          statusV2: newStatusV2,
+          updatedBy: updatedBy,
+          updatedAt: new Date()
+        }
+      }));
+
+    if (statusChanged && options.cascadeFlow !== false) {
+      await dispatchCommittedTicketStatusChange({
+        ticketId,
+        newStatus: newStatusV2,
+        actorUserId: updatedBy,
+      });
+    }
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
@@ -466,13 +555,13 @@ export class TicketRepository {
         changes.statusV2 = { previousValue: oldStatusV2 ?? null, newValue: newStatusV2 };
       }
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes,
         performedById: updatedBy,
       });
     }
 
-    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: updatedSnapshot,
@@ -587,7 +676,7 @@ export class TicketRepository {
             conversationId: currentTicket.conversationId,
             senderId: updatedBy,
             content: statusMessage,
-            activityType: 'STATUS',
+            activityType: ActivityType.STATUS,
             workspaceId: currentTicket.workspaceId,
             isAutomation: source === ActivitySource.AUTOMATION,
           },
@@ -597,6 +686,39 @@ export class TicketRepository {
           `[TicketRepository] Created status change message for ticket ${ticketId} in conversation ${currentTicket.conversationId}`
         );
       }
+    }
+
+    const flowSnapshot = (
+      updatedTicket.metadata as {
+        flow?: {
+          nodeSnapshot?: {
+            planNodeId?: string;
+            title?: string;
+            gate?: { type?: string; prompt?: string };
+          };
+        };
+      } | null
+    )?.flow?.nodeSnapshot;
+    if (
+      newStatusV2 === TicketStatusV2.COMPLETED &&
+      oldStatusV2 !== TicketStatusV2.COMPLETED &&
+      flowSnapshot?.gate?.type === 'confirmation'
+    ) {
+      await prisma.ticketActivity.create({
+        data: {
+          workspaceId: currentTicket.workspaceId,
+          ticketId,
+          updatedBy,
+          activityType: ActivityType.METADATA,
+          value: {
+            field: 'flowConfirmation',
+            planNodeId: flowSnapshot.planNodeId ?? null,
+            prompt: flowSnapshot.gate.prompt?.trim() || null,
+            confirmationText:
+              flowSnapshot.gate.prompt?.trim() || flowSnapshot.title?.trim() || null,
+          } as Prisma.InputJsonValue,
+        },
+      });
     }
 
     return updatedTicket;
@@ -764,7 +886,7 @@ export class TicketRepository {
 
     if (previousAssigneeId !== newAssigneeId) {
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes: {
           assignedTo: { previousValue: previousAssigneeId, newValue: newAssigneeId },
         },
@@ -772,7 +894,7 @@ export class TicketRepository {
       });
     }
 
-    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: assigneeSnapshot,
@@ -803,7 +925,7 @@ export class TicketRepository {
 
     if (previousGroupId !== groupId) {
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes: {
           userGroupId: { previousValue: previousGroupId, newValue: groupId },
         },
@@ -849,8 +971,10 @@ export class TicketRepository {
       isArchived?: boolean;
       closedAt?: Date | null;
       closedBy?: string | null;
+      aiPriority?: string;
     },
     updatedBy: string,
+    options: { cascadeFlow?: boolean } = {},
   ): Promise<void> {
     const data: Record<string, unknown> = { updatedBy, updatedAt: new Date() };
     if (fields.title !== undefined) data.title = fields.title;
@@ -862,6 +986,7 @@ export class TicketRepository {
     if (fields.isArchived !== undefined) data.isArchived = fields.isArchived;
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
+    if (fields.aiPriority !== undefined) data.aiPriority = fields.aiPriority;
 
     if (Object.keys(data).length <= 2) {
       return;
@@ -900,10 +1025,10 @@ export class TicketRepository {
       });
       prevSnapshot = prev
         ? {
-            statusV2: prev.statusV2,
+            statusV2: prev.statusV2 as TicketStatusV2,
             title: prev.title,
             description: prev.description,
-            priority: prev.priority,
+            priority: prev.priority as TicketPriority,
             eta: prev.eta,
             ticketType: prev.ticketType,
             isArchived: prev.isArchived,
@@ -913,6 +1038,19 @@ export class TicketRepository {
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+
+    if (
+      fields.statusV2 !== undefined
+      && fields.statusV2 !== previousStatus
+      && options.cascadeFlow !== false
+    ) {
+      await dispatchCommittedTicketStatusChange({
+        ticketId,
+        newStatus: fields.statusV2,
+        actorUserId: updatedBy,
+      });
+    }
+
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
     if (
@@ -1042,7 +1180,7 @@ export class TicketRepository {
 
       if (Object.keys(changes).length > 0) {
         void emitTicketUpdated({
-          ticket: updatedTicket,
+          ticket: updatedTicket as TicketLike,
           changes,
           performedById: updatedBy,
         });
@@ -1050,7 +1188,7 @@ export class TicketRepository {
     }
 
     if (prevSnapshot) {
-      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
       websocketService.broadcastTicketCountsUpdate({
         operation: 'update',
         ticket: metadataSnapshot,

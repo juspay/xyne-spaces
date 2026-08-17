@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { AuthProvider } from '@prisma/client';
 import {
   CommunityJoinResultStatus,
   OrgRole,
   WorkspaceJoinRequestAction,
   type WorkspaceJoinRequestAction as WorkspaceJoinRequestActionType,
   WorkspaceJoinRequestStatus,
+  AuthProvider,
 } from '@xyne/shared';
 import { communityWorkspaceService } from '@/services/communityWorkspaceService';
 import { UserSessionService } from '@/services/userSessionService';
@@ -15,6 +15,7 @@ import { jwtService } from '@/services/jwtService';
 import { channelService } from '@/services/channelService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { redisService } from '@/services/redisService';
 
 type PendingAuth = {
   userData: {
@@ -27,6 +28,7 @@ type PendingAuth = {
   refreshToken?: string;
   accessToken?: string;
   accessTokenExpiry?: Date;
+  tokenKey?: string;
 };
 
 export class CommunityWorkspaceController {
@@ -139,6 +141,11 @@ export class CommunityWorkspaceController {
           path: '/',
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
+      }
+      if (pendingAuth.tokenKey) {
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingAuth.tokenKey}`,
+        );
       }
       res.clearCookie('google_access_token', { path: '/' });
 
@@ -295,7 +302,7 @@ export class CommunityWorkspaceController {
     };
   }
 
-  private parsePendingAuthCookie(cookie: string): PendingAuth | null {
+  private async parsePendingAuthCookie(cookie: string): Promise<PendingAuth | null> {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
         googleId?: string;
@@ -307,12 +314,31 @@ export class CommunityWorkspaceController {
         refreshToken?: string | null;
         accessToken?: string | null;
         accessTokenExpiry?: string | null;
+        tokenKey?: string;
       };
       const providerUserId = decoded.providerUserId || decoded.googleId;
       if (!decoded.email || !providerUserId) return null;
 
-      const accessTokenExpiry = decoded.accessTokenExpiry
-        ? new Date(decoded.accessTokenExpiry)
+      let redisTokens: {
+        refreshToken?: string | null;
+        accessToken?: string | null;
+        accessTokenExpiry?: string | null;
+      } | null = null;
+
+      if (decoded.tokenKey) {
+        const storedTokens = await redisService.get(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
+        );
+        if (!storedTokens) return null;
+        redisTokens = JSON.parse(storedTokens);
+      }
+
+      const refreshToken = redisTokens?.refreshToken ?? decoded.refreshToken;
+      const accessToken = redisTokens?.accessToken ?? decoded.accessToken;
+      const accessTokenExpiryValue =
+        redisTokens?.accessTokenExpiry ?? decoded.accessTokenExpiry;
+      const accessTokenExpiry = accessTokenExpiryValue
+        ? new Date(accessTokenExpiryValue)
         : undefined;
       return {
         userData: {
@@ -322,12 +348,13 @@ export class CommunityWorkspaceController {
           picture: decoded.picture,
           authProvider: decoded.provider || AuthProvider.GOOGLE,
         },
-        refreshToken: decoded.refreshToken || undefined,
-        accessToken: decoded.accessToken || undefined,
+        refreshToken: refreshToken || undefined,
+        accessToken: accessToken || undefined,
         accessTokenExpiry:
           accessTokenExpiry && !Number.isNaN(accessTokenExpiry.getTime())
             ? accessTokenExpiry
             : undefined,
+        tokenKey: decoded.tokenKey,
       };
     } catch (_error) {
       return null;

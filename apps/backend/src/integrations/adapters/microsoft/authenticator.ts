@@ -85,7 +85,8 @@ export class MicrosoftAuthenticator extends BaseAuthenticator {
         }
       }
 
-      return { authenticated: true };
+      // No stored credentials at all (empty credentialsJson): return not-authenticated.
+      return { authenticated: false };
     } catch (error) {
       logger.error('Microsoft authentication error:', error);
       return { authenticated: false };

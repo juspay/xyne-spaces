@@ -43,12 +43,12 @@ characters`. AI features need a provider on top of this — see
 
 ## Databases
 
-Two Prisma schemas, in separate Postgres instances:
+Two Prisma schemas, both in the single local Postgres on port 5433:
 
-| Schema | Database | Port | Holds |
-| ------ | -------- | ---- | ----- |
-| `prisma/schema.prisma` | `xyne_dev_db` | 5433 | Application data |
-| `prisma-common/schema.prisma` | `xyne_common` | 5434 | Shared reference data |
+| Schema | Database | Holds |
+| ------ | -------- | ----- |
+| `prisma/schema.prisma` | `xyne_dev_db` | Application data |
+| `prisma-common/schema.prisma` | `xyne_common` | Shared reference data |
 
 ```bash
 pnpm --filter xyne-spaces-backend run db:generate         # regenerate the app client

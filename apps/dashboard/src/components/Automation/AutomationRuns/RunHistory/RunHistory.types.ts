@@ -1,7 +1,7 @@
-import type { AutomationRun } from '../../Automation.types';
+import type { AutomationRunSummary } from '../../Automation.types';
 
 export interface RunHistoryProps {
   automationId: string;
-  onOpenRun: (run: AutomationRun) => void;
+  onOpenRun: (run: AutomationRunSummary) => void;
   onBack: () => void;
 }

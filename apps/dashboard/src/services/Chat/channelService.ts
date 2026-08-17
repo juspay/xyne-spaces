@@ -1,4 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
+import { DeskType, ChannelScopeType } from '@xyne/shared';
 
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
@@ -18,7 +19,7 @@ export interface CreateChannelFormData {
 
 export interface CreateChannelRequest {
   name: string;
-  scopeType: 'DEFAULT';
+  scopeType: ChannelScopeType.DEFAULT;
   scopeId?: string;
   description?: string;
   topicTags?: string[];
@@ -35,11 +36,11 @@ export interface CreateChannelRequest {
 }
 
 export type EmailDeskOpts =
-  | { deskType: 'EMAIL' }
-  | { deskType: 'DL'; dlEmail: string }
-  | { deskType: 'SLACK'; slackChannelId: string }
-  | { deskType: 'APP'; installedAppId: string }
-  | { deskType: 'CALL' };
+  | { deskType: DeskType.EMAIL }
+  | { deskType: DeskType.DL; dlEmail: string }
+  | { deskType: DeskType.SLACK; slackChannelId: string }
+  | { deskType: DeskType.APP; installedAppId: string }
+  | { deskType: DeskType.CALL };
 
 export interface CreateChannelResponse {
   success: boolean;
@@ -127,7 +128,7 @@ export class ChannelService {
   ): Promise<CreateChannelResponse> {
     const requestData: CreateChannelRequest = {
       name: formData.name,
-      scopeType: 'DEFAULT',
+      scopeType: ChannelScopeType.DEFAULT,
       description: formData.description || '',
       visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
       projectId: formData.projectId,
@@ -137,21 +138,21 @@ export class ChannelService {
       ...(channelType === 'EMAIL' &&
         emailDeskOpts && {
           deskType: emailDeskOpts.deskType,
-          ...(emailDeskOpts.deskType === 'DL' && { dlEmail: emailDeskOpts.dlEmail }),
+          ...(emailDeskOpts.deskType === DeskType.DL && { dlEmail: emailDeskOpts.dlEmail }),
         }),
       ...(channelType === 'SLACK' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'SLACK' && {
+        emailDeskOpts.deskType === DeskType.SLACK && {
           slackChannelId: emailDeskOpts.slackChannelId,
         }),
       ...(channelType === 'APP' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'APP' && {
+        emailDeskOpts.deskType === DeskType.APP && {
           installedAppId: emailDeskOpts.installedAppId,
         }),
       ...(channelType === 'CALL' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'CALL' && {
+        emailDeskOpts.deskType === DeskType.CALL && {
           deskType: emailDeskOpts.deskType,
         }),
     };

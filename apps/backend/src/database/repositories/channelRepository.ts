@@ -1,7 +1,9 @@
 import { BaseRepository } from './base';
-import { Channel, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@prisma/client';
+import { Channel } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
@@ -38,7 +40,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Skip 255 char validation for DM and GROUP_DM channels
     // Their names are comma-separated user IDs (internal identifiers)
     // and can exceed 255 chars with many participants
-    const isDMChannel = data.scopeType === 'DM' || data.scopeType === 'GROUP_DM';
+    const isDMChannel = data.scopeType === ChannelScopeType.DM || data.scopeType === ChannelScopeType.GROUP_DM;
     if (!isDMChannel) {
       await this.validateString(data.name, 'name', 255);
     }
@@ -149,7 +151,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // Their names are comma-separated user IDs (internal identifiers)
       // and can exceed 255 chars with many participants
       const channel = await this.findById(id);
-      const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+      const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
 
       if (!isDMChannel) {
         await this.validateString(data.name, 'name', 255);
@@ -225,16 +227,24 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
-    // Self-DM: channel name is stored as single userId, scopeType DM
-    if (userId1 === userId2) {
+    // Run the existence probe under withWorkspaceScope (service actor) so the per-user
+    // channel ACL is dropped and only workspace scope applies — otherwise a non-participant
+    // caller (e.g. an automation submitter probing an admin's bot DM) never sees the existing
+    // PRIVATE DM and mints a duplicate. orderBy asc pins the oldest as the canonical match.
+    return withWorkspaceScope(async () => {
+      // Self-DM: channel name is stored as single userId, scopeType DM
+      if (userId1 === userId2) {
+        return await this.db.channel.findFirst({
+          where: { name: userId1, scopeType: ChannelScopeType.DM },
+          orderBy: { createdAt: 'asc' },
+        });
+      }
+      // For 1:1 DM channels, name is sorted user IDs joined by comma
+      const name = [userId1, userId2].sort().join(",");
       return await this.db.channel.findFirst({
-        where: { name: userId1, scopeType: ChannelScopeType.DM },
+        where: { name },
+        orderBy: { createdAt: 'asc' },
       });
-    }
-    // For 1:1 DM channels, name is sorted user IDs joined by comma
-    const name = [userId1, userId2].sort().join(",");
-    return await this.db.channel.findFirst({
-      where: { name },
     });
   }
 
@@ -273,14 +283,18 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getGroupChannelByMembers(memberIds: string[]): Promise<Channel | null> {
-    // Get all GROUP_DM scope channels
+    // Same rationale as getDMChannel: the existence probe must not be filtered by the
+    // caller's participation, and must resolve to a single canonical (oldest) row.
     const name = memberIds.sort().join(",");
-    return await this.db.channel.findFirst({
-      where: {
-        scopeType: 'GROUP_DM',
-        name: name
-      }
-    });
+    return withWorkspaceScope(async () =>
+      this.db.channel.findFirst({
+        where: {
+          scopeType: ChannelScopeType.GROUP_DM,
+          name: name,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
   }
 
   async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {

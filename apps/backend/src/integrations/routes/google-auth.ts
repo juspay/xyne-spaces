@@ -2,6 +2,8 @@
  * Google OAuth routes for Gmail integration setup.
  */
 
+import { randomUUID } from 'crypto';
+import { EmailMergeMode, WorkspaceRole, DeskType, ChannelRole, ChannelScopeType, ChannelType, AccessType } from '@xyne/shared';
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
@@ -11,9 +13,10 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
+import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
 import { config as appConfig } from '@/config/env';
 import {
   appendQueryToReturnPath,
@@ -22,11 +25,15 @@ import {
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
-import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
 
 const TAG = '[GoogleAuth]';
+
+// Same ACL the migration/backfill endpoints use — a grantable resource permission
+// rather than a users.role string check.
+const seedCursorsAdminAuth = authorize(BACKFILL_ADMIN_RESOURCE, AccessType.ADMIN);
 const router = express.Router();
 router.use(express.json());
 
@@ -71,7 +78,13 @@ class GoogleAuthRouteError extends Error {
 export type OAuthStateValue = {
   channelId?: string;
   channelData?: PendingChannelData;
-  mode?: 'reconnect' | 'workspace' | 'dl-member-sync' | 'channel-email-workspace';
+  mode?:
+    | 'reconnect'
+    | 'workspace'
+    | 'dl-member-sync'
+    | 'channel-email-workspace'
+    | 'recording-email'
+    | 'recording-doc';
   expectedEmail?: string;
   workspaceId?: string;
   returnPath?: string;
@@ -85,6 +98,24 @@ export type OAuthStateValue = {
 
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
 const OAUTH_STATE_TTL_SECONDS = 60 * 60;
+
+const RECORDING_OAUTH_QUERY_PARAMS = {
+  'recording-email': {
+    connected: 'recordingEmailConnected',
+    error: 'recordingEmailError',
+  },
+  'recording-doc': {
+    connected: 'recordingGoogleDocConnected',
+    error: 'recordingGoogleDocError',
+  },
+} as const;
+
+type RecordingOAuthMode = keyof typeof RECORDING_OAUTH_QUERY_PARAMS;
+type RecordingOAuthResult = keyof (typeof RECORDING_OAUTH_QUERY_PARAMS)[RecordingOAuthMode];
+
+function recordingOAuthQueryParam(mode: RecordingOAuthMode, result: RecordingOAuthResult): string {
+  return RECORDING_OAUTH_QUERY_PARAMS[mode][result];
+}
 
 export async function setOAuthState(state: string, value: OAuthStateValue): Promise<void> {
   await redisService.set(
@@ -119,6 +150,21 @@ export const GMAIL_SCOPES = [
   // `contacts.other.readonly`: "Other contacts" (auto-saved frequent senders).
   'https://www.googleapis.com/auth/contacts.readonly',
   'https://www.googleapis.com/auth/contacts.other.readonly',
+];
+
+const RECORDING_EMAIL_GMAIL_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/gmail.send',
+];
+const RECORDING_EMAIL_SOURCE_TYPE = 'google-recording-email';
+const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
+const RECORDING_DOC_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/drive.file',
 ];
 
 export function getGoogleIntegrationRedirectUri(req: Request | null = null): string {
@@ -157,6 +203,21 @@ function redirectError(
   const params = new URLSearchParams({ emailError: error });
   res.redirect(
     buildPostOAuthRedirect(frontendUrl, buildSupportPath(workspaceId, channelId, params), platform),
+  );
+}
+
+function redirectRecordingEmailOAuthResult(
+  res: Response,
+  frontendUrl: string,
+  state: OAuthStateValue,
+  params: URLSearchParams,
+): void {
+  res.redirect(
+    buildPostOAuthRedirect(
+      frontendUrl,
+      buildReturnPathOrSupportPath(state.returnPath, state.workspaceId, undefined, params),
+      state.platform,
+    ),
   );
 }
 
@@ -215,6 +276,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
     mode: 'workspace',
     workspaceId,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
@@ -245,12 +307,77 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
     workspaceId,
     returnPath,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
   return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+async function createGoogleRecordingEmailAuthUrl(
+  userId: string,
+  workspaceId: string,
+  returnPath: string,
+  req: Request,
+): Promise<string> {
+  const user = await db.user.findFirst({
+    where: { id: userId, workspaceId },
+    select: { email: true },
+  });
+  if (!user) {
+    throw new GoogleAuthRouteError('User account not found', 401);
+  }
+
+  const state = randomUUID();
+  await setOAuthState(state, {
+    mode: 'recording-email',
+    userId,
+    workspaceId,
+    expectedEmail: user.email.trim().toLowerCase(),
+    returnPath,
+    platform: 'web',
+    timestamp: Date.now(),
+  });
+
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
+    access_type: 'offline',
+    scope: RECORDING_EMAIL_GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+async function createGoogleRecordingDocAuthUrl(
+  userId: string,
+  workspaceId: string,
+  returnPath: string,
+  platform: ProviderPlatform,
+  req: Request,
+): Promise<string> {
+  const user = await db.user.findFirst({
+    where: { id: userId, workspaceId },
+    select: { email: true },
+  });
+  if (!user) throw new GoogleAuthRouteError('User account not found', 401);
+
+  const state = randomUUID();
+  await setOAuthState(state, {
+    mode: 'recording-doc',
+    userId,
+    workspaceId,
+    expectedEmail: user.email.trim().toLowerCase(),
+    returnPath,
+    platform,
+    timestamp: Date.now(),
+  });
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
+    access_type: 'offline',
+    scope: RECORDING_DOC_SCOPES,
     prompt: 'consent',
     state,
   });
@@ -451,6 +578,63 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
   }
 });
 
+router.post(
+  '/connect/recording-email/init',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const returnPath = sanitizeReturnPath(req.body.returnPath);
+    if (!returnPath) {
+      res.status(400).json({ error: 'A valid return path is required' });
+      return;
+    }
+
+    try {
+      const authUrl = await createGoogleRecordingEmailAuthUrl(
+        req.user!.id,
+        req.user!.workspaceId,
+        returnPath,
+        req,
+      );
+      res.json({ authUrl });
+    } catch (error: unknown) {
+      logger.error(`${TAG} Error initiating recording email Google connect`, error);
+      if (error instanceof GoogleAuthRouteError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      res.status(400).json({ error: 'Unable to start Google email connection' });
+    }
+  },
+);
+
+router.post(
+  '/connect/recording-doc/init',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const returnPath = sanitizeReturnPath(req.body.returnPath);
+    const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
+    if (!returnPath) {
+      res.status(400).json({ error: 'A valid return path is required' });
+      return;
+    }
+    try {
+      const authUrl = await createGoogleRecordingDocAuthUrl(
+        req.user!.id,
+        req.user!.workspaceId,
+        returnPath,
+        platform,
+        req,
+      );
+      res.json({ authUrl });
+    } catch (error: unknown) {
+      logger.error(`${TAG} Error initiating recording Google Docs connect`, error);
+      res.status(error instanceof GoogleAuthRouteError ? error.status : 400).json({
+        error: error instanceof GoogleAuthRouteError ? error.message : 'Unable to start Google Docs connection',
+      });
+    }
+  },
+);
+
 // Legacy /auth/start flow removed.
 // The frontend now uses the authenticated /connect/* entry points, which
 // validate workspace ownership before generating OAuth URLs.
@@ -464,6 +648,20 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
   const channelHint = stateData?.channelId;
   const stateWorkspaceId =
     stateData?.workspaceId ?? stateData?.channelData?.workspaceId;
+  const redirectCallbackError = (message: string): void => {
+    if (stateData?.mode === 'recording-email' || stateData?.mode === 'recording-doc') {
+      redirectRecordingEmailOAuthResult(
+        res,
+        frontendUrl,
+        stateData,
+        new URLSearchParams({
+          [recordingOAuthQueryParam(stateData.mode, 'error')]: message,
+        }),
+      );
+      return;
+    }
+    redirectError(res, frontendUrl, message, platform, stateWorkspaceId, channelHint);
+  };
 
   try {
     logger.info(`${TAG} OAuth callback received`, { hasCode: !!code, hasState: !!state, error });
@@ -471,12 +669,12 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     if (error) {
       logger.error(`${TAG} OAuth error:`, error);
       if (state) await deleteOAuthState(state as string);
-      redirectError(res, frontendUrl, String(error), platform, stateWorkspaceId, channelHint);
+      redirectCallbackError(String(error));
       return;
     }
 
     if (!code || !state) {
-      redirectError(res, frontendUrl, 'missing_code_or_state', platform, stateWorkspaceId, channelHint);
+      redirectCallbackError('missing_code_or_state');
       return;
     }
     if (!stateData) {
@@ -495,6 +693,109 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       throw new Error(`Failed to obtain tokens — access_token: ${!!tokens.access_token}, refresh_token: ${!!tokens.refresh_token}`);
     }
     logger.info(`${TAG} Tokens obtained successfully`);
+
+    if (stateData.mode === 'recording-email' || stateData.mode === 'recording-doc') {
+      const isRecordingDoc = stateData.mode === 'recording-doc';
+      if (!stateData.userId || !stateData.workspaceId || !stateData.expectedEmail || !tokens.id_token) {
+        throw new Error(`Invalid recording ${isRecordingDoc ? 'Google Docs' : 'email'} OAuth state`);
+      }
+
+      const ticket = await oauth2Client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      const emailAddress = payload?.email?.trim().toLowerCase();
+      if (!emailAddress || payload?.email_verified !== true) {
+        redirectRecordingEmailOAuthResult(
+          res,
+          frontendUrl,
+          stateData,
+          new URLSearchParams({
+            [recordingOAuthQueryParam(stateData.mode, 'error')]: 'Google did not verify this email address',
+          }),
+        );
+        return;
+      }
+      if (emailAddress !== stateData.expectedEmail) {
+        redirectRecordingEmailOAuthResult(
+          res,
+          frontendUrl,
+          stateData,
+          new URLSearchParams({
+            [recordingOAuthQueryParam(stateData.mode, 'error')]:
+              `Connect ${stateData.expectedEmail} to ${isRecordingDoc ? 'export recordings' : 'send recording recaps'}`,
+          }),
+        );
+        return;
+      }
+
+      const currentUser = await db.user.findFirst({
+        where: { id: stateData.userId, workspaceId: stateData.workspaceId },
+        select: { email: true },
+      });
+      if (currentUser?.email.trim().toLowerCase() !== stateData.expectedEmail) {
+        throw new Error(`Your Xyne account changed while connecting Google ${isRecordingDoc ? 'Docs' : 'email'}`);
+      }
+
+      const sourceName = `${isRecordingDoc ? 'google-recording-doc' : 'google-recording-email'}-${stateData.userId}`;
+      const existingSource = await db.externalSource.findUnique({
+        where: { name: sourceName },
+        select: { id: true, workspaceId: true, ownerUserId: true },
+      });
+      if (
+        existingSource &&
+        (existingSource.workspaceId !== stateData.workspaceId ||
+          existingSource.ownerUserId !== stateData.userId)
+      ) {
+        throw new Error(`Recording ${isRecordingDoc ? 'Google Docs' : 'email'} connection is owned by another user`);
+      }
+
+      const credentials = encrypt(
+        JSON.stringify({
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          email: emailAddress,
+        }),
+      );
+      await db.externalSource.upsert({
+        where: { name: sourceName },
+        update: {
+          sourceType: isRecordingDoc ? RECORDING_DOC_SOURCE_TYPE : RECORDING_EMAIL_SOURCE_TYPE,
+          displayName: emailAddress,
+          channelId: null,
+          workspaceId: stateData.workspaceId,
+          ownerUserId: stateData.userId,
+          credentials,
+          isActive: true,
+        },
+        create: {
+          name: sourceName,
+          sourceType: isRecordingDoc ? RECORDING_DOC_SOURCE_TYPE : RECORDING_EMAIL_SOURCE_TYPE,
+          displayName: emailAddress,
+          channelId: null,
+          workspaceId: stateData.workspaceId,
+          ownerUserId: stateData.userId,
+          credentials,
+          isActive: true,
+        },
+      });
+
+      logger.info(`${TAG} Recording ${isRecordingDoc ? 'Google Docs' : 'email'} connection established`, {
+        workspaceId: stateData.workspaceId,
+        userId: stateData.userId,
+        sourceName,
+      });
+      redirectRecordingEmailOAuthResult(
+        res,
+        frontendUrl,
+        stateData,
+        new URLSearchParams({
+          [recordingOAuthQueryParam(stateData.mode, 'connected')]: 'true',
+        }),
+      );
+      return;
+    }
 
     // Fetch Gmail profile
     logger.info(`${TAG} Fetching Gmail profile`);
@@ -594,6 +895,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         channelId: stateData.channelId,
         sourceId: sourceRow.id,
       });
+
+      await enqueueCursorCatchup({
+        sourceId: sourceRow.id,
+        watchHistoryId: reEncrypted.watchResult.historyId,
+        requesterUserId: stateData.userId,
+      });
+      
       const params = new URLSearchParams({
         emailReconnected: 'true',
         provider: 'google',
@@ -643,7 +951,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingForWorkspace.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueCursorCatchup({
+          sourceId: existingForWorkspace.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         try {
@@ -656,6 +973,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
               workspaceId,
               credentials: network.encryptedCredentials,
               isActive: true,
+              lastSyncCursor: network.watchResult.historyId,
             },
           });
         } catch (e: any) {
@@ -838,7 +1156,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingSource.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueCursorCatchup({
+          sourceId: existingSource.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         await db.externalSource.create({
@@ -850,6 +1177,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             workspaceId,
             credentials: network.encryptedCredentials,
             isActive: true,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
       }
@@ -893,14 +1221,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       const txResult = await db.$transaction(async (tx) => {
         const ch = await tx.channel.create({
           data: {
-            scopeType: 'DEFAULT',
+            scopeType: ChannelScopeType.DEFAULT,
             name: cd.name,
             description: cd.description,
             visibility: cd.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
             createdBy: cd.userId,
             workspaceId: cd.workspaceId,
             projectId: cd.projectId,
-            type: 'EMAIL',
+            type: ChannelType.EMAIL,
           },
         });
         const now = new Date();
@@ -917,7 +1245,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           seenConversations[seenConversations.length - 1]?.createdAt ?? now;
 
         await tx.channelParticipant.create({
-          data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN', workspaceId: cd.workspaceId },
+          data: { channelId: ch.id, userId: cd.userId, role: ChannelRole.ADMIN, workspaceId: cd.workspaceId },
         });
 
         await tx.channelUserStatus.create({
@@ -971,6 +1299,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             ownerUserId: cd.userId,
             isActive: true,
             workspaceId: cd.workspaceId,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
 
@@ -993,7 +1322,36 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     const message = error?.message || 'Unknown error';
     const stack = error?.stack || '';
     logger.error(`${TAG} Error in OAuth callback: ${message}`, { stack });
-    redirectError(res, frontendUrl, message, platform, stateWorkspaceId, channelHint);
+    redirectCallbackError(message);
+  }
+});
+
+/**
+ * POST /api/integrations/google/admin/seed-sync-cursors
+ * Give every active Gmail source a starting `lastSyncCursor` from `users.getProfile`.
+ * Run before the cursor-resuming ingestion path ships.
+ *
+ * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors — safe only
+ * while nothing reads the column.
+ */
+router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, seedCursorsAdminAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+    const overwrite = req.query.overwrite === 'true' || req.body?.overwrite === true;
+
+    const report = await GoogleService.seedSyncCursors({ dryRun, overwrite });
+
+    logger.info(`${TAG} seed-sync-cursors finished`, {
+      dryRun: report.dryRun,
+      overwrite: report.overwrite,
+      seededCount: report.seeded.length,
+      skippedCount: report.skipped.length,
+      requestedBy: req.user?.id,
+    });
+    res.json({ success: true, ...report });
+  } catch (error: any) {
+    logger.error(`${TAG} seed-sync-cursors failed`, error);
+    res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
   }
 });
 

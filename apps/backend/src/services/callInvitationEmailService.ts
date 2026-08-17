@@ -4,7 +4,6 @@ import { repositories } from '@/database/repositories';
 import { emailService } from '@/services/emailService';
 import { sanitizeEmailBodyHtml } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
-import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 export interface CallInvitationParams {
   externalId: string;
@@ -24,13 +23,20 @@ export interface CallInvitationParams {
 }
 
 async function buildInvitationPayload(params: CallInvitationParams) {
-  const organizer = await repositories.users.findById(params.organizerUserId);
+  const [organizer, call] = await Promise.all([
+    repositories.users.findById(params.organizerUserId),
+    repositories.calls.findByExternalId(params.externalId),
+  ]);
+  if (!call?.roomLink) {
+    throw new Error(`Stored roomLink not found for call ${params.externalId}`);
+  }
+
   const title = params.invitation.title || params.callTitle;
   const organizerName =
     params.invitation.organizerName || organizer?.name || organizer?.email || 'A colleague';
   const organizerEmail = params.invitation.organizerEmail || organizer?.email || '';
   const timezone = params.invitation.timezone || 'UTC';
-  const joinUrl = buildCallInviteUrl(params.externalId);
+  const joinUrl = call.roomLink;
 
   const renderedBody = renderCallInvitationHtml({
     title,

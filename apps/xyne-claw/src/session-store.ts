@@ -19,7 +19,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
-import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./gcs.js";
+import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./storage.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";

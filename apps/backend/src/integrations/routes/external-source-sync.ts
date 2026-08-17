@@ -4,6 +4,7 @@
  */
 
 import express, { Router, Request, Response } from 'express';
+import { DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
@@ -17,8 +18,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { DeskType } from '@prisma/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const router = Router();
 
@@ -100,8 +100,7 @@ router.post(
         });
         throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
       }
-      const results = await runWithContext(
-        { userId: 'external-source-ingest', workspaceId: ingestWorkspaceId },
+      const results = await runAsServiceActor('external-source-ingest', ingestWorkspaceId,
         () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
       );
 
