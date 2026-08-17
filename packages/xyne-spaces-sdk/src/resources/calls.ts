@@ -53,6 +53,11 @@ export class CallsResource extends Resource {
   }
 
   /** List the summary templates available for call notes. */
+  /** Get one call-summary template by id. */
+  getSummaryTemplate(templateId: string): Promise<unknown | null> {
+    return this.call(callsOperations.getSummaryTemplate, { templateId });
+  }
+
   listSummaryTemplates(): Promise<unknown[]> {
     return this.call(callsOperations.listSummaryTemplates, undefined);
   }

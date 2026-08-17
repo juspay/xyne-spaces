@@ -73,7 +73,14 @@ export const conversationsOperations = {
    * Maps to: Zero query 'channelConversationsPaginatedV3'
    */
   listByChannel: query<
-    { channelId: string; limit?: number; start?: ConversationCursor; isMember?: boolean },
+    {
+      channelId: string;
+      limit?: number;
+      start?: ConversationCursor;
+      isMember?: boolean;
+      /** Page direction relative to `start`. Required server-side. */
+      direction?: 'forward' | 'backward';
+    },
     Conversation[]
   >('channelConversationsPaginatedV3', {
     mapArgs: (args) => ({
@@ -81,6 +88,7 @@ export const conversationsOperations = {
       isMember: args.isMember ?? true,
       limit: args.limit ?? 50,
       start: args.start ?? null,
+      direction: args.direction ?? 'forward',
     }),
   }),
 

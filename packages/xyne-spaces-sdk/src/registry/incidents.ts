@@ -66,9 +66,16 @@ export const incidentsOperations = {
    * Application release tickets for a release.
    * Maps to: Zero query 'applicationReleaseTicketsByReleaseId'
    */
-  listApplicationReleaseTickets: query<void, unknown[]>(
-    'applicationReleaseTicketsByReleaseId'
-  ),
+  listApplicationReleaseTickets: query<
+    { releaseId: string; limit?: number },
+    unknown[]
+  >('applicationReleaseTicketsByReleaseId', {
+    // releaseId is required; the old `void` signature sent nothing at all.
+    mapArgs: (args) => ({
+      releaseId: args.releaseId,
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
+  }),
 
   /**
    * Changes bundled into a release.
@@ -277,6 +284,22 @@ export const incidentsOperations = {
     'applicationReleaseTicket.setTestedBy',
     {
       mapArgs: (args) => ({ ...args, timestamp: now() }),
+    }
+  ),
+
+  /**
+   * A release's event log, newest first. `FORM_SAVED` events are filtered out
+   * server-side as noise.
+   * Maps to: Zero query 'releaseEventsByReleaseId'
+   */
+  listReleaseEvents: query<{ releaseId: string; limit?: number }, unknown[]>(
+    'releaseEventsByReleaseId',
+    {
+      // limit is required and capped at 100 server-side.
+      mapArgs: (args) => ({
+        releaseId: args.releaseId,
+        limit: Math.min(args.limit ?? 50, 100),
+      }),
     }
   ),
 } as const;

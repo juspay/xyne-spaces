@@ -80,6 +80,24 @@
       "note": "V2 additionally records formId."
     },
     {
+      "name": "getConversationAttachements",
+      "kind": "query",
+      "reason": "superseded-by:getConversationAttachementsV2",
+      "note": "Identical arguments; V2 moves channel-visibility gating onto the table ACL."
+    },
+    {
+      "name": "getDraftForConversation",
+      "kind": "query",
+      "reason": "superseded-by:getDraftForConversationV2",
+      "note": "V2 adds channelId/isMember for ACL membership gating; identical result shape."
+    },
+    {
+      "name": "getEmailsForConversations",
+      "kind": "query",
+      "reason": "superseded-by:getEmailsForConversationsV2",
+      "note": "V2 forwards channelId/isMember to the table ACL for membership gating instead of gating in the query body."
+    },
+    {
       "name": "getMessageForActivity",
       "kind": "query",
       "reason": "superseded-by:getMessageForActivityV2",

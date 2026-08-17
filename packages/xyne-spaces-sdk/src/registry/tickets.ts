@@ -172,6 +172,12 @@ export const ticketsOperations = {
    * A ticket's activity timeline.
    * Maps to: Zero query 'ticketActivities'
    */
+  /**
+   * The current user's ticket exports, newest first (server caps at 100).
+   * Maps to: Zero query 'ticketExportsForCurrentUser'
+   */
+  listExports: query<void, unknown[]>('ticketExportsForCurrentUser'),
+
   listActivities: query<{ ticketId: string }, unknown[]>('ticketActivities'),
 
   /**

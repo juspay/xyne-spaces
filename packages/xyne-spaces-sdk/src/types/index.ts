@@ -837,14 +837,84 @@ export interface SearchResponse {
   facets?: Record<string, Array<{ value: string; count: number }>>;
 }
 
+/**
+ * Search parameters.
+ *
+ * Names match the server's query contract exactly. Note `orderBy` — an earlier
+ * version of this SDK sent `sortBy`/`sortOrder`, which exist in neither search
+ * validator, so sorting silently did nothing.
+ */
 export interface SearchOptions {
+  /** Free text. Omit to search by filters alone. */
   q?: string;
+  /** Restrict to result types, e.g. `'messages'` or `['messages','tickets']`. */
   type?: string | string[];
-  channelId?: string;
+  /** Apps to search: `chat`, `ticket`, `user`, `file`. */
+  apps?: string | string[];
+  subApp?: 'canvas' | 'transcript' | 'recording' | 'rca' | 'collections';
+
   limit?: number;
   offset?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+
+  /**
+   * Result ordering. `'newest'` is what you want for "the latest N" — the default
+   * is relevance, which cannot be paged through time reliably.
+   */
+  orderBy?: 'newest' | 'oldest' | 'relevance';
+  /** Pass `''` to disable grouping and get one flat ranked list. */
+  groupBy?: string;
+
+  // Who and where.
+  /** Sender user id(s). */
+  from?: string | string[];
+  withUser?: string | string[];
+  fromEmail?: string | string[];
+  toEmail?: string | string[];
+  /** Channel id(s) to search within. */
+  in?: string | string[];
+  mentions?: string | string[];
+  channelMentions?: string | string[];
+
+  // Work-item filters.
+  projectId?: string | string[];
+  status?: string | string[];
+  ticketId?: string | string[];
+  priority?: string;
+  board?: string;
+  tags?: string;
+  stage?: string;
+  assignee?: string;
+
+  // Dates. `range` takes natural windows ('today', 'last 7 days'); the rest are cutoffs.
+  before?: string;
+  after?: string;
+  on?: string;
+  range?: string;
+  created?: string;
+
+  // Calls.
+  callStatus?: string;
+  callType?: string;
+  callStartsAt?: number;
+  callEndsAt?: number;
+
+  // Noise controls.
+  includeBotMessages?: boolean;
+  onlyMyChannels?: boolean;
+
+  /**
+   * @deprecated The server has no `channelId` parameter — this used to be rejected.
+   * Kept as an alias for `in`, which is the channel filter. Prefer `in`.
+   */
+  channelId?: string;
+  /**
+   * @deprecated Never worked — the server has no such parameter. Use `orderBy`.
+   */
+  sortBy?: never;
+  /**
+   * @deprecated Never worked — the server has no such parameter. Use `orderBy`.
+   */
+  sortOrder?: never;
 }
 
 // ----- Flow Plan (flow boards) -----

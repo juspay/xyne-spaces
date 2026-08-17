@@ -491,4 +491,16 @@ export const canvasesOperations = {
   restoreVersion: mutator<{ id: string }, void>('canvasVersion.restore', {
     mapArgs: (args) => ({ id: args.id, timestamp: now() }),
   }),
+
+  /**
+   * Archive a canvas, hiding it from the default listings.
+   * Maps to: Zero mutator 'canvas.archiveCanvas'
+   */
+  archive: mutator<{ canvasId: string }, void>('canvas.archiveCanvas'),
+
+  /**
+   * Restore an archived canvas.
+   * Maps to: Zero mutator 'canvas.unarchiveCanvas'
+   */
+  unarchive: mutator<{ canvasId: string }, void>('canvas.unarchiveCanvas'),
 } as const;

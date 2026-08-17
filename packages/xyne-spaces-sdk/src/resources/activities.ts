@@ -25,7 +25,11 @@ export class ActivitiesResource extends Resource {
    *
    * @param options.start - Cursor from the last item of the previous page
    */
-  listPaginated(options?: { limit?: number; start?: ActivityCursor }): Promise<Activity[]> {
+  listPaginated(options?: {
+    limit?: number;
+    start?: ActivityCursor;
+    types?: string[];
+  }): Promise<Activity[]> {
     return this.call(activitiesOperations.listPaginated, options ?? {});
   }
 

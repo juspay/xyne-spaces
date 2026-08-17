@@ -30,7 +30,12 @@ export class ConversationsResource extends Resource {
    */
   listByChannel(
     channelId: string,
-    options?: { limit?: number; start?: ConversationCursor; isMember?: boolean }
+    options?: {
+      limit?: number;
+      start?: ConversationCursor;
+      isMember?: boolean;
+      direction?: 'forward' | 'backward';
+    }
   ): Promise<Conversation[]> {
     return this.call(conversationsOperations.listByChannel, { channelId, ...options });
   }

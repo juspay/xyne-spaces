@@ -207,8 +207,8 @@ export class PreferencesResource extends Resource {
   // ----- Saved views -----
 
   /** List the saved filter views the current user created. */
-  listSavedViews(): Promise<unknown[]> {
-    return this.call(preferencesOperations.listSavedViews, undefined);
+  listSavedViews(userId: string): Promise<unknown[]> {
+    return this.call(preferencesOperations.listSavedViews, { userId });
   }
 
   /**
@@ -240,5 +240,17 @@ export class PreferencesResource extends Resource {
   /** Delete a saved view. */
   deleteSavedView(configId: string): Promise<void> {
     return this.call(preferencesOperations.deleteSavedView, { configId });
+  }
+  /**
+   * Set the filter and sort applied to one sidebar group.
+   *
+   * @param filterMode - ACTIVE | UNREADS | MENTIONS | ALL
+   */
+  setSidebarGroup(
+    id: string,
+    group: 'starred' | 'channels' | 'dms',
+    options?: { filterMode?: string; sortOrder?: string }
+  ): Promise<void> {
+    return this.call(preferencesOperations.setSidebarGroup, { id, group, ...options });
   }
 }

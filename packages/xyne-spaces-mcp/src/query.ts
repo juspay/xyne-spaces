@@ -82,6 +82,30 @@ export async function queryWhoami(): Promise<string> {
   ].join("\n")
 }
 
+/**
+ * Count real membership rows per channel.
+ *
+ * One query for the whole page, then tallied here — `include`/`_count` are both
+ * stripped by the backend AST validator, so there is no server-side aggregate to
+ * ask for.
+ */
+async function countChannelParticipants(channelIds: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  if (channelIds.length === 0) return counts
+
+  const rows = (await query({
+    model: "channelParticipant",
+    operation: "findMany",
+    where: { channelId: { in: channelIds } },
+    take: 1000,
+  })) as Array<{ channelId: string }>
+
+  for (const row of rows) {
+    counts.set(row.channelId, (counts.get(row.channelId) ?? 0) + 1)
+  }
+  return counts
+}
+
 /** Resolve user ids to display names, since `include` cannot do it. */
 async function lookupUserNames(ids: Array<string | undefined>): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))]
@@ -107,8 +131,21 @@ interface TicketFilters {
   boardId?: string
   projectId?: string
   stageName?: string
+  createdAfter?: string
+  createdBefore?: string
+  updatedAfter?: string
+  updatedBefore?: string
   limit?: number
   offset?: number
+}
+
+/** Parse an ISO date for a range filter, rejecting garbage loudly. */
+function isoBound(value: string, label: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${label} is not a valid date: "${value}". Use ISO 8601, e.g. 2026-08-01.`)
+  }
+  return parsed.toISOString()
 }
 
 interface TicketRow {
@@ -122,11 +159,9 @@ interface TicketRow {
   createdAt: string
   updatedAt: string
   conversationId?: string
-  assignedToUser?: { name: string } | null
-  createdByUser?: { name: string } | null
-  board?: { name: string } | null
-  project?: { name: string } | null
-  tags?: Array<{ name: string }>
+  boardId?: string
+  assignedTo?: string
+  createdBy?: string
 }
 
 export async function queryTickets(filters: TicketFilters): Promise<string> {
@@ -139,6 +174,18 @@ export async function queryTickets(filters: TicketFilters): Promise<string> {
   if (filters.projectId) where["projectId"] = { equals: filters.projectId }
   if (filters.stageName) where["stageName"] = { equals: filters.stageName }
 
+  // Date ranges: the AST validator allows gte/lte, so these are real server-side
+  // filters — not a client-side pass over an arbitrary page.
+  const createdAt: Record<string, string> = {}
+  if (filters.createdAfter) createdAt["gte"] = isoBound(filters.createdAfter, "createdAfter")
+  if (filters.createdBefore) createdAt["lte"] = isoBound(filters.createdBefore, "createdBefore")
+  if (Object.keys(createdAt).length > 0) where["createdAt"] = createdAt
+
+  const updatedAt: Record<string, string> = {}
+  if (filters.updatedAfter) updatedAt["gte"] = isoBound(filters.updatedAfter, "updatedAfter")
+  if (filters.updatedBefore) updatedAt["lte"] = isoBound(filters.updatedBefore, "updatedBefore")
+  if (Object.keys(updatedAt).length > 0) where["updatedAt"] = updatedAt
+
   const rows = (await query({
     model: "ticket",
     operation: "findMany",
@@ -146,29 +193,30 @@ export async function queryTickets(filters: TicketFilters): Promise<string> {
     orderBy: [{ updatedAt: "desc" }],
     take: filters.limit ?? 20,
     skip: filters.offset ?? 0,
-    include: {
-      assignedToUser: { select: { name: true } },
-      createdByUser: { select: { name: true } },
-      board: { select: { name: true } },
-      project: { select: { name: true } },
-      tags: { select: { name: true } },
-    },
   })) as TicketRow[]
 
   if (rows.length === 0) return "No tickets found."
 
+  // Creator and assignee names need a second query: `include` is stripped by the
+  // backend validator, which is why these fields used to come back empty.
+  const names = await lookupUserNames([
+    ...rows.map((t) => t.assignedTo),
+    ...rows.map((t) => t.createdBy),
+  ])
+
   const lines = rows.map((t) => {
     const parts = [`[${t.xyneId}] ${t.title}`]
     parts.push(`  Status: ${t.statusV2} · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`)
-    if (t.assignedToUser) parts.push(`  Assigned: ${t.assignedToUser.name}`)
-    if (t.createdByUser) parts.push(`  Created by: ${t.createdByUser.name}`)
-    if (t.board) parts.push(`  Board: ${t.board.name}${t.project ? ` · Project: ${t.project.name}` : ""}`)
-    if (t.tags && t.tags.length > 0) parts.push(`  Tags: ${t.tags.map((tg) => tg.name).join(", ")}`)
+    parts.push(`  Assigned: ${t.assignedTo ? (names.get(t.assignedTo) ?? t.assignedTo) : "(unassigned)"}`)
+    if (t.createdBy) parts.push(`  Created by: ${names.get(t.createdBy) ?? t.createdBy}`)
     if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`)
     if (t.conversationId) parts.push(`  ConversationID: ${t.conversationId}`)
     // TicketID, not just the key: spaces-update-ticket needs the cuid.
     parts.push(`  TicketID: ${t.id}`)
-    parts.push(`  Updated: ${new Date(t.updatedAt).toLocaleString()}`)
+    if (t.boardId) parts.push(`  BoardID: ${t.boardId}`)
+    parts.push(
+      `  Created: ${new Date(t.createdAt).toLocaleString()} · Updated: ${new Date(t.updatedAt).toLocaleString()}`
+    )
     return parts.join("\n")
   })
 
@@ -184,6 +232,7 @@ interface MessageRow {
   createdAt: string
   hasAttachment: boolean
   senderId: string
+  conversationId?: string
 }
 
 export async function queryMessages(conversationId: string, limit: number, offset: number): Promise<string> {
@@ -212,10 +261,129 @@ export async function queryMessages(conversationId: string, limit: number, offse
     const sender = names.get(m.senderId) ?? "unknown"
     const time = new Date(m.createdAt).toLocaleString()
     const attach = m.hasAttachment ? " 📎" : ""
-    return `[${time}] ${sender}${attach}: ${m.content}`
+    // Surface BOT/SYSTEM so automation traffic can be told from people without
+    // guessing from the sender's name.
+    const kind = m.msgType && m.msgType !== "USER" ? ` (${m.msgType})` : ""
+    return `[${time}] ${sender}${kind}${attach}: ${toPlainText(m.content)}`
   })
 
   return `${rows.length} message(s):\n\n${lines.join("\n")}`
+}
+
+/**
+ * A channel's whole message timeline, flattened across its threads.
+ *
+ * Two queries because `Message` has no `channelId` — messages hang off
+ * conversations, and conversations hang off channels. This is the "read this
+ * channel" path that previously did not exist: passing a channel id to
+ * `spaces-messages` returned nothing, because a channel is not a thread.
+ */
+export async function queryChannelMessages(
+  channelId: string,
+  limit: number,
+  before?: string
+): Promise<string> {
+  const conversations = (await query({
+    model: "conversation",
+    operation: "findMany",
+    where: { channelId: { equals: channelId } },
+    orderBy: [{ lastActivityAt: "desc" }],
+    take: 500,
+  })) as Array<{ conversationId: string }>
+
+  if (conversations.length === 0) {
+    return `No conversations in channel ${channelId}, so no messages. Check the ChannelID with spaces-channels.`
+  }
+
+  const where: Record<string, unknown> = {
+    conversationId: { in: conversations.map((c) => c.conversationId) },
+    isDeleted: { equals: false },
+  }
+  if (before) where["createdAt"] = { lte: isoBound(before, "before") }
+
+  const rows = (await query({
+    model: "message",
+    operation: "findMany",
+    where,
+    orderBy: [{ createdAt: "desc" }],
+    take: limit,
+  })) as MessageRow[]
+
+  if (rows.length === 0) return `No messages found in channel ${channelId}.`
+
+  const names = await lookupUserNames(rows.map((m) => m.senderId))
+
+  // Fetched newest-first for the limit to mean "most recent N"; shown oldest-first
+  // so the transcript reads naturally.
+  const lines = [...rows].reverse().map((m) => {
+    const sender = names.get(m.senderId) ?? "unknown"
+    const kind = m.msgType && m.msgType !== "USER" ? ` (${m.msgType})` : ""
+    const attach = m.hasAttachment ? " 📎" : ""
+    return `[${new Date(m.createdAt).toLocaleString()}] ${sender}${kind}${attach}: ${toPlainText(m.content)}`
+  })
+
+  const oldest = rows[rows.length - 1]
+  const more = oldest
+    ? `\n\nShowing the ${rows.length} most recent across ${conversations.length} thread(s). ` +
+      `For older, pass before="${new Date(oldest.createdAt).toISOString()}".`
+    : ""
+
+  return `${rows.length} message(s) in channel ${channelId}:\n\n${lines.join("\n")}${more}`
+}
+
+/**
+ * Everything one user wrote, newest first.
+ *
+ * Ordered by `createdAt` rather than relevance, so paging is stable and a thin
+ * page genuinely means a thin window — unlike fanning out date-sliced searches.
+ */
+export async function queryUserMessages(
+  userId: string,
+  limit: number,
+  after?: string,
+  before?: string
+): Promise<string> {
+  const where: Record<string, unknown> = {
+    senderId: { equals: userId },
+    isDeleted: { equals: false },
+  }
+
+  const createdAt: Record<string, string> = {}
+  if (after) createdAt["gte"] = isoBound(after, "after")
+  if (before) createdAt["lte"] = isoBound(before, "before")
+  if (Object.keys(createdAt).length > 0) where["createdAt"] = createdAt
+
+  const rows = (await query({
+    model: "message",
+    operation: "findMany",
+    where,
+    orderBy: [{ createdAt: "desc" }],
+    take: limit,
+  })) as MessageRow[]
+
+  if (rows.length === 0) {
+    return `No messages found for user ${userId}${after || before ? " in that date range" : ""}.`
+  }
+
+  const names = await lookupUserNames([userId])
+  const author = names.get(userId) ?? userId
+
+  const lines = rows.map((m) => {
+    const kind = m.msgType && m.msgType !== "USER" ? ` (${m.msgType})` : ""
+    const attach = m.hasAttachment ? " 📎" : ""
+    return (
+      `[${new Date(m.createdAt).toLocaleString()}]${kind}${attach} ${truncate(toPlainText(m.content), 400)}\n` +
+      `  ConversationID: ${m.conversationId ?? "(unknown)"}`
+    )
+  })
+
+  const oldest = rows[rows.length - 1]
+  const more =
+    rows.length === limit && oldest
+      ? `\n\nHit the limit — for older messages pass before="${new Date(oldest.createdAt).toISOString()}".`
+      : ""
+
+  return `${rows.length} message(s) by ${author}, newest first:\n\n${lines.join("\n\n")}${more}`
 }
 
 // ── Message Detail ───────────────────────────────────────────────────
@@ -261,7 +429,7 @@ export async function queryMessageDetail(messageId: string): Promise<string> {
     `From: ${m.sender?.name ?? "unknown"} (${m.sender?.email ?? ""})`,
     `Type: ${m.msgType}${m.edited ? " (edited)" : ""}`,
     `Date: ${new Date(m.createdAt).toLocaleString()}`,
-    `\n${m.content}`,
+    `\n${toPlainText(m.content)}`,
   ]
 
   // Reactions
@@ -306,10 +474,18 @@ interface ChannelRow {
   participants?: Array<{ user?: { name: string } | null }> | null
 }
 
-export async function queryChannels(limit: number, visibility?: string, scopeType?: string, participantName?: string): Promise<string> {
+export async function queryChannels(
+  limit: number,
+  visibility?: string,
+  scopeType?: string,
+  participantName?: string,
+  name?: string,
+  offset?: number
+): Promise<string> {
   const where: Record<string, unknown> = {}
   if (visibility) where["visibility"] = { equals: visibility }
   if (scopeType) where["scopeType"] = { equals: scopeType }
+  if (name) where["name"] = { contains: name }
   if (participantName) {
     where["participants"] = { some: { user: { name: { contains: participantName } } } }
   }
@@ -320,21 +496,24 @@ export async function queryChannels(limit: number, visibility?: string, scopeTyp
     where,
     orderBy: [{ lastActivityAt: "desc" }],
     take: limit,
-    include: {
-      project: { select: { name: true } },
-      participants: { select: { user: { select: { name: true } } } },
-    },
+    skip: offset ?? 0,
   })) as ChannelRow[]
 
-  if (rows.length === 0) return "No channels found."
+  if (rows.length === 0) {
+    return name
+      ? `No channels found matching "${name}".`
+      : "No channels found."
+  }
+
+  // The denormalized channel.participantCount is not maintained on most
+  // add/remove paths and reads 0 for nearly every channel, so count the
+  // membership rows instead — one extra query for the whole page.
+  const counts = await countChannelParticipants(rows.map((c) => c.id))
 
   const lines = rows.map((c) => {
     const parts = [`#${c.name} (${c.scopeType}, ${c.visibility})`]
     if (c.description) parts.push(`  ${c.description}`)
-    const memberNames = c.participants?.map((p) => p.user?.name).filter(Boolean) ?? []
-    if (memberNames.length > 0) parts.push(`  Members: ${memberNames.join(", ")}`)
-    else parts.push(`  Participants: ${c.participantCount}`)
-    if (c.project) parts.push(`  Project: ${c.project.name}`)
+    parts.push(`  Participants: ${counts.get(c.id) ?? c.participantCount ?? 0}`)
     if (c.lastActivityAt) parts.push(`  Last active: ${new Date(c.lastActivityAt).toLocaleString()}`)
     parts.push(`  ChannelID: ${c.id}`)
     return parts.join("\n")
@@ -410,7 +589,7 @@ export async function queryConversations(
   const lines = rows.map((c) => {
     const preview = previewById.get(c.initialMessageId)
     const author = names.get(preview?.senderId ?? c.createdBy) ?? "unknown"
-    const parts = [`${c.pinned ? "📌 " : ""}${author}: ${truncate(preview?.content ?? "(no preview)", 160)}`]
+    const parts = [`${c.pinned ? "📌 " : ""}${author}: ${truncate(toPlainText(preview?.content ?? "") || "(no preview)", 160)}`]
     parts.push(`  ConversationID: ${c.conversationId}`)
     parts.push(`  Replies: ${c.replyCount} · Last active: ${new Date(c.lastActivityAt).toLocaleString()}`)
     if (c.ticketId) parts.push(`  TicketID: ${c.ticketId}`)
@@ -427,6 +606,53 @@ export async function queryConversations(
 function truncate(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim()
   return flat.length > max ? `${flat.slice(0, max)}…` : flat
+}
+
+/**
+ * Render stored message HTML as readable text.
+ *
+ * Message bodies are editor HTML: every line is wrapped in `<p class="…">`, mentions
+ * are `<span data-mention …>` carrying the display name in an attribute, and custom
+ * emoji are `<img alt=":name:">`. Printed raw, the markup dwarfs the actual words —
+ * a few short messages ran to kilobytes — which wastes an agent's context and buries
+ * the content. Mentions and emoji are preserved in readable form because they carry
+ * meaning; everything else is dropped.
+ */
+export function toPlainText(html: string): string {
+  if (!html) return ""
+  return (
+    html
+      // Mentions: prefer the explicit username attribute over the inner text,
+      // which is sometimes empty.
+      .replace(
+        /<span[^>]*data-mention[^>]*data-username="([^"]*)"[^>]*>.*?<\/span>/gi,
+        (_m, name: string) => `@${name}`
+      )
+      .replace(/<span[^>]*data-mention[^>]*>(.*?)<\/span>/gi, (_m, inner: string) =>
+        inner.trim() ? inner.replace(/<[^>]+>/g, "") : "@mention"
+      )
+      // Custom emoji carry their shortcode in alt/title.
+      .replace(/<img[^>]*alt="(:[^"]*:)"[^>]*>/gi, (_m, code: string) => code)
+      .replace(/<img[^>]*title="([^"]*)"[^>]*>/gi, (_m, title: string) => `:${title}:`)
+      .replace(/<img[^>]*>/gi, "[image]")
+      // Links: keep the href, which is often the whole point of the message.
+      .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, (_m, href: string, text: string) => {
+        const label = text.replace(/<[^>]+>/g, "").trim()
+        return label && label !== href ? `${label} (${href})` : href
+      })
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  )
 }
 
 // ── Users ────────────────────────────────────────────────────────────

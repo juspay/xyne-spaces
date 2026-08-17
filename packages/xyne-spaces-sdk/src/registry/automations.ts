@@ -130,7 +130,13 @@ export const automationsOperations = {
    * Stop running an automation without deleting it.
    * Maps to: Zero mutator 'automations.disable'
    */
-  disable: mutator<{ id: string }, void>('automations.disable'),
+  disable: mutator<{ id: string; cancelQueued?: boolean }, void>('automations.disable', {
+    mapArgs: (args) => ({
+      id: args.id,
+      timestamp: now(),
+      ...(args.cancelQueued !== undefined ? { cancelQueued: args.cancelQueued } : {}),
+    }),
+  }),
 
   /**
    * Retire an automation.

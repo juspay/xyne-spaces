@@ -57,6 +57,18 @@ export const formsOperations = {
   listByContextType: query<{ contextType: string }, Form[]>('getFormsByContextType'),
 
   /**
+   * Form-to-context mappings for several contexts at once, with their fields.
+   * Maps to: Zero query 'getFormMappingsByContextIds'
+   *
+   * `contextType` is BOARD | RELEASE_CHANGE | STAGE; `entityType` is
+   * TICKET | SUB_TICKET | RELEASE_MIGRATION_FORM | RELEASE_ENV_FORM.
+   */
+  listMappingsByContextIds: query<
+    { contextIds: string[]; contextType: string; entityType: string },
+    unknown[]
+  >('getFormMappingsByContextIds'),
+
+  /**
    * A form's fields, in sequence order.
    * Maps to: Zero query 'getFormFieldsByFormId'
    */

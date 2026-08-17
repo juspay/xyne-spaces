@@ -123,6 +123,11 @@ export class TicketsResource extends Resource {
   }
 
   /** List a ticket's activity timeline. */
+  /** List the current user's ticket exports, newest first (server caps at 100). */
+  listExports(): Promise<unknown[]> {
+    return this.call(ticketsOperations.listExports, undefined);
+  }
+
   listActivities(ticketId: string): Promise<unknown[]> {
     return this.call(ticketsOperations.listActivities, { ticketId });
   }

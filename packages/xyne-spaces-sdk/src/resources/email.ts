@@ -24,8 +24,16 @@ import type {
 
 export class EmailResource extends Resource {
   /** List the emails on several conversations at once. */
-  listForConversations(conversationIds: string[]): Promise<unknown[]> {
-    return this.call(emailOperations.listForConversations, { conversationIds });
+  listForConversations(
+    conversationIds: string[],
+    channelId: string,
+    isMember?: boolean
+  ): Promise<unknown[]> {
+    return this.call(emailOperations.listForConversations, {
+      conversationIds,
+      channelId,
+      ...(isMember !== undefined ? { isMember } : {}),
+    });
   }
 
   /** List mail the current user has sent from a channel. */
@@ -47,8 +55,16 @@ export class EmailResource extends Resource {
   }
 
   /** Get the reply draft on a conversation, if there is one. */
-  getDraftForConversation(conversationId: string): Promise<EmailDraft | null> {
-    return this.call(emailOperations.getDraftForConversation, { conversationId });
+  getDraftForConversation(
+    conversationId: string,
+    channelId: string,
+    isMember?: boolean
+  ): Promise<EmailDraft | null> {
+    return this.call(emailOperations.getDraftForConversation, {
+      conversationId,
+      channelId,
+      ...(isMember !== undefined ? { isMember } : {}),
+    });
   }
 
   /** List compose drafts in a channel — those not yet tied to a conversation. */

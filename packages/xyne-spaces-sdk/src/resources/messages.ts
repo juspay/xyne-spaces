@@ -46,6 +46,38 @@ export class MessagesResource extends Resource {
     return this.call(messagesOperations.listMine, options ?? {});
   }
 
+  /**
+   * List messages authored by a given user, newest first.
+   *
+   * Prefer this over `search.query({ from: userId })` when assembling someone's
+   * authored history: search ranks by relevance and has a practical offset ceiling,
+   * so a thin page is indistinguishable from a truncated one. This orders by
+   * `createdAt` and cursors cleanly.
+   *
+   * Read ACL still applies — you see only messages in conversations you can read.
+   *
+   * @example
+   * // Walk a user's whole history
+   * let cursor: MessageCursor | undefined;
+   * const all: Message[] = [];
+   * for (;;) {
+   *   const page = await sdk.messages.listByUser({ userId, limit: 100, start: cursor });
+   *   all.push(...page);
+   *   const last = page[page.length - 1];
+   *   if (page.length < 100 || !last) break;
+   *   cursor = { messageId: last.messageId, createdAt: last.createdAt };
+   * }
+   */
+  listByUser(options: {
+    userId: string;
+    limit?: number;
+    start?: MessageCursor;
+    after?: number;
+    before?: number;
+  }): Promise<Message[]> {
+    return this.call(messagesOperations.listByUser, options);
+  }
+
   /** Get the latest message in a channel. */
   getLatestInChannel(channelId: string): Promise<Message | null> {
     return this.call(messagesOperations.getLatestInChannel, { channelId });
@@ -210,7 +242,11 @@ export class MessagesResource extends Resource {
   /** List every attachment shared in a channel, newest first. */
   listChannelAttachments(
     channelId: string,
-    options?: { limit?: number; start?: { attachementId: string; createdAt: number } }
+    options?: {
+      limit?: number;
+      start?: { attachementId: string; createdAt: number };
+      direction?: 'forward' | 'backward';
+    }
   ): Promise<unknown[]> {
     return this.call(messagesOperations.listChannelAttachments, { channelId, ...options });
   }

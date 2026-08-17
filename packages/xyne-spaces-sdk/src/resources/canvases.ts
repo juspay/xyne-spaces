@@ -396,4 +396,13 @@ export class CanvasesResource extends Resource {
   deleteFolder(id: string): Promise<void> {
     return this.call(canvasesOperations.deleteFolder, { id });
   }
+  /** Archive a canvas, hiding it from the default listings. */
+  archive(canvasId: string): Promise<void> {
+    return this.call(canvasesOperations.archive, { canvasId });
+  }
+
+  /** Restore an archived canvas. */
+  unarchive(canvasId: string): Promise<void> {
+    return this.call(canvasesOperations.unarchive, { canvasId });
+  }
 }
