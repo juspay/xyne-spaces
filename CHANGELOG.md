@@ -1,3 +1,32 @@
+## [1.189.6](https://github.com/juspay/xyne-spaces/compare/v1.189.5...v1.189.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* fix analytics data ([#535](https://github.com/juspay/xyne-spaces/issues/535)) ([79197bf](https://github.com/juspay/xyne-spaces/commit/79197bf5bb229b216792dc7ae3aa818cc4ea1a1b))
+
+## [1.189.5](https://github.com/juspay/xyne-spaces/compare/v1.189.4...v1.189.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* Fix dynamic dashboard tls connection issue ([#518](https://github.com/juspay/xyne-spaces/issues/518)) ([51846cb](https://github.com/juspay/xyne-spaces/commit/51846cb10357323b3fcc767c7e66582544c18290))
+
+## [1.189.4](https://github.com/juspay/xyne-spaces/compare/v1.189.3...v1.189.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* optimize Y-Sweet routes and database cleanup logic ([#643](https://github.com/juspay/xyne-spaces/issues/643)) ([b871715](https://github.com/juspay/xyne-spaces/commit/b871715f984835a7c7ee9e41063483702cc0bcd9))
+
+## [1.189.3](https://github.com/juspay/xyne-spaces/compare/v1.189.2...v1.189.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* flow board ui fixes ([#626](https://github.com/juspay/xyne-spaces/issues/626)) ([f4b2fa2](https://github.com/juspay/xyne-spaces/commit/f4b2fa212522e235472f78f8f9f8591cb2d48757))
+* local otel setup ([#623](https://github.com/juspay/xyne-spaces/issues/623)) ([b93a1bf](https://github.com/juspay/xyne-spaces/commit/b93a1bfdbddb770dc207c75a072f1d29b9a82017))
+
 ## [1.189.2](https://github.com/juspay/xyne-spaces/compare/v1.189.1...v1.189.2) (2026-08-17)
 
 

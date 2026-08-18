@@ -23,10 +23,8 @@ export class AffinityService {
         timeout: FETCH_TIMEOUT_MS,
       });
       this.weights = data;
-    } catch (error) {
+    } catch {
       // Graceful degradation — keep empty weights, Cmd+K falls back to text match
-      // eslint-disable-next-line no-console
-      console.warn('[AFFINITY] Failed to fetch weights:', error);
     } finally {
       // Always update lastFetchedAt so a Vespa outage doesn't cause a retry
       // storm on every keystroke — wait the full TTL before trying again.

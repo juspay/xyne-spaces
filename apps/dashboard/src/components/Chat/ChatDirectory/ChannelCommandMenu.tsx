@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
@@ -1902,7 +1903,11 @@ const ChannelCommandMenu = ({
       }
       onOpenChange(false);
     } catch (err) {
-      console.error('Navigation failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Navigation failed:'),
+        error: err,
+      });
     }
   };
 
@@ -2203,7 +2208,12 @@ const ChannelCommandMenu = ({
   // log the raw backend error to the console so devs can still triage from
   // DevTools without exposing implementation details in the UI.
   useEffect(() => {
-    if (error) console.warn('[Cmd+K search]', error);
+    if (error)
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[Cmd+K search]'),
+        context: [error],
+      });
   }, [error]);
 
   // Signature of the backend result ORDER, not just count: a re-rank that keeps the same row
@@ -4658,7 +4668,11 @@ const ChannelCommandMenu = ({
 
             toast.success(`${ticketsToMerge.length + 1} tickets merged successfully`);
           } catch (err) {
-            console.error('Merge failed:', err);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Merge failed:'),
+              error: err,
+            });
             toast.error('Failed to merge tickets. Please try again.');
           }
         }}
@@ -4675,7 +4689,7 @@ const ChannelCommandMenu = ({
         // matches no item so it never marks one selected too — otherwise it latches a result row
         // and a SECOND highlight appears alongside the manually-selected one.
         value='__none__'
-        onValueChange={() => {}}
+        onValueChange={() => undefined}
         data-nav-active={hasNavigated ? 'true' : undefined}
         data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
@@ -4753,7 +4767,7 @@ const ChannelCommandMenu = ({
               // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
               // item so it never adds a second highlighted row next to the imperatively-managed one.
               value='__none__'
-              onValueChange={() => {}}
+              onValueChange={() => undefined}
               data-nav-active={hasNavigated ? 'true' : undefined}
               data-mention-active={mentionSearchType ? 'true' : undefined}
               shouldFilter={false}
