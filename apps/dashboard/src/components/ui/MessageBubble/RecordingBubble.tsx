@@ -44,10 +44,8 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
   const isActive = !isEnded;
   const startedAt = message.createdAt ? Number(message.createdAt) : undefined;
   const duration = useCallDuration(startedAt, isActive);
-  // Only the recording's creator has view access (see callShareService.canView)
-  // until it's explicitly shared — other thread participants would just land
-  // on a not-found/access-denied screen, so don't offer them the click at all.
-  const canView = !!user?.id && metadata?.createdBy === user.id;
+
+  const canView = isEnded || (!!user?.id && metadata?.createdBy === user.id);
 
   const goToRecording = (): void => {
     if (!canView) return;
