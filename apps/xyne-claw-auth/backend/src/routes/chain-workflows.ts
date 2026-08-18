@@ -730,6 +730,17 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     // scoped (e.g. an admin binding for another user, or "*" for any user).
     const targetUserId = userId?.trim() || requesterId;
 
+    // L-11: targetUserId is body-controlled and canAccessWorkflow only proves
+    // the caller may use the WORKFLOW — not that they may bind it to run on
+    // ANOTHER user's behalf. Without this gate a workflow creator could send
+    // userId=<victim> (or the "*" = all-users sentinel) so their workflow runs
+    // under the victim's identity whenever the victim messages the channel.
+    // Binding for anyone other than yourself is therefore admin-only.
+    if (targetUserId !== requesterId && !(await isClawAdmin(requesterId))) {
+      res.status(403).json({ success: false, error: "Only an admin can bind a workflow for another user" });
+      return;
+    }
+
     const workflow = await agentChainWorkflowRepository.findWorkflowById(workflowId.trim());
     if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
 
