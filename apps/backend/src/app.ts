@@ -58,7 +58,6 @@ import appDeskRoutes from '@/integrations/routes/app-desk';
 import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
-import socialMediaRoutes from '@/integrations/routes/social-media';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
