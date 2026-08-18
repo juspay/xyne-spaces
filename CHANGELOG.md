@@ -1,3 +1,10 @@
+## [1.194.0](https://github.com/juspay/xyne-spaces/compare/v1.193.0...v1.194.0) (2026-08-18)
+
+
+### Features
+
+* slash commands with flowjson artifacts and  side eff… ([#355](https://github.com/juspay/xyne-spaces/issues/355)) ([46c0fa9](https://github.com/juspay/xyne-spaces/commit/46c0fa9ad1a88bbe1de3138fb83c5f704d73ba3d))
+
 ## [1.193.0](https://github.com/juspay/xyne-spaces/compare/v1.192.2...v1.193.0) (2026-08-18)
 
 
