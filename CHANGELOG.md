@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.6...v1.187.1-release-20260817.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* log whether a link opened in the in-app or external browser ([#706](https://github.com/juspay/xyne-spaces/issues/706)) ([bc35035](https://github.com/juspay/xyne-spaces/commit/bc350352c882d3e9301439d6a27349f3b9ad5aca))
+
 ## [1.187.1-release-20260817.6](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.5...v1.187.1-release-20260817.6) (2026-08-18)
 
 
