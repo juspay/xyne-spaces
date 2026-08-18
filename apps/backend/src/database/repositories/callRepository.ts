@@ -243,14 +243,15 @@ export class CallRepository {
    */
   private async syncArtifactLifecycle(
     tx: Prisma.TransactionClient,
-    call: { externalId: string; metadata: Prisma.JsonValue | null },
+    call: { externalId: string; channelId: string | null; metadata: Prisma.JsonValue | null },
     status: MessageArtifactLifecycleStatus
   ): Promise<void> {
     const artifactMessageId = getArtifactMessageId(call.metadata);
-    if (!artifactMessageId) return;
+    if (!artifactMessageId || !call.channelId) return;
 
     await setSlashCommandArtifactLifecycle(tx, {
       messageId: artifactMessageId,
+      channelId: call.channelId,
       status,
       callExternalId: call.externalId,
     });

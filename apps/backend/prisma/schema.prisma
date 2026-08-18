@@ -2279,7 +2279,7 @@ model MessageArtifact {
   command          String
   status           String
   callExternalId   String?
-  updatedAt        DateTime @updatedAt
+  updatedAt        DateTime
 
   @@index([workspaceId, status, messageCreatedAt])
   @@index([channelId])

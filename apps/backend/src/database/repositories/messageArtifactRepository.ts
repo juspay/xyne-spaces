@@ -23,7 +23,8 @@ export type MessageArtifactLifecycleStatus =
  */
 export const syncMessageArtifact = async (
   tx: Prisma.TransactionClient,
-  messageId: string
+  messageId: string,
+  expectedChannelId?: string
 ): Promise<void> => {
   const message = await tx.message.findUnique({
     where: { messageId },
@@ -57,6 +58,15 @@ export const syncMessageArtifact = async (
     return;
   }
 
+  if (expectedChannelId && message.conversation.channelId !== expectedChannelId) {
+    logger.warn('slash_command_artifact_channel_mismatch', {
+      artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
+      expectedChannelKey: getSlashCommandArtifactDiagnosticKey(expectedChannelId),
+      actualChannelKey: getSlashCommandArtifactDiagnosticKey(message.conversation.channelId),
+    });
+    return;
+  }
+
   const projected = {
     workspaceId: message.workspaceId,
     messageId: message.messageId,
@@ -68,15 +78,22 @@ export const syncMessageArtifact = async (
     command: projection.command,
   };
 
+  const now = new Date();
   await tx.messageArtifact.upsert({
     where: { messageId },
-    create: { ...projected, status: MessageArtifactStatus.ACTIVE },
-    update: projected,
+    create: { ...projected, status: MessageArtifactStatus.ACTIVE, updatedAt: now },
+    update: { ...projected, updatedAt: now },
   });
 };
 
 /**
- * Move an artifact's lifecycle forward and record the entity that owns it.
+ * Move an artifact's lifecycle forward and record the call that owns it.
+ *
+ * `channelId` is the channel of the call driving the transition, and every
+ * write is scoped to it. The artifact message id originates in a client request
+ * body, so this scoping — rather than a pre-flight lookup in the controller —
+ * is what stops a forged id from touching an artifact in a channel the caller
+ * cannot reach: a mismatch simply matches zero rows.
  *
  * The update is a compare-and-set rather than a read-modify-write: a completion
  * only lands while the artifact is still linked to the same call, so a late
@@ -86,42 +103,46 @@ export const setSlashCommandArtifactLifecycle = async (
   tx: Prisma.TransactionClient,
   params: {
     messageId: string;
+    channelId: string;
     status: MessageArtifactLifecycleStatus;
     callExternalId: string;
   }
 ): Promise<void> => {
-  const { messageId, status, callExternalId } = params;
+  const { messageId, channelId, status, callExternalId } = params;
   const logContext = {
     artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
     callKey: getSlashCommandArtifactDiagnosticKey(callExternalId),
+    channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
     lifecycleStatus: status,
   };
 
   // The message side-effect worker normally creates this row first, but call
   // creation can outrun it. Bootstrapping here keeps the lifecycle event rather
-  // than dropping it.
+  // than dropping it — scoped to the call's channel so it cannot be used to
+  // materialize a row for a message the caller has no access to.
   const existing = await tx.messageArtifact.findUnique({
     where: { messageId },
     select: { id: true },
   });
   if (!existing) {
-    await syncMessageArtifact(tx, messageId);
+    await syncMessageArtifact(tx, messageId, channelId);
   }
 
   const { count } = await tx.messageArtifact.updateMany({
     where: {
       messageId,
+      channelId,
       // Completion is only valid for the call the artifact is currently linked
       // to. Activation always wins — it is the newest call by definition.
       ...(status === MessageArtifactStatus.COMPLETED ? { callExternalId } : {}),
     },
-    data: { status, callExternalId },
+    data: { status, callExternalId, updatedAt: new Date() },
   });
 
   if (count === 0) {
     logger.info('slash_command_artifact_lifecycle_skipped', {
       ...logContext,
-      reason: existing ? 'call_link_mismatch_or_missing' : 'artifact_row_unavailable',
+      reason: existing ? 'call_link_or_channel_mismatch' : 'artifact_row_unavailable',
     });
     return;
   }

@@ -40,7 +40,6 @@ import {
   NotificationType,
   RecordingType,
   AttachmentEntityType,
-  parseSlashCommandArtifactMessage,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
@@ -499,31 +498,11 @@ export class CallController {
         return;
       }
 
-      // A call may only be linked to an artifact that lives in the conversation
-      // being called, and only when its command actually owns a call.
-      if (artifactMessageId) {
-        if (typeof artifactMessageId !== 'string' || !conversationId) {
-          res.status(400).json({
-            success: false,
-            error: 'artifactMessageId requires a conversationId',
-          });
-          return;
-        }
-        const artifactMessage = await db.message.findFirst({
-          where: {
-            messageId: artifactMessageId,
-            conversationId,
-            isDeleted: false,
-            conversation: { channelId: finalChannelId },
-          },
-          select: { content: true },
-        });
-        const artifact = parseSlashCommandArtifactMessage(artifactMessage?.content);
-        if (!artifact?.definition.linksCall) {
-          res.status(400).json({ success: false, error: 'Invalid slash-command artifact' });
-          return;
-        }
-      }
+      // No pre-flight validation of artifactMessageId: every artifact write is
+      // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
+      // an id that does not belong to this channel matches zero rows.
+      const linkedArtifactMessageId =
+        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -664,7 +643,7 @@ export class CallController {
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
-        ...(artifactMessageId && { artifactMessageId }),
+        ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 

@@ -253,8 +253,13 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
 }) => {
   const sender = useUser(senderId ?? '');
   const { user } = useAuthContext();
+  // Subscribed per artifact card, and ONLY for a real artifact: this component
+  // renders exclusively from the `slash_command_artifact` Flow node, and the
+  // subscription is disabled without a messageId. A channel with no artifact
+  // messages therefore opens no artifact subscriptions at all.
   const [messageArtifact] = useCachedQuery(
     queries.slashCommandArtifactByMessageId({ messageId: messageId ?? '' }),
+    { enabled: !!messageId },
   );
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
   const { initiateCall, joinCall, isInCall } = useCallJoinOrInitiate();

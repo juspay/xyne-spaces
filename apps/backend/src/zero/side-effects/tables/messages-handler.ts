@@ -583,7 +583,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,
-      allowBroadcastExpansion ? channelId : undefined
+      allowBroadcastExpansion ? channelId : undefined,
+      artifactBroadcastsToChannel
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
 
@@ -665,19 +666,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const notificationUserIds = [
       ...new Set(
-        [
-          ...mentionedUsers.map(u => u.userId),
-          // An artifact that addresses the channel has no @channel token in its
-          // body, so expand the audience here. Downstream this is indistinguishable
-          // from a typed @channel: same recipients, same mention-tier filtering.
-          ...(artifactBroadcastsToChannel
-            ? (await getChannelParticipantsForMention(channelId)).map(u => u.userId)
-            : []),
-        ].filter(
-          userId =>
-            channelParticipantIds.has(userId) &&
-            userId !== senderId
-        )
+        mentionedUsers
+          .map(u => u.userId)
+          .filter(
+            userId =>
+              channelParticipantIds.has(userId) &&
+              userId !== senderId
+          )
       ),
     ];
 
