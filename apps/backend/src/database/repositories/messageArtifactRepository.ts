@@ -3,6 +3,8 @@ import {
   getSlashCommandArtifactDiagnosticKey,
   getSlashCommandArtifactProjection,
   MessageArtifactStatus,
+  withSlashCommandArtifactEndedCall,
+  type SlashCommandArtifactEndedCall,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
@@ -106,9 +108,15 @@ export const setSlashCommandArtifactLifecycle = async (
     channelId: string;
     status: MessageArtifactLifecycleStatus;
     callExternalId: string;
+    /**
+     * Summary of the call that just ended. Baked into the message's FlowJSON so
+     * the card can render the ended state after the call has left the client's
+     * active-call subscription.
+     */
+    endedCall?: SlashCommandArtifactEndedCall;
   }
 ): Promise<void> => {
-  const { messageId, channelId, status, callExternalId } = params;
+  const { messageId, channelId, status, callExternalId, endedCall } = params;
   const logContext = {
     artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
     callKey: getSlashCommandArtifactDiagnosticKey(callExternalId),
@@ -147,5 +155,25 @@ export const setSlashCommandArtifactLifecycle = async (
     return;
   }
 
-  logger.info('slash_command_artifact_lifecycle_updated', logContext);
+  // Only after the compare-and-set matched — a late webhook from a superseded
+  // call must not overwrite the newer call's summary. This message write also
+  // re-syncs conversation.initial_message_md / parent_message_md via the Prisma
+  // message-metadata middleware, so no snapshot bookkeeping is needed here.
+  if (endedCall) {
+    const message = await tx.message.findUnique({
+      where: { messageId },
+      select: { content: true },
+    });
+    const content = message?.content
+      ? withSlashCommandArtifactEndedCall(message.content, endedCall)
+      : null;
+    if (content && content !== message?.content) {
+      await tx.message.update({ where: { messageId }, data: { content } });
+    }
+  }
+
+  logger.info('slash_command_artifact_lifecycle_updated', {
+    ...logContext,
+    endedCallRecorded: !!endedCall,
+  });
 };

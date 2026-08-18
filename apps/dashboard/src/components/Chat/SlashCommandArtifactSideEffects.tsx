@@ -15,7 +15,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { Event, logger } from '../../utils/logger';
 import { queries } from '../../zero/queries';
 
-type ActiveSlashCommandArtifact = QueryResultType<
+export type ActiveSlashCommandArtifact = QueryResultType<
   typeof queries.activeSlashCommandArtifacts
 >[number];
 
@@ -34,12 +34,19 @@ export interface SlashCommandArtifactBannerItem {
 export interface SlashCommandArtifactSideEffectContextValue {
   bannerItems: SlashCommandArtifactBannerItem[];
   channelIdsWithActiveSideEffects: ReadonlySet<string>;
+  /**
+   * Active artifacts keyed by messageId. Cards read their live state from here
+   * instead of each opening its own subscription — the same arrangement as
+   * userActiveCalls backing every call system message.
+   */
+  activeArtifactsByMessageId: ReadonlyMap<string, ActiveSlashCommandArtifact>;
 }
 
 const SlashCommandArtifactSideEffectContext =
   createContext<SlashCommandArtifactSideEffectContextValue>({
     bannerItems: [],
     channelIdsWithActiveSideEffects: new Set(),
+    activeArtifactsByMessageId: new Map(),
   });
 
 /**
@@ -51,9 +58,13 @@ export const deriveSlashCommandArtifactSideEffects = (
   activeArtifacts: readonly ActiveSlashCommandArtifact[],
 ): SlashCommandArtifactSideEffectContextValue => {
   const bannerItems: SlashCommandArtifactBannerItem[] = [];
+  const activeArtifactsByMessageId = new Map<string, ActiveSlashCommandArtifact>();
+
   for (const activeArtifact of activeArtifacts) {
     const definition = getSlashCommandArtifactDefinition(activeArtifact.command);
     if (!definition) continue;
+
+    activeArtifactsByMessageId.set(activeArtifact.messageId, activeArtifact);
 
     bannerItems.push({
       id: `${activeArtifact.messageId}:banner`,
@@ -73,6 +84,7 @@ export const deriveSlashCommandArtifactSideEffects = (
   return {
     bannerItems,
     channelIdsWithActiveSideEffects: new Set(bannerItems.map(item => item.channelId)),
+    activeArtifactsByMessageId,
   };
 };
 
@@ -101,6 +113,7 @@ export const SlashCommandArtifactSideEffectProvider = ({
       artifactRows: activeArtifacts.length,
       unsupportedArtifactRows,
       bannerItemsWithCallLink: value.bannerItems.filter(item => !!item.activeCallExternalId).length,
+      resolvedArtifactCards: value.activeArtifactsByMessageId.size,
       resolvedBannerItems: value.bannerItems.length,
       resolvedChannelIndicators: value.channelIdsWithActiveSideEffects.size,
     };
@@ -133,4 +146,16 @@ export const useSlashCommandArtifactSideEffects = (): SlashCommandArtifactSideEf
 export const useChannelHasSlashCommandArtifactSideEffect = (channelId: string): boolean => {
   const { channelIdsWithActiveSideEffects } = useSlashCommandArtifactSideEffects();
   return channelIdsWithActiveSideEffects.has(channelId);
+};
+
+/**
+ * Live state for one artifact message. Undefined once its call has ended (the
+ * subscription is ACTIVE-only — the card then falls back to the summary baked
+ * into the message), or when the viewer is not a participant of its channel.
+ */
+export const useActiveSlashCommandArtifact = (
+  messageId: string | undefined,
+): ActiveSlashCommandArtifact | undefined => {
+  const { activeArtifactsByMessageId } = useSlashCommandArtifactSideEffects();
+  return messageId ? activeArtifactsByMessageId.get(messageId) : undefined;
 };

@@ -658,9 +658,30 @@ export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 // likewise lives only on the `message_artifacts` row.
 // Unknown props are stripped rather than rejected so artifacts written by an
 // older client still render.
+export const slashCommandArtifactEndedCallSchema = z.object({
+  durationMs: z.number().int().nonnegative(),
+  joinedCount: z.number().int().nonnegative(),
+});
+
 export const slashCommandArtifactPropsSchema = z.object({
   command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+  /**
+   * Summary of the last call this artifact ran, written by the server exactly
+   * once when that call ends. It lives here rather than on `message_artifacts`
+   * because an ended call has already left the client's active-call
+   * subscription, and this is the same shape the standard call system message
+   * uses (content rewritten once at end-of-call).
+   *
+   * Only trusted when no live artifact row contradicts it — message content is
+   * client-authored, so a crafted client could ship a message that already
+   * claims a call ended.
+   */
+  endedCall: slashCommandArtifactEndedCallSchema.optional(),
 });
+
+export type SlashCommandArtifactEndedCall = z.infer<
+  typeof slashCommandArtifactEndedCallSchema
+>;
 
 export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
   type: z.literal('slash_command_artifact'),

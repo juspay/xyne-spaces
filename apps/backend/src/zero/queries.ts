@@ -547,16 +547,6 @@ export const queries: AnyQueryRegistry = defineQueries({
       .orderBy('messageCreatedAt', 'desc'),
   ),
 
-  slashCommandArtifactByMessageId: defineQuery(
-    z.object({ messageId: z.string() }),
-    ({ ctx, args: { messageId } }) =>
-      zql.message_artifacts
-        .where('workspaceId', ctx.workspaceId)
-        .where('messageId', messageId)
-        .related('call', call => call.related('participants'))
-        .one(),
-  ),
-
   // Conversation and Message Queries
   channelConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),

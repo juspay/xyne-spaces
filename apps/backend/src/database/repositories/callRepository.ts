@@ -230,7 +230,12 @@ export class CallRepository {
       data
     });
     if (data.status === CallStatus.ENDED) {
-      await this.syncArtifactLifecycle(client, result, MessageArtifactStatus.COMPLETED);
+      await this.syncArtifactLifecycle(
+        client,
+        result,
+        MessageArtifactStatus.COMPLETED,
+        data.endedAt ?? new Date(),
+      );
     }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
@@ -243,17 +248,39 @@ export class CallRepository {
    */
   private async syncArtifactLifecycle(
     tx: Prisma.TransactionClient,
-    call: { externalId: string; channelId: string | null; metadata: Prisma.JsonValue | null },
-    status: MessageArtifactLifecycleStatus
+    call: {
+      id: string;
+      externalId: string;
+      channelId: string | null;
+      startedAt: Date | null;
+      metadata: Prisma.JsonValue | null;
+    },
+    status: MessageArtifactLifecycleStatus,
+    endedAt?: Date
   ): Promise<void> {
     const artifactMessageId = getArtifactMessageId(call.metadata);
     if (!artifactMessageId || !call.channelId) return;
+
+    // On completion, summarise the call for the card. An ended call has left
+    // the client's active-call subscription, so these two numbers are baked
+    // into the message once here — the same thing updateCallSystemMessageIfNeeded
+    // does for the ordinary "started a call" system message.
+    const endedCall =
+      status === MessageArtifactStatus.COMPLETED && endedAt && call.startedAt
+        ? {
+            durationMs: Math.max(0, endedAt.getTime() - call.startedAt.getTime()),
+            joinedCount: await tx.callParticipant.count({
+              where: { callId: call.id, joinedAt: { not: null } },
+            }),
+          }
+        : undefined;
 
     await setSlashCommandArtifactLifecycle(tx, {
       messageId: artifactMessageId,
       channelId: call.channelId,
       status,
       callExternalId: call.externalId,
+      ...(endedCall && { endedCall }),
     });
   }
 
@@ -801,7 +828,7 @@ export class CallRepository {
       }
     });
     await refreshCallParticipantPreview(tx, callId);
-    await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
+    await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -872,7 +899,7 @@ export class CallRepository {
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
-          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
+          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, leftAt);
         }
 
         // Update system message whether the call is fully ended or just rescheduled
@@ -950,7 +977,7 @@ export class CallRepository {
       }
 
       if (call.status === CallStatus.ENDED || shouldEndCall) {
-        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED);
+        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
       }
 
       // Clear conversation.callId when call ends (for conversation calls)

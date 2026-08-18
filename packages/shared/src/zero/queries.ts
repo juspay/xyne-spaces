@@ -552,16 +552,6 @@ export const queries = defineQueries({
       .orderBy('messageCreatedAt', 'desc'),
   ),
 
-  slashCommandArtifactByMessageId: defineQuery(
-    z.object({ messageId: z.string() }),
-    ({ ctx, args: { messageId } }) =>
-      zql.message_artifacts
-        .where('workspaceId', ctx.workspaceId)
-        .where('messageId', messageId)
-        .related('call', call => call.related('participants'))
-        .one(),
-  ),
-
   userChannelSections: defineQuery(z.object({}), () => {
     return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
   }),

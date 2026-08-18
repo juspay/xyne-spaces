@@ -3355,15 +3355,11 @@ export const messageArtifactTableRelationships = relationships(
       destField: ['id'],
       destSchema: channelTable,
     }),
+    // Used by the artifact subscription to keep banner delivery participant-only.
     channelParticipants: many({
       sourceField: ['channelId'],
       destField: ['channelId'],
       destSchema: channelParticipantTable,
-    }),
-    call: one({
-      sourceField: ['callExternalId'],
-      destField: ['externalId'],
-      destSchema: callTable,
     }),
   }),
 );

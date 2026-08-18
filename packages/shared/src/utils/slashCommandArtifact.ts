@@ -2,6 +2,7 @@ import type { FlowComponent, FlowDefinition } from "../types/flowUI";
 import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
+  type SlashCommandArtifactEndedCall,
   type SlashCommandArtifactProps,
 } from "../validation/flowSchema";
 
@@ -271,4 +272,35 @@ export const getSlashCommandArtifactPreviewText = (
   return body
     ? `${artifact.definition.badge} · ${body}`
     : artifact.definition.title;
+};
+
+/**
+ * Bake the summary of a finished call into the artifact's FlowJSON.
+ *
+ * Called once when a linked call ends — the same pattern the standard call
+ * system message uses. Returns null when the content is not a recognised
+ * artifact, so the caller can skip the write entirely rather than rewriting a
+ * message it does not understand.
+ */
+export const withSlashCommandArtifactEndedCall = (
+  content: string,
+  endedCall: SlashCommandArtifactEndedCall,
+): string | null => {
+  const parsed = parseSlashCommandArtifactMessage(content);
+  if (!parsed) return null;
+
+  const patchComponents = (components: FlowComponent[]): FlowComponent[] =>
+    components.map((component) => {
+      if (component.type === "slash_command_artifact") {
+        return { ...component, props: { ...component.props, endedCall } };
+      }
+      return component.children
+        ? { ...component, children: patchComponents(component.children) }
+        : component;
+    });
+
+  return serializeFlowDefinitionMessageContent({
+    ...parsed.flow,
+    components: patchComponents(parsed.flow.components),
+  });
 };
