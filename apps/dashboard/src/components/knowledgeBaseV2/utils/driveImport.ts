@@ -175,13 +175,16 @@ export function runDriveImport(
   const { collectionId, collectionName, parentId, link } = pending;
   const placeholderId = newId();
 
-  // Immediate placeholder card while the backend lists the folder.
+  // Immediate placeholder card while the backend scans the Drive folder. The real
+  // file list isn't known yet, so show a "scanning" phase label instead of the
+  // default "Uploading 0 of 1 files" (which reads wrong during this step).
   const store = useUploadProgress.getState();
   const { uploadId } = store.startUpload(
     collectionId,
     collectionName,
     [{ file: { name: IMPORT_LABEL } as unknown as File, id: placeholderId }],
     1,
+    'Scanning Google Drive…',
   );
 
   const onNeedsAuth = (message: string): void => {
