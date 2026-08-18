@@ -1634,14 +1634,22 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 // assistant under the same user message.
 router.post("/:slug/chat/:convId/regenerate", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
-    const { convId } = req.params;
+    const { slug, convId } = req.params;
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
-    const messages = await chatMessageRepository.findByConversation(convId);
+    // L-19: scope to the caller's OWN turns in THIS agent's thread. A
+    // conversationId is shared across every user in a thread (and across
+    // agents), so the old unscoped findByConversation let any caller read
+    // another user's message content and regenerate on their turn. Filtering to
+    // m.userId === userId makes a non-participant see an empty history (400)
+    // rather than someone else's prompt — same boundary as GET .../messages.
+    const messages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) {
       res.status(400).json({ success: false, error: "No assistant message found" });
@@ -1977,7 +1985,15 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
       return;
     }
 
-    const sourceMessages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    // C-10: fork only the caller's OWN slice of the thread. A conversationId is
+    // shared across every user in the thread, so an unfiltered copy let an
+    // attacker clone a victim's entire history (message content + PI session
+    // context) into an attacker-owned conversation, rewriting every userId to
+    // their own. Filtering to m.userId === userId means a non-participant sees
+    // an empty source (404) and can fork nothing but their own turns.
+    const sourceMessages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     if (sourceMessages.length === 0) {
       res.status(404).json({ success: false, error: "Source conversation is empty" });
       return;
