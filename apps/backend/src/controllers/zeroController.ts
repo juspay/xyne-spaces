@@ -1,7 +1,7 @@
 import { Response, type Request } from 'express';
 import { EncryptedFieldQueryError } from '@xyne/shared';
-import { 
-  handleMutate, 
+import {
+  handleMutate,
   handleQueries,
   handleQueriesFallback,
   handleMutateFallback,
@@ -10,6 +10,17 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
+import { createSdlcProxy } from '@/middleware/sdlcProxy';
+import { isSdlcScopedPush, isSdlcScopedQuery } from '../zero/sdlcScope.js';
+
+const sdlcProxy = createSdlcProxy();
+
+// Main (CORE role) forwards a push/query batch to the SDLC backend whole
+// whenever it touches any SDLC-owned mutator/query — including mixed
+// batches, which are never split. On the SDLC role process itself this is a
+// no-op since backendRuntimeRole is never 'CORE' there.
+const shouldProxyToSdlc = (): boolean => config.backendRuntimeRole === 'CORE';
 
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
   if (error instanceof Error && error.message === 'Rate limit exceeded') {
@@ -35,6 +46,10 @@ function handleZeroError(res: Response, error: unknown, rateLimitMessage: string
 }
 
 export const handlePush = async (req: Request, res: Response): Promise<void> => {
+    if (shouldProxyToSdlc() && isSdlcScopedPush(req.body)) {
+      await sdlcProxy(req, res, () => undefined);
+      return;
+    }
     try {
       // Convert Express request to Web API Request
       const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
@@ -74,6 +89,10 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
 
 
 export const handleGetQueries = async (req: Request, res: Response): Promise<void> => {
+    if (shouldProxyToSdlc() && isSdlcScopedQuery(req.body)) {
+      await sdlcProxy(req, res, () => undefined);
+      return;
+    }
     try {
       // Convert Express request to Web API Request
       const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
@@ -112,6 +131,10 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
   }
 
 export const handleGetQueriesFallback = async (req: Request, res: Response): Promise<void> => {
+  if (shouldProxyToSdlc() && isSdlcScopedQuery(req.body)) {
+    await sdlcProxy(req, res, () => undefined);
+    return;
+  }
   try {
     // Convert Express request to Web API Request
     const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
@@ -150,6 +173,10 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
 }
 
 export const handlePushFallback = async (req: Request, res: Response): Promise<void> => {
+  if (shouldProxyToSdlc() && isSdlcScopedPush(req.body)) {
+    await sdlcProxy(req, res, () => undefined);
+    return;
+  }
   try {
     const fallbackConfig = await redisService.getZeroFallbackConfig();
     if (fallbackConfig.fallbackEnabled && !fallbackConfig.allowMutations) {
