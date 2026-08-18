@@ -324,10 +324,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
 
       {/* Start Recording (Take Notes) */}
       {onStartRecording && messageId === initialMessageId && !isChannelArchived && (
-        <Tooltip
-          content={isRecordingDisabled ? 'Recording in progress' : 'Take notes'}
-          side='top'
-        >
+        <Tooltip content={isRecordingDisabled ? 'Recording in progress' : 'Take notes'} side='top'>
           <Button
             variant='ghost'
             className='size-7 text-muted-foreground'

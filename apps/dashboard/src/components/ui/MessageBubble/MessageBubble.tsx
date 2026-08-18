@@ -878,7 +878,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               >
                 <MicOn
                   size={16}
-                  color={isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-success)'}
+                  color={
+                    isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-success)'
+                  }
                 />
               </div>
             ) : showAvatar && sender?.userType === UserType.APP ? (

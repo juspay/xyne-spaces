@@ -1070,7 +1070,9 @@ export const ThreadMessages = ({
                     {derivedConversationId && (
                       <ThreadRecordingButton
                         onStartRecording={handleStartRecordingFromThread}
-                        hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+                        hasActiveRecording={
+                          recordingStatus !== 'idle' && recordingStatus !== 'error'
+                        }
                         trackCategory='THREAD_PANEL'
                         trackName='START_RECORDING_FROM_THREAD'
                         trackMetadata={{
