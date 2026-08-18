@@ -17,7 +17,6 @@ import {
 import { getAutomationPauseState } from '@/database/repositories/workflowExecutionStateUtils';
 import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
-import { initializeBotRegistry } from '@/bots/registry';
 import type { TriggerType } from '../types/trigger-types';
 
 class AutomationWorker {
@@ -26,12 +25,6 @@ class AutomationWorker {
 
   async start(): Promise<void> {
     if (this.isInitialized) return;
-
-    // Ensure the bot catalog is populated in this process so the default
-    // Automations-bot sender (getAutomationsBotUserId -> botCatalog) resolves
-    // even if this worker is started from an entrypoint that did not already
-    // initialize it. Idempotent — safe to call more than once.
-    initializeBotRegistry();
 
     await automationQueue.initialize();
     if (!automationQueue.isReady) {
