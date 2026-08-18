@@ -314,6 +314,17 @@ class NoteTakerTranscriptService {
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
 
+    // Fetch the current DB row once (rather than trusting `call`, which is the
+    // in-memory snapshot from the top of processTranscript) whenever we're about
+    // to merge onto either JSON column. Generation can take minutes, during
+    // which another write — e.g. ensureStreamingCanvas's early publish of
+    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+    // the DB. Merging onto the stale snapshot would silently erase that write.
+    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+    const current = needsFreshRead
+      ? await repositories.calls.findByExternalId(call.externalId)
+      : undefined;
+
     const data: {
       metadata?: Record<string, unknown>;
       labels?: string[];
@@ -321,9 +332,12 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      const currentMetadataSource = current?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        currentMetadataSource &&
+        typeof currentMetadataSource === 'object' &&
+        !Array.isArray(currentMetadataSource)
+          ? (currentMetadataSource as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
@@ -331,7 +345,6 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems !== undefined) {
-      const current = await repositories.calls.findByExternalId(call.externalId);
       data.markedItems = mergeRecordingSummaryMarkedItems(
         current?.markedItems ?? call.markedItems,
         updates.markedItems,
