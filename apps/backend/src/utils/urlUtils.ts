@@ -44,6 +44,10 @@ export function stripAndDecodeHtml(input: string): string {
   // 1) Remove tags
   let s = input.replace(/<script[\s\S]*?<\/script>/gi, " ");
   s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  // FIX: Strip code blocks and inline code so URLs inside them are not picked
+  // for link previews, notifications, or keyword matching.
+  s = s.replace(/<pre[\s\S]*?<\/pre>/gi, " ");
+  s = s.replace(/<code[\s\S]*?<\/code>/gi, " ");
   s = s.replace(/<\/?[^>]+>/g, " "); // remove remaining tags
 
   // 2) Decode common entities (basic, covers majority cases)
