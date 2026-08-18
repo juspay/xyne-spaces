@@ -1,3 +1,13 @@
+## [1.192.1](https://github.com/juspay/xyne-spaces/compare/v1.192.0...v1.192.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* email sso routing back ([#651](https://github.com/juspay/xyne-spaces/issues/651)) ([8496efc](https://github.com/juspay/xyne-spaces/commit/8496efc9909a918c85bc7ddda2046fbaeb71afd7))
+* fix input box behaviour in Post Recording Modal ([#691](https://github.com/juspay/xyne-spaces/issues/691)) ([f1599e2](https://github.com/juspay/xyne-spaces/commit/f1599e2d459f35a99132a2ddc6af240dcf53b758))
+* fresh-read call row before merging metadata in finalizeCallUpdates ([#697](https://github.com/juspay/xyne-spaces/issues/697)) ([91c6a9d](https://github.com/juspay/xyne-spaces/commit/91c6a9d8107a718bbe2d74b676bf419135c9e9aa))
+* making workspaceId non nullable in external_sources table ([#681](https://github.com/juspay/xyne-spaces/issues/681)) ([8a095c6](https://github.com/juspay/xyne-spaces/commit/8a095c6debe69178cee0d807b48833d6cfd9938c))
+
 ## [1.192.0](https://github.com/juspay/xyne-spaces/compare/v1.191.0...v1.192.0) (2026-08-18)
 
 
