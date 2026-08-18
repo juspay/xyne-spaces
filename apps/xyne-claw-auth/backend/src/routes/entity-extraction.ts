@@ -44,6 +44,9 @@ interface ProposedType {
  * `workspaceForChannel`, which derives it from the channel itself.
  */
 async function workspaceOf(req: Request): Promise<string | null> {
+  const verifiedWorkspace = req.headers["x-spaces-workspace-id"];
+  if (typeof verifiedWorkspace === "string" && verifiedWorkspace.trim()) return verifiedWorkspace.trim();
+
   const body = (req.body ?? {}) as { workspaceId?: unknown };
   const explicit = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
   const fromQuery = typeof req.query["workspaceId"] === "string" ? req.query["workspaceId"].trim() : "";

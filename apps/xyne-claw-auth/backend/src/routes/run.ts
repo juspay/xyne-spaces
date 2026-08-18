@@ -49,6 +49,7 @@ import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
@@ -292,21 +293,33 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
 async function resolveUserId(
   body: Record<string, unknown>,
 ): Promise<{ userId: string; userName: string; userEmail: string; orgId?: string } | { error: string }> {
-  const { userId, userName, gatewayType, externalUserId } = body as {
+  const { userId, userName, gatewayType, externalUserId, spacesWorkspaceId, workspaceId } = body as {
     userId?: string;
     userName?: string;
     gatewayType?: string;
     externalUserId?: string;
+    spacesWorkspaceId?: string;
+    workspaceId?: string;
   };
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
-    const user = await prisma.user.findUnique({
-      where: { id: userId.trim() },
-      select: { name: true, email: true, orgId: true },
-    });
+    const requestedUserId = userId.trim();
+    let canonicalUserId = requestedUserId;
+    let user = await prisma.user.findUnique({ where: { id: canonicalUserId }, select: { id: true, name: true, email: true, orgId: true } });
+    if (!user) {
+      const resolved = await resolveClawUserIdForSpacesIdentity(
+        requestedUserId,
+        typeof spacesWorkspaceId === "string" ? spacesWorkspaceId : typeof workspaceId === "string" ? workspaceId : undefined,
+      );
+      if (resolved) {
+        canonicalUserId = resolved;
+        user = await prisma.user.findUnique({ where: { id: canonicalUserId }, select: { id: true, name: true, email: true, orgId: true } });
+      }
+    }
+    if (!user) return { error: "User identity could not be resolved" };
     return {
-      userId: userId.trim(),
+      userId: canonicalUserId,
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
@@ -363,6 +376,7 @@ async function resolveSpacesAuthFromRequest(
     }
 
     // Workspace id: x-workspace-id header → xyne_last_workspace cookie
+    const verifiedWorkspaceHeader = req.headers["x-spaces-workspace-id"];
     const workspaceHeader = req.headers["x-workspace-id"];
     const workspaceId =
       typeof workspaceHeader === "string" && workspaceHeader.trim()
@@ -401,9 +415,13 @@ async function resolveSpacesAuthFromRequest(
 
     if (!token && !sessionId) return undefined;
 
+    const spacesUserIdHeader = req.headers["x-spaces-user-id"];
+    const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
+      ? spacesUserIdHeader.trim()
+      : userId;
     const effectiveWorkspaceId =
       workspaceId ??
-      (userId ? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) : null) ??
+      (spacesUserId ? await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null) : null) ??
       undefined;
     if (!workspaceId && effectiveWorkspaceId) {
       log.info(
@@ -465,7 +483,10 @@ async function resolveAgent(
     ? await prisma.agent.findUnique({
         where: { orgId_slug: { orgId: orgId!, slug: agentSlug } },
         include: includeSkills,
-      })
+      }) ?? await prisma.agent.findFirst({
+      where: { slug: agentSlug, scope: "platform" },
+      include: includeSkills,
+    })
     : await prisma.agent.findFirst({ where: { orgId: orgId!, isDefault: true }, include: includeSkills });
 
   if (!agent) {
@@ -893,15 +914,21 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const bodyUserIdRaw = (req.body as { userId?: unknown }).userId;
     const bodyUserId =
       typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim() ? bodyUserIdRaw.trim() : undefined;
-    if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
-      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+    const spacesUserIdHeader = req.headers["x-spaces-user-id"];
+    const authenticatedSpacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
+      ? spacesUserIdHeader.trim()
+      : undefined;
+    if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId && bodyUserId !== authenticatedSpacesUserId) {
+      log.warn(`[run] userId pin mismatch: clawUserId=${authenticatedUserId} spacesUserId=${authenticatedSpacesUserId ?? "none"} body=${bodyUserId}`);
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
 
     const identityBody = {
       ...(req.body as Record<string, unknown>),
-      ...(!bodyUserId && authenticatedUserId ? { userId: authenticatedUserId } : {}),
+      // Body userId from Spaces is a raw workspace membership. Keep Claw
+      // persistence and provider lookups on the authenticated canonical id.
+      ...(authenticatedUserId ? { userId: authenticatedUserId } : {}),
     };
     const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
@@ -1247,11 +1274,17 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     let effectiveProvider = provider;
     if (!providerConfigs) {
       try {
+        // Pass the running user's id so the resolver folds in their provisioned key
+        // as a gap-fill and defaults `parent` to "litellm" when no premium cred wins
+        // — so the run uses the user's budgeted identity, not the pod's server key.
         const resolvedProviders = await resolveAgentProviderConfigs(
           { id: agent.id, config: agent.config },
-          // Only bulk machine traffic gets the automationProvider downgrade;
-          // "spaces"/"chat"/"api" dispatches keep the agent's premium order.
-          { headlessBulk: defaultTriggerSource === "automation" || defaultTriggerSource === "scheduled" },
+          {
+            userId: resolved.userId,
+            // Only bulk machine traffic gets the automationProvider downgrade;
+            // "spaces"/"chat"/"api" dispatches keep the agent's premium order.
+            headlessBulk: defaultTriggerSource === "automation" || defaultTriggerSource === "scheduled",
+          },
         );
         effectiveProviderConfigs = resolvedProviders.providerConfigs;
         if (!providerOrder?.length) effectiveProviderOrder = resolvedProviders.providerOrder;

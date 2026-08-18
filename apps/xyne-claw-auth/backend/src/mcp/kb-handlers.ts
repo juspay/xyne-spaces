@@ -16,6 +16,7 @@
 
 import type { Citation } from "xyne-claw-shared";
 import { prisma } from "../db.js";
+import { agentRepository } from "../repositories/index.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
@@ -159,10 +160,7 @@ async function resolveKbContext(
 ): Promise<KbResolution | { error: string }> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
   if (!user?.orgId) return { error: `User has no orgId: ${userId}` };
-  const agent = await prisma.agent.findUnique({
-    where: { orgId_slug: { orgId: user.orgId, slug: agentSlug } },
-    include: { collections: true },
-  });
+  const agent = await agentRepository.findBySlugWithRelations(agentSlug, user.orgId);
   if (!agent) return { error: `Agent not found: ${agentSlug}` };
   const scope: "COLLECTIONS" | "USER" = agent.kbScope === "USER" ? "USER" : "COLLECTIONS";
   if (scope === "COLLECTIONS" && agent.collections.length === 0) {

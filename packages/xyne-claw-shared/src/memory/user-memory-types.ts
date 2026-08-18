@@ -255,6 +255,12 @@ export interface UserMemoryDistillRequest {
   /** When true the response carries the full UserMemoryCuratorTrace. claw-auth
    *  always sets this so the pipeline viewer can show the LLM exchange. */
   includeTrace?: boolean;
+  /** The user's LiteLLM key (resolved by claw-auth for this user's memory
+   *  pipeline — always per-user, even on the backfill/daily cron) so the
+   *  curator's LLM call charges the USER's per-key budget instead of claw's
+   *  shared server key. Absent → claw uses its server key. Same S2S channel
+   *  that already carries providerConfigs.litellm.apiKey on every dispatch. */
+  litellmApiKey?: string;
 }
 
 export interface UserMemoryDistillResponse {

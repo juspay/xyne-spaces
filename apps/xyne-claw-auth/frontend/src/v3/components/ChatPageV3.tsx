@@ -2476,7 +2476,7 @@ function CenterHeader({
 
           {/* Badges */}
           <div className="flex flex-wrap items-center gap-2">
-            <Badge as="span" label={agent.scope} variant={agent.scope === "global" ? "info" : "neutral"} size="sm" />
+            <Badge as="span" label={agent.scope} variant={agent.scope === "global" || agent.scope === "platform" ? "info" : "neutral"} size="sm" />
             {agent.spacesAppId != null && (
               <Badge as="span" label="Spaces App" variant="success" size="sm" />
             )}

@@ -31,6 +31,8 @@ export interface ClassifySessionSubsystemArgs {
   task: string;
   transcript: string;
   taxonomy: Array<{ name: string; memoryCount: number }>;
+  /** Org's provisioned litellm key (org-identity curation). Absent → claw uses server key. */
+  litellmApiKey?: string;
 }
 
 /** One cheap claw-side curator call. Any failure returns null (ingest proceeds). */
@@ -117,8 +119,14 @@ export async function classifySessionSubsystemForBank(
 /**
  * POST transcript to claw's /internal/curator/distill and return the
  * SubsystemUpdate candidates. Returns [] on any failure.
+ *
+ * `litellmApiKey` is the ORG's key (resolved by the caller for this org-identity
+ * task). Absent → claw skips (no server-key fallback). Same S2S channel as the dispatch.
  */
-export async function distillSession(t: SessionTranscriptForCurator): Promise<SubsystemUpdate[]> {
+export async function distillSession(
+  t: SessionTranscriptForCurator,
+  litellmApiKey?: string,
+): Promise<SubsystemUpdate[]> {
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/curator/distill`;
 
   if (!CONFIG.xyneClawS2sKey) {
@@ -135,7 +143,7 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
         "Content-Type": "application/json",
         "x-s2s-key": CONFIG.xyneClawS2sKey,
       },
-      body: JSON.stringify(t),
+      body: JSON.stringify({ ...t, ...(litellmApiKey ? { litellmApiKey } : {}) }),
       signal: AbortSignal.timeout(CURATE_TIMEOUT_MS),
     });
 
@@ -182,6 +190,8 @@ export interface DistillSessionFileArgs {
   source?: "claude" | "opencode" | "codex" | (string & {});
   /** Raw uploaded Claude/OpenCode/Codex export. */
   rawSession: string;
+  /** Org's provisioned litellm key (org-identity curation). Absent → claw uses server key. */
+  litellmApiKey?: string;
 }
 
 /**

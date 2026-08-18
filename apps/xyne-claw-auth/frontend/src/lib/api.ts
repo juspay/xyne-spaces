@@ -119,20 +119,19 @@ export async function getMe(): Promise<User> {
   return data.user;
 }
 
-export async function upsertUser(user: User): Promise<void> {
-  const spacesToken = getGoogleToken();
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/users`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        ...(spacesToken ? { spacesToken } : {}),
-      }),
-    },
+export interface ClawSessionIdentity {
+  readonly userId: string;
+  readonly spacesUserId?: string;
+  readonly spacesWorkspaceId?: string;
+  readonly spacesOrgMemberId?: string;
+}
+
+/** Return the canonical Claw user selected by the verified Spaces session. */
+export async function getClawSessionIdentity(): Promise<ClawSessionIdentity> {
+  const data = await request<{ success: boolean; data: ClawSessionIdentity }>(
+    `${AUTH_API_URL}/api/v1/users/me`,
   );
+  return data.data;
 }
 
 export function getLoginUrl(): string {

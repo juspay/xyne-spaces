@@ -38,6 +38,8 @@ export interface ExtractInput {
   kind?: "chat" | "email" | undefined;
   model?: string | undefined;
   copilot?: { token: string; model: string } | undefined;
+  /** Admin's LiteLLM key (user budget). Absent → empty extraction. Ignored when `copilot` is set. */
+  litellmApiKey?: string | undefined;
 }
 
 /** What the model returns per pair — selections only, no generated text. */
@@ -135,14 +137,15 @@ function joinByIds(messages: ThreadMessage[], ids: string[]): string {
 
 export async function extractEvalPairs(input: ExtractInput): Promise<ExtractResult> {
   const viaCopilot = !!input.copilot?.token;
-  if ((!viaCopilot && !LITELLM.apiKey) || input.messages.length === 0) {
+  const litellmApiKey = viaCopilot ? undefined : (input.litellmApiKey ?? LITELLM.apiKey); // fall back to env server key
+  if ((!viaCopilot && !litellmApiKey) || input.messages.length === 0) {
     return { items: [], pairs: [] };
   }
   const model = viaCopilot ? input.copilot!.model : (input.model && input.model.trim()) || LITELLM.fastModel;
   const callUrl = viaCopilot ? COPILOT_COMPLETIONS_URL : `${LITELLM.url}/v1/chat/completions`;
   const callHeaders = viaCopilot
     ? copilotHeaders(input.copilot!.token)
-    : { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` };
+    : { "Content-Type": "application/json", Authorization: `Bearer ${litellmApiKey}` };
   const idSet = new Set(input.messages.map((m) => m.id));
 
   const userContent = [

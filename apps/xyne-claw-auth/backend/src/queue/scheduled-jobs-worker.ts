@@ -82,7 +82,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // Best-effort — if the row is gone we fire without it (platform default).
   const { providerConfigs, providerOrder, parent: providerParent } = agentRow
-    ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true })
+    ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true, userId })
     : { providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined };
   const fastModeEnabled = await resolveFastMode(runConversationId, agentSlug, agentRow?.config);
 

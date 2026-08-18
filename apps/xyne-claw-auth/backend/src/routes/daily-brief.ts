@@ -4,6 +4,7 @@ import { getRequesterId, getOrgId, isClawAdmin, isOrgAdmin } from "../middleware
 import { createLogger } from "../logger.js";
 import { CONFIG } from "../config.js";
 import {
+  agentRepository,
   userAgentInstructionRepository,
   generatedContentRepository,
   DAILY_BRIEF_KIND,
@@ -390,10 +391,7 @@ router.put("/settings", async (req: Request, res: Response) => {
     const slug = typeof body.agentSlug === "string" ? body.agentSlug.trim() : "";
 
     if (slug) {
-      const agent = await prisma.agent.findUnique({
-        where: { orgId_slug: { orgId, slug } },
-        select: { slug: true, enabled: true },
-      });
+      const agent = await agentRepository.findBySlug(slug, orgId);
       if (!agent) {
         res.status(400).json({ success: false, error: `Agent '${slug}' not found in this org` });
         return;

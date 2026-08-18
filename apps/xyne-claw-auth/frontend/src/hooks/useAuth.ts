@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
-import { getMe, getLoginUrl, upsertUser } from "../lib/api";
+import { getMe, getLoginUrl, getClawSessionIdentity } from "../lib/api";
 import { frontendConfig } from "../lib/config";
 import type { User } from "../lib/types";
 
 type AuthState =
   | { status: "loading" }
-  | { status: "authenticated"; user: User }
+  | {
+      status: "authenticated";
+      /** `user.id` is deliberately the canonical Claw id for Claw API calls. */
+      user: User;
+      /** Raw, workspace-scoped Spaces identity. Do not use in Claw URLs. */
+      spacesUserId: string;
+      spacesWorkspaceId?: string;
+    }
   | { status: "unauthenticated" };
 
 const AUTH_BASE_URL = `${frontendConfig.spacesAuthBaseUrl}/api/auth`;
@@ -72,9 +79,18 @@ export function useAuth() {
       }
 
       try {
-        const user = await getMe();
-        await upsertUser(user).catch(() => {});
-        setState({ status: "authenticated", user });
+        const spacesUser = await getMe();
+        const clawIdentity = await getClawSessionIdentity();
+        // Keep display/profile data from Spaces, but make the id used throughout
+        // this SPA the canonical Claw id. Every component passes `user.id` into
+        // Claw API paths, so this prevents raw workspace-user ids from leaking
+        // into per-user URLs and creating duplicate credential/config rows.
+        setState({
+          status: "authenticated",
+          user: { ...spacesUser, id: clawIdentity.userId },
+          spacesUserId: clawIdentity.spacesUserId ?? spacesUser.id,
+          ...(clawIdentity.spacesWorkspaceId ? { spacesWorkspaceId: clawIdentity.spacesWorkspaceId } : {}),
+        });
       } catch {
         setState({ status: "unauthenticated" });
       }

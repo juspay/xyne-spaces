@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -25,7 +26,7 @@ import {
   getOrgId,
   isClawAdmin,
 } from "../middleware/agent-acl.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -208,13 +209,18 @@ async function normalizeGatewayServicesInConfig(config: Record<string, unknown> 
 
 router.post("/generate-prompt", async (req: Request, res: Response) => {
   try {
+    // Inject the admin's ORG key so the prompt-gen call bills the org (admin
+    // authoring runs under the org's identity — no end-user task). A miss →
+    // undefined → claw 401s (no server-key fallback).
+    const orgId = getOrgId(req);
+    const orgLitellmApiKey = orgId ? await resolveOrgLitellmApiKey(orgId).catch(() => undefined) : undefined;
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-prompt`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({ ...req.body, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(35_000),
     });
 
@@ -232,13 +238,16 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
 
 router.post("/generate-output-format", async (req: Request, res: Response) => {
   try {
+    // Inject the admin's ORG LiteLLM key — same rationale as /generate-prompt above.
+    const orgId = getOrgId(req);
+    const orgLitellmApiKey = orgId ? await resolveOrgLitellmApiKey(orgId).catch(() => undefined) : undefined;
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-output-format`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({ ...req.body, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -297,13 +306,16 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       })),
     };
 
+    // Inject the admin's ORG key — same rationale as /generate-prompt (admin
+    // authoring bills the org). A miss → undefined → claw 401s (no server-key fallback).
+    const orgLitellmApiKey = await resolveOrgLitellmApiKey(orgId).catch(() => undefined);
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ intent, catalog }),
+      body: JSON.stringify({ intent, catalog, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(50_000),
     });
 
@@ -347,9 +359,24 @@ router.get("/", async (req: Request, res: Response) => {
     // the AUTHENTICATED user — requireAuth has already verified their cookie
     // and pinned the verified userId at req.headers["x-user-id"]. We never
     // trust the query string for that decision.
-    const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+    const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
     const authedUserId = String(req.headers["x-user-id"] ?? "");
     const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+
+    // Dashboard auth exposes the workspace-scoped Spaces user ID, while
+    // Agent.ownerUserId stores the canonical Claw User ID. Resolve an explicit
+    // scope through UserSurfaceIdentity before applying the visibility filter.
+    // Non-admin callers may only request their own two equivalent identities.
+    if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+      res.status(403).json({ success: false, error: "userId does not match authenticated session" });
+      return;
+    }
+    const scopedUser = scopeUserId ? await userRepository.findById(scopeUserId) : null;
+    if (scopeUserId && !scopedUser) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+    const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
 
     // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
     // list (e.g. the main "My Agents" view) stays filtered to
@@ -361,7 +388,7 @@ router.get("/", async (req: Request, res: Response) => {
     const adminScope = getAdminOrgScope(req, "/agents", admin && wantAllAgents);
     const listOrgId = adminScope.orgId ?? getOrgId(req);
     const agents = await agentRepository.listVisible({
-      ...(scopeUserId ? { userId: scopeUserId } : {}),
+      ...(canonicalScopeUserId ? { userId: canonicalScopeUserId } : {}),
       ...(listOrgId ? { orgId: listOrgId } : {}),
       isAdmin: admin && wantAllAgents,
     });
@@ -385,17 +412,13 @@ router.get("/", async (req: Request, res: Response) => {
 
 router.get("/user-config", async (req: Request, res: Response) => {
   try {
-    const userId = (req.query["userId"] as string | undefined)?.trim();
-    if (!userId) {
-      res.status(400).json({ success: false, error: "userId is required" });
-      return;
-    }
     const requesterId = getRequesterId(req);
     if (!requesterId) {
       res.status(401).json({ success: false, error: "authenticated user required" });
       return;
     }
-    if (requesterId !== userId) {
+    const requestedUserId = (req.query["userId"] as string | undefined)?.trim();
+    if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
       res.status(403).json({ success: false, error: "userId does not match authenticated session" });
       return;
     }
@@ -404,7 +427,7 @@ router.get("/user-config", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: "Organization context is required" });
       return;
     }
-    const configs = await userAgentConfigRepository.listByUser(userId, orgId);
+    const configs = await userAgentConfigRepository.listByUser(requesterId, orgId);
     res.json({
       success: true,
       data: {
@@ -502,15 +525,27 @@ router.post("/", async (req: Request, res: Response) => {
     // Determine scope: only admins can create global agents
     const requesterId = getRequesterId(req);
     const admin = requesterId ? await isClawAdmin(requesterId) : false;
+
+    // Platform scope can only be set via seed script, never via the API.
+    if (scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents can only be created via the seed script" });
+      return;
+    }
+
     const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
     if (ownerUserId && ownerUserId !== requesterId && !admin) {
       res.status(403).json({ success: false, error: "Only an admin can create an agent owned by another user" });
       return;
     }
-    // For personal agents, owner is required
-    const effectiveOwner = ownerUserId ?? requesterId;
-    if (effectiveScope === "personal" && !effectiveOwner) {
+    // For personal agents, owner is required. `ownerUserId` may be either the
+    // canonical Claw user id or the workspace-scoped Spaces user id supplied
+    // by the dashboard. Resolve it through UserSurfaceIdentity before writing
+    // the Agent -> User relation below.
+    const requestedOwnerId = typeof ownerUserId === "string" && ownerUserId.trim()
+      ? ownerUserId.trim()
+      : undefined;
+    if (effectiveScope === "personal" && !requestedOwnerId && !requesterId) {
       res.status(400).json({ success: false, error: "ownerUserId or x-user-id header required for personal agents" });
       return;
     }
@@ -527,6 +562,25 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
+    // A non-admin can only create an agent for the authenticated person. The
+    // auth boundary retains both representations, so accept either the
+    // canonical Claw id or the verified Spaces id from the browser session.
+    if (requestedOwnerId && !admin && !matchesAuthenticatedUserId(req, requestedOwnerId)) {
+      res.status(403).json({ success: false, error: "ownerUserId must match the authenticated user" });
+      return;
+    }
+
+    const ownerInput = requestedOwnerId ?? requesterId;
+    const resolvedOwner = ownerInput ? await userRepository.findById(ownerInput) : null;
+    if (effectiveScope === "personal" && !resolvedOwner) {
+      res.status(400).json({ success: false, error: "Owner identity could not be resolved" });
+      return;
+    }
+    if (resolvedOwner && resolvedOwner.orgId !== createOrgId) {
+      res.status(403).json({ success: false, error: "Owner must belong to the agent organization" });
+      return;
+    }
+
     const data: Prisma.AgentCreateInput = {
       slug: slug.trim(),
       name: name.trim(),
@@ -539,8 +593,8 @@ router.post("/", async (req: Request, res: Response) => {
       kbScope: effectiveKbScope,
       org: { connect: { id: createOrgId } },
     };
-    if (effectiveOwner) {
-      data.owner = { connect: { id: effectiveOwner } };
+    if (resolvedOwner) {
+      data.owner = { connect: { id: resolvedOwner.id } };
     }
     const agent = await agentRepository.create(data);
 
@@ -678,6 +732,12 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (!existing) {
       logAgentScopedMiss(req, "agents/update", req.params.slug, orgId);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    // Platform agents are read-only — duplicate to edit.
+    if (existing.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only. Duplicate this agent to edit it." });
       return;
     }
 
@@ -1483,6 +1543,12 @@ router.delete("/:slug", requireAgentOwnerOrAdmin, async (req: Request<{ slug: st
       return;
     }
 
+    // Platform agents are read-only — cannot be deleted.
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be deleted" });
+      return;
+    }
+
     await agentRepository.delete(req.params.slug, agent.orgId);
 
     await writeAuditLog({
@@ -1762,7 +1828,11 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
  * Resolve the caller's relationship to an agent: owner (real ownership, not
  * admin-derived), contributor (EDITOR/CONTRIBUTOR share), or admin.
  */
-async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null }, requesterId: string) {
+async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null; scope: string }, requesterId: string) {
+  // Platform agents are cloneable by anyone — no approval flow (no owner to approve).
+  if (agent.scope === "platform") {
+    return { isOwner: false, admin: false, isContributor: false, privileged: true };
+  }
   const isOwner = agent.ownerUserId === requesterId;
   const admin = await isClawAdmin(requesterId);
   let isContributor = false;
@@ -2046,6 +2116,10 @@ router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: stri
       res.status(400).json({ success: false, error: "Agent is already global" });
       return;
     }
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be promoted" });
+      return;
+    }
 
     const updated = await agentRepository.update(req.params.slug, agent.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
 
@@ -2073,6 +2147,10 @@ router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: strin
     if (!agent) {
       logAgentScopedMiss(req, "agents/demote", req.params.slug);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be demoted" });
       return;
     }
     if (agent.scope !== "global") {
@@ -2113,6 +2191,13 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
     const requesterId = getRequesterId(req)!;
     const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
     const agent = ctx.agent;
+
+    // Platform agents cannot be shared.
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be shared" });
+      return;
+    }
+
     // Contributors can only add new contributors on GLOBAL agents.
     // On personal agents they must be promoted to owner/admin first.
     if (!ctx.isOwner && !ctx.isAdmin && agent.scope !== "global") {

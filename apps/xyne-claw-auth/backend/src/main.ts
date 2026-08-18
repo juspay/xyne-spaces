@@ -31,6 +31,8 @@ import sandboxRouter from "./routes/sandbox.js";
 import { adminRouter } from "./routes/admin.js";
 import { adminDigitalTwinRouter } from "./routes/admin-digital-twin.js";
 import { organizationsRouter } from "./routes/organizations.js";
+import { spacesSyncRouter } from "./routes/spaces-sync.js";
+import { litellmSyncRouter } from "./routes/litellm-sync.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
@@ -213,6 +215,9 @@ app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designShares
 app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
+app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+app.use(`${BASE}/internal/spaces-sync`, requireInternalS2S, spacesSyncRouter);     // Spaces org/workspace/user provisioning mirror (INTERNAL_S2S_KEY)
+app.use(`${BASE}/internal/litellm-sync`, requireInternalS2S, litellmSyncRouter);    // LiteLLM team/user-key receive-and-store (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
 app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);

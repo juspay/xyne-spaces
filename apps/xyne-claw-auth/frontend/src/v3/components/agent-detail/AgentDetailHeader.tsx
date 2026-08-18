@@ -159,9 +159,9 @@ export function AgentDetailHeader({
   // Publish submits a *request* (owner path); admins instead get the direct
   // Promote/Demote moderation actions below.
   const isActualOwner = !!userId && agent.ownerUserId === userId;
-  const canPublish = isActualOwner && agent.scope !== "global" && !!onPublish;
+  const canPublish = isActualOwner && agent.scope !== "global" && agent.scope !== "platform" && !!onPublish;
   const canModerate = isAdmin && !isActualOwner;
-  const canPromote = canModerate && agent.scope !== "global" && !!onAdminPromote;
+  const canPromote = canModerate && agent.scope !== "global" && agent.scope !== "platform" && !!onAdminPromote;
   const canDemote = canModerate && agent.scope === "global" && !!onAdminDemote;
 
   return (
@@ -197,8 +197,8 @@ export function AgentDetailHeader({
           <div className="mt-0.5 flex items-center gap-1">
             <Badge
               as="span"
-              label={agent.scope === "global" ? "global" : "personal"}
-              variant={agent.scope === "global" ? "info" : "neutral"}
+              label={agent.scope === "platform" ? "platform" : agent.scope === "global" ? "global" : "personal"}
+              variant={agent.scope === "platform" || agent.scope === "global" ? "info" : "neutral"}
               size="sm"
             />
             <Badge

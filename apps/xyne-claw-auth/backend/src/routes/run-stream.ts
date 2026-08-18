@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { prisma } from "../db.js";
-import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
@@ -18,6 +19,7 @@ import {
   isInternalFollowUpInvocation,
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
+import { userProviderCredentialsRepository } from "../repositories/index.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
@@ -372,7 +374,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
@@ -387,16 +392,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const agentRow = await prisma.agent.findUnique({
-      where: { orgId_slug: { orgId: requestOrgId, slug } },
-      select: {
-        id: true,
-        orgId: true,
-        name: true,
-        description: true,
-        config: true,
-      },
-    }).catch(() => null);
+    const agentRow = await agentRepository.findBySlug(slug, requestOrgId).catch(() => null);
     if (!agentRow) {
       log.warn(`[run-stream/chat] agent org-scoped miss slug=${slug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -418,14 +414,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    // Resolve the agent's provider credentials so this SSE run uses the agent's
-    // configured provider + model (e.g. a shared LiteLLM key) rather than the env
-    // platform default. run-stream is otherwise a pass-through: the Spaces
-    // backend sends provider="spaces" / no providerConfigs, which fell straight
-    // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
-    // resolver the headless + automation paths use). Body-supplied values win
-    // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    // Resolve provider creds: agent-level (incl. shared) first, then the user's
+    // provisioned creds as a gap-fill, litellm as fallback parent. Pass the canonical
+    // claw-auth userId (x-user-id from requireAuth), NOT the body userId (raw Spaces
+    // id, can differ when reuseExistingUser) — so the user's provisioned key folds in.
+    const canonicalUserId = getRequesterId(req) ?? (typeof userId === "string" ? userId : undefined);
+    const resolvedProviders = await resolveAgentProviderConfigs(
+      agentRow,
+      canonicalUserId ? { userId: canonicalUserId } : undefined,
+    ).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
