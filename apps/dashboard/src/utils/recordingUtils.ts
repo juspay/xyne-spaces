@@ -3,6 +3,7 @@
  * Common time formatting and display helpers for recording screens
  */
 
+import { normalizeTagName, TAG_FORMAT_REGEX } from '@xyne/shared';
 import { logger, Event } from './logger';
 
 /**
@@ -201,6 +202,14 @@ export const getRecordingTagDotColor = (tag: string): (typeof TAG_DOT_COLORS)[nu
  */
 export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
+};
+
+/** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
+export const slugifyRecordingLabel = (raw: string): string | null => {
+  const slug = normalizeTagName(raw);
+  if (!slug) return null;
+  const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
+  return TAG_FORMAT_REGEX.test(safe) ? safe : null;
 };
 
 /**

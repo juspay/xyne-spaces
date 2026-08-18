@@ -1463,7 +1463,9 @@ export class CallController {
 
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(input.labels
+          ? { labels: await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels) }
+          : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),
