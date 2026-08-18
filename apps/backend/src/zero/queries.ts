@@ -4040,6 +4040,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return zql.user_assignment_states.where('userId', userId);
     }
   ),
+  // Query for assignment states across several user groups at once
+  getUserAssignmentStatesByGroupIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()) }),
+    ({ args: { userGroupIds } }) => {
+      return zql.user_assignment_states.where('userGroupId', 'IN', userGroupIds);
+    }
+  ),
 
   // Repository queries
   getAllRepos: defineQuery(() => {

@@ -3504,6 +3504,13 @@ export const queries = defineQueries({
       return zql.user_assignment_states.where('userId', userId);
     },
   ),
+  // Query for assignment states across several user groups at once
+  getUserAssignmentStatesByGroupIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()) }),
+    ({ args: { userGroupIds } }) => {
+      return zql.user_assignment_states.where('userGroupId', 'IN', userGroupIds);
+    },
+  ),
   // Query for board complexity scores for a user group
   getBoardComplexityScores: defineQuery(
     z.object({ userGroupId: z.string() }),
