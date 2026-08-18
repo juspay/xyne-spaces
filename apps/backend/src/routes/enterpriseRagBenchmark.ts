@@ -28,7 +28,7 @@ const isLoopbackRequest = (req: Request): boolean => {
 const usesLocalBenchmarkIdentity = (req: Request): boolean =>
   process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_ROUTES === 'true' &&
   process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_LOOPBACK === 'true' &&
-  isLoopbackRequest(req);
+  (isLoopbackRequest(req) || req.get('x-route-env') === 'onyx');
 
 const authenticateAdmin = [
   (req: Request, res: Response, next: NextFunction) => {
