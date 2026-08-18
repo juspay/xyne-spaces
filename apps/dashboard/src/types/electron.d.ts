@@ -49,8 +49,6 @@ export interface ElectronAPI {
   ) => () => void;
   focusApp: () => void;
   onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => () => void;
-  /** Fullscreen the app window; needs no user gesture, unlike the DOM Fullscreen API. */
-  setWindowFullscreen?: (fullscreen: boolean) => void;
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;

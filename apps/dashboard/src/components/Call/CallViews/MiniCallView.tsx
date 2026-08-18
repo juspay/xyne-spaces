@@ -27,6 +27,7 @@ import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { useAutoPresentationMode } from '../useAutoPresentationMode';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { CallWhiteboardView } from '../CallWhiteboard';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
@@ -145,6 +146,7 @@ export function MiniCallView({
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -254,8 +256,16 @@ export function MiniCallView({
     p => p.identity === focusedScreenShareIdentity,
   );
 
+  // Who presentation mode puts on screen. Prefer a remote presenter — the point
+  // of a telepresence wall is the person at the other end — but fall back to the
+  // local participant when nobody else has joined yet, so the wall shows itself
+  // rather than an empty "waiting" screen. A wall sitting alone in a room is the
+  // normal resting state, not an error.
   const remoteParticipant = useMemo(
-    () => findRemotePresenter(participants, localParticipantId),
+    () =>
+      findRemotePresenter(participants, localParticipantId) ??
+      participants.find(p => p.isLocal) ??
+      null,
     [participants, localParticipantId],
   );
 

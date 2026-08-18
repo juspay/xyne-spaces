@@ -32,7 +32,6 @@ import {
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
-import { markDeepLinkRendererReady } from '../services/deep-links';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
@@ -609,22 +608,6 @@ export function setupIpcHandlers(): void {
     if (!isAppWindowSender(event)) return;
     setRecordingPillEnabled(!!enabled);
     broadcastToAppWindows('recording-pill:enabled-changed', isRecordingPillEnabled());
-  });
-
-  // The renderer's 'navigate-to' listener is now mounted — release any deep link
-  // that arrived while it wasn't (cold start / pre-auth). See deep-links.ts.
-  ipcMain.on('deep-link:renderer-ready', (event) => {
-    if (!isMainWindowSender(event)) return;
-    markDeepLinkRendererReady();
-  });
-
-  // Window fullscreen, for callers that have no user gesture to spend on the DOM
-  // Fullscreen API — e.g. a room station auto-joining a call from a URL param.
-  ipcMain.on('window:set-fullscreen', (event, fullscreen: unknown) => {
-    if (!isMainWindowSender(event)) return;
-    const mainWindow = getMainWindow();
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.setFullScreen(!!fullscreen);
   });
 
   ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {

@@ -21,15 +21,13 @@ const RETRY_MAX_MS = 30000;
  */
 export const CALL_URL_PARAMS = {
   autoJoin: 'autoJoin',
-  /** Pre-existing spelling, still baked into deployed station deep links. */
-  autoJoinLegacy: 'autoJoinHuddle',
   mic: 'mic',
   camera: 'camera',
   viewMode: 'viewMode',
-  fullscreen: 'fullscreen',
+  telepresence: 'telepresence',
 } as const;
 
-/** Value that turns on the flag-style params (`autoJoin`, `fullscreen`). */
+/** Value that turns on the flag-style params. */
 const FLAG_ON = '1';
 
 interface AutoJoinCall {
@@ -51,24 +49,6 @@ const parseViewMode = (value: string | null): 'full' | 'mini' | undefined =>
   value === 'full' || value === 'mini' ? value : undefined;
 
 /**
- * Ask the shell for real fullscreen. In Electron this goes through the main
- * process (BrowserWindow.setFullScreen), which — unlike the DOM Fullscreen API —
- * needs no user gesture, so it works on an unattended machine that nobody is
- * clicking. The DOM call is the browser fallback; it can legitimately reject
- * without prior user activation, hence the swallowed rejection.
- */
-const requestShellFullscreen = (): void => {
-  const setWindowFullscreen = window.electronAPI?.setWindowFullscreen;
-  if (setWindowFullscreen) {
-    setWindowFullscreen(true);
-    return;
-  }
-  if (!document.fullscreenElement) {
-    void document.documentElement.requestFullscreen().catch(() => {});
-  }
-};
-
-/**
  * Call URL API: lets an external system drive a call by navigating to a channel
  * URL, with no bespoke integration on either side. Built for always-on room
  * stations (a machine that should hold one channel's call open indefinitely and
@@ -81,10 +61,16 @@ const requestShellFullscreen = (): void => {
  *   &mic=on|off            initial mic state, overriding the saved join preference
  *   &camera=on|off         initial camera state, likewise
  *   &viewMode=full|mini    call UI layout (default: platform-derived, mini on desktop)
- *   &fullscreen=1          put the window into fullscreen once connected
+ *   &telepresence=1        start the call already in presentation (telepresence)
+ *                          mode. Subject to its own existing gate — the call view
+ *                          honours it only for users the xyne_telepresence_config
+ *                          CAC flag already allows, so this param cannot be used
+ *                          to reach the feature without that permission.
  *
- * `?autoJoinHuddle=1` is accepted as an alias for `?autoJoin=1` — it's what the
- * already-deployed stations have baked into their deep links.
+ * Deliberately no fullscreen param: the DOM Fullscreen API needs a user gesture,
+ * which an unattended display has nobody to provide. Filling the screen is the
+ * launcher's job instead — a browser started with `--kiosk`, or a window manager
+ * rule — and that hides the browser chrome too, which the DOM API cannot.
  *
  * Everything is gated on the `call_auto_join_config` CAC flag; while that is off
  * these params are inert. No-ops entirely for URLs that don't carry them.
@@ -94,15 +80,13 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
   const { user } = useAuth();
   const isFeatureEnabled = useCallAutoJoinEnabled(user?.email);
 
-  const autoJoinRequested =
-    searchParams.get(CALL_URL_PARAMS.autoJoin) === FLAG_ON ||
-    searchParams.get(CALL_URL_PARAMS.autoJoinLegacy) === FLAG_ON;
+  const autoJoinRequested = searchParams.get(CALL_URL_PARAMS.autoJoin) === FLAG_ON;
   const autoJoin = isFeatureEnabled && isMember && autoJoinRequested;
 
   const micParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.mic));
   const cameraParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.camera));
   const viewMode = parseViewMode(searchParams.get(CALL_URL_PARAMS.viewMode));
-  const wantsFullscreen = searchParams.get(CALL_URL_PARAMS.fullscreen) === FLAG_ON;
+  const presentationMode = searchParams.get(CALL_URL_PARAMS.telepresence) === FLAG_ON;
 
   const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
   const stateSnapshot = useSelector(roomActor, state => state);
@@ -165,9 +149,11 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
     // cleared on disconnect, so the station comes back with the mic, camera and
     // layout it was asked for rather than drifting to defaults after one blip.
     const callSetup = {
+      isUrlDrivenJoin: true,
       ...(viewMode && { viewMode }),
       ...(micParam !== undefined && { initialMicEnabled: micParam }),
       ...(cameraParam !== undefined && { initialCameraEnabled: cameraParam }),
+      ...(presentationMode && { initialPresentationMode: true }),
     };
 
     const timer = setTimeout(() => {
@@ -193,20 +179,6 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
     viewMode,
     micParam,
     cameraParam,
+    presentationMode,
   ]);
-
-  // Fullscreen is a shell-level concern, so unlike mic/camera it can't ride along
-  // on the join event — it's applied once the call is actually up. Keyed on call
-  // id so a rejoin after a drop re-applies it (a user may have escaped fullscreen
-  // in between) while re-renders within one call don't.
-  const fullscreenAppliedForCallRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!autoJoin || !wantsFullscreen) return;
-    if (!stateSnapshot.matches('connected') || !currentCallId) return;
-    if (fullscreenAppliedForCallRef.current === currentCallId) return;
-
-    fullscreenAppliedForCallRef.current = currentCallId;
-    requestShellFullscreen();
-  }, [autoJoin, wantsFullscreen, stateSnapshot, currentCallId]);
 };

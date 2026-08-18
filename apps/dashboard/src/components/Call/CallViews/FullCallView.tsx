@@ -36,6 +36,7 @@ import { hasJoinedExternalParticipant } from '../callParticipant.utils';
 import { CallWhiteboardView } from '../CallWhiteboard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { useAutoPresentationMode } from '../useAutoPresentationMode';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
@@ -170,6 +171,7 @@ export function FullCallView({
   const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
   // Track local participant's network quality
   const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
   const showQualityToast = useNetworkQualityToast(networkQuality);
@@ -412,8 +414,16 @@ export function FullCallView({
     }
   }, [canUseCallChat, isCallChatOpen, onToggleCallChat]);
 
+  // Who presentation mode puts on screen. Prefer a remote presenter — the point
+  // of a telepresence wall is the person at the other end — but fall back to the
+  // local participant when nobody else has joined yet, so the wall shows itself
+  // rather than an empty "waiting" screen. A wall sitting alone in a room is the
+  // normal resting state, not an error.
   const remoteParticipant = useMemo(
-    () => findRemotePresenter(participants, localParticipantId),
+    () =>
+      findRemotePresenter(participants, localParticipantId) ??
+      participants.find(p => p.isLocal) ??
+      null,
     [participants, localParticipantId],
   );
 

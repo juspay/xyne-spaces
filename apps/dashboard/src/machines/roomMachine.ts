@@ -210,6 +210,17 @@ export interface RoomContext {
   // back to the user's saved join preferences. Host controls still win either way.
   initialMicEnabled: boolean | null;
   initialCameraEnabled: boolean | null;
+  // Start the call already in presentation (telepresence) mode — see
+  // useCallAutoJoin's ?telepresence= URL param. Carried here rather than read
+  // from the URL in the call views so it stays scoped to one call and clears
+  // with the rest of the context on disconnect. The views still apply their own
+  // xyne_telepresence_config gate before honouring it.
+  initialPresentationMode: boolean;
+  // Set when the join was driven by a URL rather than a person clicking Join.
+  // Such a join retries on its own (see useCallAutoJoin), and on an unattended
+  // display there is nobody to read or dismiss a toast — so failures stay in the
+  // logs instead of flashing on screen mid-recovery.
+  isUrlDrivenJoin: boolean;
 }
 
 // Events for Room operations
@@ -237,6 +248,8 @@ export type RoomMachineEvent =
       // Omit to use the user's saved join preferences (see RoomContext).
       initialMicEnabled?: boolean;
       initialCameraEnabled?: boolean;
+      initialPresentationMode?: boolean;
+      isUrlDrivenJoin?: boolean;
     }
   | {
       type: 'JOIN_CALL';
@@ -246,6 +259,8 @@ export type RoomMachineEvent =
       // Omit to use the user's saved join preferences (see RoomContext).
       initialMicEnabled?: boolean;
       initialCameraEnabled?: boolean;
+      initialPresentationMode?: boolean;
+      isUrlDrivenJoin?: boolean;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1341,6 +1356,8 @@ export const roomMachine = setup({
       hostControls: () => DEFAULT_HOST_CONTROLS,
       initialMicEnabled: () => null,
       initialCameraEnabled: () => null,
+      initialPresentationMode: () => false,
+      isUrlDrivenJoin: () => false,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1402,7 +1419,8 @@ export const roomMachine = setup({
       }
     },
 
-    showJoinCallErrorToast: () => {
+    showJoinCallErrorToast: ({ context }) => {
+      if (context.isUrlDrivenJoin) return;
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
@@ -1519,6 +1537,8 @@ export const roomMachine = setup({
     hostControls: DEFAULT_HOST_CONTROLS,
     initialMicEnabled: null,
     initialCameraEnabled: null,
+    initialPresentationMode: false,
+    isUrlDrivenJoin: false,
   },
   id: 'roomMachine',
   on: {
@@ -1579,6 +1599,10 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.initialMicEnabled ?? null) : null,
             initialCameraEnabled: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.initialCameraEnabled ?? null) : null,
+            initialPresentationMode: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.initialPresentationMode ?? false) : false,
+            isUrlDrivenJoin: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.isUrlDrivenJoin ?? false) : false,
             isInitiator: () => true,
           }),
         },
@@ -1598,6 +1622,10 @@ export const roomMachine = setup({
                 event.type === 'JOIN_CALL' ? (event.initialMicEnabled ?? null) : null,
               initialCameraEnabled: ({ event }) =>
                 event.type === 'JOIN_CALL' ? (event.initialCameraEnabled ?? null) : null,
+              initialPresentationMode: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.initialPresentationMode ?? false) : false,
+              isUrlDrivenJoin: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.isUrlDrivenJoin ?? false) : false,
               isInitiator: () => false,
             }),
           ],
