@@ -161,34 +161,163 @@ export class CanvasController {
         Object.fromEntries(requestedCanvasIds.map(canvasId => [canvasId, []]));
 
       const canonicalToRequested = new Map<string, string[]>();
-      await Promise.all(
-        requestedCanvasIds.map(async requestedCanvasId => {
-          const canonicalCanvasId = await this.getAccessibleCanvasId(
-            requestedCanvasId,
-            userId,
-            workspaceId,
-            'view',
-          );
-          if (!canonicalCanvasId) {
-            return;
-          }
-          const requestedIds = canonicalToRequested.get(canonicalCanvasId) ?? [];
-          requestedIds.push(requestedCanvasId);
-          canonicalToRequested.set(canonicalCanvasId, requestedIds);
-        }),
-      );
 
-      const accessibleCanvasIds = Array.from(canonicalToRequested.keys());
-      if (accessibleCanvasIds.length === 0) {
+      // Batch-load canvases and related mappings to perform access checks in-memory
+      const prisma = DatabaseClient.getInstance();
+      const canvases = await prisma.canvas.findMany({
+        where: {
+          OR: [
+            { id: { in: requestedCanvasIds } },
+            { viewAccessId: { in: requestedCanvasIds } },
+            { editAccessId: { in: requestedCanvasIds } },
+          ],
+        },
+        select: {
+          id: true,
+          createdBy: true,
+          visibility: true,
+          channelId: true,
+          folderId: true,
+          projectId: true,
+          workspaceId: true,
+          viewAccessId: true,
+          editAccessId: true,
+        },
+      });
+
+      // Map any identifier (id, viewAccessId, editAccessId) -> canonical id
+      const anyToCanonical = new Map<string, string>();
+      for (const c of canvases) {
+        anyToCanonical.set(c.id, c.id);
+        if (c.viewAccessId) anyToCanonical.set(c.viewAccessId, c.id);
+        if (c.editAccessId) anyToCanonical.set(c.editAccessId, c.id);
+      }
+
+      // Build candidate canonical IDs filtered by workspace and request mapping
+      const candidateCanonicalIds: string[] = [];
+      for (const requestedCanvasId of requestedCanvasIds) {
+        const canonical = anyToCanonical.get(requestedCanvasId);
+        if (!canonical) continue;
+        const canvasRow = canvases.find(x => x.id === canonical);
+        if (!canvasRow || canvasRow.workspaceId !== workspaceId) continue;
+        if (!candidateCanonicalIds.includes(canonical)) candidateCanonicalIds.push(canonical);
+        const requestedIds = canonicalToRequested.get(canonical) ?? [];
+        requestedIds.push(requestedCanvasId);
+        canonicalToRequested.set(canonical, requestedIds);
+      }
+
+      // Now perform access checks in-memory for the candidate canonical IDs.
+      const candidateIds = candidateCanonicalIds;
+      if (candidateIds.length === 0) {
         res.status(200).json({ labels: labelsByCanvasId });
         return;
       }
 
-      const prisma = DatabaseClient.getInstance();
+      // Fetch user role and group memberships (constant number of queries)
+      const userRow = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      const workspaceRole = userRow?.role;
+
+      const groupMappings = await prisma.userGroupMapping.findMany({ where: { userId }, select: { userGroupId: true } });
+      const groupIds = groupMappings.map(m => m.userGroupId);
+
+      // Participants for the canvases: user-specific and group-specific
+      const participantWhere: any = { canvasId: { in: candidateIds }, OR: [{ userId }] };
+      if (groupIds.length) participantWhere.OR.push({ userGroupId: { in: groupIds } });
+      const participants = await prisma.canvasParticipant.findMany({ where: participantWhere, select: { canvasId: true, role: true, userGroupId: true, userId: true } });
+
+      // Channel-related participants (for shared channel roles)
+      const canvasChannelParticipants = await prisma.canvasParticipant.findMany({ where: { canvasId: { in: candidateIds }, channelId: { not: null } }, select: { canvasId: true, channelId: true, role: true } });
+
+      const channelIds = Array.from(new Set(canvases.filter(c => c.channelId && candidateIds.includes(c.id)).map(c => c.channelId!)));
+      const projectIds = Array.from(new Set(canvases.filter(c => c.projectId && candidateIds.includes(c.id)).map(c => c.projectId!)));
+
+      const channelMemberships = channelIds.length
+        ? await prisma.channelParticipant.findMany({ where: { channelId: { in: channelIds }, userId }, select: { channelId: true } })
+        : [];
+      const channelMembershipSet = new Set(channelMemberships.map(c => c.channelId));
+
+      const guestAccessWhereOr: any[] = [];
+      if (channelIds.length) guestAccessWhereOr.push({ accessibleEntityType: 'CHANNEL', accessibleEntityId: { in: channelIds } });
+      if (projectIds.length) guestAccessWhereOr.push({ accessibleEntityType: 'PROJECT', accessibleEntityId: { in: projectIds } });
+
+      const guestAccessRows = guestAccessWhereOr.length
+        ? await prisma.guestAccess.findMany({ where: { workspaceId, userId, OR: guestAccessWhereOr }, select: { accessibleEntityType: true, accessibleEntityId: true } })
+        : [];
+
+      const guestChannelSet = new Set(guestAccessRows.filter(g => g.accessibleEntityType === 'CHANNEL').map(g => g.accessibleEntityId));
+      const guestProjectSet = new Set(guestAccessRows.filter(g => g.accessibleEntityType === 'PROJECT').map(g => g.accessibleEntityId));
+
+      const roleRank = (role: CanvasRole | undefined): number => (role === CanvasRole.OWNER ? 3 : role === CanvasRole.EDITOR ? 2 : role === CanvasRole.VIEWER ? 1 : 0);
+      const strongerRole = (a: { role: CanvasRole } | null, b: { role: CanvasRole } | null) => {
+        if (!a) return b;
+        if (!b) return a;
+        return roleRank(a.role) >= roleRank(b.role) ? a : b;
+      };
+
+      const allowedCanonicalIds: string[] = [];
+      for (const canonicalId of candidateIds) {
+        const canvasRow = canvases.find(c => c.id === canonicalId)!;
+        const isCreator = canvasRow.createdBy === userId;
+
+        const participant = participants.find(p => p.canvasId === canonicalId && p.userId === userId);
+
+        const groupParticipantEntries = participants.filter(p => p.canvasId === canonicalId && p.userGroupId);
+        let strongestGroup: { role: CanvasRole } | null = null;
+        for (const gp of groupParticipantEntries) {
+          strongestGroup = strongerRole(strongestGroup, { role: gp.role as CanvasRole });
+        }
+
+        // Channel-shared role
+        const channelParticipants = canvasChannelParticipants.filter(p => p.canvasId === canonicalId && p.channelId);
+        let strongestChannelRole: { role: CanvasRole } | null = null;
+        for (const cp of channelParticipants) {
+          const chanId = cp.channelId!;
+          const hasEffectiveChannelAccess = channelMembershipSet.has(chanId) || (workspaceRole === 'GUEST' && guestChannelSet.has(chanId));
+          if (hasEffectiveChannelAccess) {
+            strongestChannelRole = strongerRole(strongestChannelRole, { role: cp.role as CanvasRole });
+          }
+        }
+
+        const entityRole = strongerRole(strongestGroup, strongestChannelRole);
+        const effectiveRole = participant?.role ?? entityRole?.role;
+        const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
+        const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
+        const hasViewerRole = effectiveRole === CanvasRole.VIEWER;
+
+        const hasPublicVisibilityAccess = (() => {
+          if (canvasRow.visibility !== 'PUBLIC') return false;
+          if (workspaceRole === 'GUEST') {
+            if (canvasRow.channelId) return guestChannelSet.has(canvasRow.channelId);
+            if (canvasRow.projectId) return guestProjectSet.has(canvasRow.projectId);
+            return false;
+          }
+          return true;
+        })();
+
+        const hasGuestContainerAccess = (() => {
+          if (workspaceRole !== 'GUEST') return false;
+          if (canvasRow.channelId && guestChannelSet.has(canvasRow.channelId)) return true;
+          if (!canvasRow.projectId) return false;
+          return guestProjectSet.has(canvasRow.projectId);
+        })();
+
+        const canEdit = isCreator || hasOwnerRole || hasEditorRole;
+        const canView = canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;
+
+        if (canView) {
+          allowedCanonicalIds.push(canonicalId);
+        }
+      }
+
+      if (allowedCanonicalIds.length === 0) {
+        res.status(200).json({ labels: labelsByCanvasId });
+        return;
+      }
+
       const rows = await prisma.tag.findMany({
         where: {
           workspaceId,
-          sourceId: { in: accessibleCanvasIds },
+          sourceId: { in: allowedCanonicalIds },
           sourceType: CANVAS_LABEL_SOURCE_TYPE,
           tagCategory: CANVAS_LABEL_CATEGORY,
           isDeleted: false,

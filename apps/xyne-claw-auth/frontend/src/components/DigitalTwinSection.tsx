@@ -603,7 +603,6 @@ function ClusterDetail({ userId, subsystem, onBack }: { userId: string; subsyste
                         <textarea
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
-                          maxLength={1500}
                           className="h-24 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-zinc-100"
                         />
                       )}

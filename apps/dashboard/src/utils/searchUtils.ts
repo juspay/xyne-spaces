@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -183,7 +184,10 @@ export const applyHighlights = (
   if (!container) return;
 
   if (!CSS.highlights) {
-    console.warn('CSS Custom Highlight API not supported in this browser.');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('CSS Custom Highlight API not supported in this browser.'),
+    });
     return;
   }
 

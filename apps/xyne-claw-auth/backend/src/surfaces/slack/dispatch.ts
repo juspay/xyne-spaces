@@ -28,6 +28,28 @@ export function slackConversationId(teamId: string, channelId: string, threadRoo
 }
 
 /**
+ * Make the built-in Slack subagent available for runs originating on Slack.
+ * This creates a per-run copy and never mutates the stored agent config.
+ *
+ * A missing tools object means the agent is unrestricted, so adding one here
+ * would accidentally turn that agent into a Slack-only allowlist.
+ */
+function withSlackSubagentInjected(config: unknown): unknown {
+  if (!config || typeof config !== "object") return config;
+  const base = config as Record<string, unknown>;
+  const tools = base["tools"];
+  if (!tools || typeof tools !== "object") return config;
+
+  const toolsObj = tools as Record<string, unknown>;
+  const current = Array.isArray(toolsObj["subagents"])
+    ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
+    : [];
+  if (current.includes("slack")) return config;
+
+  return { ...base, tools: { ...toolsObj, subagents: [...current, "slack"] } };
+}
+
+/**
  * The one Slack run-dispatch path — mentions, DMs, and slash commands all go
  * through here so provider resolution, the session ctx, and the result
  * callback can never drift apart per entry point (the phase-4 parity lesson).
@@ -61,6 +83,7 @@ export async function dispatchSlackRun(input: {
     id: input.agent.id,
     config: input.agent.config,
   });
+  const effectiveAgentConfig = withSlackSubagentInjected(input.agent.config);
   const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
     headers: {
@@ -87,7 +110,7 @@ export async function dispatchSlackRun(input: {
         ? { providerConfigs: providers.providerConfigs }
         : {}),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
-      ...(input.agent.config ? { agentConfig: input.agent.config } : {}),
+      ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
     }),
   });
   const body = (await response.json().catch(() => null)) as {

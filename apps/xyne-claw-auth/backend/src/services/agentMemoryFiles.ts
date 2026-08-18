@@ -72,8 +72,8 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
     name: "soul.md",
     loadInPrompt: true,
     sortOrder: 0,
-    description: "Your core persona — how you sound and who you are. Always speak as this.",
-    subsystems: ["style", "context"],
+    description: "Your core persona — how you sound, who you are, and when you engage. Always follow this.",
+    subsystems: ["style", "context", "triage"],
     seed: [
       "# Soul",
       "",
@@ -84,6 +84,9 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
       "",
       "## Identity",
       "_(role, team, how you show up)_",
+      "",
+      "## Engagement",
+      "_(when you respond, when you stay silent, and which conversations you prioritize — from approved triage memories)_",
     ].join("\n"),
   },
   {

@@ -1,3 +1,45 @@
+## [1.189.9](https://github.com/juspay/xyne-spaces/compare/v1.189.8...v1.189.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* fixing canvas acl ([#658](https://github.com/juspay/xyne-spaces/issues/658)) ([b987df4](https://github.com/juspay/xyne-spaces/commit/b987df43b132d0268451dce7bc0ebefa6009b172))
+
+## [1.189.8](https://github.com/juspay/xyne-spaces/compare/v1.189.7...v1.189.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* round Xyne AI main panel corners to match chat ([#654](https://github.com/juspay/xyne-spaces/issues/654)) ([7f5ea4b](https://github.com/juspay/xyne-spaces/commit/7f5ea4ba1e6d24daa39a7aad4896341b6a92f325))
+
+## [1.189.7](https://github.com/juspay/xyne-spaces/compare/v1.189.6...v1.189.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* sudoQuery product metrics ([#427](https://github.com/juspay/xyne-spaces/issues/427)) ([b5aeb3c](https://github.com/juspay/xyne-spaces/commit/b5aeb3c814dd911b6fe20013015c4f948f0499b9))
+
+## [1.189.6](https://github.com/juspay/xyne-spaces/compare/v1.189.5...v1.189.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* fix analytics data ([#535](https://github.com/juspay/xyne-spaces/issues/535)) ([79197bf](https://github.com/juspay/xyne-spaces/commit/79197bf5bb229b216792dc7ae3aa818cc4ea1a1b))
+
+## [1.189.5](https://github.com/juspay/xyne-spaces/compare/v1.189.4...v1.189.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* Fix dynamic dashboard tls connection issue ([#518](https://github.com/juspay/xyne-spaces/issues/518)) ([51846cb](https://github.com/juspay/xyne-spaces/commit/51846cb10357323b3fcc767c7e66582544c18290))
+
+## [1.189.4](https://github.com/juspay/xyne-spaces/compare/v1.189.3...v1.189.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* optimize Y-Sweet routes and database cleanup logic ([#643](https://github.com/juspay/xyne-spaces/issues/643)) ([b871715](https://github.com/juspay/xyne-spaces/commit/b871715f984835a7c7ee9e41063483702cc0bcd9))
+
 ## [1.189.3](https://github.com/juspay/xyne-spaces/compare/v1.189.2...v1.189.3) (2026-08-17)
 
 

@@ -428,8 +428,6 @@ export class ACLFactory {
         return new BaseACL<any>(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
-      default:
-        return new BaseACL<any>(ctx, table);
     }
   }
 }

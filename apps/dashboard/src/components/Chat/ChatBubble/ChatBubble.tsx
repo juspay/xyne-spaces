@@ -98,6 +98,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
 import { parseRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 export interface ThreadData {
@@ -196,7 +198,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     appsService
       .getChannelShortcuts(channelId, { type: 'MESSAGE' })
       .then(setMessageShortcuts)
-      .catch(() => {});
+      .catch(() => undefined);
   }, [channelId]);
 
   const messageConversationId = message.conversationId;
@@ -474,6 +476,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setShowParticipantsModal(true);
   };
 
+  // Starts a headless ("take notes") recording anchored to this message's
+  // thread — directly via the recording store (no navigation), same as the
+  // ThreadPannel "Take notes" button. Only rendered for the thread's root
+  // message (see HoverActionsToolbar's messageId === initialMessageId gate).
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const handleStartRecordingFromMessage = (): void => {
+    const targetConversationId = conversation?.conversationId || message.conversationId;
+    if (!targetConversationId || !channelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: targetConversationId,
+      channelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
+  };
+
   const handleAddBookmark = (): void => {
     try {
       const addResult = zero.mutate(
@@ -685,7 +711,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ? markdownToHtml(contentToCopy)
             .then(html => copyHtmlToClipboard(html))
             .catch(error => {
-              console.warn('Markdown processing failed, falling back to raw content:', error);
+              logger.warn(Event.FRONTEND_ERROR, {
+                type: 'migrated_console_warn',
+                message: String('Markdown processing failed, falling back to raw content:'),
+                context: [error],
+              });
               return copyHtmlToClipboard(contentToCopy);
             })
         : copyHtmlToClipboard(contentToCopy);
@@ -770,7 +800,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }
       toast.success('Marked as unread');
     } catch (error) {
-      console.error('Failed to mark as unread:', error);
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to mark as unread:'),
+        error: error,
+      });
       toast.error('Failed to mark as unread. Please try again.');
       setSkipMarkAsRead(false);
     }
@@ -1022,6 +1056,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
           isCallDisabled: hasActiveCallForConversation,
+          onStartRecording: handleStartRecordingFromMessage,
+          isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
         }),
       ...(conversation &&
         (!isSystemMessage || isTicketCreationMessage) &&
@@ -1050,7 +1086,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 plainText,
                 message.messageId,
               )
-              .catch(() => {});
+              .catch(() => undefined);
           },
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),
@@ -1347,6 +1383,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,
                   isCallDisabled: hasActiveCallForConversation,
+                  onStartRecording: handleStartRecordingFromMessage,
+                  isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
                 })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&

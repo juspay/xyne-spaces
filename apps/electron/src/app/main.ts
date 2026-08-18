@@ -12,8 +12,7 @@ import {
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
 import { agentAuthService } from '../services/agent-auth';
-import { BrowserWindow } from 'electron';
-import { Logger } from '../services/logger/Logger';
+import { installElectronLogStackHook, Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
@@ -31,30 +30,17 @@ import Store from 'electron-store';
 
 const store = new Store();
 
-// Forward logs to renderer process for workflow IPC messages.
-(log.transports as any).forwardToRenderer = (message: any) => {
-  // Convert message data to string for filtering
-  const msgContent = (message.data || []).map((item: any) => String(item)).join(' ');
-  const shouldForward = msgContent.toLowerCase().includes('workflow');
-
-  if (shouldForward) {
-    BrowserWindow.getAllWindows().forEach((w) => {
-      if (!w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
-        w.webContents.send('electron-log', message);
-      }
-    });
-  }
-};
-
 if (process.platform === 'darwin') {
   app.setName(config.APP_NAME);
 }
 app.setAppUserModelId(config.APP_ID);
 
 // Initialize electron-log for main process
+process.setSourceMapsEnabled(true);
 log.initialize();
+installElectronLogStackHook();
 log.transports.file.level = 'info';
-log.transports.console.level = 'info';
+log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors
