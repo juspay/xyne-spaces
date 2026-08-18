@@ -8,7 +8,7 @@ import { logger } from '@/utils/logger';
 /** Guards only against near-simultaneous "last file" finishers (a race) sending
  *  twice — kept short so a genuinely separate upload a few seconds later still
  *  notifies. */
-const DEDUP_TTL_SECONDS = 10;
+const DEDUP_TTL_SECONDS = 20;
 
 /** Safety TTL on the "import in progress" flag, so a crashed importer can't
  *  suppress notifications forever. Importers clear it explicitly when done. */
@@ -168,7 +168,17 @@ async function notifyIfCollectionDone(rootCollectionId: string): Promise<void> {
   try {
     await send();
   } catch (sendErr) {
+    // The producer is only initialized in some worker processes; the process running
+    // ingestion may not have done so. Initialize on demand and retry.
+    if (sendErr instanceof Error && /not initialized/i.test(sendErr.message)) {
+      logger.info('[KB_INGEST_NOTIFY] Notification producer not initialized; initializing on demand and retrying', {
+        rootCollectionId,
+      });
+      await notificationService.initialize();
+      await send();
+    } else {
       throw sendErr;
+    }
   }
 
   // Also record a persistent Activity so the owner can find it later in the Activity

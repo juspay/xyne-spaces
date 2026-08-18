@@ -26,7 +26,7 @@ export const DriveConnectDialog = (): ReactElement => {
       onOpenChange={open => {
         if (!open) close();
       }}
-      title='Connect Google Drive'
+      title='Grant access to Drive'
       description='To import this file, allow Xyne read-only access to your Google Drive. You’ll approve it on Google’s screen — no password and no re-login.'
       className='max-w-md bg-secondary border border-border'
     >
@@ -56,7 +56,7 @@ export const DriveConnectDialog = (): ReactElement => {
             data-track-name='drive-connect'
           >
             <HardDriveDownload size={16} />
-            Connect Google Drive
+            Grant access to Drive
           </Button>
         </div>
       </div>
