@@ -20,11 +20,13 @@ import {
   requireClawAdmin,
   requireAgentOwnerOrAdmin,
   requireAgentOwnerContributorOrAdmin,
+  getAgentEditAccess,
   getRequesterId,
   getOrgId,
   isClawAdmin,
 } from "../middleware/agent-acl.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig } from "../lib/agent-config-validation.js";
@@ -437,7 +439,19 @@ router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
       return;
     }
 
-    res.json({ success: true, data: sanitizeAgent(agent as unknown as Record<string, unknown>) });
+    // L-21: full agent internals (systemPrompt, promptNote, config, tool +
+    // skill configs, KB grants) are only for the owner / admin / contributors,
+    // and the trusted runtime (S2S) that has to RUN the agent. Any other org
+    // member gets the light projection — the same fields the agent list already
+    // exposes — so a slug read can't leak another user's prompt/config/creds.
+    const record = agent as unknown as Record<string, unknown>;
+    const viewerId = getRequesterId(req);
+    let full = s2sKeyMatches(req.headers["x-s2s-key"]);
+    if (!full && viewerId) {
+      const access = await getAgentEditAccess(viewerId, req.params.slug, getOrgId(req)).catch(() => null);
+      full = Boolean(access?.canEdit) || (await isClawAdmin(viewerId));
+    }
+    res.json({ success: true, data: full ? sanitizeAgent(record) : lightAgentProjection(record) });
   } catch (err) {
     log.error("[agents] get error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -489,6 +503,14 @@ router.post("/", async (req: Request, res: Response) => {
     const admin = requesterId ? await isClawAdmin(requesterId) : false;
     const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
+    // C-8: prevent ownerUserId mass-assignment. A non-admin may only create an
+    // agent owned by itself; forging ownerUserId=<victim> would produce an agent
+    // that LOOKS victim-owned but carries the attacker's Spaces identity
+    // (spacesAppUserId) — a trojan agent. Mirrors the PUT owner-change guard.
+    if (ownerUserId && ownerUserId !== requesterId && !admin) {
+      res.status(403).json({ success: false, error: "Only an admin can create an agent owned by another user" });
+      return;
+    }
     // For personal agents, owner is required
     const effectiveOwner = ownerUserId ?? requesterId;
     if (effectiveScope === "personal" && !effectiveOwner) {
@@ -2391,7 +2413,7 @@ function spacesUserAuthHeaders(
 
 // ── Step-by-step Spaces App registration (3 separate buttons) ────────
 
-router.post("/:slug/create-app", async (req: Request<{ slug: string }>, res: Response) => {
+router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const userToken = extractUserToken(req);
     if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
@@ -2449,7 +2471,7 @@ router.post("/:slug/create-app", async (req: Request<{ slug: string }>, res: Res
   }
 });
 
-router.post("/:slug/install-app", async (req: Request<{ slug: string }>, res: Response) => {
+router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const userToken = extractUserToken(req);
     if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
@@ -2500,7 +2522,7 @@ router.post("/:slug/install-app", async (req: Request<{ slug: string }>, res: Re
   }
 });
 
-router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, res: Response) => {
+router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const userToken = extractUserToken(req);
     if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
@@ -2575,7 +2597,7 @@ const CLAW_APP_PERMISSIONS = [
 // THEN install (the existing-installation branch re-approves + re-issues the JWT).
 // Without this the bot 403s with `missing_permission required:chat:write granted:[]`
 // the moment it tries to post a result back to the thread.
-router.post("/:slug/grant-permissions", async (req: Request<{ slug: string }>, res: Response) => {
+router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const userToken = extractUserToken(req);
     if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
@@ -2676,6 +2698,7 @@ const pictureUpload = multer({
 
 router.post(
   "/:slug/upload-picture",
+  requireAgentOwnerOrAdmin,
   pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
@@ -2754,7 +2777,7 @@ router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
 
 // ── User Chain Config (per-user agent chaining) ──────────────────────
 
-router.get("/:slug/chain-config/:userId", async (req: Request<{ slug: string; userId: string }>, res: Response) => {
+router.get("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
@@ -2766,7 +2789,7 @@ router.get("/:slug/chain-config/:userId", async (req: Request<{ slug: string; us
   }
 });
 
-router.put("/:slug/chain-config/:userId", async (req: Request<{ slug: string; userId: string }>, res: Response) => {
+router.put("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const chainConfig = req.body.chainConfig ?? null;
 
@@ -3050,7 +3073,7 @@ router.get("/:slug/skills", async (req: Request<{ slug: string }>, res: Response
   }
 });
 
-router.post("/:slug/skills", async (req: Request<{ slug: string }>, res: Response) => {
+router.post("/:slug/skills", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) {
@@ -3071,7 +3094,7 @@ router.post("/:slug/skills", async (req: Request<{ slug: string }>, res: Respons
   }
 });
 
-router.delete("/:slug/skills/:skillId", async (req: Request<{ slug: string; skillId: string }>, res: Response) => {
+router.delete("/:slug/skills/:skillId", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string; skillId: string }>, res: Response) => {
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) {
