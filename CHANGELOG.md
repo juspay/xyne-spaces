@@ -1,3 +1,10 @@
+## [1.191.0](https://github.com/juspay/xyne-spaces/compare/v1.190.2...v1.191.0) (2026-08-18)
+
+
+### Features
+
+* full screen video ([#683](https://github.com/juspay/xyne-spaces/issues/683)) ([3153536](https://github.com/juspay/xyne-spaces/commit/3153536216f20946279b4a824ce2f30385061302))
+
 ## [1.190.2](https://github.com/juspay/xyne-spaces/compare/v1.190.1...v1.190.2) (2026-08-18)
 
 
