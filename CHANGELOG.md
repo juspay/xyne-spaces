@@ -1,3 +1,10 @@
+## [1.192.0](https://github.com/juspay/xyne-spaces/compare/v1.191.0...v1.192.0) (2026-08-18)
+
+
+### Features
+
+* add LLM endpoint verification script and update setup process ([#672](https://github.com/juspay/xyne-spaces/issues/672)) ([d7bde1d](https://github.com/juspay/xyne-spaces/commit/d7bde1dde092dc57d8dc0fd326c5421343510fcd))
+
 ## [1.191.0](https://github.com/juspay/xyne-spaces/compare/v1.190.2...v1.191.0) (2026-08-18)
 
 
