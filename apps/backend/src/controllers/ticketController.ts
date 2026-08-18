@@ -52,7 +52,8 @@ import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType,
+import {
+  BaseTicketType,
   FormContextType,
   FormEntityType,
   ReleaseTrackingMode,
@@ -664,7 +665,6 @@ export class TicketController {
         board?.boardType === BoardType.FLOW && !parentTicketId
           ? BaseTicketType.Epic
           : ticketType;
-
       // Process file uploads BEFORE transaction (external I/O operation)
       let uploadedFiles: UploadedFileResult[] = [];
       if (files.length > 0 && (!draftAttachmentIds || draftAttachmentIds.length === 0)) {
@@ -823,7 +823,10 @@ export class TicketController {
           // Update conversation with ticketId and ticket_md
           await tx.conversation.update({
             where: { conversationId: existingConversation.conversationId },
-            data: { ticketId: ticket.id, ticket_md: ticketMd },
+            data: {
+              ticketId: ticket.id,
+              ticket_md: ticketMd,
+            },
           });
 
 
@@ -973,7 +976,10 @@ export class TicketController {
           // Update conversation with ticketId and ticket_md
           await tx.conversation.update({
             where: { conversationId },
-            data: { ticketId: ticket.id, ticket_md: ticketMd },
+            data: {
+              ticketId: ticket.id,
+              ticket_md: ticketMd,
+            },
           });
 
           // Add ticket creator as MENTIONED participant (subscribed by default)
@@ -1509,7 +1515,8 @@ export class TicketController {
         return;
       }
 
-      const { assigneeId, stage, groupId, title, description, priority, status, eta, tags } = req.body ?? {};
+      const { assigneeId, stage, groupId, title, description, priority, status, eta, tags } =
+        req.body ?? {};
       // Custom form-field values, keyed by field name. Accept `formFields`
       // (preferred) or the legacy `dynamicFields` alias used by the apps API.
       const rawFormFields = (req.body?.formFields ?? req.body?.dynamicFields) as unknown;

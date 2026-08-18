@@ -107,12 +107,33 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
+import {
+  buildSdlcAgentToolProfile,
+  buildWriteApprovalFlow,
+  buildTwinApprovalFlow,
+  buildUserQuestionFlow,
+  buildPromoteProviderFlow,
+  buildCapacityRetryFlow,
+  buildGoalSuggestionFlow,
+  buildPlanFlow,
+  buildAgentCardFlow,
+  hashSkillContent,
+  buildPrFlow,
+  prScreenId,
+  isTwinDelivery,
+  SDLC_REQUIRED_TOOLS,
+  type PrProvider,
+  type PrStatus,
+} from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 
 const clog = createLogger("webhook");
+const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+  xyneSpacesTools.map((tool) => tool.name),
+);
 
 /** A run that died because the model provider was over capacity (429 / quota /
  *  overloaded / 5xx after fallback), as opposed to a real agent error. */
@@ -3651,7 +3672,15 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
-    sdlcOperation?: "baseline" | "artifact" | "work";
+    sdlcOperation?: "baseline" | "artifact" | "work" | "wiki";
+    sdlcWikiRole?:
+      | "BOOTSTRAP_SURVEY"
+      | "BOOTSTRAP_PAGE"
+      | "BOOTSTRAP_EDITOR"
+      | "BOOTSTRAP"
+      | "GENERATOR"
+      | "ARCHITECTURE_VALIDATOR"
+      | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
 
@@ -3907,19 +3936,72 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-  const directTools = Array.isArray(baseTools["direct"]) ? (baseTools["direct"] as string[]) : [];
-  const customTools = Array.isArray(baseTools["custom"]) ? (baseTools["custom"] as string[]) : [];
-  const subagents = Array.isArray(baseTools["subagents"]) ? (baseTools["subagents"] as string[]) : [];
-  const sdlcCustomTools = [
-    "sandbox-repo-setup",
-    "sandbox-run",
-    "sandbox-run-detached",
-    "sandbox-poll-job",
-    "sandbox-read-file",
-    "sandbox-destroy",
-  ];
+  const wikiValidator =
+    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
+    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
+  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
+  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
   const sdlcOutputFormat =
-    payload.sdlcOperation === "work"
+    payload.sdlcOperation === "wiki" && wikiSurvey
+      ? {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              repositorySummary: { type: "string" },
+              pages: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                    purpose: { type: "string" },
+                    concepts: { type: "array", items: { type: "string" } },
+                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
+                    archetype: {
+                      type: "string",
+                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
+                    },
+                    sourceAreas: { type: "array", items: { type: "string" } },
+                    relatedPages: { type: "array", items: { type: "string" } },
+                    tableCandidates: { type: "array", items: { type: "string" } },
+                    diagramCandidates: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
+                },
+              },
+            },
+            required: ["repositorySummary", "pages"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
+        }
+      : payload.sdlcOperation === "wiki" && wikiValidator
+        ? {
+            type: "json",
+            schema: {
+              type: "object",
+              properties: {
+                complete: { type: "boolean" },
+                missingTopics: { type: "array", items: { type: "string" } },
+                issues: { type: "array", items: { type: "string" } },
+                suggestions: { type: "array", items: { type: "string" } },
+              },
+              required: ["complete", "missingTopics", "issues", "suggestions"],
+            },
+          }
+        : payload.sdlcOperation === "wiki"
+          ? {
+              type: "json",
+              schema: {
+                type: "object",
+                properties: { completed: { type: "boolean" } },
+                required: ["completed"],
+              },
+          requireToolsBeforeSubmit: wikiPageWriter
+            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
+            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
+            }
+    : payload.sdlcOperation === "work"
       ? {
           type: "json",
           schema: {
@@ -3932,7 +4014,7 @@ export async function handleAutomationWebhook(
             },
             required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
           },
-          requireToolsBeforeSubmit: ["sandbox-repo-setup", "sandbox-run", "spaces-sdlc-create-pull-request"],
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
         }
       : {
           type: "json",
@@ -3945,11 +4027,10 @@ export async function handleAutomationWebhook(
             },
             required: ["created", "canvasId", "artifactKind"],
           },
-          requireToolsBeforeSubmit: [
+          requireToolsBeforeSubmit:
             payload.sdlcOperation === "baseline"
-              ? "spaces-sdlc-update-baseline"
-              : "spaces-sdlc-create-artifact",
-          ],
+              ? [...SDLC_REQUIRED_TOOLS.baseline]
+              : [...SDLC_REQUIRED_TOOLS.artifact],
         };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
@@ -3960,22 +4041,13 @@ export async function handleAutomationWebhook(
             ? {
                 tools: {
                   ...baseTools,
-                  direct: [
-                    ...new Set([
-                      ...directTools,
-                      "spaces-sdlc-create-artifact",
-                      "spaces-sdlc-update-baseline",
-                      "spaces-sdlc-create-pull-request",
-                    ]),
-                  ],
-                  custom: [...new Set([...customTools, ...sdlcCustomTools])],
-                  subagents,
+                  direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
+                  custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
+                  subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
                 },
                 toolPermissions: {
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
-                  "xyne-spaces__spaces-sdlc-create-artifact": "allow",
-                  "xyne-spaces__spaces-sdlc-update-baseline": "allow",
-                  "xyne-spaces__spaces-sdlc-create-pull-request": "allow",
+                  ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
                 outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
@@ -4420,6 +4492,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let goalContinues = false;
   let experimentContinues = false;
   let skipQueueDrain = false;
+  // Recovery continuations execute under fresh physical AgentRun ids, while
+  // external callers (including SDLC Wiki) remain bound to the original
+  // logical run id. Capture the root returned by recovery settlement and use
+  // it only for the external callback identity.
+  let externalCallbackSessionId = sessionId;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
   // Per-user twin FIFO scope for the finalizer's drain. MUST be declared at THIS
@@ -4651,9 +4728,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   }
 
   if (payload.status === "completed") {
-    await handleRunCompletion(sessionId, "completed").catch((err) => {
+    const recoveryCompletion = await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
+      return null;
     });
+    externalCallbackSessionId = recoveryCompletion?.rootSessionId ?? sessionId;
     if (ctx?.conversationId && ctx.agentSlug) {
       experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
         clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
@@ -4736,6 +4815,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return null;
     });
 
+    externalCallbackSessionId = recoveryFailure?.rootSessionId ?? sessionId;
+
     if (recoveryFailure?.retried) {
       clog.info(`[webhook/result] Session ${sessionId}: retry queued (${recoveryFailure.retriesUsed}/${recoveryFailure.maxRetries})`);
       return;
@@ -4744,12 +4825,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
   // External API callbacks are interposed by /run: claw only ever calls this
   // internal endpoint, and claw-auth performs the untrusted outbound delivery.
-  // Prefer Redis context, with AgentRun.metadata as a durable fallback.
+  // Prefer Redis context, with AgentRun.metadata as a durable fallback. A
+  // recovery attempt may have sparse physical-run metadata, so fall back to
+  // the logical recovery root as well.
   let externalResultCallback = ctx?.externalResultCallback;
   if (!ctx && sessionId) {
-    const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-    const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
-    externalResultCallback = metadata?.externalResultCallback;
+    for (const callbackSessionId of new Set([sessionId, externalCallbackSessionId])) {
+      const storedRun = await agentRunRepository.findBySessionId(callbackSessionId).catch(() => null);
+      const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
+      externalResultCallback = metadata?.externalResultCallback;
+      if (externalResultCallback) break;
+    }
   }
   if (externalResultCallback) {
     // HITL for API/service-token runs: the external caller receives its result
@@ -4784,7 +4870,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     await sendStoredExternalResultCallback(
       externalResultCallback,
       {
-        sessionId,
+        sessionId: externalCallbackSessionId,
         status: payload.status ?? "failed",
         result: payload.result ?? "",
         ...(payload.error ? { error: payload.error } : {}),

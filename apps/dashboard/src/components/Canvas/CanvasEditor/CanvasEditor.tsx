@@ -651,7 +651,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={asBlockNoteEditorForView(editor)}
+          />
+        )}
       </div>
     );
   },
