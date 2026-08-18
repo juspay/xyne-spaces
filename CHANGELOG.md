@@ -1,3 +1,10 @@
+## [1.190.1](https://github.com/juspay/xyne-spaces/compare/v1.190.0...v1.190.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* match DM panel corner radius when a conversation is open ([#670](https://github.com/juspay/xyne-spaces/issues/670)) ([6637cdb](https://github.com/juspay/xyne-spaces/commit/6637cdb22e41239dde8f8ffb47aecdb3059bd3fd))
+
 ## [1.190.0](https://github.com/juspay/xyne-spaces/compare/v1.189.9...v1.190.0) (2026-08-18)
 
 
