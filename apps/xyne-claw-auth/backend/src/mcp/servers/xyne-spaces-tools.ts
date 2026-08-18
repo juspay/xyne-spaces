@@ -13,6 +13,7 @@ import {
   spacesFetchBuffer,
   spacesFetchText,
   appFetch,
+  appFetchBuffer,
 } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
@@ -5505,7 +5506,38 @@ const spacesFetchAttachment: ToolDef = {
       let sourceLabel = "a signed URL";
       let inlineBuffer: Buffer | undefined;
 
-      try {
+      // Automation / app-user runs have NO human session, so the user-scoped
+      // /api/attachments/:id/{signed-url,download} routes reject the app token
+      // (401) — this is exactly why the RCA agent could LIST the PDF (listing
+      // goes through the dual-auth /api/query/claw) but could not DOWNLOAD it.
+      // In app mode, pull the bytes from the app download route instead
+      // (authenticateApp + files:read, workspace-scoped). This is the
+      // "app endpoints only when coming from automation" path.
+      const APP_MODE = process.env["XYNE_SPACES_AUTH_MODE"] === "app";
+      if (APP_MODE) {
+        if (declaredSize > ATTACHMENT_DOWNLOAD_FALLBACK_LIMIT_BYTES) {
+          return err(
+            `Attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(declaredSize)}) could not be fetched: this automation run downloads via the app endpoint and the file is over the ${formatAttachmentBytes(ATTACHMENT_DOWNLOAD_FALLBACK_LIMIT_BYTES)} limit. Ask the user for a smaller file.`,
+          );
+        }
+        try {
+          const dl = await appFetchBuffer(`/files/download/${encodeURIComponent(attachmentId)}`);
+          inlineBuffer = dl.buffer;
+          declaredSize = dl.buffer.length;
+          if (!m.mimetype && dl.contentType) resolvedMime = dl.contentType;
+          source = { data: dl.buffer.toString("base64") };
+          sourceLabel = "an app download";
+        } catch (appErr) {
+          // The app route runs a workspace-isolation check and requires the
+          // files:read scope. A failure here is the honest signal: the app is
+          // missing files:read, or the file is deleted / outside this workspace.
+          return err(
+            `Could not fetch attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(m.size)}) via the app endpoint. ` +
+            "The app is likely missing the files:read scope, or the file is deleted / not in this workspace. " +
+            `(${appErr instanceof Error ? appErr.message : String(appErr)})`,
+          );
+        }
+      } else try {
         const signed = (await spacesFetch(
           `/api/attachments/${encodeURIComponent(attachmentId)}/signed-url`,
         )) as SignedAttachmentUrlResponse;

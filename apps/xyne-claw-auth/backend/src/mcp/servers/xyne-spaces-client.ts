@@ -263,6 +263,41 @@ export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAu
   return response.json();
 }
 
+/**
+ * App-token BINARY variant of appFetch. Hits the `/api/apps/*` routes (gated by
+ * Spaces' `authenticateApp` middleware) using the agent's app token as Bearer,
+ * and returns the raw response body as a Buffer + content-type.
+ *
+ * This is the app-mode counterpart of spacesFetchBuffer. On an automation /
+ * app-user run there is NO human session, so the user-scoped
+ * `/api/attachments/:id/download` route rejects the app token (401). The app
+ * download route `/api/apps/files/download/:attachmentId` accepts the app token
+ * (authenticateApp + files:read, workspace-scoped) and is the only path that
+ * returns attachment bytes for a headless run.
+ */
+export async function appFetchBuffer(
+  path: string,
+  auth?: SpacesAuthContext,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+  if (!baseUrl) throw new Error("Spaces base URL is not configured.");
+  if (!token) throw new Error("Spaces app token is missing for this request.");
+
+  const url = `${baseUrl}/api/apps${path}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 300)}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
+}
+
 export interface QueryAST {
   model: string;
   operation: "findMany" | "count";
