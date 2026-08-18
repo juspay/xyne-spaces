@@ -1295,9 +1295,6 @@ const parseNode = (
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
         const externalHref = href;
         props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
-          if (e.metaKey || e.ctrlKey) {
-            logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: externalHref });
-          }
           e.preventDefault();
           openLink(externalHref, e);
         };

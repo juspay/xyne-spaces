@@ -53,6 +53,8 @@ export interface ElectronAPI {
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  // Optional: absent on Electron builds older than the one that added it.
+  onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
   onOpenXyneAIWithContext: (
     callback: (data: {
