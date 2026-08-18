@@ -1372,7 +1372,16 @@ export class CallController {
             typeof callMetadata?.detailedSummaryCanvasId === 'string'
               ? callMetadata.detailedSummaryCanvasId
               : null,
-          detailedSummaryReady: !!callMetadata?.detailedSummaryReady,
+          // Tri-state, not a plain boolean: `true`/`false` are recordings
+          // created after this flag existed (still generating vs done);
+          // `null` means the key is entirely absent from metadata (a
+          // recording from before this flag existed at all) — those already
+          // finished generating long ago, so the frontend treats `null` the
+          // same as `true` and only treats an explicit `false` as "not ready".
+          detailedSummaryReady:
+            typeof callMetadata?.detailedSummaryReady === 'boolean'
+              ? callMetadata.detailedSummaryReady
+              : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
               ? callMetadata.linkedTicketId

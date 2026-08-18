@@ -176,7 +176,7 @@ export interface RecordingDetail extends Recording {
   messageId: string | null;
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
-  detailedSummaryReady: boolean;
+  detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;

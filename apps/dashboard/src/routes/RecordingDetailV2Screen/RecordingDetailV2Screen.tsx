@@ -383,6 +383,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const linkedTicketId = typeof rawLinkedTicketId === 'string' ? rawLinkedTicketId : null;
       const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
+      const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
       const next: RecordingDetail = {
         ...prev,
@@ -395,7 +396,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
           typeof rawDetailedSummaryCanvasId === 'string'
             ? rawDetailedSummaryCanvasId
             : prev.detailedSummaryCanvasId,
-        detailedSummaryReady: !!metadata?.['detailedSummaryReady'] || prev.detailedSummaryReady,
+        detailedSummaryReady:
+          typeof rawDetailedSummaryReady === 'boolean'
+            ? rawDetailedSummaryReady
+            : prev.detailedSummaryReady,
         notesCanvasId:
           prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
         markedItems: recordingRow.markedItems ?? prev.markedItems,
@@ -542,7 +546,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     // Picking the template the existing summary was already written with is a no-op
     if (
       recording.detailedSummaryCanvasId &&
-      recording.detailedSummaryReady &&
+      recording.detailedSummaryReady !== false &&
       summaryTemplateId === recording.summaryTemplateId
     ) {
       handleTabSelect('summary');
@@ -731,7 +735,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Polling has given up (or was skipped for an old recording) and there is still no
   // stitched audio, so the control bar shows an unavailable indicator, not a spinner.
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
-  const hasDetailedSummary = !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady;
+  // The canvas itself now exists from call-start (so sharing works
+  // immediately) — gate on detailedSummaryReady too, otherwise this would
+  // flip true instantly and skip straight past the shimmer. `null` means the
+  // recording predates this flag (already finished generating long ago), so
+  // only an explicit `false` counts as "still generating".
+  const hasDetailedSummary =
+    !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady !== false;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const summaryTemplateOptions: RecordingSummaryTemplate[] = [
     DEFAULT_SUMMARY_TEMPLATE_OPTION,
