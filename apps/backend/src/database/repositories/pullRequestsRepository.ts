@@ -183,25 +183,6 @@ export class PRMetricsRepository {
         }
       });
 
-      if (currentPr.ticketId) {
-        const ticket = await this.prisma.ticket.findUnique({
-          where: { id: currentPr.ticketId },
-          select: { id: true, createdBy: true, metadata: true },
-        });
-        const metadata = ticket?.metadata as Record<string, unknown> | null | undefined;
-        if (ticket && metadata?.surface === 'SDLC') {
-          await this.prisma.ticket.update({
-            where: { id: ticket.id },
-            data: {
-              stageName: 'Done',
-              statusV2: 'COMPLETED',
-              statusUpdatedAt: new Date(),
-              updatedBy: ticket.createdBy,
-            },
-          });
-        }
-      }
-
       return { pr: currentPr, statusChanged, previousStatus };
     } catch (err) {
       logger.error(`[PR-Repository] Error marking PR as merged for ${prUrl}:`, err);

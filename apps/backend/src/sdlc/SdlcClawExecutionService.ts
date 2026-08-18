@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { TicketStatusV2, type SdlcBaselineKind } from '@xyne/shared';
+import { PRStatus, PRStatusEvent, TicketStatusV2, type SdlcBaselineKind } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
@@ -10,6 +10,7 @@ import {
   getS2SClawRunStatus,
   runS2SClawAgent,
 } from '@/services/clawAgentService';
+import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
 import { logger } from '@/utils/logger';
 import { BASELINE_DEFINITIONS } from './baselineDefinitions';
 import { baselineWikiState, type BaselineWikiState } from './baselineWikiContext';
@@ -55,10 +56,6 @@ interface ExecutionContext {
   parentWikiExecutionId?: string;
   baselineWikiState?: BaselineWikiState;
   generationCommit?: string;
-  kind?: 'PRD' | 'TECH_DOC';
-  title?: string;
-  prompt?: string;
-  parentCanvasId?: string;
   ticketId?: string;
   sourceType?: 'CANVAS' | 'TICKET';
   sourceId?: string;
@@ -205,82 +202,6 @@ export class SdlcClawExecutionService {
     return baselineWikiState({ executionStatus: execution.status, phase });
   }
 
-  async dispatchArtifact(executionId: string, admissionPermitId: string): Promise<boolean> {
-    const execution = await this.prisma.workflowExecution.findUnique({
-      where: { id: executionId },
-      include: { workflow: true },
-    });
-    if (!execution?.createdBy) throw new Error(`Invalid SDLC artifact execution ${executionId}`);
-    const current = this.readContext(execution.context);
-    if (!current.repoId || !current.kind || !current.title) {
-      throw new Error(`Incomplete SDLC artifact execution ${executionId}`);
-    }
-    const [repo, user] = await Promise.all([
-      this.prisma.repo.findUnique({ where: { id: current.repoId } }),
-      this.requireUser(execution.createdBy),
-    ]);
-    if (!repo?.channelId) throw new Error('SDLC repository unavailable');
-    const repository = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
-    const generationCommit =
-      current.generationCommit || (await sdlcVcs.resolveBaseBranchHead(repo.id));
-    const conversationId = current.conversationId || `chat-sdlc-artifact-${execution.id}`;
-    const sessionId = randomUUID();
-    if (
-      !(await this.setRunning(execution.id, execution.workflowId, {
-        ...current,
-        phase: 'GENERATING',
-        conversationId,
-        sessionId,
-        credentialSessionId: sessionId,
-        admissionPermitId,
-        ...newSdlcClawDeadline(),
-        generationCommit,
-      }))
-    )
-      return false;
-    const agentContext = await sdlcAgentContext.build(
-      { userId: execution.createdBy, workspaceId: this.requiredWorkspaceId(repo.workspaceId) },
-      repo.id,
-      {
-        operation: 'artifact',
-        workflowExecutionId: execution.id,
-        sessionId,
-        conversationId,
-        artifactKind: current.kind,
-        generationCommit,
-        sourceType: current.sourceType,
-        sourceId: current.sourceId,
-      }
-    );
-    const response = await runS2SClawAgent({
-      sessionId,
-      agentSlug: SDLC_AGENT_SLUG,
-      task: this.artifactPrompt(
-        { ...current, generationCommit },
-        execution.id,
-        repo.name,
-        repository.cloneUrl,
-        requireSdlcBaseBranch(repo.baseBranch)
-      ),
-      userId: user.id,
-      userName: user.name || user.email,
-      userEmail: user.email,
-      callbackUrl: this.callbackUrl(execution.id, 'artifact'),
-      callbackSecret: config.xyneClaw.s2sKey,
-      conversationId,
-      channelId: repo.channelId,
-      workspaceId: this.requiredWorkspaceId(repo.workspaceId),
-      executionProfile: 'sdlc',
-      sdlcOperation: 'artifact',
-      sdlcContext: agentContext as unknown as Record<string, unknown>,
-      allowWriteInReadOnlyJob: true,
-    });
-    if (response.sessionId && response.sessionId !== sessionId) {
-      await this.patchContext(execution.id, { sessionId: response.sessionId });
-    }
-    return true;
-  }
-
   async dispatchWork(executionId: string, admissionPermitId: string): Promise<boolean> {
     const execution = await this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
@@ -414,10 +335,6 @@ export class SdlcClawExecutionService {
           await this.completeBaselineStep(execution.id, execution.workflowId, step);
           return;
         }
-        if (execution.workflowType === 'SDLC_ARTIFACT') {
-          await this.completeArtifact(execution.id, execution.workflowId);
-          return;
-        }
         if (execution.workflowType === 'SDLC_WORK') {
           await this.completeWork(execution.id, execution.workflowId, payload.result);
           return;
@@ -440,7 +357,7 @@ export class SdlcClawExecutionService {
     const terminalFailureBefore = new Date(Date.now() - 10 * 60 * 1000);
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
-        workflowType: { in: ['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK'] },
+        workflowType: { in: ['SDLC_SETUP', 'SDLC_WORK'] },
         status: { in: ['PENDING', 'RUNNING'] },
         updatedAt: { lt: staleBefore },
         createdBy: { not: null },
@@ -542,7 +459,7 @@ export class SdlcClawExecutionService {
   async restoreAdmissionPermits(): Promise<void> {
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
-        workflowType: { in: ['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK'] },
+        workflowType: { in: ['SDLC_SETUP', 'SDLC_WORK'] },
         status: 'RUNNING',
       },
       select: { id: true, context: true },
@@ -571,6 +488,7 @@ export class SdlcClawExecutionService {
         prId: true,
         prUrl: true,
         repositoryUrl: true,
+        ticketId: true,
       },
       orderBy: { updatedAt: 'asc' },
       take: 25,
@@ -589,15 +507,30 @@ export class SdlcClawExecutionService {
     const results = await Promise.allSettled(
       pullRequests.map(async (pullRequest) => {
         const repoId = repoIdByPullRequest.get(pullRequest.id);
-        if (!repoId) return;
+        if (!repoId || !pullRequest.ticketId) return;
         const inspection = await sdlcVcs.inspectPullRequest(repoId, pullRequest.prId);
         if (inspection.state === 'MERGED') {
-          await repository.markMergedPr({
+          const result = await repository.markMergedPr({
             prId: pullRequest.prId,
             repoUrl: pullRequest.repositoryUrl,
             prUrl: pullRequest.prUrl,
             numberOfComments: inspection.numberOfComments,
           });
+          if (result?.statusChanged) {
+            const remainingOpenPRs = await repository.countPRsForTicket(
+              pullRequest.ticketId,
+              pullRequest.prId,
+              pullRequest.prUrl,
+              [PRStatus.OPEN, PRStatus.UPDATED]
+            );
+            await prTicketStatusSyncService.syncTicketStatusOnPRChange({
+              prId: pullRequest.prId,
+              prUrl: pullRequest.prUrl,
+              newStatus: PRStatus.MERGED,
+              prEvent: PRStatusEvent.MERGED,
+              remainingOpenPRs,
+            });
+          }
         } else if (inspection.state === 'CLOSED') {
           await repository.markDeclinedPr({
             prId: pullRequest.prId,
@@ -672,17 +605,6 @@ export class SdlcClawExecutionService {
       });
       await sdlcQueue.enqueueSetup(executionId, context.repoId);
     }
-  }
-
-  private async completeArtifact(executionId: string, workflowId: string) {
-    const context = await this.executionContext(executionId);
-    const canvas = await this.findCanvasByExecution(context.repoId, executionId);
-    if (!canvas) throw new Error('Claw completed without creating the SDLC artifact');
-    await this.finishExecution(executionId, workflowId, {
-      ...context,
-      phase: 'COMPLETED',
-      canvasId: canvas.id,
-    });
   }
 
   private async completeWork(executionId: string, workflowId: string, rawResult: unknown) {
@@ -774,37 +696,6 @@ export class SdlcClawExecutionService {
     ]);
   }
 
-  private artifactPrompt(
-    context: ExecutionContext,
-    executionId: string,
-    repoName: string,
-    repoUrl: string,
-    baseBranch: string
-  ): string {
-    const parent = context.parentCanvasId
-      ? `Read parent PRD canvas ${context.parentCanvasId} before drafting.`
-      : '';
-    return `Create an implementation-ready ${context.kind} for SDLC repository ${repoName}.
-Repository identity is server-pinned. Do not search Spaces or guess another repository.
-Pinned URL: ${repoUrl}
-Pinned branch: ${baseBranch}
-Pinned generation commit: ${context.generationCommit}
-After sandbox setup, detach the sandbox at that generation commit before inspection.
-Use the repository sandbox, approved baseline canvases, channel messages, and linked context when relevant.
-${parent}
-Title: ${context.title}
-User direction: ${context.prompt || 'Use the available evidence and repository conventions.'}
-
-Use \`[[source:N]]\` for every repository file reference and submit matching structured sourceReferences
-(path, optional symbol/startLine/endLine). Never construct repository URLs.
-
-Call spaces-sdlc-mutate-artifact exactly once with repoId ${context.repoId}, artifactType ${context.kind}, action create,
-title ${JSON.stringify(context.title)}, workflowExecutionId ${executionId}${
-      context.parentCanvasId ? `, parentCanvasId ${context.parentCanvasId}` : ''
-    }, complete Markdown, and sourceReferences. Submit only after that mutation succeeds. If validation fails,
-correct the arguments and retry; never submit a failed mutation. Then submit the returned canvas id. Never create a generic canvas.`;
-  }
-
   private workPrompt(input: {
     repoId: string;
     repoName: string;
@@ -877,24 +768,6 @@ as failure.`;
       }
     }
     return result;
-  }
-
-  private async findCanvasByExecution(repoId: string, executionId: string) {
-    const repo = await this.prisma.repo.findUnique({
-      where: { id: repoId },
-      select: { channelId: true },
-    });
-    if (!repo?.channelId) return null;
-    const canvases = await this.prisma.canvas.findMany({
-      where: { channelId: repo.channelId },
-      select: { id: true, metadata: true },
-    });
-    return (
-      canvases.find((canvas) => {
-        const metadata = canvas.metadata as Record<string, unknown> | null;
-        return metadata?.workflowExecutionId === executionId;
-      }) ?? null
-    );
   }
 
   private async setRunning(

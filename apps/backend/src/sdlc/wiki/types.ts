@@ -14,14 +14,4 @@ export interface SdlcWikiPageSummary {
 
 export interface SdlcWiki {
   listPages(actor: SdlcWikiActor, repoId: string): Promise<SdlcWikiPageSummary[]>;
-  repairPreview(actor: SdlcWikiActor, repoId: string): Promise<Array<{
-    path: string;
-    action: 'archive' | 'review';
-    reason: string;
-    canvasId: string;
-    preservesCanvasIdentity: true;
-    preservesVersionHistory: true;
-    preservesSourceEvidence: true;
-    applied: false;
-  }>>;
 }

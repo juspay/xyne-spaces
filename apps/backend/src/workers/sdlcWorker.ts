@@ -100,11 +100,9 @@ class SdlcWorker {
       const dispatched =
         job.data.type === 'SETUP'
           ? await sdlcClawExecutionService.dispatchSetup(job.data.executionId, permit.permitId)
-          : job.data.type === 'ARTIFACT'
-            ? await sdlcClawExecutionService.dispatchArtifact(job.data.executionId, permit.permitId)
-            : job.data.type === 'WORK'
-              ? await sdlcClawExecutionService.dispatchWork(job.data.executionId, permit.permitId)
-              : await sdlcWikiExecutionService.dispatch(job.data.executionId, permit.permitId);
+          : job.data.type === 'WORK'
+            ? await sdlcClawExecutionService.dispatchWork(job.data.executionId, permit.permitId)
+            : await sdlcWikiExecutionService.dispatch(job.data.executionId, permit.permitId);
       if (!dispatched) await sdlcAdmission.release(permit.permitId);
       return { dispatched };
     } catch (error) {

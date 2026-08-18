@@ -2,7 +2,6 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import {
   attachSdlcRepositorySchema,
   checkSdlcRepositoryAccessSchema,
-  createSdlcArtifactSchema,
   createSdlcLinkSchema,
   configureSdlcVcsCredentialSchema,
   sdlcVcsProviderSchema,
@@ -222,14 +221,6 @@ router.get(
   })
 );
 
-router.get(
-  '/repositories/:repoId/wiki/repair-preview',
-  route(async (req, res) => {
-    const preview = await sdlcWiki.repairPreview(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, preview, applied: false });
-  })
-);
-
 router.post(
   '/repositories/:repoId/wiki/generate',
   route(async (req, res) => {
@@ -293,15 +284,6 @@ router.post(
   route(async (req, res) => {
     const execution = await sdlcHub.cancelSetup(actorFromRequest(req), req.params.repoId);
     res.status(200).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/artifacts',
-  route(async (req, res) => {
-    const input = createSdlcArtifactSchema.parse(req.body);
-    const artifact = await sdlcHub.createArtifact(actorFromRequest(req), req.params.repoId, input);
-    res.status(201).json({ success: true, artifact });
   })
 );
 

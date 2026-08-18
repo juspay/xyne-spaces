@@ -11,7 +11,6 @@ import {
   SDLC_BASELINE_COUNT,
   WorkspaceRole,
   type AttachSdlcRepositoryInput,
-  type CreateSdlcArtifactInput,
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
   type UpdateSdlcBaselineDraftInput,
@@ -592,154 +591,6 @@ export class SdlcHubService implements SdlcHub {
     return { executionId: execution.id, status: 'CANCELLED' };
   }
 
-  async createArtifact(
-    actor: SdlcActor,
-    repoId: string,
-    input: CreateSdlcArtifactInput
-  ): Promise<SdlcArtifact> {
-    const repo = await this.requireRepositoryRole(actor, repoId, false);
-    await this.requireArtifactCreationGate(actor, repoId, repo.channelId!);
-    const folderName = input.kind === 'PRD' ? 'PRDs' : 'Tech Docs';
-    const folder = await this.prisma.canvasFolder.findFirst({
-      where: { channelId: repo.channelId, name: folderName },
-      select: { id: true },
-    });
-    if (!folder) {
-      throw new AppError(`${folderName} folder not found`, 409);
-    }
-
-    if (input.kind === 'TECH_DOC' && !input.parentCanvasId) {
-      throw new AppError('Tech Doc requires a parent PRD', 400);
-    }
-    if (input.generateWithAi) {
-      if (input.kind === 'TECH_DOC' && input.parentCanvasId) {
-        const parent = await this.prisma.canvas.findFirst({
-          where: { id: input.parentCanvasId, channelId: repo.channelId },
-          select: { metadata: true },
-        });
-        const metadata = parent?.metadata as Record<string, unknown> | null;
-        if (metadata?.repoId !== repoId || metadata.artifactKind !== 'PRD') {
-          throw new AppError('PRD canvas not found', 404);
-        }
-      }
-      const conversationId = `chat-sdlc-artifact-${randomUUID()}`;
-      const context = JSON.stringify({
-        repoId,
-        phase: 'QUEUED',
-        kind: input.kind,
-        title: input.title,
-        prompt: input.aiPrompt,
-        parentCanvasId: input.parentCanvasId,
-        conversationId,
-      });
-      const execution = await this.prisma.$transaction(async (tx) => {
-        const workflow = await tx.workflow.create({
-          data: {
-            workspaceId: actor.workspaceId,
-            workflowName: `SDLC ${input.kind.toLowerCase()}: ${input.title}`,
-            workflowType: 'SDLC_ARTIFACT',
-            status: 'PENDING',
-            context,
-            metadata: JSON.stringify({ repoId, kind: input.kind }),
-          },
-        });
-        return tx.workflowExecution.create({
-          data: {
-            workspaceId: actor.workspaceId,
-            workflowId: workflow.id,
-            workflowType: 'SDLC_ARTIFACT',
-            status: 'PENDING',
-            context,
-            createdBy: actor.userId,
-          },
-        });
-      });
-      try {
-        await sdlcQueue.enqueueArtifact(execution.id, repoId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.prisma.$transaction([
-          this.prisma.workflowExecution.update({
-            where: { id: execution.id },
-            data: {
-              status: 'FAILURE',
-              context: JSON.stringify({
-                ...JSON.parse(context),
-                phase: 'PARTIALLY_FAILED',
-                error: message,
-              }),
-            },
-          }),
-          this.prisma.workflow.update({
-            where: { id: execution.workflowId },
-            data: { status: 'FAILURE' },
-          }),
-        ]);
-        throw new AppError(`Failed to start Claw artifact generation: ${message}`, 503);
-      }
-      return { kind: input.kind, executionId: execution.id, conversationId };
-    }
-    const artifactContent = input.content;
-
-    return this.prisma.$transaction(async (tx) => {
-      if (input.kind === 'TECH_DOC' && input.parentCanvasId) {
-        await this.requireArtifactCanvas(tx, repoId, repo.channelId!, input.parentCanvasId, 'PRD');
-        const existing = await tx.sdlcEntityLink.findFirst({
-          where: {
-            repoId,
-            sourceType: 'CANVAS',
-            sourceId: input.parentCanvasId,
-            relationType: 'TECH_DOC',
-          },
-        });
-        if (existing) {
-          throw new AppError('PRD already has a Tech Doc', 409);
-        }
-      }
-
-      const canvas = await tx.canvas.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          title: input.title,
-          content: artifactContent as Prisma.InputJsonValue,
-          channelId: repo.channelId,
-          folderId: folder.id,
-          projectId: repo.projectId,
-          createdBy: actor.userId,
-          lastEditedBy: actor.userId,
-          lastEditedAt: new Date(),
-          visibility: CanvasVisibility.PRIVATE,
-          isCollaborative: true,
-          metadata: {
-            surface: 'SDLC',
-            repoId,
-            artifactKind: input.kind,
-          },
-          participants: {
-            create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
-          },
-        },
-      });
-
-      if (input.kind === 'TECH_DOC' && input.parentCanvasId) {
-        await tx.sdlcEntityLink.create({
-          data: {
-            workspaceId: actor.workspaceId,
-            repoId,
-            sourceType: 'CANVAS',
-            sourceId: input.parentCanvasId,
-            targetType: 'CANVAS',
-            targetId: canvas.id,
-            relationType: 'TECH_DOC',
-            createdBy: actor.userId,
-          },
-        });
-      }
-
-      return { canvasId: canvas.id, kind: input.kind };
-    });
-  }
-
   async getExecutionDebug(
     actor: SdlcActor,
     repoId: string,
@@ -825,47 +676,11 @@ export class SdlcHubService implements SdlcHub {
       }
     }
 
-    if (input.workflowExecutionId && input.kind !== 'BASELINE') {
-      const existing = await this.findSdlcCanvas(repo.channelId, {
-        workflowExecutionId: input.workflowExecutionId,
-        artifactKind: input.kind,
-      });
-      if (existing) {
-        return {
-          canvasId: existing.id,
-          viewAccessId: existing.viewAccessId ?? undefined,
-          url: `/chat/canvas/${existing.id}`,
-          kind: input.kind,
-        };
-      }
-    }
-
     let artifactMarkdown = input.markdown;
     let artifactGenerationCommit: string | undefined;
     let artifactSourceReferences: SdlcSourceReference[] = [];
-    if (input.kind !== 'BASELINE' && input.workflowExecutionId) {
-      const artifactExecution = await this.prisma.workflowExecution.findFirst({
-        where: {
-          id: input.workflowExecutionId,
-          workspaceId: actor.workspaceId,
-          workflowType: 'SDLC_ARTIFACT',
-          status: 'RUNNING',
-          createdBy: actor.userId,
-        },
-        select: { context: true },
-      });
-      if (!artifactExecution) throw new AppError('Active SDLC artifact execution not found', 409);
-      const artifactContext = this.parseJsonRecord(artifactExecution.context);
-      if (artifactContext.repoId !== repo.id) {
-        throw new AppError('SDLC artifact execution does not belong to this repository', 403);
-      }
-      artifactGenerationCommit =
-        typeof artifactContext.generationCommit === 'string'
-          ? artifactContext.generationCommit
-          : undefined;
-      if (!artifactGenerationCommit) {
-        throw new AppError('SDLC artifact generation commit is unavailable', 409);
-      }
+    if (input.kind !== 'BASELINE') {
+      artifactGenerationCommit = await sdlcVcs.resolveBaseBranchHead(repo.id);
       const resolved = await this.resolveSourceReferences({
         repoId: repo.id,
         repositoryUrl: repo.canonicalUrl || repo.url,
@@ -916,7 +731,7 @@ export class SdlcHubService implements SdlcHub {
                 artifactKind: input.kind,
                 ...(input.baselineKind ? { baselineKind: input.baselineKind } : {}),
                 ...(input.setupExecutionId ? { setupExecutionId: input.setupExecutionId } : {}),
-                ...(input.workflowExecutionId
+                ...(input.kind === 'BASELINE' && input.workflowExecutionId
                   ? { workflowExecutionId: input.workflowExecutionId }
                   : {}),
                 ...(artifactGenerationCommit ? { generationCommit: artifactGenerationCommit } : {}),
@@ -1341,12 +1156,9 @@ export class SdlcHubService implements SdlcHub {
     const repo = await this.requireRepositoryRole(actor, input.repoId, false);
     if (!repo.channelId || !repo.projectId) throw new AppError('SDLC repository not found', 404);
     await this.requireArtifactCreationGate(actor, repo.id, repo.channelId);
-    const artifactIdentity = input.canvasId
-      ? { id: input.canvasId }
-      : { viewAccessId: input.viewAccessId! };
     const existing = await this.prisma.canvas.findFirst({
       where: {
-        ...artifactIdentity,
+        id: input.canvasId,
         channelId: repo.channelId,
         metadata: { path: ['artifactKind'], equals: input.kind },
       },

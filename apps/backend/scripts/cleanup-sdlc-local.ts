@@ -5,7 +5,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { getBaseRedisOptions } from '../src/services/redisFactory';
 
 const prisma = new PrismaClient();
-const SDLC_WORKFLOW_TYPES = ['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK', 'SDLC_WIKI'];
+const SDLC_WORKFLOW_TYPES = ['SDLC_SETUP', 'SDLC_WORK', 'SDLC_WIKI'];
 const PROTECTED_TABLES = new Set([
   'users',
   'workspaces',

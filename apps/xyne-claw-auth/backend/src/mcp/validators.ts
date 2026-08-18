@@ -295,14 +295,14 @@ register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
   if (artifactType === "PRD" || artifactType === "TECH_DOC") {
     if (!["create", "update"].includes(action)) return `${artifactType} action must be create or update`;
     if (action === "create") {
-      for (const key of ["title", "markdown", "workflowExecutionId"]) {
+      for (const key of ["title", "markdown"]) {
         if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
       }
       if (artifactType === "TECH_DOC" && !String(params["parentCanvasId"] ?? "").trim()) {
         return "parentCanvasId is required for TECH_DOC create";
       }
     } else {
-      for (const key of ["viewAccessId", "markdown"]) {
+      for (const key of ["canvasId", "markdown"]) {
         if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
       }
     }
