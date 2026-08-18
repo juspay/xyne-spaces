@@ -1,4 +1,5 @@
 import type React from 'react';
+import { RRule } from 'rrule';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
 import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
@@ -7,8 +8,49 @@ import { formatDuration } from '../../utils/dateUtils';
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
 /** Inverse of topPxForMinutes: pixel offset → minutes since midnight (raw, not snapped) */
-export function minutesFromTopPx(px: number): number {
-  return (px / HOUR_HEIGHT) * 60;
+export function minutesFromTopPx(px: number, hourHeight: number = HOUR_HEIGHT): number {
+  return (px / hourHeight) * 60;
+}
+
+export interface CalendarCreateSlotOptions {
+  clampToDay?: boolean;
+  durationMins?: number;
+  hourHeight?: number;
+  snapMode?: 'floor' | 'nearest';
+  snapIntervalMins?: number;
+}
+
+export function snapMinutes(minutes: number, intervalMins: number): number {
+  return Math.round(minutes / intervalMins) * intervalMins;
+}
+
+export function getCalendarCreateSlot(
+  date: Date,
+  rawStartMins: number,
+  {
+    clampToDay = false,
+    durationMins = 60,
+    snapMode = 'floor',
+    snapIntervalMins = 30,
+  }: CalendarCreateSlotOptions = {},
+): { startsAt: Date; endsAt: Date; startMins: number; endMins: number } {
+  const latestStartMins = Math.max(0, 24 * 60 - durationMins);
+  const snappedStartMins =
+    snapMode === 'nearest'
+      ? snapMinutes(rawStartMins, snapIntervalMins)
+      : Math.floor(rawStartMins / snapIntervalMins) * snapIntervalMins;
+  const startMins = clampToDay
+    ? Math.max(0, Math.min(latestStartMins, snappedStartMins))
+    : snappedStartMins;
+  const endMins = clampToDay
+    ? Math.min(24 * 60, startMins + durationMins)
+    : startMins + durationMins;
+  const startsAt = new Date(date);
+  startsAt.setHours(Math.floor(startMins / 60), startMins % 60, 0, 0);
+  const endsAt = new Date(date);
+  endsAt.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
+
+  return { startsAt, endsAt, startMins, endMins };
 }
 
 /**
@@ -21,25 +63,25 @@ export function createSlotClickHandler(
   isPopoverOpen: boolean,
   consumeDragEnd: (() => boolean) | undefined,
   onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined,
+  options: CalendarCreateSlotOptions = {},
 ): (e: React.MouseEvent<HTMLDivElement>) => void {
   return (e: React.MouseEvent<HTMLDivElement>) => {
     if (isPopoverOpen || consumeDragEnd?.()) return;
     if (!onCreateCallAtSlot) return;
-    const rawMins = minutesFromTopPx(e.clientY - e.currentTarget.getBoundingClientRect().top);
-    const hour = Math.floor(rawMins / 60);
-    const snappedStart = hour * 60 + (rawMins % 60 < 30 ? 0 : 30);
-    const start = new Date(date);
-    start.setHours(Math.floor(snappedStart / 60), snappedStart % 60, 0, 0);
-    const end = new Date(date);
-    const snappedEnd = snappedStart + 60;
-    end.setHours(Math.floor(snappedEnd / 60), snappedEnd % 60, 0, 0);
-    onCreateCallAtSlot(start, end);
+    if ((e.target as HTMLElement).closest('button')) return;
+
+    const rawMins = minutesFromTopPx(
+      e.clientY - e.currentTarget.getBoundingClientRect().top,
+      options.hourHeight,
+    );
+    const { startsAt, endsAt } = getCalendarCreateSlot(date, rawMins, options);
+    onCreateCallAtSlot(startsAt, endsAt);
   };
 }
 
 /** Snap a minute value to the nearest 15-minute interval */
 export function snapTo15(minutes: number): number {
-  return Math.round(minutes / 15) * 15;
+  return snapMinutes(minutes, 15);
 }
 
 /**
@@ -352,6 +394,24 @@ export function getCallEventProps(call: Call, currentUserId?: string) {
     isDeclined,
     isMaybe,
   };
+}
+
+/**
+ * Convert an RRULE string to a short human-readable label.
+ * e.g. "FREQ=WEEKLY;BYDAY=TU" → "Every week on Tuesday"
+ */
+export function formatRecurrenceRule(ruleStr: string | null | undefined): string {
+  if (!ruleStr) return 'This call repeats on a schedule';
+  try {
+    // Strip the "RRULE:" prefix if present, then parse
+    const cleaned = ruleStr.replace(/^RRULE:/i, '');
+    const options = RRule.parseString(cleaned);
+    const rule = new RRule(options);
+    const text = rule.toText();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  } catch {
+    return 'This call repeats on a schedule';
+  }
 }
 
 /**

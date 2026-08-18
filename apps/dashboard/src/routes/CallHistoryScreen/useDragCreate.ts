@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { HOUR_HEIGHT, dayKey, formatTime, snapTo15 } from './CalenderViewUtils';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  HOUR_HEIGHT,
+  dayKey,
+  formatTime,
+  minutesFromTopPx,
+  snapMinutes,
+} from './CalenderViewUtils';
 
 export interface DragCreatePreview {
   dateKey: string;
@@ -21,9 +27,47 @@ interface UseDragCreateReturn {
   consumeDragEnd: () => boolean;
 }
 
+export interface UseDragCreateOptions {
+  coordinateRef?: RefObject<HTMLElement | null>;
+  hourHeight?: number;
+  minimumDurationMins?: number;
+  snapIntervalMins?: number;
+}
+
+const DAY_MINUTES = 24 * 60;
+
+// Calculates the start and end minutes of a drag selection, ensuring that the selection is at least `minimumDurationMins` long. If the user drags in the opposite direction, the selection will expand to meet the minimum duration requirement.
+const getDragCreateRange = (
+  anchorMins: number,
+  currentMins: number,
+  minimumDurationMins: number,
+): { startMins: number; endMins: number } => {
+  let startMins = Math.min(anchorMins, currentMins);
+  let endMins = Math.max(anchorMins, currentMins);
+
+  if (endMins - startMins < minimumDurationMins) {
+    if (currentMins < anchorMins) {
+      startMins = Math.max(0, endMins - minimumDurationMins);
+    } else {
+      endMins = Math.min(DAY_MINUTES, startMins + minimumDurationMins);
+      if (endMins - startMins < minimumDurationMins) {
+        startMins = Math.max(0, endMins - minimumDurationMins);
+      }
+    }
+  }
+
+  return { startMins, endMins };
+};
+
 export function useDragCreate(
-  gridRef: React.RefObject<HTMLDivElement | null>,
+  gridRef: RefObject<HTMLDivElement | null>,
   onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined,
+  {
+    coordinateRef,
+    hourHeight = HOUR_HEIGHT,
+    minimumDurationMins = 15,
+    snapIntervalMins = 15,
+  }: UseDragCreateOptions = {},
 ): UseDragCreateReturn {
   const stateRef = useRef<DragState | null>(null);
   const previewRef = useRef<DragCreatePreview | null>(null);
@@ -33,7 +77,9 @@ export function useDragCreate(
   const [dragCreatePreview, setDragCreatePreview] = useState<DragCreatePreview | null>(null);
 
   // Clean up window listeners if the component unmounts mid-drag
-  useEffect(() => () => cleanupRef.current?.(), []);
+  useEffect(() => {
+    return (): void => cleanupRef.current?.();
+  }, []);
 
   /** Call at the top of handleClick — returns true (and resets) if a drag just ended. */
   const consumeDragEnd = useCallback((): boolean => {
@@ -56,12 +102,29 @@ export function useDragCreate(
       e.preventDefault();
       cleanupRef.current?.();
 
-      const anchorRawMins =
-        ((e.clientY - grid.getBoundingClientRect().top + grid.scrollTop) / HOUR_HEIGHT) * 60;
+      const getRawMins = (clientY: number): number => {
+        const coordinateElement = coordinateRef?.current;
+        if (coordinateElement) {
+          return minutesFromTopPx(
+            clientY - coordinateElement.getBoundingClientRect().top,
+            hourHeight,
+          );
+        }
+
+        return minutesFromTopPx(
+          clientY - grid.getBoundingClientRect().top + grid.scrollTop,
+          hourHeight,
+        );
+      };
+
+      const anchorRawMins = getRawMins(e.clientY);
 
       stateRef.current = {
         date,
-        anchorMins: snapTo15(anchorRawMins),
+        anchorMins: Math.max(
+          0,
+          Math.min(DAY_MINUTES, snapMinutes(anchorRawMins, snapIntervalMins)),
+        ),
         anchorClientY: e.clientY,
         active: false,
       };
@@ -69,16 +132,19 @@ export function useDragCreate(
 
       // Converts a clientY to snapped minutes, clamped to [0, 24*60]
       const toSnappedMins = (clientY: number): number => {
-        const g = gridRef.current!;
-        const raw = ((clientY - g.getBoundingClientRect().top + g.scrollTop) / HOUR_HEIGHT) * 60;
-        return Math.max(0, Math.min(24 * 60, snapTo15(raw)));
+        return Math.max(
+          0,
+          Math.min(DAY_MINUTES, snapMinutes(getRawMins(clientY), snapIntervalMins)),
+        );
       };
 
       const buildPreview = (currentMins: number): DragCreatePreview => {
         const { anchorMins } = stateRef.current!;
-        const startMins = Math.min(anchorMins, currentMins);
-        // Enforce minimum 15-min duration
-        const endMins = Math.max(Math.max(anchorMins, currentMins), startMins + 15);
+        const { startMins, endMins } = getDragCreateRange(
+          anchorMins,
+          currentMins,
+          minimumDurationMins,
+        );
         const startDate = new Date(date);
         startDate.setHours(Math.floor(startMins / 60), startMins % 60, 0, 0);
         const endDate = new Date(date);
@@ -106,7 +172,7 @@ export function useDragCreate(
         setDragCreatePreview(preview);
       };
 
-      const onPointerUp = (): void => {
+      const finishDrag = (shouldCreate: boolean): void => {
         const state = stateRef.current;
         const preview = previewRef.current;
 
@@ -116,7 +182,7 @@ export function useDragCreate(
         previewRef.current = null;
         setDragCreatePreview(null);
 
-        if (!state?.active || !preview) return;
+        if (!shouldCreate || !state?.active || !preview) return;
 
         // Flag so the trailing click event doesn't also trigger click-to-create
         dragEndedRef.current = true;
@@ -128,14 +194,19 @@ export function useDragCreate(
         onCreateCallAtSlot(startDate, endDate);
       };
 
+      const onPointerUp = (): void => finishDrag(true);
+      const onPointerCancel = (): void => finishDrag(false);
+
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
-      cleanupRef.current = () => {
+      window.addEventListener('pointercancel', onPointerCancel);
+      cleanupRef.current = (): void => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
       };
     },
-    [gridRef, onCreateCallAtSlot],
+    [coordinateRef, gridRef, hourHeight, minimumDurationMins, onCreateCallAtSlot, snapIntervalMins],
   );
 
   return { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd };

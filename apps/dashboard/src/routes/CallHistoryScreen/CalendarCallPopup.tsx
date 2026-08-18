@@ -21,7 +21,6 @@ import {
   CalendarFold,
   Loader2,
 } from 'lucide-react';
-import { RRule } from 'rrule';
 import { useSelector } from '@xstate/react';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
@@ -45,6 +44,7 @@ import { formatRelativeTime, formatTimeAmPm, formatTimeUntil } from '../../utils
 import {
   didAttend,
   formatCallDuration,
+  formatRecurrenceRule,
   MAX_AVATARS_TO_SHOW,
   RSVP_BADGE_BASE_CLASS,
 } from './CalenderViewUtils';
@@ -70,24 +70,6 @@ function formatPopupDate(startsAt: number | string): string {
     month: 'long',
     day: 'numeric',
   });
-}
-
-/**
- * Convert an RRULE string to a short human-readable label.
- * e.g. "FREQ=WEEKLY;BYDAY=TU" → "Every week on Tuesday"
- */
-function formatRecurrenceRule(ruleStr: string | null | undefined): string {
-  if (!ruleStr) return 'This call repeats on a schedule';
-  try {
-    // Strip the "RRULE:" prefix if present, then parse
-    const cleaned = ruleStr.replace(/^RRULE:/i, '');
-    const options = RRule.parseString(cleaned);
-    const rule = new RRule(options);
-    const text = rule.toText();
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  } catch {
-    return 'This call repeats on a schedule';
-  }
 }
 
 // Small RSVP badge overlaid on the avatar bottom-right corner
