@@ -24,6 +24,8 @@ export interface UserGroupMappingLike {
 export interface ComplexityScoreLike {
   boardId: string;
   weight: number | null;
+  /** "Use percentage assignment" — when false/unset the percentDiff term is not applied. */
+  usePercentage?: boolean | null;
 }
 
 export interface ExpertiseMappingLike {
@@ -74,6 +76,21 @@ export function computeProjectBoardIds(
   return new Set(boards.filter(b => b.projectId === selected.projectId).map(b => b.id));
 }
 
+/**
+ * Whether the percentDiff term applies to the selected board. Mirrors the engine:
+ * percentDiff is gated on board_complexity_scores.usePercentage for the target board
+ * (assignmentEngine.ts `usePercentageForBoard`).
+ */
+export function computeUsePercentageForBoard(
+  boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined,
+  selectedBoardId: string | null,
+): boolean {
+  if (!selectedBoardId) return false;
+  return (
+    (boardComplexityScores ?? []).find(s => s.boardId === selectedBoardId)?.usePercentage === true
+  );
+}
+
 /** Σ activeTasks across all members on the selected board (0 when no board selected). */
 export function computeTotalTicketsOnBoard(
   workloadMappings: readonly WorkloadMappingLike[] | null | undefined,
@@ -111,6 +128,10 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const weightByBoard = buildWeightByBoard(boardComplexityScores);
   const projectBoardIds = computeProjectBoardIds(boards, selectedBoardId);
   const totalTicketsOnBoard = computeTotalTicketsOnBoard(workloadMappings, selectedBoardId);
+  const usePercentageForBoard = computeUsePercentageForBoard(
+    boardComplexityScores,
+    selectedBoardId,
+  );
   const expertiseByUser = new Map((expertiseMappings ?? []).map(e => [e.userId, e] as const));
   const startOffsetByUser = new Map(
     (userGroupMappings ?? []).map(m => [m.userId, m.startOffset ?? 0] as const),
@@ -137,9 +158,8 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
       const percentage = em?.percentage ?? 100;
       const expertiseBonus = hasExpertise ? 10 : 0;
       const currentPct = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
-      const score = selectedBoardId
-        ? effectiveActiveTasks - expertiseBonus - (percentage - currentPct)
-        : null;
+      const percentDiff = usePercentageForBoard ? percentage - currentPct : 0;
+      const score = selectedBoardId ? effectiveActiveTasks - expertiseBonus - percentDiff : null;
       return {
         user,
         userTickets,

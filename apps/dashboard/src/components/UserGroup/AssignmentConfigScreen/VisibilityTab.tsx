@@ -7,6 +7,7 @@ import type { Board } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import {
   computeAssignmentScores,
+  computeUsePercentageForBoard,
   type ComplexityScoreLike,
   type ExpertiseMappingLike,
   type UserGroupMappingLike,
@@ -69,6 +70,7 @@ export function VisibilityTab({
 
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;
   const hasAnyStartOffset = scoreRows.some(row => row.startOffset > 0);
+  const usePercentage = computeUsePercentageForBoard(boardComplexityScores, selectedBoardId);
 
   return (
     <>
@@ -94,7 +96,9 @@ export function VisibilityTab({
           </Select>
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
-              ? 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus − percentDiff. Lowest score is assigned next.'
+              ? usePercentage
+                ? 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus − percentDiff. Lowest score is assigned next.'
+                : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next. percentDiff is excluded because “Use percentage assignment” is off for this board.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>
         </div>
