@@ -14,6 +14,11 @@ import { recordingRepairStateService } from '@/services/recordingRepairStateServ
 import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
 import { logger } from '@/utils/logger';
 
+// A whole-call recording.webm streamed through the backend. Long calls are large,
+// so the body is piped straight to storage (never buffered); this bound only
+// rejects absurd Content-Lengths up front.
+const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024;
+
 function manifestContentHash(manifest: Parameters<typeof serializeManifestForHash>[0]): string {
   return createHash('sha256').update(serializeManifestForHash(manifest)).digest('hex');
 }
@@ -38,23 +43,23 @@ class RecordingRepairController {
     });
   }
 
-  // Proxy one MediaRecorder fragment (a chunk `.part`) through the backend to GCS.
-  // The raw octet-stream body is written server-side — no direct-to-GCS PUT, no
-  // bucket CORS. Authorized by the caller's session + call ownership.
-  uploadChunk = async (req: Request, res: Response): Promise<void> => {
-    const { callId, captureId, sequence } = req.params;
+  // Stream the whole capture (one recording.webm) through the backend to GCS. The
+  // request body is piped straight to storage — never buffered — so long calls do
+  // not sit in memory. No direct-to-GCS PUT, no bucket CORS. Authorized by the
+  // caller's session + call ownership.
+  uploadAudio = async (req: Request, res: Response): Promise<void> => {
+    const { callId, captureId } = req.params;
     if (!req.user?.id) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    const seq = Number(sequence);
-    if (!isUuid(captureId) || !Number.isSafeInteger(seq) || seq < 0) {
-      res.status(400).json({ success: false, error: 'Invalid recording repair chunk request' });
+    if (!isUuid(captureId)) {
+      res.status(400).json({ success: false, error: 'Invalid recording repair upload request' });
       return;
     }
-    const body = req.body as Buffer;
-    if (!Buffer.isBuffer(body) || body.length === 0) {
-      res.status(400).json({ success: false, error: 'Empty recording repair chunk' });
+    const contentLength = Number(req.headers['content-length'] ?? 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_AUDIO_BYTES) {
+      res.status(413).json({ success: false, error: 'Recording is too large' });
       return;
     }
     try {
@@ -67,16 +72,16 @@ class RecordingRepairController {
         return;
       }
 
-      await recordingRepairStorageService.writeChunkPart(callId, captureId, seq, body);
+      await recordingRepairStorageService.writeAudioStream(callId, captureId, req);
       res.json({ success: true });
     } catch (error) {
-      logger.error('[RecordingRepairController] Chunk upload failed', { callId, captureId, sequence: seq, error });
-      res.status(500).json({ success: false, error: 'Failed to upload recording repair chunk' });
+      logger.error('[RecordingRepairController] Audio upload failed', { callId, captureId, error });
+      res.status(500).json({ success: false, error: 'Failed to upload recording audio' });
     }
   };
 
   // Commit the capture: the client sends the full manifest, which the backend
-  // writes to GCS (the commit marker), then verifies every outage chunk landed
+  // writes to GCS (the commit marker), then verifies the recording.webm landed
   // before publishing the repair job.
   finalize = async (req: Request, res: Response): Promise<void> => {
     const { callId, captureId } = req.params;
@@ -126,13 +131,10 @@ class RecordingRepairController {
         return;
       }
 
-      // Persist the manifest (commit marker), then confirm every needed part landed.
+      // Persist the manifest (commit marker), then confirm the audio landed.
       await recordingRepairStorageService.writeManifest(callId, captureId, manifest);
-      const uploaded = await recordingRepairStorageService.listUploadedSequences(callId, captureId);
-      const missing = needed.filter((sequence) => !uploaded.has(sequence));
-      if (missing.length > 0) {
-        recordingRepairStorageService.logMissing(callId, captureId, missing);
-        res.status(400).json({ success: false, error: 'Missing recording repair chunk parts' });
+      if (!(await recordingRepairStorageService.audioExists(callId, captureId))) {
+        res.status(400).json({ success: false, error: 'Recording audio was not uploaded' });
         return;
       }
 

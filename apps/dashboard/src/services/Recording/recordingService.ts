@@ -409,15 +409,14 @@ class RecordingService {
     await apiInstance.delete(`/calls/recordings/${callId}`);
   }
 
-  /** Stream one outage chunk's bytes through the backend to GCS. */
-  async uploadRecordingRepairChunk(
+  /** Stream the whole capture (one recording.webm) through the backend to GCS. */
+  async uploadRecordingRepairAudio(
     callId: string,
     captureId: string,
-    sequence: number,
     body: Blob,
   ): Promise<void> {
     await apiInstance.post(
-      `/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`,
+      `/calls/${callId}/recording-repairs/${captureId}/audio`,
       body,
       { headers: { 'Content-Type': 'application/octet-stream' } },
     );

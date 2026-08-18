@@ -1,17 +1,16 @@
 import type { RecordingCaptureManifest } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getStorageService, type ListedFile, type StorageService } from '@/services/storage';
-import { logger } from '@/utils/logger';
 
 // GCS layout for the offline-first recorder repair path:
-//   recording-repairs/{callId}/{captureId}/chunks/{sequence}.part   (MediaRecorder fragments)
-//   recording-repairs/{callId}/{captureId}/chunk_manifest.json      (source of truth)
-// The client streams chunk-part bytes + the manifest through the backend, which
-// writes them here server-side (no direct-to-GCS PUT, no bucket CORS). Fragments
-// are NOT standalone WebM — the worker concatenates them in sequence order to
-// reconstruct the original recording.
+//   recording-repairs/{callId}/{captureId}/recording.webm       (the whole capture)
+//   recording-repairs/{callId}/{captureId}/chunk_manifest.json  (source of truth)
+// The client stitches the capture locally and streams the ONE recording.webm plus
+// the manifest through the backend, which writes them here server-side (no
+// direct-to-GCS PUT, no bucket CORS). The worker hands the whole file to the
+// transcription agent as-is — no reconstruction, no per-fragment concatenation.
 
-const CHUNK_CONTENT_TYPE = 'application/octet-stream';
+const AUDIO_CONTENT_TYPE = 'application/octet-stream';
 const MANIFEST_CONTENT_TYPE = 'application/json';
 
 function isNotFound(error: unknown): boolean {
@@ -33,25 +32,34 @@ class RecordingRepairStorageService {
     return `recording-repairs/${callId}/${captureId}/`;
   }
 
-  chunkPartPath(callId: string, captureId: string, sequence: number): string {
-    return `${this.capturePrefix(callId, captureId)}chunks/${sequence}.part`;
+  audioPath(callId: string, captureId: string): string {
+    return `${this.capturePrefix(callId, captureId)}recording.webm`;
   }
 
   manifestPath(callId: string, captureId: string): string {
     return `${this.capturePrefix(callId, captureId)}chunk_manifest.json`;
   }
 
-  /** Write one MediaRecorder fragment (a chunk `.part`) to storage. */
-  async writeChunkPart(
+  /** Stream the whole capture (one WebM) through to storage without buffering it. */
+  async writeAudioStream(
     callId: string,
     captureId: string,
-    sequence: number,
-    body: Buffer,
+    stream: NodeJS.ReadableStream,
   ): Promise<void> {
-    await this.storage.uploadFileV2(body, {
-      path: this.chunkPartPath(callId, captureId, sequence),
-      contentType: CHUNK_CONTENT_TYPE,
+    await this.storage.uploadStreamToPath(stream, {
+      path: this.audioPath(callId, captureId),
+      contentType: AUDIO_CONTENT_TYPE,
     });
+  }
+
+  /** Whether the capture's recording.webm has been uploaded. */
+  audioExists(callId: string, captureId: string): Promise<boolean> {
+    return this.storage.fileExists(this.audioPath(callId, captureId));
+  }
+
+  /** Download the whole capture for the transcription agent. */
+  readAudio(callId: string, captureId: string): Promise<Buffer> {
+    return this.storage.getFileBuffer(this.audioPath(callId, captureId));
   }
 
   /** Write the manifest — the capture's commit marker — to storage. */
@@ -76,21 +84,6 @@ class RecordingRepairStorageService {
     }
   }
 
-  readChunkPart(callId: string, captureId: string, sequence: number): Promise<Buffer> {
-    return this.storage.getFileBuffer(this.chunkPartPath(callId, captureId, sequence));
-  }
-
-  /** Sequences whose `.part` object currently exists in storage. */
-  async listUploadedSequences(callId: string, captureId: string): Promise<Set<number>> {
-    const files = await this.storage.listFiles(`${this.capturePrefix(callId, captureId)}chunks/`);
-    const sequences = new Set<number>();
-    for (const file of files) {
-      const match = /\/chunks\/(\d+)\.part$/.exec(file.name);
-      if (match) sequences.add(Number(match[1]));
-    }
-    return sequences;
-  }
-
   listRepairObjects(): Promise<ListedFile[]> {
     return this.storage.listFiles('recording-repairs/');
   }
@@ -112,14 +105,6 @@ class RecordingRepairStorageService {
           .join(', ')}`
       );
     }
-  }
-
-  logMissing(callId: string, captureId: string, missing: number[]): void {
-    logger.warn('[RecordingRepairStorage] Manifest references chunk parts missing from storage', {
-      callId,
-      captureId,
-      missing,
-    });
   }
 }
 

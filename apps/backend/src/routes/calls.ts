@@ -1,4 +1,4 @@
-import { Router, raw } from 'express';
+import { Router } from 'express';
 import { callController } from '@/controllers/callController';
 import { recordingEmailController } from '@/controllers/recordingEmailController';
 import { callHostControlController } from '@/controllers/callHostControlController';
@@ -43,10 +43,11 @@ router.get('/pulse-orgs', callController.getPulseOrgs);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
+// Whole-capture audio is streamed straight to storage — no body parser here, so
+// the controller pipes the raw request into GCS without buffering it in memory.
 router.post(
-  '/:callId/recording-repairs/:captureId/chunks/:sequence',
-  raw({ type: () => true, limit: '32mb' }),
-  recordingRepairController.uploadChunk,
+  '/:callId/recording-repairs/:captureId/audio',
+  recordingRepairController.uploadAudio,
 );
 router.post(
   '/:callId/recording-repairs/:captureId/finalize',

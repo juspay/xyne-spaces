@@ -10,7 +10,7 @@ const assertLease = jest.fn();
 const hasUnmergedForCall = jest.fn();
 const listDeletableCaptureIdsForCall = jest.fn();
 const readManifest = jest.fn();
-const readChunkPart = jest.fn();
+const readAudio = jest.fn();
 const deleteCaptureObjects = jest.fn();
 const transcribeRecordingRepair = jest.fn();
 const applyRecordingRepair = jest.fn();
@@ -29,7 +29,7 @@ jest.mock('@/services/recordingRepairStateService', () => ({
   },
 }));
 jest.mock('@/services/recordingRepairStorageService', () => ({
-  recordingRepairStorageService: { readManifest, readChunkPart, deleteCaptureObjects },
+  recordingRepairStorageService: { readManifest, readAudio, deleteCaptureObjects },
 }));
 jest.mock('@/services/voiceInputService', () => ({
   voiceInputService: { transcribeRecordingRepair },
@@ -63,9 +63,9 @@ jest.mock('@xyne/shared', () => ({
 
 import { RecordingRepairService } from './recordingRepairService';
 
-// EBML header so isStandaloneWebm() accepts the reconstructed buffer.
-const chunkBuffer = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
-const chunkSha = createHash('sha256').update(chunkBuffer).digest('hex');
+// EBML magic so isStandaloneWebm() accepts the uploaded recording.
+const webmAudio = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02]);
+const chunkSha = createHash('sha256').update(webmAudio).digest('hex');
 
 function manifest(overrides: Partial<RecordingCaptureManifest> = {}): RecordingCaptureManifest {
   return {
@@ -77,8 +77,9 @@ function manifest(overrides: Partial<RecordingCaptureManifest> = {}): RecordingC
     mimeType: 'audio/webm',
     audioBitsPerSecond: 48_000,
     offlineAtStart: false,
+    // One 10s chunk: media time m ms → wall (1000 + m) ms.
     chunks: [
-      { sequence: 0, byteOffset: 0, byteLength: 4, startedAtMs: 1_000, endedAtMs: 11_000, sha256: chunkSha },
+      { sequence: 0, byteOffset: 0, byteLength: 6, startedAtMs: 1_000, endedAtMs: 11_000, sha256: chunkSha },
     ],
     outages: [{ startedAtMs: 6_000, endedAtMs: 8_000, reasons: ['browser_offline'] }],
     markedMoments: [],
@@ -96,7 +97,7 @@ describe('RecordingRepairService', () => {
     // manifestHash null → the worker skips the integrity check for the test.
     claim.mockResolvedValue({ status: 'PROCESSING', leaseId: 'lease-1', manifestHash: null });
     readManifest.mockResolvedValue(manifest());
-    readChunkPart.mockResolvedValue(chunkBuffer);
+    readAudio.mockResolvedValue(webmAudio);
     deleteCaptureObjects.mockResolvedValue(undefined);
     heartbeat.mockResolvedValue(true);
     assertLease.mockResolvedValue(undefined);
@@ -105,20 +106,20 @@ describe('RecordingRepairService', () => {
     refreshRecordingArtifacts.mockResolvedValue(undefined);
   });
 
-  it('reconstructs the WebM and transcribes each outage as a media offset', async () => {
+  it('transcribes the whole recording and maps segments into outage windows', async () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: true,
       text: 'recovered',
-      audioDurationSeconds: 2,
-      segments: [{ startSeconds: 0, endSeconds: 2, text: 'recovered' }],
+      audioDurationSeconds: 10,
+      // media [5s,7s] → wall [6000,8000] = inside the outage window.
+      segments: [{ startSeconds: 5, endSeconds: 7, text: 'recovered' }],
     });
 
     await new RecordingRepairService().process('call-1', 'capture-1');
 
-    // outage [6000,8000] wall-clock → media offsets [5000,7000] (chunk starts at 1000).
+    // The whole file is handed over as-is — no media offsets.
     expect(transcribeRecordingRepair).toHaveBeenCalledWith(
-      expect.objectContaining({ originalname: 'capture-1.webm' }),
-      { startOffsetMs: 5_000, endOffsetMs: 7_000 }
+      expect.objectContaining({ originalname: 'capture-1.webm' })
     );
     expect(applyRecordingRepair).toHaveBeenCalledWith(
       'call-1',
@@ -133,7 +134,7 @@ describe('RecordingRepairService', () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: false,
       text: '',
-      audioDurationSeconds: 2,
+      audioDurationSeconds: 10,
       segments: [],
     });
 
@@ -152,23 +153,23 @@ describe('RecordingRepairService', () => {
     expect(claim).not.toHaveBeenCalled();
   });
 
-  it('fails a chunk whose bytes do not match the manifest checksum', async () => {
-    readChunkPart.mockResolvedValue(Buffer.from([0x1a, 0x45, 0xdf, 0xa4]));
+  it('fails a recording that has no WebM header', async () => {
+    readAudio.mockResolvedValue(Buffer.from([0x00, 0x00, 0x00, 0x00]));
 
     await expect(new RecordingRepairService().process('call-1', 'capture-1')).rejects.toThrow(
-      'checksum mismatch'
+      'no WebM header'
     );
     expect(applyRecordingRepair).not.toHaveBeenCalled();
     expect(markFailed).toHaveBeenCalledWith(
       'call-1',
       'capture-1',
-      expect.stringContaining('checksum mismatch'),
+      expect.stringContaining('no WebM header'),
       'lease-1',
       false
     );
   });
 
-  it('rejects decoded audio whose duration disagrees with the requested window', async () => {
+  it('rejects decoded audio whose duration disagrees with the manifest', async () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: true,
       text: 'too short',

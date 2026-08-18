@@ -19,7 +19,7 @@ interface RecordingRepairTranscriptionResponse extends PythonTranscriptionRespon
 export class VoiceInputService {
   async transcribeRecordingRepair(
     file: Express.Multer.File,
-    offsets: { startOffsetMs: number; endOffsetMs: number }
+    offsets?: { startOffsetMs: number; endOffsetMs: number }
   ): Promise<{
     text: string;
     language?: string;
@@ -36,8 +36,12 @@ export class VoiceInputService {
       filename: file.originalname,
       contentType: file.mimetype,
     });
-    form.append('startOffsetMs', String(offsets.startOffsetMs));
-    form.append('endOffsetMs', String(offsets.endOffsetMs));
+    // Whole-file mode (offsets omitted): the agent decodes + VAD/STT the entire
+    // recording. Offsets are retained only for callers that still trim a window.
+    if (offsets) {
+      form.append('startOffsetMs', String(offsets.startOffsetMs));
+      form.append('endOffsetMs', String(offsets.endOffsetMs));
+    }
 
     const startedAt = Date.now();
     try {

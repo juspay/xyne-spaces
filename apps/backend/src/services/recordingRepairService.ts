@@ -28,19 +28,27 @@ function manifestContentHash(manifest: RecordingCaptureManifest): string {
   return createHash('sha256').update(serializeManifestForHash(manifest)).digest('hex');
 }
 
+/** Total media (ms) in the recording: the sum of chunk wall-spans (pauses excluded). */
+function totalMediaMs(chunks: RecordingChunkDescriptor[]): number {
+  return chunks.reduce((sum, chunk) => sum + (chunk.endedAtMs - chunk.startedAtMs), 0);
+}
+
 /**
- * Wall-clock ms → offset (ms) into the reconstructed audio. Each chunk's media
- * duration is its wall-clock span; pause gaps between chunks contribute no media,
- * so summing chunk spans up to `wallMs` excludes paused time.
+ * Offset (ms) into the decoded audio → wall-clock ms. Each chunk contributes its
+ * wall-span of media and pause gaps between chunks contribute none, so we walk the
+ * chunks accumulating media until we reach the one containing `mediaMs`. This maps
+ * the agent's segment times (measured from the start of the whole recording) back
+ * onto the transcript's wall-clock timeline.
  */
-function wallToMediaMs(chunks: RecordingChunkDescriptor[], wallMs: number): number {
+function mediaMsToWall(chunks: RecordingChunkDescriptor[], mediaMs: number): number {
   let media = 0;
   for (const chunk of chunks) {
-    if (wallMs >= chunk.endedAtMs) media += chunk.endedAtMs - chunk.startedAtMs;
-    else if (wallMs > chunk.startedAtMs) return media + (wallMs - chunk.startedAtMs);
-    else break;
+    const span = chunk.endedAtMs - chunk.startedAtMs;
+    if (mediaMs <= media + span) return chunk.startedAtMs + (mediaMs - media);
+    media += span;
   }
-  return media;
+  const last = chunks[chunks.length - 1];
+  return last ? last.endedAtMs + (mediaMs - media) : mediaMs;
 }
 
 export class RecordingRepairService {
@@ -88,40 +96,45 @@ export class RecordingRepairService {
         throw new RecordingRepairTerminalError('Manifest has no outage windows to repair');
       }
 
-      // Download + verify + concatenate the contiguous prefix into the original WebM.
-      const buffers: Buffer[] = [];
-      for (const sequence of needed) {
-        await heartbeat();
-        await assertLease();
-        const chunk = manifest.chunks.find((c) => c.sequence === sequence);
-        if (!chunk) throw new RecordingRepairTerminalError(`Manifest is missing chunk ${sequence}`);
-        const buffer = await recordingRepairStorageService.readChunkPart(callId, captureId, sequence);
-        if (buffer.length !== chunk.byteLength) {
-          throw new RecordingRepairTerminalError(`Chunk ${sequence} size differs from manifest`);
-        }
-        if (createHash('sha256').update(buffer).digest('hex') !== chunk.sha256) {
-          throw new RecordingRepairTerminalError(`Chunk ${sequence} checksum mismatch`);
-        }
-        buffers.push(buffer);
+      // Fetch the whole capture. The client already stitched it into one WebM, so
+      // the agent decodes + VAD + STT it as-is — no reconstruction, no trimming.
+      await heartbeat();
+      await assertLease();
+      const audio = await recordingRepairStorageService.readAudio(callId, captureId);
+      if (!isStandaloneWebm(audio)) {
+        throw new RecordingRepairTerminalError('Uploaded recording has no WebM header');
       }
-      const reconstructed = Buffer.concat(buffers);
-      if (!isStandaloneWebm(reconstructed)) {
-        throw new RecordingRepairTerminalError('Reconstructed audio has no WebM header');
-      }
-      const uploadedChunks = manifest.chunks.filter((c) => needed.includes(c.sequence));
 
-      // Windows of the call to transcribe: each outage, or the whole call if offline.
+      // Windows of the call whose transcript may be replaced: each outage, or the
+      // whole call when it was offline from the start.
       const windows = manifest.offlineAtStart
         ? [
             {
               startedAtMs: manifest.startedAt,
-              endedAtMs: manifest.endedAt ?? uploadedChunks[uploadedChunks.length - 1]!.endedAtMs,
+              endedAtMs:
+                manifest.endedAt ??
+                manifest.chunks[manifest.chunks.length - 1]?.endedAtMs ??
+                manifest.startedAt,
             },
           ]
         : manifest.outages.map((outage) => ({
             startedAtMs: outage.startedAtMs,
             endedAtMs: outage.endedAtMs,
           }));
+
+      const result = await voiceInputService.transcribeRecordingRepair({
+        buffer: audio,
+        size: audio.length,
+        mimetype: manifest.mimeType,
+        originalname: `${captureId}.webm`,
+      } as Express.Multer.File);
+      await heartbeat();
+      await assertLease();
+
+      const expectedSeconds = totalMediaMs(manifest.chunks) / 1000;
+      if (Math.abs(result.audioDurationSeconds - expectedSeconds) > Math.max(2, expectedSeconds * 0.05)) {
+        throw new RecordingRepairTerminalError('Decoded recording duration differs from manifest');
+      }
 
       const repairs: Array<{
         user: string;
@@ -131,26 +144,7 @@ export class RecordingRepairService {
       }> = [];
       const replacementCoverage: Array<{ startedAt: number; endedAt: number }> = [];
 
-      for (const window of windows) {
-        await heartbeat();
-        await assertLease();
-        const startOffsetMs = wallToMediaMs(uploadedChunks, window.startedAtMs);
-        const endOffsetMs = wallToMediaMs(uploadedChunks, window.endedAtMs);
-        if (endOffsetMs <= startOffsetMs) continue;
-        const result = await voiceInputService.transcribeRecordingRepair(
-          {
-            buffer: reconstructed,
-            size: reconstructed.length,
-            mimetype: manifest.mimeType,
-            originalname: `${captureId}.webm`,
-          } as Express.Multer.File,
-          { startOffsetMs, endOffsetMs }
-        );
-        const requestedSeconds = (endOffsetMs - startOffsetMs) / 1000;
-        if (Math.abs(result.audioDurationSeconds - requestedSeconds) > 0.5) {
-          throw new RecordingRepairTerminalError('Decoded repair audio duration differs from manifest');
-        }
-        if (!result.speechDetected) continue;
+      if (result.speechDetected) {
         const segments =
           result.segments.length > 0
             ? result.segments
@@ -158,13 +152,19 @@ export class RecordingRepairService {
         for (const segment of segments) {
           const text = segment.text.trim();
           if (!text) continue;
-          // Within a window (no pause) media time is linear, so map the segment
-          // back to the wall-clock transcript timeline off the window start.
-          const startedAt = window.startedAtMs + segment.startSeconds * 1000;
-          const endedAt = Math.min(window.endedAtMs, window.startedAtMs + segment.endSeconds * 1000);
-          if (endedAt <= startedAt) continue;
-          repairs.push({ user: 'Recovered audio', text, timestamp: startedAt / 1000, participant_identity: '' });
-          replacementCoverage.push({ startedAt, endedAt });
+          // Segment times are measured from the start of the whole recording; map
+          // them onto the wall-clock timeline, then keep only the part inside an
+          // outage window so good live transcript is never overwritten.
+          const segStartWall = mediaMsToWall(manifest.chunks, segment.startSeconds * 1000);
+          const segEndWall = mediaMsToWall(manifest.chunks, segment.endSeconds * 1000);
+          for (const window of windows) {
+            const startedAt = Math.max(segStartWall, window.startedAtMs);
+            const endedAt = Math.min(segEndWall, window.endedAtMs);
+            if (endedAt <= startedAt) continue;
+            repairs.push({ user: 'Recovered audio', text, timestamp: startedAt / 1000, participant_identity: '' });
+            replacementCoverage.push({ startedAt, endedAt });
+            break;
+          }
         }
       }
 
