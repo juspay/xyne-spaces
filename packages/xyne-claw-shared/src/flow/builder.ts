@@ -945,6 +945,7 @@ function clipArtifact(body: string, marker: string): string {
 }
 
 export function buildCodeFlow(code: string, language?: string): FlowDefinition {
+  const lineCount = code.split('\n').length;
   return new FlowBuilder(`code-${crypto.randomUUID()}`)
     .addComponent({
       id: 'code',
@@ -954,6 +955,12 @@ export function buildCodeFlow(code: string, language?: string): FlowDefinition {
         ...(language ? { language } : {}),
       },
     })
+    // Without fallbackText the stored message preview degrades to the literal
+    // "Flow JSON" — see the fallback chain in apps/backend chatController.
+    .setData({
+      kind: 'code',
+      fallbackText: `${language ? `${language} ` : ''}snippet · ${lineCount} line${lineCount === 1 ? '' : 's'}`,
+    })
     .build();
 }
 
@@ -962,6 +969,9 @@ export function buildDiffFlow(path: string, patch: string): FlowDefinition {
   const headed =
     firstMeaningfulLine.startsWith('diff --git ') || firstMeaningfulLine.startsWith('--- ');
   const headedPatch = headed ? patch : `--- a/${path}\n+++ b/${path}\n${patch}`;
+  const lines = patch.split('\n');
+  const added = lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+  const removed = lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
   return new FlowBuilder(`diff-${crypto.randomUUID()}`)
     .addComponent({
       id: 'diff',
@@ -971,6 +981,7 @@ export function buildDiffFlow(path: string, patch: string): FlowDefinition {
         patch: clipArtifact(headedPatch, ' … diff truncated'),
       },
     })
+    .setData({ kind: 'diff', fallbackText: `${path} · +${added}/−${removed}` })
     .build();
 }
 
@@ -1082,16 +1093,29 @@ const CHART_MAX_SERIES_POINTS = 200;
 
 export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
   let props: Record<string, unknown>;
+  let pointCount: number;
   if (chart.type === 'line' || chart.type === 'area') {
-    props = { type: chart.type, series: chart.series.slice(0, CHART_MAX_SERIES_POINTS) };
+    const series = chart.series.slice(0, CHART_MAX_SERIES_POINTS);
+    props = { type: chart.type, series };
+    pointCount = series.length;
   } else {
-    props = { type: chart.type, points: chart.points.slice(0, CHART_MAX_CATEGORY_POINTS) };
+    const points = chart.points.slice(0, CHART_MAX_CATEGORY_POINTS);
+    props = { type: chart.type, points };
+    pointCount = points.length;
   }
   return new FlowBuilder(`chart-${crypto.randomUUID()}`)
     .addComponent({
       id: 'chart',
       type: 'chart',
       props: { ...props, ...(chart.caption ? { caption: chart.caption } : {}) },
+    })
+    // The caption carries the takeaway, so it's the best preview line we have;
+    // fall back to the shape when the agent omitted one.
+    .setData({
+      kind: 'chart',
+      fallbackText: chart.caption?.trim()
+        ? chart.caption.trim()
+        : `${chart.type} chart · ${pointCount} point${pointCount === 1 ? '' : 's'}`,
     })
     .build();
 }

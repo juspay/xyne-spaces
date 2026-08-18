@@ -11,13 +11,22 @@ describe("buildCodeFlow", () => {
       type: "code",
       props: { code: "const a = 1;\n", language: "typescript" },
     });
-    expect(flow.data).toBeUndefined();
+    // `data` carries only the preview line — never an action surface.
+    expect(flow.data).toEqual({ kind: "code", fallbackText: "typescript snippet · 2 lines" });
     expect(flow.components[0]?.props).not.toHaveProperty("submitAction");
   });
 
   it("omits language when absent rather than emitting an empty one", () => {
     const flow = buildCodeFlow("plain text");
     expect(flow.components[0]?.props).not.toHaveProperty("language");
+  });
+
+  // Without fallbackText the stored message preview renders the literal
+  // "Flow JSON" (apps/backend chatController falls back through
+  // data.fallbackText → title → "Flow JSON", and these flows set no title).
+  it("carries a preview line even with no language", () => {
+    const flow = buildCodeFlow("one line");
+    expect(flow.data).toMatchObject({ fallbackText: "snippet · 1 line" });
   });
 });
 
@@ -32,7 +41,8 @@ describe("buildDiffFlow", () => {
     const props = flow.components[0]?.props as { path: string; patch: string };
     expect(props.path).toBe("src/push/token.ts");
     expect(props.patch).toBe(`--- a/src/push/token.ts\n+++ b/src/push/token.ts\n${hunk}`);
-    expect(flow.data).toBeUndefined();
+    // Preview line only — no action surface on a display-only card.
+    expect(flow.data).toEqual({ kind: "diff", fallbackText: "src/push/token.ts · +1/−1" });
   });
 
   it("still adds headers when a hunk body line looks like a file header", () => {
@@ -180,5 +190,28 @@ describe("buildChartFlow", () => {
   it("omits caption when absent", () => {
     const flow = buildChartFlow({ type: "donut", points: [{ label: "a", value: 1 }] });
     expect(flow.components[0]?.props).not.toHaveProperty("caption");
+  });
+
+  it("uses the caption as the preview line — it carries the takeaway", () => {
+    const flow = buildChartFlow({
+      type: "bar",
+      points: [{ label: "Mon", value: 1 }],
+      caption: "Push failures per day",
+    });
+    expect(flow.data).toMatchObject({ kind: "chart", fallbackText: "Push failures per day" });
+  });
+
+  it("falls back to the chart shape when the agent omitted a caption", () => {
+    const flow = buildChartFlow({
+      type: "line",
+      series: [{ x: "Mon", y: 1 }, { x: "Tue", y: 2 }],
+    });
+    expect(flow.data).toMatchObject({ fallbackText: "line chart · 2 points" });
+  });
+
+  it("counts the capped points, not the caller's, in the preview line", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ label: `d${i}`, value: i }));
+    const flow = buildChartFlow({ type: "bar", points: many });
+    expect(flow.data).toMatchObject({ fallbackText: "bar chart · 24 points" });
   });
 });

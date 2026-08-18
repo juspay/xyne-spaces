@@ -35,8 +35,8 @@ export const askUserQuestion: ToolDefinition = {
     "`single_choice` for exactly one option, `multiple_choice` for one or more options, or `open_ended` for free text. " +
     "Choice questions require 2-8 concise `options`; open-ended questions must not include options. Each option is " +
     "either a label string or `{ label, description }` — prefer the object form and give every option a short " +
-    "description explaining the trade-off, since the UI renders it as a second line under the label. Use a short, " +
-    "The UI adds a default 'Skip this question' response, so do not add your own skip option. " +
+    "description explaining the trade-off, since the UI renders it as a second line under the label. " +
+    "The UI adds a default 'Skip this question' response, so do not add your own skip option. Use a short, " +
     "human-readable `label` for the question tab (for example, 'Version scope') and an optional stable `id`; when " +
     "id is omitted, q1, q2, etc. are generated. Set `required: false` only when the question is genuinely optional. " +
     "A new agent run automatically starts with the structured answers and any per-question notes as context. " +
@@ -52,7 +52,7 @@ export const askUserQuestion: ToolDefinition = {
         type: "array",
         description: "One or more questions to ask together (at most 8).",
         items: { type: "object", properties: {
-          id: { type: "string" }, label: { type: "string" }, question: { type: "string" }, type: { type: "string", description: "single_choice, multiple_choice, or open_ended" }, options: { type: "array", description: "Each option is either a plain label string, or { label, description } to show a one-line explanation under the label.", items: { oneOf: [{ type: "string" }, { type: "object", properties: { label: { type: "string" }, description: { type: "string" } }, required: ["label"] }] } }, required: { type: "boolean" }, placeholder: { type: "string" },
+          id: { type: "string" }, label: { type: "string" }, question: { type: "string" }, type: { type: "string", enum: ["single_choice", "multiple_choice", "open_ended"], description: "single_choice, multiple_choice, or open_ended" }, options: { type: "array", description: "Choice questions only: 2-8 options. Each is an object with a `label` and an optional one-line `description` shown under it. A plain string is also accepted as a bare label.", items: { type: "object", properties: { label: { type: "string" }, description: { type: "string" } }, required: ["label"] } }, required: { type: "boolean" }, placeholder: { type: "string" },
         }, required: ["question", "type"] },
       },
     },
