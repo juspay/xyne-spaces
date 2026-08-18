@@ -3,7 +3,6 @@ export type {
   UploadOptions,
   UploadResult,
   UploadToPathOptions,
-  ConditionalUploadResult,
   DeleteResult,
   FileMetadata,
   ListedFile,

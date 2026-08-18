@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import { callController } from '@/controllers/callController';
 import { recordingEmailController } from '@/controllers/recordingEmailController';
 import { callHostControlController } from '@/controllers/callHostControlController';
@@ -44,8 +44,9 @@ router.get('/pulse-orgs', callController.getPulseOrgs);
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
 router.post(
-  '/:callId/recording-repairs/:captureId/upload-urls',
-  recordingRepairController.getUploadUrls,
+  '/:callId/recording-repairs/:captureId/chunks/:sequence',
+  raw({ type: () => true, limit: '32mb' }),
+  recordingRepairController.uploadChunk,
 );
 router.post(
   '/:callId/recording-repairs/:captureId/finalize',

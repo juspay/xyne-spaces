@@ -74,15 +74,6 @@ const electronAPI = {
       ipcRenderer.invoke('recording-fs:delete-capture', { captureId }),
     freeSpace: (): Promise<{ availableBytes: number | null }> =>
       ipcRenderer.invoke('recording-fs:free-space'),
-    putChunk: (args: {
-      url: string;
-      captureId: string;
-      byteOffset: number;
-      byteLength: number;
-      contentType: string;
-    }): Promise<{ status: number }> => ipcRenderer.invoke('recording-fs:put-chunk', args),
-    putManifest: (captureId: string, url: string): Promise<{ status: number }> =>
-      ipcRenderer.invoke('recording-fs:put-manifest', { captureId, url }),
   },
 
   openExternal: (url: string) => {

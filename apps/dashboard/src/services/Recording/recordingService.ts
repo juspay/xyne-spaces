@@ -5,7 +5,12 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
+import type {
+  DefaultOutlet,
+  GrantableEntityUserAccess,
+  RecordingCaptureManifest,
+  RecordingType,
+} from '@xyne/shared';
 import { CallType } from '@xyne/shared';
 
 export interface RecordingSession {
@@ -404,27 +409,27 @@ class RecordingService {
     await apiInstance.delete(`/calls/recordings/${callId}`);
   }
 
-  async requestRecordingRepairUploadUrls(
+  /** Stream one outage chunk's bytes through the backend to GCS. */
+  async uploadRecordingRepairChunk(
     callId: string,
     captureId: string,
-    sequences: number[],
-  ): Promise<{ chunks: Array<{ sequence: number; url: string }>; manifestUrl: string }> {
-    const response: AxiosResponse<{
-      chunks: Array<{ sequence: number; url: string }>;
-      manifestUrl: string;
-    }> = await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/upload-urls`, {
-      sequences,
-    });
-    return { chunks: response.data.chunks, manifestUrl: response.data.manifestUrl };
+    sequence: number,
+    body: Blob,
+  ): Promise<void> {
+    await apiInstance.post(
+      `/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`,
+      body,
+      { headers: { 'Content-Type': 'application/octet-stream' } },
+    );
   }
 
   async finalizeRecordingRepair(
     callId: string,
     captureId: string,
-    manifestHash: string,
+    manifest: RecordingCaptureManifest,
   ): Promise<void> {
     await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {
-      manifestHash,
+      manifest,
     });
   }
 

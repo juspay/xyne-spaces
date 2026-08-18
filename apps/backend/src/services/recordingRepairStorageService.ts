@@ -6,13 +6,13 @@ import { logger } from '@/utils/logger';
 // GCS layout for the offline-first recorder repair path:
 //   recording-repairs/{callId}/{captureId}/chunks/{sequence}.part   (MediaRecorder fragments)
 //   recording-repairs/{callId}/{captureId}/chunk_manifest.json      (source of truth)
-// Chunks are uploaded directly by the client via signed PUT URLs; the manifest is
-// uploaded LAST as the commit marker. Fragments are NOT standalone WebM — the worker
-// concatenates them in sequence order to reconstruct the original recording.
+// The client streams chunk-part bytes + the manifest through the backend, which
+// writes them here server-side (no direct-to-GCS PUT, no bucket CORS). Fragments
+// are NOT standalone WebM — the worker concatenates them in sequence order to
+// reconstruct the original recording.
 
 const CHUNK_CONTENT_TYPE = 'application/octet-stream';
 const MANIFEST_CONTENT_TYPE = 'application/json';
-const UPLOAD_URL_EXPIRY_SECONDS = 15 * 60;
 
 function isNotFound(error: unknown): boolean {
   const status =
@@ -41,17 +41,28 @@ class RecordingRepairStorageService {
     return `${this.capturePrefix(callId, captureId)}chunk_manifest.json`;
   }
 
-  chunkUploadUrl(callId: string, captureId: string, sequence: number): Promise<string> {
-    return this.storage.generateUploadSignedUrl(this.chunkPartPath(callId, captureId, sequence), {
+  /** Write one MediaRecorder fragment (a chunk `.part`) to storage. */
+  async writeChunkPart(
+    callId: string,
+    captureId: string,
+    sequence: number,
+    body: Buffer,
+  ): Promise<void> {
+    await this.storage.uploadFileV2(body, {
+      path: this.chunkPartPath(callId, captureId, sequence),
       contentType: CHUNK_CONTENT_TYPE,
-      expirySeconds: UPLOAD_URL_EXPIRY_SECONDS,
     });
   }
 
-  manifestUploadUrl(callId: string, captureId: string): Promise<string> {
-    return this.storage.generateUploadSignedUrl(this.manifestPath(callId, captureId), {
+  /** Write the manifest — the capture's commit marker — to storage. */
+  async writeManifest(
+    callId: string,
+    captureId: string,
+    manifest: RecordingCaptureManifest,
+  ): Promise<void> {
+    await this.storage.uploadFileV2(Buffer.from(JSON.stringify(manifest), 'utf8'), {
+      path: this.manifestPath(callId, captureId),
       contentType: MANIFEST_CONTENT_TYPE,
-      expirySeconds: UPLOAD_URL_EXPIRY_SECONDS,
     });
   }
 

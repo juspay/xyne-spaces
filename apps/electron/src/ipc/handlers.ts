@@ -231,29 +231,6 @@ export function setupIpcHandlers(): void {
     assertRecordingFsSender(event);
     return recordingFs.freeSpace();
   });
-  ipcMain.handle(
-    'recording-fs:put-chunk',
-    (
-      event,
-      args: {
-        url: string;
-        captureId: string;
-        byteOffset: number;
-        byteLength: number;
-        contentType: string;
-      },
-    ) => {
-      assertRecordingFsSender(event);
-      return recordingFs.putChunk(args);
-    },
-  );
-  ipcMain.handle(
-    'recording-fs:put-manifest',
-    (event, { captureId, url }: { captureId: string; url: string }) => {
-      assertRecordingFsSender(event);
-      return recordingFs.putManifest(captureId, url);
-    },
-  );
 
   // Webview preload path handler
   ipcMain.on('get-webview-preload-path', (event) => {

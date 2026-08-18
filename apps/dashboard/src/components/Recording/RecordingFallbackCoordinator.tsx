@@ -18,7 +18,7 @@ import {
   RECORDING_STORAGE_EXHAUSTED_EVENT,
 } from '../../services/Recording/offlineRecordingService';
 import { setRecordingRepairUploader } from '../../services/Recording/archive/uploader';
-import { signedUrlUploader } from '../../services/Recording/archive/signedUrlUploader';
+import { backendProxyUploader } from '../../services/Recording/archive/backendProxyUploader';
 import {
   AGENT_LEFT_CONFIRM_DELAY_MS,
   isTranscriptionAgentIdentity,
@@ -74,7 +74,7 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
 
   useEffect(() => {
     const initialize = (): void => {
-      setRecordingRepairUploader(signedUrlUploader);
+      setRecordingRepairUploader(backendProxyUploader);
       void offlineRecordingService.initialize().catch(() => {
         sendRecordingEvent({ type: 'setFallbackProtection', availability: 'unavailable' });
       });

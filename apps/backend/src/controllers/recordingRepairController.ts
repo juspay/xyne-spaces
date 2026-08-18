@@ -5,6 +5,7 @@ import {
   neededChunkSequences,
   serializeManifestForHash,
   validateManifestStructure,
+  type RecordingCaptureManifest,
 } from '@xyne/shared';
 import { validate as isUuid } from 'uuid';
 import { repositories } from '@/database/repositories';
@@ -12,8 +13,6 @@ import { recordingRepairQueue } from '@/queues/recordingRepairQueue';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
 import { logger } from '@/utils/logger';
-
-const MAX_UPLOAD_URLS = 5_000;
 
 function manifestContentHash(manifest: Parameters<typeof serializeManifestForHash>[0]): string {
   return createHash('sha256').update(serializeManifestForHash(manifest)).digest('hex');
@@ -39,23 +38,23 @@ class RecordingRepairController {
     });
   }
 
-  // Issue short-lived signed PUT URLs so the client uploads chunk parts + the
-  // manifest directly to GCS. Authorized by the caller's session + call ownership;
-  // no permanent storage credentials ever reach the browser/Electron.
-  getUploadUrls = async (req: Request, res: Response): Promise<void> => {
-    const { callId, captureId } = req.params;
+  // Proxy one MediaRecorder fragment (a chunk `.part`) through the backend to GCS.
+  // The raw octet-stream body is written server-side — no direct-to-GCS PUT, no
+  // bucket CORS. Authorized by the caller's session + call ownership.
+  uploadChunk = async (req: Request, res: Response): Promise<void> => {
+    const { callId, captureId, sequence } = req.params;
     if (!req.user?.id) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    const sequences = (req.body as { sequences?: unknown }).sequences;
-    if (
-      !isUuid(captureId) ||
-      !Array.isArray(sequences) ||
-      sequences.length > MAX_UPLOAD_URLS ||
-      sequences.some((s) => !Number.isSafeInteger(s) || (s as number) < 0)
-    ) {
-      res.status(400).json({ success: false, error: 'Invalid recording repair upload request' });
+    const seq = Number(sequence);
+    if (!isUuid(captureId) || !Number.isSafeInteger(seq) || seq < 0) {
+      res.status(400).json({ success: false, error: 'Invalid recording repair chunk request' });
+      return;
+    }
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ success: false, error: 'Empty recording repair chunk' });
       return;
     }
     try {
@@ -68,31 +67,48 @@ class RecordingRepairController {
         return;
       }
 
-      const chunks = await Promise.all(
-        (sequences as number[]).map(async (sequence) => ({
-          sequence,
-          url: await recordingRepairStorageService.chunkUploadUrl(callId, captureId, sequence),
-        }))
-      );
-      const manifestUrl = await recordingRepairStorageService.manifestUploadUrl(callId, captureId);
-      res.json({ success: true, chunks, manifestUrl });
+      await recordingRepairStorageService.writeChunkPart(callId, captureId, seq, body);
+      res.json({ success: true });
     } catch (error) {
-      logger.error('[RecordingRepairController] Upload URL generation failed', { callId, captureId, error });
-      res.status(500).json({ success: false, error: 'Failed to issue recording repair upload URLs' });
+      logger.error('[RecordingRepairController] Chunk upload failed', { callId, captureId, sequence: seq, error });
+      res.status(500).json({ success: false, error: 'Failed to upload recording repair chunk' });
     }
   };
 
+  // Commit the capture: the client sends the full manifest, which the backend
+  // writes to GCS (the commit marker), then verifies every outage chunk landed
+  // before publishing the repair job.
   finalize = async (req: Request, res: Response): Promise<void> => {
     const { callId, captureId } = req.params;
-    const manifestHash = String((req.body as { manifestHash?: unknown }).manifestHash ?? '').toLowerCase();
     if (!req.user?.id) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    if (!isUuid(captureId) || !/^[a-f0-9]{64}$/.test(manifestHash)) {
+    const manifest = (req.body as { manifest?: unknown }).manifest as RecordingCaptureManifest | undefined;
+    if (
+      !isUuid(captureId) ||
+      !manifest ||
+      typeof manifest !== 'object' ||
+      manifest.callId !== callId ||
+      manifest.captureId !== captureId ||
+      !Array.isArray(manifest.chunks) ||
+      !Array.isArray(manifest.outages) ||
+      !Array.isArray(manifest.markedMoments)
+    ) {
       res.status(400).json({ success: false, error: 'Invalid finalize request' });
       return;
     }
+    const structureError = validateManifestStructure(manifest);
+    if (structureError) {
+      res.status(400).json({ success: false, error: structureError });
+      return;
+    }
+    const needed = neededChunkSequences(manifest);
+    if (needed.length === 0) {
+      res.status(400).json({ success: false, error: 'Manifest has no outage windows to repair' });
+      return;
+    }
+    const manifestHash = manifestContentHash(manifest);
     try {
       const authorized = await this.getOwnedHeadlessCall(req, callId);
       if (authorized.error) return this.sendAuthError(res, authorized.error);
@@ -110,25 +126,8 @@ class RecordingRepairController {
         return;
       }
 
-      const manifest = await recordingRepairStorageService.readManifest(callId, captureId);
-      if (!manifest || manifest.callId !== callId || manifest.captureId !== captureId) {
-        res.status(400).json({ success: false, error: 'Manifest was not uploaded' });
-        return;
-      }
-      if (manifestContentHash(manifest) !== manifestHash) {
-        res.status(400).json({ success: false, error: 'Manifest hash mismatch' });
-        return;
-      }
-      const structureError = validateManifestStructure(manifest);
-      if (structureError) {
-        res.status(400).json({ success: false, error: structureError });
-        return;
-      }
-      const needed = neededChunkSequences(manifest);
-      if (needed.length === 0) {
-        res.status(400).json({ success: false, error: 'Manifest has no outage windows to repair' });
-        return;
-      }
+      // Persist the manifest (commit marker), then confirm every needed part landed.
+      await recordingRepairStorageService.writeManifest(callId, captureId, manifest);
       const uploaded = await recordingRepairStorageService.listUploadedSequences(callId, captureId);
       const missing = needed.filter((sequence) => !uploaded.has(sequence));
       if (missing.length > 0) {

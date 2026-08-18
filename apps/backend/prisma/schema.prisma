@@ -2635,11 +2635,6 @@ model Call {
   @@schema("public")
 }
 
-// NOTE: RecordingRepairCapture and RecordingRepairCallState were removed. The
-// offline-recorder repair control plane is now Redis-only (see
-// recordingRepairStateService.ts + recordingRepairRedisKeys.ts). The durability
-// backstop is the user's local recording.webm, not Postgres.
-
 /// Polymorphic sharing record. `entityId` is resolved according to
 /// `shareableEntityType`; application services enforce target existence and access.
 /// Sharing target is exactly one of userId, userGroupId, or channelId.

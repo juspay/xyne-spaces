@@ -328,48 +328,6 @@ export class GCSService {
     }
   }
 
-  /** Atomically create an exact object path without overwriting an existing object. */
-  async uploadFileV2IfAbsent(
-    buffer: Buffer,
-    options: {
-      path: string;
-      contentType: string;
-      cacheControl?: string;
-      metadata?: Record<string, string>;
-    },
-  ): Promise<GCSUploadResult & { created: boolean }> {
-    if (!buffer.length) throw new Error('File buffer is empty or invalid');
-    const file = this.bucket.file(options.path);
-    try {
-      await file.save(buffer, {
-        resumable: false,
-        preconditionOpts: { ifGenerationMatch: 0 },
-        metadata: {
-          contentType: options.contentType,
-          cacheControl: options.cacheControl ?? 'private, max-age=0',
-          metadata: options.metadata,
-        },
-      });
-      return {
-        filename: options.path,
-        gcsPath: options.path,
-        size: buffer.length,
-        created: true,
-      };
-    } catch (error) {
-      const code = (error as { code?: number }).code;
-      if (code === 409 || code === 412) {
-        const metadata = await this.getFileMetadata(options.path);
-        return {
-          filename: options.path,
-          gcsPath: options.path,
-          size: Number(metadata.size ?? 0),
-          created: false,
-        };
-      }
-      throw error;
-    }
-  }
 
   /**
    * Delete file from GCS
@@ -435,36 +393,6 @@ export class GCSService {
       }
 
       throw new Error('Signed URL generation failed: Unknown error');
-    }
-  }
-
-  async generateUploadSignedUrl(
-    filename: string,
-    options: { contentType: string; expirySeconds?: number }
-  ): Promise<string> {
-    try {
-      if (!filename) {
-        throw new Error('Filename is required for signed upload URL generation');
-      }
-
-      // v4 write URL. The object need not exist yet. The bound Content-Type must
-      // be sent verbatim on the client PUT or GCS rejects the signature.
-      const [signedUrl] = await this.bucket.file(filename).getSignedUrl({
-        version: 'v4',
-        action: 'write',
-        contentType: options.contentType,
-        expires: Date.now() + (options.expirySeconds ?? 900) * 1000,
-      });
-
-      return signedUrl;
-    } catch (error) {
-      logger.error(`Failed to generate signed upload URL for: ${filename}`, error);
-
-      if (error instanceof Error) {
-        throw new Error(`Signed upload URL generation failed: ${error.message}`);
-      }
-
-      throw new Error('Signed upload URL generation failed: Unknown error');
     }
   }
 

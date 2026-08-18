@@ -4,11 +4,9 @@ import type {
   UploadOptions,
   UploadResult,
   UploadToPathOptions,
-  ConditionalUploadResult,
   DeleteResult,
   FileMetadata,
   ListedFile,
-  UploadSignedUrlOptions,
 } from './types.js';
 
 export class GCSAdapter implements StorageService {
@@ -44,27 +42,12 @@ export class GCSAdapter implements StorageService {
     return { filename: r.filename, path: r.gcsPath, size: r.size };
   }
 
-  async uploadFileIfAbsent(
-    buffer: Buffer,
-    options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> },
-  ): Promise<ConditionalUploadResult> {
-    const result = await this.gcs.uploadFileV2IfAbsent(buffer, options);
-    return { filename: result.filename, path: result.gcsPath, size: result.size, created: result.created };
-  }
-
   async deleteFile(filename: string): Promise<DeleteResult> {
     return this.gcs.deleteFile(filename);
   }
 
   async generateSignedUrl(filename: string, expirationHours?: number): Promise<string> {
     return this.gcs.generateSignedUrl(filename, expirationHours);
-  }
-
-  async generateUploadSignedUrl(
-    path: string,
-    options: UploadSignedUrlOptions,
-  ): Promise<string> {
-    return this.gcs.generateUploadSignedUrl(path, options);
   }
 
   async fileExists(filename: string): Promise<boolean> {

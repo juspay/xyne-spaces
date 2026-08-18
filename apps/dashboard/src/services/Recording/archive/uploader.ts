@@ -1,9 +1,9 @@
 import type { RecordingCaptureManifest } from '@xyne/shared';
 
-// Seam between the recorder and the direct-to-GCS upload path. The recorder only
-// knows "this capture needs its outage audio repaired"; the concrete uploader
-// (Phase 5) requests signed PUT URLs, uploads byte ranges + the manifest, and
-// calls the finalize endpoint. Registered at app init via setRecordingRepairUploader.
+// Seam between the recorder and the upload path. The recorder only knows "this
+// capture needs its outage audio repaired"; the concrete uploader streams the
+// outage byte ranges + the manifest through the backend (which writes them to
+// GCS) and calls finalize. Registered at app init via setRecordingRepairUploader.
 
 export interface RecordingUploadInput {
   callId: string;

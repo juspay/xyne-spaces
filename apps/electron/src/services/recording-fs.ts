@@ -12,24 +12,6 @@ const RECORDINGS_SUBDIR = 'Xyne Recordings';
 const RECORDING_FILE = 'recording.webm';
 const MANIFEST_FILE = 'chunk_manifest.json';
 
-// Only ever PUT recording bytes to object-storage hosts. The signed URL comes
-// from our backend, but validate here too so a compromised renderer cannot use
-// the main process to exfiltrate audio to an arbitrary host.
-function isAllowedUploadUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== 'https:') return false;
-    const host = url.hostname;
-    return (
-      host === 'storage.googleapis.com' ||
-      host.endsWith('.googleapis.com') ||
-      host.endsWith('.amazonaws.com')
-    );
-  } catch {
-    return false;
-  }
-}
-
 let rootDir: string | null = null;
 let rootLoaded = false;
 const appendQueues = new Map<string, Promise<unknown>>();
@@ -209,34 +191,4 @@ export async function freeSpace(): Promise<{ availableBytes: number | null }> {
   } catch {
     return { availableBytes: null };
   }
-}
-
-export async function putChunk(args: {
-  url: string;
-  captureId: string;
-  byteOffset: number;
-  byteLength: number;
-  contentType: string;
-}): Promise<{ status: number }> {
-  if (!isAllowedUploadUrl(args.url)) throw new Error('Upload host not allowed');
-  const body = Buffer.from(await readRange(args.captureId, args.byteOffset, args.byteLength));
-  const response = await fetch(args.url, {
-    method: 'PUT',
-    headers: { 'Content-Type': args.contentType },
-    body,
-  });
-  return { status: response.status };
-}
-
-export async function putManifest(captureId: string, url: string): Promise<{ status: number }> {
-  if (!isAllowedUploadUrl(url)) throw new Error('Upload host not allowed');
-  const dir = await captureDir(captureId, false);
-  if (!dir) throw new Error('No recording directory configured');
-  const body = await fs.readFile(path.join(dir, MANIFEST_FILE));
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-  return { status: response.status };
 }

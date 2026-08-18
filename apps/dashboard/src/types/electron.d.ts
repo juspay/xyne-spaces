@@ -41,16 +41,6 @@ export interface RecordingFsApi {
   listPending: () => Promise<Array<{ captureId: string; manifestJson: string }>>;
   deleteCapture: (captureId: string) => Promise<void>;
   freeSpace: () => Promise<{ availableBytes: number | null }>;
-  /** Signed PUT of a byte range straight from the main process (no CORS). */
-  putChunk: (args: {
-    url: string;
-    captureId: string;
-    byteOffset: number;
-    byteLength: number;
-    contentType: string;
-  }) => Promise<{ status: number }>;
-  /** Signed PUT of the capture's chunk_manifest.json from the main process. */
-  putManifest: (captureId: string, url: string) => Promise<{ status: number }>;
 }
 
 export interface ElectronAPI {
