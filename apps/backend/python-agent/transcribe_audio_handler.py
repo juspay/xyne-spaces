@@ -8,7 +8,6 @@ Registered by health_server.py:
 import asyncio
 import base64
 import json
-import math
 import os
 import tempfile
 import traceback
@@ -103,7 +102,7 @@ async def _trim_to_repair_wav(
     start_offset_ms: float,
     end_offset_ms: float,
 ) -> None:
-    """Decode only the outage intersection to mono PCM for VAD and batch STT."""
+    """Decode a sub-range (one detected speech segment) to mono PCM for batch STT."""
     process = await asyncio.create_subprocess_exec(
         'ffmpeg',
         '-y',
@@ -785,9 +784,9 @@ async def transcribe_recording_repair(request):
     """
     POST /transcribe-recording-repair
 
-    Decodes the uploaded recording (whole file by default, or trimmed to one outage
-    intersection when startOffsetMs/endOffsetMs are provided), applies local Silero
-    VAD, and calls the configured STT provider only when speech exists.
+    Decodes the uploaded recording (the client has already stitched it down to the
+    outage audio), applies local Silero VAD, and calls the configured STT provider
+    only when speech exists.
     """
     import time as _time
     request_start = _time.monotonic()
@@ -803,8 +802,6 @@ async def transcribe_recording_repair(request):
 
         reader = await request.multipart()
         language = ''
-        start_offset_raw = ''
-        end_offset_raw = ''
 
         while True:
             field = await reader.next()
@@ -819,10 +816,6 @@ async def transcribe_recording_repair(request):
                         if not chunk:
                             break
                         tmp.write(chunk)
-            elif field.name == 'startOffsetMs':
-                start_offset_raw = (await field.text()).strip()
-            elif field.name == 'endOffsetMs':
-                end_offset_raw = (await field.text()).strip()
             elif field.name == 'language':
                 language = (await field.text()).strip()
 
@@ -832,24 +825,9 @@ async def transcribe_recording_repair(request):
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as repair_file:
             repair_path = repair_file.name
 
-        if start_offset_raw == '' and end_offset_raw == '':
-            # Whole-file mode: the caller has already stitched the recording down to
-            # the outage audio, so decode the entire file with no trimming.
-            await _decode_to_repair_wav(input_path, repair_path)
-        else:
-            try:
-                start_offset_ms = float(start_offset_raw)
-                end_offset_ms = float(end_offset_raw)
-            except ValueError:
-                return web.json_response({'error': 'Invalid recording repair offsets'}, status=400)
-            if (
-                not math.isfinite(start_offset_ms)
-                or not math.isfinite(end_offset_ms)
-                or start_offset_ms < 0
-                or end_offset_ms <= start_offset_ms
-            ):
-                return web.json_response({'error': 'Invalid recording repair offsets'}, status=400)
-            await _trim_to_repair_wav(input_path, repair_path, start_offset_ms, end_offset_ms)
+        # The client has already stitched the recording down to the outage audio, so
+        # decode the entire file with no trimming.
+        await _decode_to_repair_wav(input_path, repair_path)
 
         speech_segments, speech_duration_s, audio_duration_s = await _detect_repair_speech(
             repair_path, cfg,

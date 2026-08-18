@@ -1,13 +1,5 @@
 import { GCSService } from './gcsService.js';
-import type {
-  StorageService,
-  UploadOptions,
-  UploadResult,
-  UploadToPathOptions,
-  DeleteResult,
-  FileMetadata,
-  ListedFile,
-} from './types.js';
+import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, DeleteResult, FileMetadata, ListedFile } from './types.js';
 
 export class GCSAdapter implements StorageService {
   constructor(private gcs: GCSService) {}

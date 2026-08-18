@@ -328,10 +328,6 @@ export class GCSService {
     }
   }
 
-
-  /**
-   * Delete file from GCS
-   */
   async deleteFile(filename: string): Promise<GCSDeleteResult> {
     try {
       if (!filename) {
@@ -644,32 +640,16 @@ export class GCSService {
    * List files in the bucket with a given prefix.
    * Returns an array of objects with name and optional contentType metadata.
    */
-  async listFiles(prefix: string): Promise<
-    Array<{
-      name: string;
-      contentType?: string;
-      size?: number;
-      updated?: Date;
-      metadata?: Record<string, string>;
-    }>
-  > {
+  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string; size?: number; updated?: Date }>> {
     const [files] = await this.bucket.getFiles({ prefix });
     return files.map(file => {
-      const meta = file.metadata as
-        | {
-            contentType?: string;
-            size?: string | number;
-            updated?: string;
-            metadata?: Record<string, string>;
-          }
-        | undefined;
+      const meta = file.metadata as { contentType?: string; size?: string | number; updated?: string } | undefined;
       const size = meta?.size !== undefined ? Number(meta.size) : undefined;
       return {
         name: file.name,
         contentType: meta?.contentType,
         ...(Number.isFinite(size) ? { size } : {}),
         ...(meta?.updated ? { updated: new Date(meta.updated) } : {}),
-        ...(meta?.metadata ? { metadata: meta.metadata } : {}),
       };
     });
   }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { RecordingRepairReason, RecordingRepairStatus } from '@xyne/shared';
+import type { RecordingRepairStatus } from '@xyne/shared';
 import { createRedisClient } from '@/services/redisFactory';
 import {
   recordingRepairRedisKeys as keys,
@@ -18,14 +18,6 @@ import {
 //
 // Single-node Redis is assumed (same instance Bull uses); Lua scripts build capture
 // keys from set members, which is not Redis-Cluster safe.
-
-export type { RecordingRepairReason, RecordingRepairStatus };
-
-export interface RecordingRepairOutage {
-  startedAt: number;
-  endedAt: number;
-  reasons: RecordingRepairReason[];
-}
 
 export interface RecordingRepairCaptureState {
   status: RecordingRepairStatus;

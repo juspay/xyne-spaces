@@ -147,12 +147,6 @@ export type RecordingRepairReason =
   | 'agent_left'
   | 'stt_failed';
 
-export interface RecordingRepairOutage {
-  startedAt: string;
-  endedAt: string;
-  reasons: RecordingRepairReason[];
-}
-
 export interface RecordingRepairStatus {
   status: 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
   processingError: string | null;
@@ -410,16 +404,10 @@ class RecordingService {
   }
 
   /** Stream the whole capture (one recording.webm) through the backend to GCS. */
-  async uploadRecordingRepairAudio(
-    callId: string,
-    captureId: string,
-    body: Blob,
-  ): Promise<void> {
-    await apiInstance.post(
-      `/calls/${callId}/recording-repairs/${captureId}/audio`,
-      body,
-      { headers: { 'Content-Type': 'application/octet-stream' } },
-    );
+  async uploadRecordingRepairAudio(callId: string, captureId: string, body: Blob): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/audio`, body, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
   }
 
   async finalizeRecordingRepair(

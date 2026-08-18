@@ -53,7 +53,6 @@ export interface ListedFile {
   contentType?: string;
   size?: number;
   updated?: Date;
-  metadata?: Record<string, string>;
 }
 
 export interface UploadToPathOptions {
