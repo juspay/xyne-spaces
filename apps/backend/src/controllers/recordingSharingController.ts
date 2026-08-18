@@ -62,6 +62,16 @@ export class RecordingSharingController {
       res.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof RecordingSharingError) {
+        // These are expected, client-facing errors (e.g. 409 "Detailed summary
+        // canvas is not ready yet"). They were previously invisible in backend
+        // logs, so a data-integrity bug behind a 409 could not be diagnosed
+        // without reconstructing it from istio + client-bridge logs.
+        logger.warn('[RecordingSharingController] recording sharing rejected', {
+          callId,
+          action: parsed.data.action,
+          status: error.status,
+          message: error.message,
+        });
         res.status(error.status).json({ success: false, message: error.message });
         return;
       }
