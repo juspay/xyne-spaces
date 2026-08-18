@@ -18,6 +18,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { decrypt } from '@/services/encryptionService';
@@ -47,9 +48,13 @@ router.use(webhookLimiter);
 router.get(
   '/:sourceName/ingest',
   (req, res, next) => {
-    // Run adapterResolver so isTestQueryParam fires for webhook verifications (e.g. Meta hub.challenge).
-    // If the platform isn't registered (other integrations, health probes), fall through to the 200 OK handler.
-    adapterResolver(req, res, () => next());
+    // Only run adapterResolver when hub.mode is present (Meta-style webhook verification).
+    // Otherwise return plain 200 OK — preserves behaviour for Slack/Microsoft/Ozonetel health probes
+    // and any external service that GETs the endpoint to verify it's reachable.
+    if (req.query['hub.mode']) {
+      return adapterResolver(req, res, () => next());
+    }
+    return next();
   },
   (_req, res: Response) => {
     return res.status(200).send('OK');
@@ -69,6 +74,22 @@ router.get(
 // These fire from the SENDER's subscription (entry[0].id = sender), not the recipient's.
 // We call getMessage(mid) with each active IG token to find the actual recipient, then
 // inject _resolvedRecipientId into the entry so getSourceNameFromDB returns the right name.
+function requireValidHubSignature(req: Request, res: Response, next: NextFunction): void {
+  const sigHeader = req.headers['x-hub-signature-256'];
+  const sig = Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? '');
+  const secret = (appConfig.META_IG_APP_SECRET || appConfig.META_APP_SECRET) as string;
+  if (!secret || !sig) {
+    res.status(401).json({ error: 'Missing signature' });
+    return;
+  }
+  const rawBodyReq = req as RawBodyRequest;
+  if (!metaGraphClient.verifyWebhookSignature(rawBodyReq.rawBody, sig, secret)) {
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+  next();
+}
+
 async function resolveMessageEditRecipient(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const body = req.body as Record<string, unknown>;
   const entry = (body?.entry as Array<Record<string, unknown>>)?.[0];
@@ -80,7 +101,7 @@ async function resolveMessageEditRecipient(req: Request, _res: Response, next: N
   if (mid !== undefined && numEdit === 0) {
     try {
       const sources = await db.externalSource.findMany({
-        where: { sourceType: 'instagram', isActive: true },
+        where: { sourceType: ExternalSourcePlatform.INSTAGRAM, isActive: true },
         select: { credentials: true, externalIdentifier: true },
       });
       for (const src of sources) {
@@ -109,6 +130,7 @@ async function resolveMessageEditRecipient(req: Request, _res: Response, next: N
 router.post(
   '/instagram/ingest',
   (req, _res, next) => { req.params.sourceName = 'instagram'; next(); },
+  requireValidHubSignature,
   resolveMessageEditRecipient,
   adapterResolver,
   authenticate,

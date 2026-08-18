@@ -17,6 +17,10 @@ export class InstagramReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {
     const { source, externalThreadId, subject, body, userId, authorName } = context;
 
+    if (body.length > 1000) {
+      throw new InteractionReplyValidationError('Reply exceeds Instagram 1000-character limit');
+    }
+
     // Enforce 24h reply window — Meta hard rule for DMs
     const lastInbound = await db.email.findFirst({
       where: {
@@ -52,7 +56,7 @@ export class InstagramReplySender extends BaseInteractionReplySender {
       emailData: {
         subject: `Re: ${subject}`,
         from: authorName,
-        to: [externalThreadId],
+        to: [],
         type: EmailType.REPLY,
         sentByUserId: userId,
         skipBlockingCheck: true,

@@ -23,7 +23,6 @@ import {
   Share2,
   Plus,
   Trash2,
-  Instagram,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -372,6 +371,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
           onSubmit?.({
             ...value,
             connector: null,
@@ -415,15 +415,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
-          });
-        } else if (deskType === DeskType.SOCIAL_MEDIA) {
-          const isElectron = typeof window.electronAPI?.openExternal === 'function';
-          onSubmit?.({
-            ...value,
-            connector: null,
-            deskType: DeskType.SOCIAL_MEDIA,
-            assigneeUserGroupId: value.assigneeUserGroupId,
-            platform: isElectron ? 'electron' : 'web',
           });
         } else {
           onSubmit?.({

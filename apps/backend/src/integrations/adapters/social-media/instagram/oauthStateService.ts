@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import { redisService } from '@/services/redisService';
 
 export interface InstagramOAuthState {

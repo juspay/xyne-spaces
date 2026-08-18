@@ -60,7 +60,14 @@ export class InstagramPostprocessor extends BasePostprocessor {
               select: { ownerUserId: true },
             })
           : null;
-        const updatedBy = preference?.ownerUserId ?? 'system';
+        const updatedBy = preference?.ownerUserId;
+        if (!updatedBy) {
+          logger.warn(`${TAG} Cannot reopen ticket — ownerUserId missing for channel`, {
+            ticketId: ticket.id,
+            channelId: source?.channelId,
+          });
+          return;
+        }
 
         await repositories.tickets
           .updateTicketStage(ticket.id, firstStage.name, updatedBy)

@@ -49,6 +49,11 @@ class InstagramTokenRefreshWorker {
           continue;
         }
 
+        if (typeof creds.expiresAt !== 'number') {
+          logger.warn(`${TAG} Source ${source.id} has no expiresAt — skipping`);
+          skipped++;
+          continue;
+        }
         const timeUntilExpiry = creds.expiresAt - Date.now();
         if (timeUntilExpiry > REFRESH_THRESHOLD_MS) {
           skipped++;

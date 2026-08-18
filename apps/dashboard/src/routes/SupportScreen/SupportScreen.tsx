@@ -2589,34 +2589,6 @@ const SupportScreen = (): ReactElement => {
       return;
     }
 
-    if (deskType === 'SOCIAL_MEDIA') {
-      const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      void (async () => {
-        try {
-          const res = await apiInstance.post<{ authUrl: string }>(
-            '/integrations/social-media/instagram/oauth/start',
-            {
-              name: rest.name,
-              projectId: rest.projectId,
-              visibility: rest.visibility,
-              ...(rest.boardId && { boardId: rest.boardId }),
-              ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
-              platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
-            },
-          );
-          setShowCreateChannelModal(false);
-          if (isElectron && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(res.data.authUrl);
-          } else {
-            window.location.href = res.data.authUrl;
-          }
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Instagram authorization');
-        }
-      })();
-      return;
-    }
-
     if (connector === 'microsoft') {
       if (isElectron && window.electronAPI?.openExternal) {
         void initDeskChannelOAuth('microsoft', {
