@@ -22,6 +22,7 @@ import type {
   PartialBlock,
   StyleSchema,
 } from '@blocknote/core';
+import { withCollaboration } from '@blocknote/core/yjs';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
@@ -187,15 +188,19 @@ export const CollaborativeCanvasEditor = forwardRef<
 
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
 
-    const editorOptions = {
+    const baseEditorOptions = {
       schema: canvasSchema,
       dictionary: canvasDictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
       _tiptapOptions: canvasTiptapOptions,
-      ...(shouldUseCollaboration
-        ? {
+    };
+
+    const editorOptions =
+      shouldUseCollaboration && provider && fragment
+        ? withCollaboration({
+            ...baseEditorOptions,
             collaboration: {
               fragment,
               user: {
@@ -205,13 +210,14 @@ export const CollaborativeCanvasEditor = forwardRef<
               },
               provider,
             },
-          }
-        : {}),
-    };
+          })
+        : baseEditorOptions;
 
     const editor = useCreateBlockNote(editorOptions as Parameters<typeof useCreateBlockNote>[0], [
       canvasId,
       awareness,
+      fragment,
+      provider,
       shouldUseCollaboration,
     ]);
 
