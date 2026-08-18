@@ -62,7 +62,13 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
     // a channel (RecordingShareContent/RecordingSharePill) — keeps "a
     // recording card in a message" looking identical everywhere instead of
     // maintaining a second, slightly-different design here.
-    return <RecordingSharePill title={title} durationMs={durationMs} onOpen={canView ? goToRecording : undefined} />;
+    return (
+      <RecordingSharePill
+        title={title}
+        durationMs={durationMs}
+        onOpen={canView ? goToRecording : undefined}
+      />
+    );
   }
 
   return (
