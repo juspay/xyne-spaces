@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 /**
@@ -25,6 +26,12 @@ import { logger } from '@/utils/logger';
  *
  * Idempotent: only rows whose pointer is still absent are selected, so re-running
  * after the pipeline cutover picks up just the stragglers.
+ *
+ * Runs inside runAsSystem(): `db` is the ACL-wrapped client, and Call/Canvas both
+ * carry a workspaceId scalar, so an ordinary request context would silently narrow
+ * this to the calling admin's own rows (isRequestContext() applies the per-table
+ * user ACL) or at best to their single workspace. This repair spans every
+ * workspace, which is what the system actor is for.
  */
 
 const TAG = '[RecordingSummaryPointerBackfill]';
@@ -151,12 +158,19 @@ export class RecordingSummaryPointerBackfillController {
     let scanCursor = cursor;
 
     for (;;) {
+      // `id: { gt: … }` rather than Prisma's `cursor`: cursor pagination needs the
+      // cursor row to still match the where-clause, and this backfill removes rows
+      // from the candidate set by writing the very key the clause filters on. A
+      // cursor pointing at an already-linked row returns an empty page, which
+      // silently ends the run with rows left behind.
       const page: CandidateCall[] = await db.call.findMany({
-        where: RecordingSummaryPointerBackfillController.candidateWhere(),
+        where: {
+          ...RecordingSummaryPointerBackfillController.candidateWhere(),
+          ...(scanCursor ? { id: { gt: scanCursor } } : {}),
+        },
         select: { id: true, externalId: true, metadata: true },
         orderBy: { id: 'asc' },
         take: SCAN_PAGE_SIZE,
-        ...(scanCursor ? { cursor: { id: scanCursor }, skip: 1 } : {}),
       });
 
       if (page.length === 0) {
@@ -228,6 +242,7 @@ export class RecordingSummaryPointerBackfillController {
     logger.info(`${TAG} started`, { ...options });
 
     try {
+      const result = await runAsSystem(async () => {
       const batches: BatchResult[] = [];
       const linkedExternalIds: string[] = [];
       let totalUpdated = 0;
@@ -282,8 +297,8 @@ export class RecordingSummaryPointerBackfillController {
         durationMs: Date.now() - startedAt,
       });
 
-      res.json({
-        success: true,
+      return {
+        success: true as const,
         dryRun: options.dryRun,
         totalUpdated,
         batches,
@@ -293,7 +308,9 @@ export class RecordingSummaryPointerBackfillController {
         // The rollback key: removing 'detailedSummaryCanvasId' from these rows
         // restores the exact prior state, since only absent keys were written.
         linkedExternalIds,
+      };
       });
+      res.json(result);
     } catch (error) {
       logger.error(`${TAG} failed`, {
         error: error instanceof Error ? error.message : String(error),
@@ -311,6 +328,7 @@ export class RecordingSummaryPointerBackfillController {
    */
   static status = async (_req: Request, res: Response): Promise<void> => {
     try {
+      const result = await runAsSystem(async () => {
       const pointerAbsent = await RecordingSummaryPointerBackfillController.countRemaining(null);
 
       const canvases = await db.canvas.findMany({
@@ -334,7 +352,9 @@ export class RecordingSummaryPointerBackfillController {
           })
         : 0;
 
-      res.json({ success: true, linkable, pointerAbsent, summaryCanvases: callIds.length });
+      return { success: true as const, linkable, pointerAbsent, summaryCanvases: callIds.length };
+      });
+      res.json(result);
     } catch (error) {
       logger.error(`${TAG} status failed`, {
         error: error instanceof Error ? error.message : String(error),

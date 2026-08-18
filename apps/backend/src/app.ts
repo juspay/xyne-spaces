@@ -385,6 +385,9 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
