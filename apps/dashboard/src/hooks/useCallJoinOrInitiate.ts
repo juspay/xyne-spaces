@@ -15,6 +15,8 @@ interface CallSetupOverrides {
   viewMode?: 'full' | 'mini';
   initialMicEnabled?: boolean;
   initialCameraEnabled?: boolean;
+  initialPresentationMode?: boolean;
+  isUrlDrivenJoin?: boolean;
 }
 
 interface JoinCallParams extends CallSetupOverrides {
@@ -38,12 +40,21 @@ interface InitiateCallParams extends CallSetupOverrides {
  */
 const mediaOverrideFields = (
   overrides: CallSetupOverrides,
-): Pick<CallSetupOverrides, 'initialMicEnabled' | 'initialCameraEnabled'> => ({
+): Pick<
+  CallSetupOverrides,
+  'initialMicEnabled' | 'initialCameraEnabled' | 'initialPresentationMode' | 'isUrlDrivenJoin'
+> => ({
   ...(overrides.initialMicEnabled !== undefined && {
     initialMicEnabled: overrides.initialMicEnabled,
   }),
   ...(overrides.initialCameraEnabled !== undefined && {
     initialCameraEnabled: overrides.initialCameraEnabled,
+  }),
+  ...(overrides.initialPresentationMode !== undefined && {
+    initialPresentationMode: overrides.initialPresentationMode,
+  }),
+  ...(overrides.isUrlDrivenJoin !== undefined && {
+    isUrlDrivenJoin: overrides.isUrlDrivenJoin,
   }),
 });
 
