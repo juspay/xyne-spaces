@@ -255,8 +255,11 @@ const GlobalCommandMenu = ({
   const { starred, channels, directMessages } = useMemo(() => {
     if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
+    // Index visible channels by id once (O(n)); the previous `.find` inside this
+    // `.map` was O(n * m) over ~749 all x ~431 visible channels per recompute.
+    const visibleById = new Map(visibleAllChannels.map(vc => [vc.id, vc]));
     const visibleChannels = channelData.map(channel => {
-      const vc = visibleAllChannels.find(vc => vc.id === channel.id);
+      const vc = visibleById.get(channel.id);
       if (vc) {
         return vc;
       }
