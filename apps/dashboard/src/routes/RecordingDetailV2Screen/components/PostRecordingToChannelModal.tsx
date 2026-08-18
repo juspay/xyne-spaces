@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Hash } from 'lucide-react';
@@ -6,8 +6,10 @@ import { MessageType } from '@xyne/shared';
 import { useChannelSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
+import { InputBox } from '../../../components/ui/InputBox';
 import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 import { useActiveUsers } from '../../../hooks/useUsers';
+import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { channelService } from '../../../services/Chat/channelService';
@@ -52,10 +54,27 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
   const zero = useZero();
   const activeUsers = useActiveUsers();
   const shareableOrigin = useShareableOrigin();
+  const inputBoxRef = useRef<React.ComponentRef<typeof InputBox>>(null);
+
+  // Channel-less mention search over active workspace users — the same ranked
+  // source the chat composer uses. A selected @-mention serializes into the
+  // note HTML, and when the note is posted to a channel the message
+  // side-effect handler expands it into a real notification for the mentioned
+  // user (see extractAllUsersForNotification / createMentionNotifications).
+  const { results: mentionResults, searchMentions } = useMentionSearch(
+    undefined,
+    undefined,
+    undefined,
+    { excludeSelf: true },
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const [note, setNote] = useState('');
+  // The note is composed in the rich InputBox editor, so it is stored as
+  // sanitized HTML (produced by Tiptap) alongside its plain-text projection.
+  // The plain text is only used to decide whether the note is empty.
+  const [noteHtml, setNoteHtml] = useState('');
+  const [noteText, setNoteText] = useState('');
   const [posting, setPosting] = useState(false);
 
   const channels = useChannelSearch(searchQuery, 10);
@@ -90,8 +109,11 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
     // (the /recordings/:id route only exists nested under /:workspaceId).
     const link = `${shareableOrigin}/recordings/${recording.externalId}`;
     const parts: string[] = [];
-    if (note.trim()) {
-      parts.push(`<p>${escapeHtml(note.trim())}</p>`);
+    // The note is already sanitized paragraph HTML from the InputBox editor —
+    // matching how every normal chat message is composed and sent — so it is
+    // injected as-is rather than escaped like the (plain-string) title below.
+    if (noteText.trim()) {
+      parts.push(noteHtml);
     }
     parts.push(
       `<p>\uD83C\uDFA5 <strong>${escapeHtml(title)}</strong><br/><a href="${link}">View recording</a></p>`,
@@ -158,7 +180,8 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
         toast.success('Recording shared');
         setSelectedValues([]);
         setSearchQuery('');
-        setNote('');
+        setNoteHtml('');
+        setNoteText('');
         onClose?.();
       }
     } catch (error) {
@@ -190,15 +213,33 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
         <label htmlFor='post-recording-note' className='text-muted-foreground text-[13px]'>
           Add a message (optional)
         </label>
-        <textarea
+        <InputBox
+          ref={inputBoxRef}
           id='post-recording-note'
-          value={note}
-          onChange={event => setNote(event.target.value)}
+          value={noteHtml}
           placeholder='Say something about this recording...'
-          rows={3}
-          className='w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
-          data-track-category='RecordingDetailV2'
-          data-track-name='post_recording_note_input'
+          showTypingIndicator={false}
+          onContentChange={(html: string, text: string) => {
+            setNoteHtml(html);
+            setNoteText(text);
+          }}
+          // The modal owns the primary "Send" action below, and the note is a
+          // multi-line caption — so Enter inserts a newline and the composer's
+          // own send button is hidden. onSendMessage stays wired to the post
+          // handler as a safe fallback.
+          mentionItems={mentionResults}
+          onMentionSearch={searchMentions}
+          onSendMessage={() => void handlePost()}
+          disableEnterToSend
+          hideSendButton
+          disableDraftUpload
+          features={{
+            richText: true,
+            emojiPicker: true,
+            mentions: true,
+            commands: false,
+            fileAttachments: false,
+          }}
         />
       </div>
 
