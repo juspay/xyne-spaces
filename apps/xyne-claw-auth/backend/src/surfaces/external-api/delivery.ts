@@ -2,6 +2,7 @@ import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 import { decryptSurfaceSecret } from "../../lib/surface-resolver.js";
 import { postExternalCallback } from "./api.js";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 import {
   RETRY_DELAYS_MS,
   MAX_DELIVERY_ATTEMPTS,
@@ -93,6 +94,17 @@ export async function sendExternalResultCallback(
 ): Promise<"delivered" | "refused" | "failed"> {
   if (!isAllowedExternalCallbackUrl(callback.url)) {
     log.warn(`[external-callback] refused unsafe callback target session=${payload.sessionId}`);
+    return "refused";
+  }
+
+  // Defense in depth: the check above is a literal-hostname blocklist and cannot
+  // catch DNS names that resolve to private/reserved IPs (DNS rebinding) or the
+  // many private CIDRs not enumerated in BLOCKED_HOSTNAMES. Resolve the host and
+  // reject every private/reserved destination via the shared outbound guard.
+  try {
+    await assertSafeOutboundUrl(callback.url);
+  } catch {
+    log.warn(`[external-callback] refused callback target resolving to a blocked address session=${payload.sessionId}`);
     return "refused";
   }
 

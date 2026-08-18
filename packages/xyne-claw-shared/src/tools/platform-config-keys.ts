@@ -29,6 +29,28 @@ export const PLATFORM_ONLY_CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
   "QUERY_ROUTING_KEY",
   "IMAGE_GENERATION_ENDPOINT",
   "IMAGE_GENERATION_API_KEY",
+  // create-pdf provider endpoint + key. Declared in CREATE_PDF_CONFIG_SCHEMA
+  // (so they fall back to env/default after stripping). Kept platform-only so a
+  // frontend-controlled agentConfig can't point PDF_BASE_URL at an attacker host
+  // while PDF_API_KEY still resolves from the platform env (secret exfil), or
+  // aim the provider call at an internal address (SSRF).
+  "PDF_BASE_URL",
+  "PDF_API_KEY",
+  // research-agent internal service endpoint + key (defaults to an internal
+  // *.svc.k8s Juspay host; key falls back to env). Frontend override → SSRF into
+  // the cluster + exfil of the research-agent key.
+  "RESEARCH_AGENT_API_URL",
+  "RESEARCH_AGENT_API_KEY",
+  // sandbox-pw router — internal cluster service URL. Frontend override → SSRF.
+  "SANDBOX_PW_ROUTER_URL",
+  // Internal infra/service endpoints. Not sourced from agentConfig today, listed
+  // here as defense-in-depth so a future tool reading them from config can never
+  // be redirected (SSRF) or made to leak a co-resident secret.
+  "GRAFANA_URL",
+  "HINDSIGHT_URL",
+  "HINDSIGHT_DATABASE_URL",
+  "BITBUCKET_DASHBOARD_BASE_URL",
+  "JENKINS_BASE_URL",
 ]);
 
 /**

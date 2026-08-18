@@ -1,4 +1,5 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -2829,6 +2830,8 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   } else {
     headers["x-api-key"] = apiKey;
   }
+  // SSRF guard: baseUrl is user-supplied; block private/reserved destinations.
+  await assertSafeOutboundUrl(`${root}/v1/models`);
   const res = await fetch(`${root}/v1/models`, {
     method: "GET",
     headers,
@@ -3962,6 +3965,8 @@ router.get(
         headers["User-Agent"] = "codex-cli";
       }
 
+      // SSRF guard: cred.baseUrl is user-supplied; block private/reserved destinations.
+      await assertSafeOutboundUrl(url);
       const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
@@ -4028,6 +4033,8 @@ router.post(
 
       const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
+      // SSRF guard: baseUrl is user-supplied; block private/reserved destinations.
+      await assertSafeOutboundUrl(`${root}/v1/models`);
       const upstream = await fetch(`${root}/v1/models`, {
         headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
         signal: AbortSignal.timeout(20_000),
