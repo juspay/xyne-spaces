@@ -20,6 +20,7 @@ export class ArtifactRenderBoundary extends Component<
   }
 
   public override componentDidCatch(error: Error, info: ErrorInfo): void {
+    /* eslint-disable no-console */
     console.error('[flowUI] artifact failed to render', error, info.componentStack);
   }
 
