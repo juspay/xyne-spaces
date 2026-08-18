@@ -27,13 +27,12 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
-  | 'agent';
+  | 'agent'
   | 'user_question'
   | 'code'
   | 'diff'
   | 'ticket'
   | 'chart'
-  | 'agent'
   | 'mcpConfigure';
 
 export interface FlowComponent {
