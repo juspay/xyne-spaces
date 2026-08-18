@@ -141,6 +141,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [postToEmailNonce, setPostToEmailNonce] = useState(0);
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
@@ -208,10 +209,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     if (connected) {
       toast.success('Google email connected');
+      // Remount so the compose context is refetched — in Electron the modal is still
+      // mounted from before the consent screen opened in the system browser.
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
     if (connectionError) {
       toast.error(connectionError);
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
 
@@ -1072,6 +1077,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           testId='post-recording-to-email-dialog'
         >
           <PostRecordingToEmailModal
+            key={postToEmailNonce}
             recording={recording}
             onClose={() => setShowPostToEmailModal(false)}
           />
