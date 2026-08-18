@@ -190,6 +190,7 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { createSdlcProxy } from '@/middleware/sdlcProxy';
 
 
 export class App {
@@ -262,6 +263,11 @@ export class App {
   }
 
   private initializeRoutes(): void {
+    if (config.backendRuntimeRole === 'SDLC') {
+      this.initializeSdlcRoutes();
+      return;
+    }
+
     // Public routes (no ACL protection)
 
     // External source sync routes (body parsing handled in route file)
@@ -553,14 +559,14 @@ export class App {
     this.app.post(
       '/api/internal/sdlc/claw-callback/:executionId/:step',
       validateS2SKey,
-      handleSdlcClawCallback,
+      createSdlcProxy(),
     );
-    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
-    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, createSdlcProxy());
+    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, createSdlcProxy());
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
       validateS2SKey,
-      sdlcArtifactVersionsInternalRoutes
+      createSdlcProxy()
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
@@ -591,8 +597,8 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
-    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
+    this.app.use('/api/sdlc/claw', authenticateUserOrApp, createSdlcProxy());
+    this.app.use('/api/sdlc', authMiddleware.authenticate, createSdlcProxy());
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
@@ -627,7 +633,7 @@ export class App {
     this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
 
     // Xyne AI routes (unified AI assistant with context awareness)
-    this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
+    this.app.use('/api/xyne-ai', authMiddleware.authenticate, createSdlcProxy());
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
@@ -713,6 +719,52 @@ export class App {
         timestamp: new Date().toISOString(),
       });
     });
+  }
+
+  // SDLC-role process: serves only the private SDLC surface that main (CORE
+  // role) proxies to. Everything else in initializeRoutes() is CORE-only and
+  // is skipped entirely for this role.
+  private initializeSdlcRoutes(): void {
+    this.app.use('/api/health', healthRoutes);
+
+    // initializeMiddlewares() doesn't parse bodies (that normally happens
+    // further down in the CORE-only branch of initializeRoutes(), which this
+    // role never reaches) — every route below needs req.body populated.
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+    const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
+      const supplied = req.headers['x-s2s-key'];
+      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
+        res.status(401).json({ error: 'Invalid or missing S2S key' });
+        return;
+      }
+      next();
+    };
+
+    this.app.post(
+      '/api/internal/sdlc/claw-callback/:executionId/:step',
+      validateS2SKey,
+      handleSdlcClawCallback,
+    );
+    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    this.app.use(
+      '/api/internal/sdlc/artifact-versions',
+      validateS2SKey,
+      sdlcArtifactVersionsInternalRoutes
+    );
+
+    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
+
+    // Full mutator/query registry — an SDLC-scoped batch forwarded from main
+    // executes here unmodified; a mixed batch containing core mutations also
+    // executes here since this registry isn't namespace-restricted.
+    this.app.use('/api/zero', zeroRoutes);
+
+    this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
   }
 
   private initializeErrorHandling(): void {

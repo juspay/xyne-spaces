@@ -304,7 +304,7 @@ class WorkerService {
         logger.info('Entity extraction is disabled; skipping worker startup');
       }
 
-      if (appConfig.enableSdlcWorker) {
+      if (appConfig.enableSdlcWorker && appConfig.backendRuntimeRole === 'SDLC') {
         logger.info('Starting SDLC worker...');
         await sdlcWorker.start();
         const reconcileSdlc = (): void => {

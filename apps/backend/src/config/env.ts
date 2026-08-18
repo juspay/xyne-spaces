@@ -104,6 +104,10 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  // SDLC private backend split: CORE (default, main) proxies SDLC traffic to a
+  // separate SDLC-role process; SDLC role serves it directly.
+  BACKEND_RUNTIME_ROLE: Joi.string().valid('CORE', 'SDLC').default('CORE'),
+  SDLC_RUNTIME_URL: Joi.string().uri().allow('').default(''),
   ENABLE_SDLC_WORKER: Joi.boolean().default(false),
   SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
   SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
@@ -500,6 +504,16 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+if (!envVars.INTERNAL_S2S_KEY) {
+  throw new Error('Config validation error: INTERNAL_S2S_KEY is required');
+}
+
+if (envVars.BACKEND_RUNTIME_ROLE === 'CORE' && !envVars.SDLC_RUNTIME_URL) {
+  throw new Error(
+    'Config validation error: SDLC_RUNTIME_URL is required when BACKEND_RUNTIME_ROLE=CORE'
+  );
+}
+
 export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
@@ -615,6 +629,8 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  backendRuntimeRole: envVars.BACKEND_RUNTIME_ROLE as 'CORE' | 'SDLC',
+  sdlcRuntimeUrl: envVars.SDLC_RUNTIME_URL as string,
   enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
   sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
   sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
