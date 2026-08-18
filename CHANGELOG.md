@@ -1,3 +1,48 @@
+## [1.192.1](https://github.com/juspay/xyne-spaces/compare/v1.192.0...v1.192.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* email sso routing back ([#651](https://github.com/juspay/xyne-spaces/issues/651)) ([8496efc](https://github.com/juspay/xyne-spaces/commit/8496efc9909a918c85bc7ddda2046fbaeb71afd7))
+* fix input box behaviour in Post Recording Modal ([#691](https://github.com/juspay/xyne-spaces/issues/691)) ([f1599e2](https://github.com/juspay/xyne-spaces/commit/f1599e2d459f35a99132a2ddc6af240dcf53b758))
+* fresh-read call row before merging metadata in finalizeCallUpdates ([#697](https://github.com/juspay/xyne-spaces/issues/697)) ([91c6a9d](https://github.com/juspay/xyne-spaces/commit/91c6a9d8107a718bbe2d74b676bf419135c9e9aa))
+* making workspaceId non nullable in external_sources table ([#681](https://github.com/juspay/xyne-spaces/issues/681)) ([8a095c6](https://github.com/juspay/xyne-spaces/commit/8a095c6debe69178cee0d807b48833d6cfd9938c))
+
+## [1.192.0](https://github.com/juspay/xyne-spaces/compare/v1.191.0...v1.192.0) (2026-08-18)
+
+
+### Features
+
+* add LLM endpoint verification script and update setup process ([#672](https://github.com/juspay/xyne-spaces/issues/672)) ([d7bde1d](https://github.com/juspay/xyne-spaces/commit/d7bde1dde092dc57d8dc0fd326c5421343510fcd))
+
+## [1.191.0](https://github.com/juspay/xyne-spaces/compare/v1.190.2...v1.191.0) (2026-08-18)
+
+
+### Features
+
+* full screen video ([#683](https://github.com/juspay/xyne-spaces/issues/683)) ([3153536](https://github.com/juspay/xyne-spaces/commit/3153536216f20946279b4a824ce2f30385061302))
+
+## [1.190.2](https://github.com/juspay/xyne-spaces/compare/v1.190.1...v1.190.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* pass caller as rank-only terms for personalized message ranking ([#679](https://github.com/juspay/xyne-spaces/issues/679)) ([6a2852d](https://github.com/juspay/xyne-spaces/commit/6a2852df2cdc152f8467e4c41cf3836dc258b38d))
+
+## [1.190.1](https://github.com/juspay/xyne-spaces/compare/v1.190.0...v1.190.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* match DM panel corner radius when a conversation is open ([#670](https://github.com/juspay/xyne-spaces/issues/670)) ([6637cdb](https://github.com/juspay/xyne-spaces/commit/6637cdb22e41239dde8f8ffb47aecdb3059bd3fd))
+
+## [1.190.0](https://github.com/juspay/xyne-spaces/compare/v1.189.9...v1.190.0) (2026-08-18)
+
+
+### Features
+
+* recording in thread ([#659](https://github.com/juspay/xyne-spaces/issues/659)) ([7509107](https://github.com/juspay/xyne-spaces/commit/75091070b470b366ae4b6d0e7dad8280b9a39085))
+
 ## [1.189.9](https://github.com/juspay/xyne-spaces/compare/v1.189.8...v1.189.9) (2026-08-18)
 
 
