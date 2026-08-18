@@ -16,7 +16,6 @@ import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
-import { AudioTrack } from '@livekit/components-react';
 import { useIsSpeaking } from '@livekit/components-react';
 
 interface ParticipantTileProps {
@@ -57,9 +56,6 @@ export function ParticipantTile({
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
   const screenSharePublication = participant.participant?.getTrackPublication(
     Track.Source.ScreenShare,
-  );
-  const microphonePublication = participant.participant?.getTrackPublication(
-    Track.Source.Microphone,
   );
 
   // Determine if video should be shown
@@ -149,17 +145,6 @@ export function ParticipantTile({
     [hasScreenShareVideo, screenSharePublication, cameraPublication, participant.participant],
   );
 
-  const audioTrackRef = useMemo(
-    () =>
-      microphonePublication && participant.participant
-        ? {
-            participant: participant.participant,
-            source: Track.Source.Microphone,
-            publication: microphonePublication,
-          }
-        : undefined,
-    [microphonePublication, participant.participant],
-  );
   const videoTrackStyle = useMemo(
     () => (participant.isLocal && !isScreenShare ? { transform: 'scaleX(-1)' } : undefined),
     [isScreenShare, participant.isLocal],
@@ -349,8 +334,14 @@ export function ParticipantTile({
         </div>
       )}
 
-      {/* Audio Track - Using LiveKit's AudioTrack component (only for remote participants) */}
-      {!participant.isLocal && audioTrackRef && <AudioTrack trackRef={audioTrackRef} />}
+      {/* No per-tile <AudioTrack> here: `RoomAudioRenderer` is mounted once,
+          globally, in GlobalCallOverlay.tsx and already plays every remote
+          participant's audio exactly once for the whole call — regardless of
+          how many ParticipantTile instances visually represent them (grid,
+          spotlight main stage, spotlight sidebar, fullscreen modal, mini
+          view, etc). Rendering a second <AudioTrack> per tile here used to
+          double (or triple, whenever a participant appeared in more than one
+          tile at once) their audio. */}
 
       {/* Participant Info Overlay */}
       <div
