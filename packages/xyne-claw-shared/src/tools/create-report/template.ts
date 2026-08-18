@@ -178,14 +178,32 @@ function escapeHtml(s: string): string {
  * javascript: URLs in href/src.
  */
 export function sanitizeHtmlBody(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<(iframe|object|embed|form|link|meta)\b[^>]*>/gi, "")
-    .replace(/<\/(iframe|object|embed|form)>/gi, "")
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
-    .replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, "$1=\"#\"")
-    .replace(/(href|src)\s*=\s*'\s*javascript:[^']*'/gi, "$1='#'");
+  return (
+    html
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+      // <svg>/<math> are foreign-content roots that enable mutation-XSS and are
+      // not needed in a text report (charts are embedded as <img> data: rasters).
+      .replace(/<(iframe|object|embed|form|link|meta|base|svg|math)\b[^>]*>/gi, "")
+      .replace(/<\/(iframe|object|embed|form|svg|math)>/gi, "")
+      // C-2: event-handler attributes. The old pattern required a WHITESPACE
+      // delimiter (\son\w+), so a slash-separated handler — `<img src=x
+      // /onerror=alert(1)>` — slipped through and executed. Match a handler
+      // preceded by ANY non-name delimiter (whitespace, slash, quote) and
+      // re-insert a space so neighbouring attributes don't fuse.
+      .replace(/[\s/]on\w+\s*=\s*"[^"]*"/gi, " ")
+      .replace(/[\s/]on\w+\s*=\s*'[^']*'/gi, " ")
+      .replace(/[\s/]on\w+\s*=\s*[^\s>]+/gi, " ")
+      // Dangerous URL schemes in href/src/xlink:href. javascript: and vbscript:
+      // are always unsafe; data:text/html and data:image/svg+xml can carry
+      // script, but raster data: images (png/jpeg/gif/webp — used by embedded
+      // charts) are preserved. Tolerant of leading whitespace after `=`.
+      .replace(/(href|src|xlink:href)\s*=\s*"\s*(?:javascript|vbscript):[^"]*"/gi, '$1="#"')
+      .replace(/(href|src|xlink:href)\s*=\s*'\s*(?:javascript|vbscript):[^']*'/gi, "$1='#'")
+      .replace(/(href|src|xlink:href)\s*=\s*(?:javascript|vbscript):[^\s>]+/gi, '$1="#"')
+      .replace(/(href|src|xlink:href)\s*=\s*"\s*data:text\/html[^"]*"/gi, '$1="#"')
+      .replace(/(href|src|xlink:href)\s*=\s*'\s*data:text\/html[^']*'/gi, "$1='#'")
+      .replace(/(href|src|xlink:href)\s*=\s*"\s*data:image\/svg\+xml[^"]*"/gi, '$1="#"')
+      .replace(/(href|src|xlink:href)\s*=\s*'\s*data:image\/svg\+xml[^']*'/gi, "$1='#'")
+  );
 }
