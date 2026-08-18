@@ -872,6 +872,20 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: "callbackUrl is not an allowed target" });
       return;
     }
+    // L-24: progressUrl is caller-supplied and is later POSTed to with the
+    // internal x-s2s-key on every streamed event. It MUST pass the same origin
+    // allowlist as callbackUrl, otherwise any authenticated caller can name their
+    // own server as progressUrl and harvest the platform S2S key. Legit webhook /
+    // scheduled flows point progressUrl at the same Spaces backend origin as
+    // callbackUrl, so this rejects only untrusted targets.
+    if (progressUrl !== undefined && typeof progressUrl !== "string") {
+      res.status(400).json({ success: false, error: "progressUrl must be a string" });
+      return;
+    }
+    if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
+      res.status(400).json({ success: false, error: "progressUrl is not an allowed target" });
+      return;
+    }
     if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
       res
         .status(400)

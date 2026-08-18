@@ -91,7 +91,7 @@ import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middlewa
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
@@ -4214,12 +4214,23 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
+  // L-18: `url` is derived from caller-supplied resultForwardUrl / automation
+  // callbackUrl. Legit forward targets are always internal origins (the Spaces
+  // backend /automations/claw-callback, auto-draft, or /webhook/result). Never
+  // forward the internal x-s2s-key to a target that is not an internal origin —
+  // otherwise a body-controlled URL harvests the platform S2S key. Refuse any
+  // target that is neither an internal origin nor an explicitly allowed callback.
+  const forwardToInternal = isInternalCallbackOrigin(url);
+  if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
+    clog.warn(`[webhook/result] refusing to forward result to non-allowlisted url origin`);
+    return;
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,
