@@ -1,5 +1,6 @@
 import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -10,7 +11,8 @@ import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { recordingSharingService } from '@/services/recordingSharingService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -155,6 +157,17 @@ class NoteTakerTranscriptService {
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
+
+      // Thread-linked recording (started from inside a thread — see
+      // callController's headless-initiate branch): now that the detailed
+      // summary canvas exists, auto-share the recording to that thread's
+      // channel. Must wait until here — recordingSharingService requires both
+      // notesCanvasId AND detailedSummaryCanvasId to be on Call.metadata
+      // before it can sync canvas access, so calling it any earlier (e.g. at
+      // call-start) always fails with "Detailed summary canvas is not ready yet".
+      if (detailedSummary?.canvasId) {
+        await this.shareThreadRecordingIfLinked(call);
+      }
     } finally {
       await releaseLock(lockHandle);
     }
@@ -239,6 +252,41 @@ class NoteTakerTranscriptService {
   }
 
   /**
+   * Grants the thread's channel VIEW access to this recording (same
+   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses),
+   * so every thread/channel member can see the recording message card and
+   * open /recordings/:callId. No-op for recordings not started from a thread
+   * (no channelId on Call.metadata). Best-effort — a failure here must never
+   * block transcript/summary processing.
+   */
+  private async shareThreadRecordingIfLinked(call: Call): Promise<void> {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    const channelId = typeof metadata.channelId === 'string' ? metadata.channelId : undefined;
+    if (!channelId) return;
+
+    try {
+      await recordingSharingService.execute(
+        call.externalId,
+        { userId: call.createdByUserId, workspaceId: call.workspaceId },
+        {
+          action: 'grant',
+          targets: [{ type: 'channel', id: channelId }],
+          access: EntityUserAccess.VIEW,
+        },
+      );
+    } catch (error) {
+      logger.error(`[${call.externalId}] thread_channel_share_failed`, {
+        channelId,
+        error,
+        path: 'note_taker',
+      });
+    }
+  }
+
+  /**
    * Single combined Call write for anything computed during this run
    * (metadata fields, labels, markedItems). Merging everything here — instead
    * of each step writing independently — avoids one step's write clobbering
@@ -266,6 +314,17 @@ class NoteTakerTranscriptService {
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
 
+    // Fetch the current DB row once (rather than trusting `call`, which is the
+    // in-memory snapshot from the top of processTranscript) whenever we're about
+    // to merge onto either JSON column. Generation can take minutes, during
+    // which another write — e.g. ensureStreamingCanvas's early publish of
+    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+    // the DB. Merging onto the stale snapshot would silently erase that write.
+    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+    const current = needsFreshRead
+      ? await repositories.calls.findByExternalId(call.externalId)
+      : undefined;
+
     const data: {
       metadata?: Record<string, unknown>;
       labels?: string[];
@@ -273,9 +332,12 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      const currentMetadataSource = current?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        currentMetadataSource &&
+        typeof currentMetadataSource === 'object' &&
+        !Array.isArray(currentMetadataSource)
+          ? (currentMetadataSource as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
@@ -283,7 +345,6 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems !== undefined) {
-      const current = await repositories.calls.findByExternalId(call.externalId);
       data.markedItems = mergeRecordingSummaryMarkedItems(
         current?.markedItems ?? call.markedItems,
         updates.markedItems,
@@ -403,6 +464,19 @@ class NoteTakerTranscriptService {
       try {
         await repositories.calls.update(call.id, { title });
         logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        // Thread-linked recording: patch the anchor message's content with
+        // this title too (mirrors how a regular call's ended message shows its
+        // AI text as message.content) so RecordingBubble never needs its own
+        // live query on the Call row just to display the ended-state title.
+        // Best-effort — a failure here must not affect the saved Call.title.
+        try {
+          await noteTakerCallRepository.updateThreadMessageTitle(call.id, title);
+        } catch (messageError) {
+          logger.error(`[${callId}] thread_message_title_update_failed`, {
+            path: 'note_taker',
+            error: messageError,
+          });
+        }
         return true;
       } catch (error) {
         logger.error(`[${callId}] call_record_update_failed`, {

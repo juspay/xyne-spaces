@@ -457,11 +457,11 @@ model UserMemoryCandidate {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// Cluster label. One of: "style" | "expertise" | "projects" |
+  /// Cluster label. One of: "style" | "triage" | "expertise" | "projects" |
   /// "relationships" | "preferences" | "decisions" | "context" | "docs"
   subsystem String
 
-  /// The memory text the curator emitted, ≤ 1500 chars.
+  /// The memory text the curator emitted.
   text       String
   /// If the user edited before approving, the edited version goes here; the
   /// curator's original stays in `text` for audit.
@@ -1123,10 +1123,41 @@ model ChatAttachment {
   createdAt        DateTime @default(now())
 
   chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+  designShares DesignArtifactShare[]
 
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
   @@map("chat_attachments")
+}
+
+/// A stable, revocable public link to the latest published HTML attachment in
+/// one Design Studio conversation. Only the bearer token hash is used for
+/// verification; its encrypted copy exists so
+/// the owner can reopen the Share dialog without rotating a live link.
+model DesignArtifactShare {
+  id              String   @id @default(cuid())
+  tokenHash       String   @unique
+  tokenCiphertext String
+  tokenIv         String
+  tokenAuthTag    String
+  ownerUserId     String
+  orgId           String
+  conversationId  String
+  attachmentId    String
+  title           String
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  viewCount       Int      @default(0)
+  lastViewedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  attachment ChatAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerUserId, conversationId])
+  @@index([orgId, updatedAt])
+  @@index([attachmentId])
+  @@map("design_artifact_shares")
 }
 
 model AgentRequest {
@@ -1807,6 +1838,94 @@ model ActiveGoal {
   @@index([status, updatedAt])
   @@index([orgId])
   @@map("active_goals")
+}
+
+model ExperimentRun {
+  id                String              @id @default(cuid())
+  conversationId    String
+  channelId         String
+  agentSlug         String
+  userId            String
+  orgId             String
+  focus             String?
+  /// Per-experiment LLM pin, forwarded as providerOverride on every epoch
+  /// dispatch. NULL = the agent's normal provider resolution.
+  provider          String?
+  modelId           String?
+  /// "experiment" (default proof-reward loop) or "understanding" (coverage-gated:
+  /// end-experiment stays locked until the open-conjecture frontier is exhausted).
+  /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
+  kind              String              @default("experiment")
+  status            String              @default("running") /// running | finishing | done | aborted
+  epoch             Int                 @default(1)
+  deadlineAt        DateTime
+  currentHypothesis String?             @db.Text
+  currentSessionId  String?
+  lastEpochEndedAt  DateTime?
+  sandboxNote       String?
+  /// Basenames of files the agent actually delivered to the thread via
+  /// sandbox-deliver-files. A finding may only be marked `proved` if its
+  /// proofArtifactPath resolves to one of these — proof left behind in a
+  /// sandbox dies with the sandbox and is worthless to a human reader.
+  deliveredArtifacts String[]           @default([])
+  /// Sessions of in-flight CHECKER runs. Checkers deliberately never claim
+  /// currentSessionId (that would make the epoch handoff chain off their
+  /// completion), which also meant `/experiment stop` could not reach them —
+  /// a stopped run kept emitting checker output into the thread.
+  checkerSessionIds  String[]           @default([])
+  finalReport       String?             @db.Text
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  findings          ExperimentFinding[]
+  reviews           ExperimentReview[]
+
+  @@index([conversationId, status])
+  @@map("experiment_runs")
+}
+
+// workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model ExperimentFinding {
+  id                String        @id @default(cuid())
+  experimentId      String
+  experiment        ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  epoch             Int
+  status            String /// conjecture | proved | refuted
+  title             String
+  hypothesis        String        @db.Text
+  note              String?       @db.Text
+  proofArtifactPath String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  reviews           ExperimentReview[]
+
+  @@index([experimentId])
+  @@map("experiment_findings")
+}
+
+/// A second agent's verdict on a finding, produced at the end of each epoch.
+/// Deliberately ADVISORY: a review never mutates ExperimentFinding.status.
+/// An agent that can silently un-prove another agent's work is a failure mode
+/// with no audit trail — so the verdict sits beside the finding and a human
+/// (or the next epoch's prompt) decides what to do with it.
+// workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model ExperimentReview {
+  id           String            @id @default(cuid())
+  experimentId String
+  experiment   ExperimentRun     @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  findingId    String
+  finding      ExperimentFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  /// Epoch the review ran for (the epoch whose findings it checked).
+  epoch        Int
+  /// confirms | contradicts | stale | duplicate | unverifiable
+  verdict      String
+  reason       String            @db.Text
+  /// Set when verdict = duplicate — the ExperimentFinding.id it duplicates.
+  duplicateOf  String?
+  createdAt    DateTime          @default(now())
+
+  @@unique([findingId, epoch])
+  @@index([experimentId])
+  @@map("experiment_reviews")
 }
 
 /// Output of the FailureCurator — a structured "why this agent is

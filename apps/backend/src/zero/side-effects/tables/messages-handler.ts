@@ -147,9 +147,14 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
 }
 
 /**
- * Friendly notification label for structured Flow cards. Slash-command
- * artifacts and plans both belong here so callers have one Flow-card path and
- * never need to inspect command-specific legacy HTML markers.
+ * Friendly notification label for a flow CARD whose title/content doesn't live
+ * in text `content` props — so extractTextFromFlowJson returns '' and the
+ * preview would otherwise fall back to the meaningless "Flow JSON" text node.
+ *
+ * Handles slash-command artifacts (matched first, via the shared registry, so
+ * callers never inspect command-specific markers) plus the plan, diff, code,
+ * ticket, chart and user-question artifacts. Returns null for other flows so
+ * the caller keeps its existing extraction.
  */
 function getFlowCardNotificationLabel(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
@@ -177,11 +182,57 @@ function getFlowCardNotificationLabel(content: string): string | null {
     const plan = Array.isArray(flow.components)
       ? flow.components.find((c) => c?.type === 'plan')
       : undefined;
-    if (!plan) return null;
-    const rawTitle = plan.props?.['title'];
-    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-    const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
-    return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    if (plan) {
+      const rawTitle = plan.props?.['title'];
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
+      return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    }
+    const diff = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'diff')
+      : undefined;
+    if (diff) {
+      const rawPath = diff.props?.['path'];
+      const path = typeof rawPath === 'string' ? rawPath.trim() : '';
+      return path ? `📝 Shared a diff: ${path}` : '📝 Shared a diff';
+    }
+    const code = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'code')
+      : undefined;
+    if (code) {
+      const rawLanguage = code.props?.['language'];
+      const language = typeof rawLanguage === 'string' ? rawLanguage.trim() : '';
+      return language ? `💻 Shared ${language} code` : '💻 Shared a code snippet';
+    }
+    const ticket = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'ticket')
+      : undefined;
+    if (ticket) {
+      const rawXyneId = ticket.props?.['xyneId'];
+      const rawTitle = ticket.props?.['title'];
+      const xyneId = typeof rawXyneId === 'string' ? rawXyneId.trim() : '';
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      if (xyneId && title) return `🎫 Filed ${xyneId}: ${title}`;
+      return xyneId ? `🎫 Filed ${xyneId}` : '🎫 Filed a ticket';
+    }
+    const chart = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'chart')
+      : undefined;
+    if (chart) {
+      const rawCaption = chart.props?.['caption'];
+      const caption = typeof rawCaption === 'string' ? rawCaption.trim() : '';
+      return caption ? `📊 ${caption}` : '📊 Shared a chart';
+    }
+    const questionSet = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'user_question')
+      : undefined;
+    if (!questionSet) return null;
+    const questions = questionSet.props?.['questions'];
+    const count = Array.isArray(questions) ? questions.length : 0;
+    const phase = questionSet.props?.['phase'];
+    if (phase === 'answered') return `✅ Answered ${count || 'agent'} question${count === 1 ? '' : 's'}`;
+    if (phase === 'declined') return 'Question request declined';
+    return count > 1 ? `💬 Agent wants to ask you ${count} questions` : '💬 Agent wants to ask you a question';
   } catch {
     return null;
   }

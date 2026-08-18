@@ -9,6 +9,12 @@ import { CONFIG } from "../../config.js";
 
 export const SLACK_SCOPES = [
   "app_mentions:read",
+  // The Slack MCP subagent lists and reads channels where the installed bot
+  // is present. Slack separates public-channel and private-channel scopes.
+  "channels:read",
+  "channels:history",
+  "groups:read",
+  "groups:history",
   "chat:write",
   "chat:write.customize",
   "im:history",

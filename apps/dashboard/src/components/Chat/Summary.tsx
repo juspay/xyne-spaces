@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Unified Summary Component
  * Handles both thread and channel summarization with shared UI and logic
@@ -538,8 +539,11 @@ export const Summary = (props: SummaryProps): ReactElement => {
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return;
-        // eslint-disable-next-line no-console
-        console.error('Error fetching summary:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error fetching summary:'),
+          error: err,
+        });
         if (currentIdRef.current === fetchId) {
           setError(err instanceof Error ? err.message : 'Failed to fetch summary');
           setState('error');

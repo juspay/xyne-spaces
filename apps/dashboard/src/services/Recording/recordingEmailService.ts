@@ -62,10 +62,10 @@ class RecordingEmailService {
     return response.data;
   }
 
-  async connectGoogle(returnPath: string): Promise<string> {
+  async connectGoogle(returnPath: string, platform: 'electron' | 'web' = 'web'): Promise<string> {
     const response = await apiInstance.post<GoogleRecordingEmailConnectionResponse>(
       '/integrations/google/connect/recording-email/init',
-      { returnPath },
+      { returnPath, platform },
     );
     return response.data.authUrl;
   }

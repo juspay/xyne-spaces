@@ -597,7 +597,11 @@ function MessageCodeBlock({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to copy code snippet to clipboard'),
+          error: error,
+        });
       });
   };
 
@@ -1068,18 +1072,19 @@ const parseNode = (
   // Handle embedded flow JSON — render FlowScreenManager in place of the div
   if (el.hasAttribute('data-flow-json')) {
     const raw = el.getAttribute('data-flow-json');
-    console.log(
-      '[RenderMsg] data-flow-json found, raw length:',
-      raw?.length,
-      'messageId:',
-      messageId,
-      'conversationId:',
-      conversationId,
-    );
+    logger.info(Event.FRONTEND_ERROR, {
+      type: 'migrated_console_log',
+      message: String('[RenderMsg] data-flow-json found, raw length:'),
+      context: [raw?.length, 'messageId:', messageId, 'conversationId:', conversationId],
+    });
     if (raw) {
       try {
         const flowJSON = JSON.parse(raw) as FlowDefinition;
-        console.log('[RenderMsg] parsed flowJSON ok, screenId:', flowJSON.screenId);
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('[RenderMsg] parsed flowJSON ok, screenId:'),
+          context: [flowJSON.screenId],
+        });
         return (
           <FlowScreenManager
             key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
@@ -1092,7 +1097,11 @@ const parseNode = (
           />
         );
       } catch (e) {
-        console.error('[RenderMsg] failed to parse data-flow-json:', e);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[RenderMsg] failed to parse data-flow-json:'),
+          error: e,
+        });
         return null;
       }
     }
@@ -1297,9 +1306,6 @@ const parseNode = (
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
         const externalHref = href;
         props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
-          if (e.metaKey || e.ctrlKey) {
-            logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: externalHref });
-          }
           e.preventDefault();
           openLink(externalHref, e);
         };
@@ -1374,12 +1380,11 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       if (!message || typeof message !== 'string') return [];
 
       if (message.includes('data-flow-json')) {
-        console.log(
-          '[RenderMsg] content contains data-flow-json, messageId:',
-          messageId,
-          'len:',
-          message.length,
-        );
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('[RenderMsg] content contains data-flow-json, messageId:'),
+          context: [messageId, 'len:', message.length],
+        });
       }
 
       const safe = message.slice(0, MAX_HTML_LENGTH).replace(/\r\n/g, '\n').replace(/\r/g, '\n');

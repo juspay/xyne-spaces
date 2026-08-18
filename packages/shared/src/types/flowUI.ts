@@ -27,7 +27,13 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
+  | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart'
   | 'agent'
+  | 'mcpConfigure'
   | 'slash_command_artifact';
 
 export interface FlowComponent {

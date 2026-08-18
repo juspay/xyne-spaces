@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { ActivityLogPayload } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
 import { ENABLE_ACTIVITY_LOG } from '../config';
@@ -17,9 +18,15 @@ export const activityApi = {
       });
     } catch (error) {
       // Log error for monitoring
-      console.warn('Activity logging failed:', {
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Activity logging failed:'),
+        context: [
+          {
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
     }
   },

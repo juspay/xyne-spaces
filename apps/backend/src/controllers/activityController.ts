@@ -4,6 +4,8 @@ import { ActivityLogEntry } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { UserSessionService } from '@/services/userSessionService';
 import { activityService } from '@/services/activity/activityService';
+import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
+import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
 
 export class ActivityController {
   private userSessionService: UserSessionService;
@@ -53,10 +55,31 @@ export class ActivityController {
         severity: 'INFO',
       };
 
-      logger.info('Activity logged', { 
+      logger.info('Activity logged', {
         eventType: 'activity',
-        ...logEntry 
+        ...logEntry
       });
+
+    
+      if (validated.triggerEvent === 'page_change') {
+        try {
+          // page arrives workspace-prefixed (`/${workspaceId}${path}`). Only
+          // whitelisted modules are tracked, so no record id is ever sent.
+          const resolved = resolveModule(validated.page);
+
+          if (resolved) {
+            sudoQueryService.identify({ id: validated.userId, email: validated.userEmail });
+            sudoQueryService.track('module_open', {
+              userId: validated.userId,
+              module: resolved.module, // '/calls', '/chat/dm', '/chat/dir/recap'
+              workspaceId: resolved.workspaceId,
+              ...(platform && { platform }),
+            });
+          }
+        } catch (err) {
+          logger.debug('[ModuleMetrics] track failed (non-blocking)', { error: err });
+        }
+      }
 
       res.status(200).json({ success: true });
       logger.debug('ACTIVITY_TRACE [Backend-Controller]: Response sent (200 OK) ✓');

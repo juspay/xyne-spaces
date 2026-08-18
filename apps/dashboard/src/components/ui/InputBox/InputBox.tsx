@@ -254,7 +254,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           const map = getDroppedFilesForEntity(channelId, conversationId ?? null);
           setAttachmentsMap(map);
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
           logger.error(Event.DRAFT_ATTACHMENTS_LOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,
@@ -411,7 +415,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         try {
           await providerAddDroppedFiles(files, channelId, conversationId);
         } catch (error) {
-          console.error('Failed to upload file:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to upload file:'),
+            error: error,
+          });
           logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,

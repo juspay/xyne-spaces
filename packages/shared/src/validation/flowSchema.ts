@@ -526,6 +526,145 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+/** A bare label, or a label plus the secondary line the option card renders under it. */
+export const userQuestionOptionSchema = z.union([
+  z.string().min(1),
+  z.object({ label: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+]);
+
+export const userQuestionItemSchema = z.discriminatedUnion('type', [
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('open_ended'), placeholder: z.string().optional(), required: z.boolean().optional() }).strict(),
+]);
+
+export const userQuestionPropsSchema = z.object({
+  title: z.string().min(1),
+  questions: z.array(userQuestionItemSchema).min(1).max(8),
+  // Absent on cards posted before terminal question states were introduced;
+  // the renderer interprets absence as `pending`.
+  phase: z.enum(['pending', 'answered', 'declined']).optional(),
+  answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
+  /** Optional notes are scoped to the individual prompt id. */
+  notes: z.record(z.string()).optional(),
+  decidedAt: z.string().optional(),
+  submitAction: flowActionSchema.optional(),
+  dismissAction: flowActionSchema.optional(),
+}).strict();
+
+export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.literal('user_question'), props: userQuestionPropsSchema });
+export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
+export type UserQuestionOption = z.infer<typeof userQuestionOptionSchema>;
+export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
+
+export const codePropsSchema = z
+  .object({
+    code: z.string().min(1),
+    language: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const codeComponentSchema = baseComponentSchema.extend({
+  type: z.literal('code'),
+  props: codePropsSchema,
+});
+
+export const diffPropsSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().min(1),
+  })
+  .strict();
+
+export const diffComponentSchema = baseComponentSchema.extend({
+  type: z.literal('diff'),
+  props: diffPropsSchema,
+});
+
+export const ticketStatusSchema = z.enum(['TODO', 'STARTED', 'PAUSED', 'CANCELLED', 'COMPLETED']);
+export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const ticketPropsSchema = z
+  .object({
+    xyneId: z.string().min(1).optional(),
+    ticketId: z.string().min(1).optional(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    status: ticketStatusSchema,
+    priority: ticketPrioritySchema,
+    stageName: z.string().min(1).optional(),
+    eta: z.string().optional(),
+    url: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    conversationId: z.string().min(1).optional(),
+    assigneeId: z.string().min(1).optional(),
+    phase: z.enum(['proposed', 'created']).optional(),
+    approveAction: flowActionSchema.optional(),
+    approveContinueAction: flowActionSchema.optional(),
+    declineAction: flowActionSchema.optional(),
+  })
+  .strict();
+
+export const ticketComponentSchema = baseComponentSchema.extend({
+  type: z.literal('ticket'),
+  props: ticketPropsSchema,
+});
+
+export const chartPointSchema = z
+  .object({ label: z.string().min(1), value: z.number().finite() })
+  .strict();
+
+export const chartSeriesPointSchema = z
+  .object({
+    x: z.string().min(1),
+    y: z.number().finite(),
+    series: z.string().min(1).optional(),
+  })
+  .strict();
+
+const CHART_MAX_POINTS = 200;
+
+const categoryChartSchema = <T extends 'bar' | 'pie' | 'donut'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      points: z.array(chartPointSchema).min(1).max(24),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+const seriesChartSchema = <T extends 'line' | 'area'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      series: z.array(chartSeriesPointSchema).min(1).max(CHART_MAX_POINTS),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+export const chartPropsSchema = z.discriminatedUnion('type', [
+  categoryChartSchema('bar'),
+  categoryChartSchema('pie'),
+  categoryChartSchema('donut'),
+  seriesChartSchema('line'),
+  seriesChartSchema('area'),
+]);
+
+export const chartComponentSchema = baseComponentSchema.extend({
+  type: z.literal('chart'),
+  props: chartPropsSchema,
+});
+
+export type CodeProps = z.infer<typeof codePropsSchema>;
+export type DiffProps = z.infer<typeof diffPropsSchema>;
+export type TicketProps = z.infer<typeof ticketPropsSchema>;
+export type TicketArtifactStatus = z.infer<typeof ticketStatusSchema>;
+export type TicketArtifactPriority = z.infer<typeof ticketPrioritySchema>;
+export type ChartProps = z.infer<typeof chartPropsSchema>;
+export type ChartType = ChartProps['type'];
+export type ChartPoint = z.infer<typeof chartPointSchema>;
+export type ChartSeriesPoint = z.infer<typeof chartSeriesPointSchema>;
+
 // ── Agent artifact ────────────────────────────────────────────────────────────
 // ONE node renders every agent surface. The identity block (name / slug /
 // description / model / capabilities / system prompt) is INVARIANT across
@@ -695,6 +834,44 @@ export type SlashCommandArtifactProps = z.infer<
   typeof slashCommandArtifactPropsSchema
 >;
 
+// ── MCP configure card ────────────────────────────────────────────────────────
+// The agent asks for an account it needs but the user hasn't connected. It posts
+// this card; the USER types the credentials in the dashboard and they go
+// browser → claw-auth directly.
+//
+// INVARIANT: no secret ever appears in these props. `fields` describes WHICH
+// inputs to render (name/label/type), never their values — a credential passed
+// as a tool argument would land in the model's context, the run transcript and
+// the logs. `mcpServerId` is the only thing the server acts on, and the whole
+// flowJSON round-trips through the client, so props are untrusted regardless.
+export const mcpCredentialFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    type: z.enum(['text', 'password']),
+    placeholder: z.string().optional(),
+    optional: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpConfigurePropsSchema = z
+  .object({
+    serverType: z.string().min(1),
+    serverName: z.string().min(1),
+    mcpServerId: z.string().min(1),
+    reason: z.string().optional(),
+    fields: z.array(mcpCredentialFieldSchema).min(1),
+  })
+  .strict();
+
+export const mcpConfigureComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcpConfigure'),
+  props: mcpConfigurePropsSchema,
+});
+
+export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
+export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -715,7 +892,13 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    userQuestionComponentSchema,
+    codeComponentSchema,
+    diffComponentSchema,
+    ticketComponentSchema,
+    chartComponentSchema,
     agentComponentSchema,
+    mcpConfigureComponentSchema,
     slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
@@ -731,6 +914,44 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
       children: z.array(z.lazy(() => flowComponentSchema)).optional(),
     }),
   ]),
+);
+
+// TEMPORARY — remove once every deploy target ships the same @xyne/shared.
+//
+// The union above is a HARD gate: an unrecognised `type` fails validation for
+// the WHOLE flow, and this same schema runs on Spaces' postMessage ingest. So a
+// card emitted by a newer claw against an older backend is not partially
+// rendered — the entire message is rejected and nothing reaches the thread, with
+// no error the user can see. That is how the `agent` card (PR #279) went dark:
+// the emitter shipped, the schema did not.
+//
+// Until shared/backend/dashboard are deployed in lockstep, an unknown component
+// is allowed through as an opaque passthrough node. Known types keep their
+// strict validation — this only widens the door for types this build has never
+// heard of. The renderer degrades them to a readable JSON block.
+// Component types THIS build knows. The lenient branch must refuse these —
+// otherwise a malformed `text` node (say, one missing `content`) stops failing
+// validation and quietly degrades to an "unsupported card" instead, which is a
+// worse bug than the one this shim fixes.
+const KNOWN_COMPONENT_TYPES = new Set([
+  'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
+  'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
+  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
+]);
+
+const unknownComponentSchema = baseComponentSchema
+  .extend({
+    type: z
+      .string()
+      .min(1)
+      .refine((t) => !KNOWN_COMPONENT_TYPES.has(t), {
+        message: 'known component type must satisfy its own schema',
+      }),
+  })
+  .passthrough();
+
+export const flowComponentSchemaLenient: z.ZodType<any> = z.lazy(() =>
+  z.union([flowComponentSchema, unknownComponentSchema]),
 );
 
 // ============================================================================
@@ -755,7 +976,9 @@ export const flowDefinitionSchema = z.object({
   version: z.literal('2.0'),
   screenId: z.string().min(1),
   title: z.string().optional(),
-  components: z.array(flowComponentSchema).min(1),
+  // Lenient on purpose — see flowComponentSchemaLenient. A single unknown
+  // component must not reject the entire message at ingest.
+  components: z.array(flowComponentSchemaLenient).min(1),
   data: z.record(z.unknown()).optional(),
   state: flowStateSchema,
 });
