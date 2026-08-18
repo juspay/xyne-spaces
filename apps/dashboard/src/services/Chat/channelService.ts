@@ -1,9 +1,6 @@
 import { apiInstance } from '../clients/apiClient';
 import { DeskType, ChannelScopeType } from '@xyne/shared';
-import type {
-  AddGroupDmParticipantsRequest,
-  AddGroupDmParticipantsResponse,
-} from '@xyne/shared';
+import type { AddGroupDmParticipantsRequest, AddGroupDmParticipantsResponse } from '@xyne/shared';
 
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
@@ -87,10 +84,7 @@ export interface CreateDmResponse {
   isExisting: boolean;
 }
 
-export type {
-  AddGroupDmParticipantsRequest,
-  AddGroupDmParticipantsResponse,
-} from '@xyne/shared';
+export type { AddGroupDmParticipantsRequest, AddGroupDmParticipantsResponse } from '@xyne/shared';
 
 export interface PromoteGroupDmRequest {
   name: string;
