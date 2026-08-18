@@ -1,5 +1,5 @@
 import { forwardRef, useMemo, useState } from 'react';
-import { ChannelType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType } from '@xyne/shared';
 import {
   CheckTickSingle,
   ChevronDown,
@@ -190,7 +190,14 @@ function withMissingSelected<T extends ChecklistOption<string>>(
 }
 
 function useChannelOptions(search: string, value: string[]): ChecklistOption<string>[] {
-  const channels = useAllChannels();
+  const allChannels = useAllChannels();
+  const channels = useMemo(
+    () =>
+      allChannels.filter(
+        c => c.scopeType !== ChannelScopeType.DM && c.scopeType !== ChannelScopeType.GROUP_DM,
+      ),
+    [allChannels],
+  );
   return useMemo(() => {
     const lower = search.trim().toLowerCase();
     const base = channels
