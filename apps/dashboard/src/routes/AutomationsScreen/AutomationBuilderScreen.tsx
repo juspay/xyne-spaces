@@ -111,76 +111,73 @@ export default function AutomationBuilderScreen(): ReactElement {
   }
 
   return (
-    <>
-      {/* `key` forces a fresh mount whenever the route's automation id (or
+    <div className='flex h-full min-h-0 w-full'>
+      <div className='min-w-0 flex-1'>
+        {/* `key` forces a fresh mount whenever the route's automation id (or
           fork source) changes — otherwise React reuses the same component
           and useState values like editMode / name / config carry over from
           the previous automation. */}
-      <AutomationBuilder
-        key={isNew ? `new-${forkFromId ?? 'fresh'}` : (params.id ?? '')}
-        automation={isNew ? null : automation}
-        {...(forkSource && isNew
-          ? {
-              initialConfig: forkSource.config,
-              initialName: isClone ? `${forkSource.name.slice(0, 72)} - Clone` : forkSource.name,
-              ...(forkSource.description ? { initialDescription: forkSource.description } : {}),
-              // Clones start an independent lineage — forks stay pinned to the source.
-              ...(forkFromId && !isClone
-                ? {
-                    forkFromSeriesId: forkSource.automationSeriesId ?? forkSource.id,
-                    forkSourceAutomationId: forkFromId,
-                  }
-                : {}),
+        <AutomationBuilder
+          key={isNew ? `new-${forkFromId ?? 'fresh'}` : (params.id ?? '')}
+          automation={isNew ? null : automation}
+          {...(forkSource && isNew
+            ? {
+                initialConfig: forkSource.config,
+                initialName: isClone ? `${forkSource.name.slice(0, 72)} - Clone` : forkSource.name,
+                ...(forkSource.description ? { initialDescription: forkSource.description } : {}),
+                // Clones start an independent lineage — forks stay pinned to the source.
+                ...(forkFromId && !isClone
+                  ? {
+                      forkFromSeriesId: forkSource.automationSeriesId ?? forkSource.id,
+                      forkSourceAutomationId: forkFromId,
+                    }
+                  : {}),
+              }
+            : {})}
+          approvalReviewMode={fromApprovals}
+          onBack={() => void navigate(fromApprovals ? '../approvals' : '..', { relative: 'path' })}
+          onSaved={result => {
+            if (isNew) {
+              void navigate(`../${result.automation.id}`, { replace: true, relative: 'path' });
             }
-          : {})}
-        approvalReviewMode={fromApprovals}
-        onBack={() => void navigate(fromApprovals ? '../approvals' : '..', { relative: 'path' })}
-        onSaved={result => {
-          if (isNew) {
-            void navigate(`../${result.automation.id}`, { replace: true, relative: 'path' });
+          }}
+          onShowRuns={id => void navigate(`../${id}/runs`, { relative: 'path' })}
+          onShowVersionHistory={id =>
+            setPanelParams({ panel: 'versions', versionsId: id }, { replace: false })
           }
-        }}
-        onShowRuns={id => void navigate(`../${id}/runs`, { relative: 'path' })}
-        onShowVersionHistory={id =>
-          setPanelParams({ panel: 'versions', versionsId: id }, { replace: false })
-        }
-        onAfterApprovalDecision={() => void navigate('../approvals', { relative: 'path' })}
-      />
+          onAfterApprovalDecision={() => void navigate('../approvals', { relative: 'path' })}
+        />
+      </div>
 
-      {/* Portaled to document.body (via DialogPrimitive.Portal) so it's never
-          clipped by the automations shell's `overflow-hidden` rounded panel —
-          that clipping was the source of the earlier overlap glitch. */}
+      {/* Rendered inline (no Portal, no `fixed`) as a flex sibling so it
+          pushes/shrinks the builder pane instead of overlaying it — a real
+          docked sidebar, not a modal. `modal={false}` keeps the builder pane
+          interactive; outside clicks don't dismiss it, only Back/Escape do. */}
       <DialogPrimitive.Root
         open={versionsPanelOpen}
+        modal={false}
         onOpenChange={open => {
           if (!open) setPanelParams({ panel: null, versionsId: null });
         }}
       >
-        <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay
-            className={
-              'fixed inset-0 z-50 bg-black/20 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
-            }
-          />
-          <DialogPrimitive.Content
-            className={
-              'fixed inset-y-0 right-0 z-50 flex h-full w-[420px] max-w-full flex-col border-l border-border bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-200'
-            }
-          >
-            <DialogPrimitive.Title className='hidden'>Version history</DialogPrimitive.Title>
-            {versionsId && (
-              <VersionHistory
-                automationId={versionsId}
-                onBack={() => setPanelParams({ panel: null, versionsId: null })}
-                onOpenVersion={version => void navigate(`/automations/${version.id}`)}
-                onCompare={(fromId, toId) =>
-                  setPanelParams({ cmpFrom: fromId, cmpTo: toId }, { replace: false })
-                }
-              />
-            )}
-          </DialogPrimitive.Content>
-        </DialogPrimitive.Portal>
+        <DialogPrimitive.Content
+          onPointerDownOutside={e => e.preventDefault()}
+          onInteractOutside={e => e.preventDefault()}
+          className='flex h-full w-[420px] shrink-0 flex-col border-l border-border bg-background outline-none'
+        >
+          <DialogPrimitive.Title className='hidden'>Version history</DialogPrimitive.Title>
+          {versionsId && (
+            <VersionHistory
+              automationId={versionsId}
+              onBack={() => setPanelParams({ panel: null, versionsId: null })}
+              onOpenVersion={version => void navigate(`/automations/${version.id}`)}
+              onCompare={(fromId, toId) =>
+                setPanelParams({ cmpFrom: fromId, cmpTo: toId }, { replace: false })
+              }
+            />
+          )}
+        </DialogPrimitive.Content>
       </DialogPrimitive.Root>
-    </>
+    </div>
   );
 }
