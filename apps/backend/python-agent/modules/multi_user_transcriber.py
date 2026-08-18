@@ -952,6 +952,7 @@ class MultiUserTranscriber:
         
         # Grab pre-warmed session from pool (instant, no initialization delay)
         session = await self._get_session_from_pool()
+        
         # Create agent for this participant with shared turn detector
         agent = ParticipantTranscriber(
             participant_identity=participant.identity,
@@ -1112,3 +1113,4 @@ class MultiUserTranscriber:
         task = asyncio.create_task(self._close_session(session, participant.identity))
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._tasks.discard(t))
+

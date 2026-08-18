@@ -24,7 +24,7 @@ export const recordingRepairRedisKeys = {
   /**
    * ZSET (member = `${callId}:${captureId}`, score = finalizedAt) of every capture
    * that is neither MERGED nor FAILED-non-retryable — i.e. still worth working on.
-   * Replaces the Postgres `findPending` scan.
+   * Read by the queue's recovery sweep to re-enqueue pending captures.
    */
   pending: `${NS}:pending`,
 
@@ -34,7 +34,6 @@ export const recordingRepairRedisKeys = {
   /**
    * SET of captureIds for a call that are not yet MERGED and not FAILED-non-retryable
    * (i.e. could still merge). Empty ⇒ safe to (re)generate the call's artifacts.
-   * Replaces the Postgres `hasUnmergedForCall` query.
    */
   callUnmerged: (callId: string): string => `${NS}:call:${callId}:unmerged`,
 

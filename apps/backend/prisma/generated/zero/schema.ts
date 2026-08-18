@@ -515,7 +515,6 @@ export const userPreferenceTable = table("user_preferences")
     channelSortOrder: string(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
-    showThreadTags: boolean(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -1137,7 +1136,6 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
-    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -1343,7 +1341,6 @@ export const messageTable = table("messages")
     isSent: boolean(),
     reactions_md: string().optional(),
     link_preview_md: string().optional(),
-    messageActs: string().optional(),
   })
   .primaryKey("messageId");
 

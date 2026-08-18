@@ -51,7 +51,3 @@ export async function getSavedDirectoryHandle(): Promise<FileSystemDirectoryHand
 export async function saveDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
   await withStore<IDBValidKey>('readwrite', store => store.put(handle, KEY));
 }
-
-export async function clearSavedDirectoryHandle(): Promise<void> {
-  await withStore<undefined>('readwrite', store => store.delete(KEY)).catch(() => undefined);
-}

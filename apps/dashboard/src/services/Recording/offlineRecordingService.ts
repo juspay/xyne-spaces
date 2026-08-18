@@ -65,7 +65,7 @@ function needsRepair(manifest: RecordingCaptureManifest): boolean {
   return manifest.offlineAtStart || manifest.outages.length > 0;
 }
 
-export class OfflineRecordingService {
+class OfflineRecordingService {
   private capture: ActiveCapture | null = null;
   private startPromise: Promise<void> | null = null;
   private startingCallId: string | null = null;

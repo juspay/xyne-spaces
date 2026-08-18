@@ -9,7 +9,7 @@ import type { RecordingArchiveInit } from './types';
 
 const FSA_APP_DIR = 'Xyne Recordings';
 
-export function fsaAvailable(): boolean {
+function fsaAvailable(): boolean {
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
 }
 

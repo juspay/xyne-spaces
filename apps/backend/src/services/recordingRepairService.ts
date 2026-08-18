@@ -18,7 +18,9 @@ export class RecordingRepairTerminalError extends Error {
   override readonly name = 'RecordingRepairTerminalError';
 }
 
-export class RecordingRepairDeferredError extends Error {
+// Thrown to signal "not yet — retry later"; unlike the terminal error the queue
+// never branches on it, so it stays module-local and simply propagates for a retry.
+class RecordingRepairDeferredError extends Error {
   override readonly name = 'RecordingRepairDeferredError';
 }
 
