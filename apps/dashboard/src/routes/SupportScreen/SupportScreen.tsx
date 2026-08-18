@@ -167,7 +167,7 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
-import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
+import { startGooglePlayOAuth, startInstagramOAuth } from '../../services/clients/socialMediaDeskApi';
 import SocialMediaComposer from '../../components/xyne-desk/SocialMediaComposer/SocialMediaComposer';
 import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -2033,6 +2033,7 @@ const SupportScreen = (): ReactElement => {
       installedAppId?: string;
       applications?: Array<{ displayName: string; packageName: string }>;
       platform?: 'web' | 'electron';
+      socialMediaProvider?: 'instagram' | 'google-play';
     },
   ) => {
     const {
@@ -2044,12 +2045,35 @@ const SupportScreen = (): ReactElement => {
       installedAppId,
       applications,
       platform: formPlatform,
+      socialMediaProvider,
       channelType: _submittedChannelType,
       ...rest
     } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
+      if (socialMediaProvider === 'instagram') {
+        void startInstagramOAuth({
+          name: rest.name,
+          projectId: rest.projectId,
+          boardId: rest.boardId,
+          ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+          platform: isElectron ? 'electron' : 'web',
+        })
+          .then(authUrl => {
+            setShowCreateChannelModal(false);
+            if (isElectron && window.electronAPI?.openExternal) {
+              window.electronAPI.openExternal(authUrl);
+            } else {
+              window.location.href = authUrl;
+            }
+          })
+          .catch(error => {
+            toast.error(error instanceof Error ? error.message : 'Failed to start Instagram OAuth');
+          });
+        return;
+      }
       if (!applications?.length || !rest.boardId) {
         toast.error('At least one Google Play application and a board are required');
         return;
@@ -2138,34 +2162,6 @@ const SupportScreen = (): ReactElement => {
         channelType: 'EMAIL',
         emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
-      return;
-    }
-
-    if (deskType === 'SOCIAL_MEDIA') {
-      const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      void (async () => {
-        try {
-          const res = await apiInstance.post<{ authUrl: string }>(
-            '/integrations/social-media/instagram/oauth/start',
-            {
-              name: rest.name,
-              projectId: rest.projectId,
-              visibility: rest.visibility,
-              ...(rest.boardId && { boardId: rest.boardId }),
-              ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
-              platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
-            },
-          );
-          setShowCreateChannelModal(false);
-          if (isElectron && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(res.data.authUrl);
-          } else {
-            window.location.href = res.data.authUrl;
-          }
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Instagram authorization');
-        }
-      })();
       return;
     }
 

@@ -136,7 +136,7 @@ router.get(
       const relatedExtMsgs = await db.externalMessage.findMany({
         where: {
           externalSourceId: source.id,
-          externalThreadId: { startsWith: igsid },
+          externalThreadId: { startsWith: `${igsid}:` },
           direction: 'INCOMING',
           entityType: 'EMAIL',
         },

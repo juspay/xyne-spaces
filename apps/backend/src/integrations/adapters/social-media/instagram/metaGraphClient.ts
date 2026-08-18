@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { config } from '@/config/env';
+import { logger } from '@/utils/logger';
 
 const IG_API_VERSION = 'v25.0';
 const IG_BASE_URL = `https://graph.instagram.com/${IG_API_VERSION}`;
@@ -71,16 +72,13 @@ export const metaGraphClient = {
     codeVerifier?: string,
   ): Promise<ExchangeTokenResult> {
     const params: Record<string, string> = {
-      client_id: config.META_APP_ID,
-      client_secret: config.META_APP_SECRET,
+      client_id: config.META_IG_APP_ID || config.META_APP_ID,
+      client_secret: config.META_IG_APP_SECRET || config.META_APP_SECRET,
       grant_type: 'authorization_code',
       redirect_uri: redirectUri,
       code,
     };
     if (codeVerifier) params.code_verifier = codeVerifier;
-    // Use Instagram App credentials (separate from Facebook App ID/Secret)
-    params.client_id = config.META_IG_APP_ID || config.META_APP_ID;
-    params.client_secret = config.META_IG_APP_SECRET || config.META_APP_SECRET;
     const response = await axios.post<ExchangeTokenResult>(
       IG_TOKEN_URL,
       new URLSearchParams(params).toString(),
@@ -141,7 +139,7 @@ export const metaGraphClient = {
       );
       return response.data;
     } catch (err) {
-      console.error('[IG getMessage] failed for mid=%s:', mid, err);
+      logger.error('[IG getMessage] failed', { mid, error: err });
       return null;
     }
   },
@@ -158,8 +156,9 @@ export const metaGraphClient = {
   },
 
   // In-process cache so we don't call Meta's profile API on every single DM.
-  // Key: `${igUserId}:${igsid}`, value: username string.
+  // Key: `${igUserId}:${igsid}`, value: username string. Capped at 500 entries (LRU eviction).
   _usernameCache: new Map<string, string>(),
+  _usernameCacheMaxSize: 500,
 
   async getSenderUsername(accessToken: string, businessIgUserId: string, senderIgsid: string): Promise<string | null> {
     const cacheKey = `${businessIgUserId}:${senderIgsid}`;
@@ -168,7 +167,14 @@ export const metaGraphClient = {
     try {
       const profile = await this.getUserProfile(accessToken, senderIgsid);
       const username = profile.username ?? null;
-      if (username) this._usernameCache.set(cacheKey, username);
+      if (username) {
+        if (this._usernameCache.size >= this._usernameCacheMaxSize) {
+          // Evict oldest entry (Map preserves insertion order)
+          const firstKey = this._usernameCache.keys().next().value;
+          if (firstKey !== undefined) this._usernameCache.delete(firstKey);
+        }
+        this._usernameCache.set(cacheKey, username);
+      }
       return username;
     } catch {
       return null;
@@ -206,7 +212,10 @@ export const metaGraphClient = {
       .createHmac('sha256', appSecret)
       .update(payloadB64)
       .digest('base64url');
-    if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sigB64))) return null;
+    const expectedBuf = Buffer.from(expected);
+    const sigBuf = Buffer.from(sigB64);
+    if (expectedBuf.length !== sigBuf.length) return null;
+    if (!crypto.timingSafeEqual(expectedBuf, sigBuf)) return null;
     try {
       return JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as {
         user_id?: string;
@@ -223,6 +232,9 @@ export const metaGraphClient = {
       .update(rawBody)
       .digest('hex');
     const received = signature.slice('sha256='.length);
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+    const expectedBuf = Buffer.from(expected);
+    const receivedBuf = Buffer.from(received);
+    if (expectedBuf.length !== receivedBuf.length) return false;
+    return crypto.timingSafeEqual(expectedBuf, receivedBuf);
   },
 };
