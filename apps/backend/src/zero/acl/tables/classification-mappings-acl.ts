@@ -50,11 +50,11 @@ export class ClassificationMappingsACL extends BaseACL<'classification_mappings'
     await this.verifyChannelAccess(row.channelId, tx);
     // channelId can be repointed on update — re-verify access to the new channel.
     if (args.channelId !== undefined) {
-      await this.verifyChannelAccess(args.channelId as string, tx);
+      await this.verifyChannelAccess(args.channelId, tx);
     }
     // userGroupId can be repointed on update — validate the new group's workspace.
     if (args.userGroupId !== undefined) {
-      await this.verifyUserGroupInWorkspace(args.userGroupId as string, tx);
+      await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     }
   }
 

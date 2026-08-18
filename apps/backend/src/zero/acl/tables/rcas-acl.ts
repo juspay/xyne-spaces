@@ -47,7 +47,7 @@ export class RcasACL extends BaseACL<'rcas'> {
     await this.verifyTicketAccess(row.ticketId, tx);
     // ticketId can be repointed on update — re-verify access to the new ticket.
     if (args.ticketId !== undefined) {
-      await this.verifyTicketAccess(args.ticketId as string, tx);
+      await this.verifyTicketAccess(args.ticketId, tx);
     }
   }
 

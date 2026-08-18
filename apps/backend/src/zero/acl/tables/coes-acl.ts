@@ -47,7 +47,7 @@ export class CoesACL extends BaseACL<'coes'> {
     await this.verifyRcaAccess(row.rcaId, tx);
     // rcaId can be repointed on update — re-verify access to the new RCA too.
     if (args.rcaId !== undefined) {
-      await this.verifyRcaAccess(args.rcaId as string, tx);
+      await this.verifyRcaAccess(args.rcaId, tx);
     }
   }
 
