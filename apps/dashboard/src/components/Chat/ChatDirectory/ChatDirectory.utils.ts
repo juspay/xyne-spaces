@@ -94,6 +94,13 @@ export const groupChannelsByScope = (
   const starred: VisibleChannel[] = [];
   const channels: VisibleChannel[] = [];
   const directMessages: VisibleChannel[] = [];
+  // Index statuses by channelId once (O(n)) so the per-channel lookup below is
+  // O(1) — same pattern used by bucketChannelsBySection. Previously this used
+  // `allChannelsUserStatus.find(...)` per channel, giving O(n * m) behaviour.
+  const statusByChannelId = new Map<string, ChannelUserStatus>();
+  for (const status of allChannelsUserStatus) {
+    statusByChannelId.set(status.channelId, status);
+  }
   for (const channel of channelData) {
     // EMAIL channels live in Xyne Desk, not in the chat directory.
     // TODO: filter this out at the source by excluding EMAIL-type channels in the
@@ -102,7 +109,7 @@ export const groupChannelsByScope = (
       continue;
     }
 
-    const currentUserParticipation = allChannelsUserStatus.find(p => p.channelId === channel.id);
+    const currentUserParticipation = statusByChannelId.get(channel.id);
 
     // Skip closed DMs (soft-deleted by user)
     if (currentUserParticipation?.isClosed && isDMChannel(channel.scopeType)) {
