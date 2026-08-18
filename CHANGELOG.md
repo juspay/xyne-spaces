@@ -1,3 +1,10 @@
+## [1.189.9](https://github.com/juspay/xyne-spaces/compare/v1.189.8...v1.189.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* fixing canvas acl ([#658](https://github.com/juspay/xyne-spaces/issues/658)) ([b987df4](https://github.com/juspay/xyne-spaces/commit/b987df43b132d0268451dce7bc0ebefa6009b172))
+
 ## [1.189.8](https://github.com/juspay/xyne-spaces/compare/v1.189.7...v1.189.8) (2026-08-18)
 
 
