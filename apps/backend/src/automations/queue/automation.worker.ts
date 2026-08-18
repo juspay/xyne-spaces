@@ -19,7 +19,8 @@ import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
 
 const EXECUTION_FETCH_MAX_RETRIES = 3;
-const EXECUTION_FETCH_RETRY_DELAY_MS = 200;
+const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
+const EXECUTION_FETCH_RETRY_STEP_MS = 500;
 
 class AutomationWorker {
   private isInitialized = false;
@@ -55,7 +56,8 @@ class AutomationWorker {
     const fetchExecution = () => db.workflowExecution.findUnique({ where: { id: executionId } });
     let execution = await fetchExecution();
     for (let retry = 0; !execution && retry < EXECUTION_FETCH_MAX_RETRIES; retry++) {
-      await new Promise(resolve => setTimeout(resolve, EXECUTION_FETCH_RETRY_DELAY_MS));
+      const delayMs = EXECUTION_FETCH_RETRY_BASE_DELAY_MS + retry * EXECUTION_FETCH_RETRY_STEP_MS;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
       execution = await fetchExecution();
     }
     if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
