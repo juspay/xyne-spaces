@@ -134,7 +134,8 @@ vi.mock("../lib/agent-provider-config.js", () => ({
   resolveSubagentProviderMode: vi.fn(() => "spaces"),
 }));
 
-vi.mock("xyne-claw-shared", () => ({
+vi.mock("xyne-claw-shared", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("xyne-claw-shared")>()),
   ClawSseParser: class {
     feed() {
       return [];

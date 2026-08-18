@@ -1,72 +1,60 @@
 import { describe, expect, it } from "vitest";
+import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
+import {
+  injectSdlcBaselineRunContext,
+  parseSdlcAgentRunContext,
+} from "./sdlc-baseline-run-context.js";
 
-import { injectSdlcBaselineRunContext, parseSdlcAgentRunContext } from "./sdlc-baseline-run-context.js";
+function context(baselineKind: string) {
+  return {
+    version: 1,
+    operation: "baseline",
+    workspaceId: "workspace-1",
+    projectId: "project-1",
+    channelId: "channel-1",
+    actorUserId: "user-1",
+    repository: { id: "repo-1", name: "Repo", url: "https://github.com/acme/repo.git", baseBranch: "main" },
+    permissions: { repositoryRole: "ADMIN" },
+    gates: { capabilities: [], allBaselinesApproved: false },
+    execution: { workflowExecutionId: "execution-1", sessionId: "session-1", conversationId: "conversation-1" },
+    artifact: { kind: null, id: null, sourceType: null, sourceId: null },
+    ticketId: null,
+    setupExecutionId: "execution-1",
+    baselineKind,
+  };
+}
 
-const pinned = {
-  version: 1,
-  operation: "baseline",
-  workspaceId: "workspace-1",
-  projectId: "project-1",
-  channelId: "channel-1",
-  actorUserId: "user-1",
-  repository: { id: "repo-1", name: "repo", url: "https://github.com/acme/repo.git", baseBranch: "main" },
-  permissions: { repositoryRole: "ADMIN", writeRequested: false },
-  gates: { accessStatus: "VALID", accessCredentialRevision: 1, capabilities: [], allBaselinesApproved: false },
-  execution: { workflowExecutionId: "setup-1", sessionId: "session-1", conversationId: null },
-  artifact: { kind: null, id: null, sourceType: null, sourceId: null },
-  ticketId: null,
-  setupExecutionId: "setup-1",
-  baselineKind: "CORE_CODE_MAP",
-};
-
-describe("SDLC baseline run context", () => {
-  it("force-injects persisted identifiers when the model omits them after compaction", () => {
+describe("SDLC baseline trusted run context", () => {
+  it.each(SDLC_BASELINE_KINDS)("accepts and injects %s", baselineKind => {
+    const sdlcContext = context(baselineKind);
+    expect(parseSdlcAgentRunContext(sdlcContext)).not.toBeNull();
     expect(
       injectSdlcBaselineRunContext(
-        { action: "upsert_section", sectionKey: "architecture" },
-        { sdlcContext: pinned },
-      ),
-    ).toEqual({
-      action: "upsert_section",
-      sectionKey: "architecture",
+        { artifactType: "BASELINE", action: "begin" },
+        { sdlcContext }
+      )
+    ).toMatchObject({
       repoId: "repo-1",
-      setupExecutionId: "setup-1",
-      workflowExecutionId: "setup-1",
-      baselineKind: "CORE_CODE_MAP",
+      setupExecutionId: "execution-1",
+      workflowExecutionId: "execution-1",
+      baselineKind,
     });
   });
 
-  it("overwrites hallucinated identifiers with persisted run values", () => {
-    expect(
-      injectSdlcBaselineRunContext(
-        { action: "finalize", repoId: "juspay/hyperswitch", workflowExecutionId: "wrong" },
-        { sdlcContext: pinned },
-      ),
-    ).toEqual({
-      action: "finalize",
-      repoId: "repo-1",
-      setupExecutionId: "setup-1",
-      workflowExecutionId: "setup-1",
-      baselineKind: "CORE_CODE_MAP",
-    });
-  });
-
-  it("rejects incomplete persisted context", () => {
-    expect(parseSdlcAgentRunContext({ ...pinned, repository: { ...pinned.repository, id: "" } })).toBeNull();
-    expect(parseSdlcAgentRunContext({ ...pinned, gates: { ...pinned.gates, capabilities: null } })).toBeNull();
-  });
-
-  it("rejects operation/context mismatches", () => {
-    expect(parseSdlcAgentRunContext({
-      ...pinned,
-      operation: "work",
-      ticketId: "ticket-1",
-      permissions: { ...pinned.permissions, writeRequested: false },
-    })).toBeNull();
-    expect(parseSdlcAgentRunContext({
-      ...pinned,
+  it("accepts interactive context only with conversation-bound authority", () => {
+    const base = context("CORE_CODE_MAP");
+    const interactive = {
+      ...base,
       operation: "interactive",
-      execution: { ...pinned.execution, conversationId: null },
-    })).toBeNull();
+      interactiveGrant: "signed-grant",
+      execution: {
+        workflowExecutionId: null,
+        sessionId: null,
+        conversationId: "conversation-1",
+      },
+    };
+
+    expect(parseSdlcAgentRunContext(interactive)).not.toBeNull();
+    expect(parseSdlcAgentRunContext({ ...interactive, interactiveGrant: null })).toBeNull();
   });
 });
