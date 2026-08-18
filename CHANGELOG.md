@@ -1,3 +1,11 @@
+## [1.192.2](https://github.com/juspay/xyne-spaces/compare/v1.192.1...v1.192.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* acl fix for canvas ([#700](https://github.com/juspay/xyne-spaces/issues/700)) ([93ef45c](https://github.com/juspay/xyne-spaces/commit/93ef45c277692c483e6b940f2ee1d65d64272103))
+* log whether a link opened in the in-app or external browser ([#704](https://github.com/juspay/xyne-spaces/issues/704)) ([b08e0dc](https://github.com/juspay/xyne-spaces/commit/b08e0dc1488de5de423a16033390631de2ddbbb9))
+
 ## [1.192.1](https://github.com/juspay/xyne-spaces/compare/v1.192.0...v1.192.1) (2026-08-18)
 
 
