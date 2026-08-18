@@ -1,13 +1,17 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { ActivityClassification } from '@xyne/shared';
+import { isVisibleUnreadActivity } from '@xyne/shared';
 import { stateMachineActor } from '../machines/stateMachine';
 
 /**
- * Hook to get unread activities count with cancelled reactions filtered out
- * Reads from state machine (populated by DeferredLoader)
+ * Hook to get the unread activities count shown on the left-rail bell badge.
+ * Reads from state machine (populated by DeferredLoader) and counts only
+ * activities that are user-facing notifications.
  *
- * @returns count - Number of unread activities
+ * Uses the shared `isVisibleUnreadActivity` predicate so this badge always
+ * matches the Activity 'All' tab count/feed (single source of truth).
+ *
+ * @returns count - Number of unread notification activities
  */
 export const useUnreadActivitiesCount = (): number => {
   const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
@@ -17,19 +21,6 @@ export const useUnreadActivitiesCount = (): number => {
       return 0;
     }
 
-    return unreadActivities.filter(activity => {
-      if (activity.actorAction === 'added_v2') return false;
-      if (activity.actorAction === 'removed') return false;
-      if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') return false;
-      const classification = activity.classification ?? ActivityClassification.PENDING;
-      if (classification === ActivityClassification.SKIP) return false;
-      if (activity.actorAction === 'direct_message') {
-        return (
-          classification === ActivityClassification.ACTIONABLE ||
-          classification === ActivityClassification.FYI
-        );
-      }
-      return true;
-    }).length;
+    return unreadActivities.filter(isVisibleUnreadActivity).length;
   }, [unreadActivities]);
 };

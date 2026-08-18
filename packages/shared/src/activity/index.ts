@@ -32,3 +32,4 @@ export interface ActivityLogEntry extends ActivityLogPayload {
   serverTimestamp: string;
   severity: 'INFO' | 'WARNING' | 'ERROR';
 }
+export * from './notificationVisibility';
