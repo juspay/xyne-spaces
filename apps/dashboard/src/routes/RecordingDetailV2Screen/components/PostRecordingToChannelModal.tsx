@@ -9,6 +9,7 @@ import { Button } from '../../../components/ui/Button/Button';
 import { InputBox } from '../../../components/ui/InputBox';
 import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 import { useActiveUsers } from '../../../hooks/useUsers';
+import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { channelService } from '../../../services/Chat/channelService';
@@ -54,6 +55,18 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
   const activeUsers = useActiveUsers();
   const shareableOrigin = useShareableOrigin();
   const inputBoxRef = useRef<React.ComponentRef<typeof InputBox>>(null);
+
+  // Channel-less mention search over active workspace users — the same ranked
+  // source the chat composer uses. A selected @-mention serializes into the
+  // note HTML, and when the note is posted to a channel the message
+  // side-effect handler expands it into a real notification for the mentioned
+  // user (see extractAllUsersForNotification / createMentionNotifications).
+  const { results: mentionResults, searchMentions } = useMentionSearch(
+    undefined,
+    undefined,
+    undefined,
+    { excludeSelf: true },
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
@@ -214,6 +227,8 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
           // multi-line caption — so Enter inserts a newline and the composer's
           // own send button is hidden. onSendMessage stays wired to the post
           // handler as a safe fallback.
+          mentionItems={mentionResults}
+          onMentionSearch={searchMentions}
           onSendMessage={() => void handlePost()}
           disableEnterToSend
           hideSendButton
@@ -221,7 +236,7 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
           features={{
             richText: true,
             emojiPicker: true,
-            mentions: false,
+            mentions: true,
             commands: false,
             fileAttachments: false,
           }}
