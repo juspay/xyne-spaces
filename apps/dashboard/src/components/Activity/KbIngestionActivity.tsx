@@ -1,5 +1,4 @@
 import { ReactElement } from 'react';
-import { FolderCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { IngestionStatus } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
@@ -66,6 +65,25 @@ export const KbIngestionActivity = ({
 
   const targetPath = collectionId ? `/knowledge-base?cl=${collectionId}` : '';
 
+  // Outcome line: a colored status word + a plain-language summary, mirroring the
+  // three real end-states of a collection import.
+  let statusLabel: string;
+  let statusColor: string;
+  let summary: string;
+  if (failed === 0) {
+    statusLabel = 'Complete';
+    statusColor = 'text-green-600';
+    summary = `${String(succeeded)} file${succeeded === 1 ? '' : 's'} added, no failures`;
+  } else if (succeeded === 0) {
+    statusLabel = 'Failed';
+    statusColor = 'text-red-600';
+    summary = `none of the ${String(total)} file${total === 1 ? '' : 's'} could be added`;
+  } else {
+    statusLabel = 'Needs attention';
+    statusColor = 'text-amber-600';
+    summary = `${String(succeeded)} of ${String(total)} files added, ${String(failed)} failed`;
+  }
+
   return (
     <ActivityItemCard
       activity={activity}
@@ -74,38 +92,23 @@ export const KbIngestionActivity = ({
       // always bold-prefixes this label; passing the user's name read as "Om did it".)
       actorName='Knowledge base'
       channelId={undefined}
-      badgeIcon={<FolderCheck className='size-3 text-primary' />}
-      badgeColorClass='bg-muted'
-      description={<span className='text-muted-foreground text-sm'>finished processing files</span>}
+      // Header reads: Knowledge base · "collection name". The card colors this span
+      // per read/unread state, so no explicit color here.
+      description={
+        collectionName ? (
+          <span className='text-sm'>{`· "${collectionName}"`}</span>
+        ) : (
+          <span className='text-sm' />
+        )
+      }
       targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}
     >
-      {/* The header line truncates, so keep the full, self-explanatory summary
-          here — the collapsed row clamps children to one line, so context +
-          name + counts stay together on the line that's actually visible. */}
+      {/* Collapsed rows clamp children to one line — keep the whole outcome on it. */}
       <div className={isExpanded ? 'text-sm mt-2' : 'text-sm'}>
-        <span className='text-muted-foreground'>{'Collection '}</span>
-        {collectionName ? (
-          <span className='font-medium text-foreground'>{`"${collectionName}" `}</span>
-        ) : null}
-        {total > 0 ? (
-          <span className='ml-1 inline-flex items-center gap-2 align-middle'>
-            <span
-              title='Succeeded'
-              className='inline-flex items-center gap-1 text-muted-foreground'
-            >
-              <CheckCircle2 className='h-3.5 w-3.5 text-green-600' strokeWidth={2} />
-              {succeeded}
-            </span>
-            <span title='Failed' className='inline-flex items-center gap-1 text-muted-foreground'>
-              <XCircle className='h-3.5 w-3.5 text-red-500' strokeWidth={2} />
-              {failed}
-            </span>
-          </span>
-        ) : (
-          <span className='text-muted-foreground'>· all files processed</span>
-        )}
+        <span className={`font-semibold ${statusColor}`}>{statusLabel}</span>
+        <span className='text-muted-foreground'>{` — ${summary}`}</span>
       </div>
     </ActivityItemCard>
   );

@@ -135,12 +135,26 @@ async function notifyIfCollectionDone(rootCollectionId: string): Promise<void> {
   });
   const succeeded = total - failed;
 
+  // Match the Activity-feed card's three outcomes and plain-language phrasing.
+  let title: string;
+  let body: string;
+  if (failed === 0) {
+    title = `"${collection.name}" is ready`;
+    body = `${String(succeeded)} file${succeeded === 1 ? '' : 's'} added, no failures`;
+  } else if (succeeded === 0) {
+    title = `"${collection.name}" import failed`;
+    body = `None of the ${String(total)} file${total === 1 ? '' : 's'} could be added`;
+  } else {
+    title = `"${collection.name}" needs attention`;
+    body = `${String(succeeded)} of ${String(total)} files added, ${String(failed)} failed`;
+  }
+
   const send = (): Promise<string> =>
     notificationService.sendNotification(
       collection.ownerId,
       NotificationType.COLLECTION_INGESTION_COMPLETED,
-      'Ingestion complete',
-      `All files in "${collection.name}" have been processed — ${String(succeeded)} succeeded, ${String(failed)} failed.`,
+      title,
+      body,
       {
         workspaceId: collection.workspaceId,
         collectionId: rootCollectionId,
@@ -154,14 +168,7 @@ async function notifyIfCollectionDone(rootCollectionId: string): Promise<void> {
   try {
     await send();
   } catch (sendErr) {
-    // The producer is only initialized in some worker processes; the process running
-    // ingestion may not have done so. Initialize on demand and retry.
-    if (sendErr instanceof Error && /not initialized/i.test(sendErr.message)) {
-      await notificationService.initialize();
-      await send();
-    } else {
       throw sendErr;
-    }
   }
 
   // Also record a persistent Activity so the owner can find it later in the Activity
