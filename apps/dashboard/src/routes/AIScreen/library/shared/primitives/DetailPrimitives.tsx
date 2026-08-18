@@ -27,7 +27,7 @@ export const DETAIL_CONTROL_CLASS =
 
 export const DETAIL_CONTROL_CLASS_FOR: Record<DetailTypeScale, string> = {
   library: DETAIL_CONTROL_CLASS,
-  twin: cn(DETAIL_CONTROL_CLASS, TWIN_STROKE_CLASS),
+  twin: cn(DETAIL_CONTROL_CLASS, TWIN_STROKE_CLASS, 'bg-card'),
 };
 
 export const DETAIL_SELECT_TRIGGER_CLASS = cn(
@@ -37,12 +37,15 @@ export const DETAIL_SELECT_TRIGGER_CLASS = cn(
 
 export const DETAIL_SELECT_TRIGGER_CLASS_FOR: Record<DetailTypeScale, string> = {
   library: DETAIL_SELECT_TRIGGER_CLASS,
-  twin: cn(DETAIL_SELECT_TRIGGER_CLASS, TWIN_STROKE_CLASS),
+  twin: cn(DETAIL_SELECT_TRIGGER_CLASS, TWIN_STROKE_CLASS, 'bg-card'),
 };
 
 export const DETAIL_TEXT_FIELD_CLASS_FOR: Record<DetailTypeScale, string> = {
   library: DETAIL_TEXT_FIELD_CLASS,
-  twin: cn(DETAIL_TEXT_FIELD_CLASS, TWIN_STROKE_CLASS),
+  twin: cn(
+    'dt-details-text-field w-full overflow-hidden rounded-2xl bg-muted p-4',
+    TWIN_STROKE_CLASS,
+  ),
 };
 
 const HEADING_CLASS: Record<DetailHeading, string> = {
@@ -133,7 +136,7 @@ export function DetailCard({
   );
 }
 
-/** Grouped setting rows — Figma subcategory contents: #fafafa, 16px pad/radius, 24px row gap. */
+/** Grouped setting rows — Library keeps Figma #fafafa; Twin uses theme `bg-muted`. */
 export function DetailGroup({
   className,
   typeScale = 'library',
@@ -146,8 +149,8 @@ export function DetailGroup({
   return (
     <div
       className={cn(
-        'flex w-full flex-col gap-6 rounded-2xl bg-[#fafafa] p-4',
-        typeScale === 'twin' && TWIN_STROKE_CLASS,
+        'flex w-full flex-col gap-6 rounded-2xl p-4',
+        typeScale === 'twin' ? cn('bg-muted', TWIN_STROKE_CLASS) : 'bg-[#fafafa]',
         className,
       )}
     >

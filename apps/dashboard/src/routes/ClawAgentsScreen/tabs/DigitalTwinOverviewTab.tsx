@@ -19,7 +19,10 @@ import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { CAPABILITY_LABEL_CLASS } from '@/routes/AIScreen/library/shared/primitives/CapabilityChips';
-import { DETAIL_TEXT_VALUE_CLASS } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
+import {
+  DETAIL_TEXT_VALUE_CLASS,
+  TWIN_STROKE_CLASS,
+} from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { useAgentDetailActions } from '@/routes/AIScreen/library/agents/detail/useAgentDetailActions';
 import { AgentKnowledgeChips } from '@/routes/AIScreen/library/agents/detail/knowledge/AgentKnowledgeChips';
 import { useAgentKnowledge } from '@/routes/AIScreen/library/agents/detail/knowledge/useAgentKnowledge';
@@ -33,7 +36,12 @@ const INSTRUCTIONS_FOCUS_MAX_PX = 400;
 
 const OVERVIEW_FIELD_PAD = 'px-3 pt-3 pb-5';
 
-const OVERVIEW_FIELD_CHROME = `w-full rounded-2xl border border-[#e8e8e8] bg-[#fbfbfb] ${OVERVIEW_FIELD_PAD} placeholder:text-foreground/40 focus:outline-none`;
+const OVERVIEW_FIELD_CHROME = cn(
+  'w-full rounded-2xl bg-muted',
+  TWIN_STROKE_CLASS,
+  OVERVIEW_FIELD_PAD,
+  'placeholder:text-foreground/40 focus:outline-none',
+);
 
 const DESCRIPTION_FIELD_CLASS = `${OVERVIEW_FIELD_CHROME} min-h-[44px] resize-none overflow-y-auto`;
 
@@ -93,11 +101,11 @@ const OverviewInstructionsChrome = ({
   children: ReactNode;
   clipped: boolean;
 }): ReactElement => (
-  <div className='group relative overflow-hidden rounded-2xl border border-[#e8e8e8] bg-[#fbfbfb]'>
+  <div className={cn('group relative overflow-hidden rounded-2xl bg-muted', TWIN_STROKE_CLASS)}>
     {children}
     <span
       className={cn(
-        'pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#fbfbfb] to-transparent transition-opacity duration-200 ease-out group-focus-within:opacity-0',
+        'pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent transition-opacity duration-200 ease-out group-focus-within:opacity-0',
         clipped ? 'opacity-100' : 'opacity-0',
       )}
       aria-hidden
