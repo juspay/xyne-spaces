@@ -1,3 +1,10 @@
+## [1.193.0](https://github.com/juspay/xyne-spaces/compare/v1.192.2...v1.193.0) (2026-08-18)
+
+
+### Features
+
+* upgraded ysweet image with support for service accounts and docid in query params ([#710](https://github.com/juspay/xyne-spaces/issues/710)) ([1b1b11f](https://github.com/juspay/xyne-spaces/commit/1b1b11f823b1f68c1b337942eeb61a1263b32b4b))
+
 ## [1.192.2](https://github.com/juspay/xyne-spaces/compare/v1.192.1...v1.192.2) (2026-08-18)
 
 
