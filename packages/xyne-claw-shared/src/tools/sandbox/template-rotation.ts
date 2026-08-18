@@ -27,6 +27,22 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
   ],
+  // euler: 2-way (not 4). It storms the most of any pool — 5 times between
+  // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
+  // whatever single snapshot it was pointed at (v8 -> v12). It also has the
+  // LARGEST clones in the cluster (200Gi vs xyne-spaces' 100Gi), so each extra
+  // variant costs real snapshot storage; a/b halves the per-snapshot restore
+  // rate, which is the cheapest thing that actually breaks the cycle. Add c/d
+  // if it still throttles.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=euler-workspace-template BASE_WARMPOOL=euler-warmpool \
+  //   GOLDEN_PVC=euler-golden-pvc SNAP_PREFIX=euler-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "euler-workspace-template": [
+    "euler-workspace-template-a",
+    "euler-workspace-template-b",
+  ],
 };
 
 // Per-base round-robin cursor. Process-local (each claw pod has its own), which
