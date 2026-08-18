@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
@@ -156,22 +157,19 @@ class TranscriptionAgentController {
       let boardId = requestBoardId;
       let boardProjectId: string | undefined;
       if (!boardId) {
-        // Get default board via ChannelBoardMapping (isDefault, or oldest)
-        const mapping = await db.channelBoardMapping.findFirst({
-          where: { channelId: channel.id },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          include: { board: { select: { id: true, name: true, projectId: true } } },
-        });
+        // Get default board via ChannelBoardMapping (isDefault, or oldest),
+        // falling back to legacy channel.projectId if no mapping exists.
+        const resolved = await resolveChannelDefaultBoard(db, channel.id);
 
-        if (!mapping?.board) {
+        if (!resolved) {
           logger.error(`[TicketTool] No board found for channel: ${channel.id}`);
           res.status(400).json({ success: false, error: 'No board found for channel' });
           return;
         }
 
-        boardId = mapping.board.id;
-        boardProjectId = mapping.board.projectId ?? undefined;
-        logger.info(`[TicketTool] Using default board: ${mapping.board.name} (${boardId})`);
+        boardId = resolved.boardId;
+        boardProjectId = resolved.projectId ?? undefined;
+        logger.info(`[TicketTool] Using default board: ${boardId}`);
       } else {
         const board = await db.board.findUnique({
           where: { id: boardId },
