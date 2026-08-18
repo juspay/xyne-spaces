@@ -7,7 +7,6 @@ import {
   CreateBucketCommand,
   ListObjectsV2Command,
   CopyObjectCommand,
-  PutObjectCommand,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
@@ -19,16 +18,7 @@ import { Readable } from 'stream';
 
 import { logger } from './logger.js';
 import { generateFilePath } from './pathUtils.js';
-import type {
-  StorageService,
-  S3StorageConfig,
-  UploadOptions,
-  UploadResult,
-  UploadToPathOptions,
-  ConditionalUploadResult,
-  DeleteResult,
-  FileMetadata,
-} from './types.js';
+import type { StorageService, S3StorageConfig, UploadOptions, UploadResult, DeleteResult, FileMetadata } from './types.js';
 
 export class S3StorageService implements StorageService {
   private client: S3Client;
@@ -137,7 +127,7 @@ export class S3StorageService implements StorageService {
 
   async uploadStreamToPath(
     stream: NodeJS.ReadableStream,
-    options: UploadToPathOptions
+    options: { path: string; contentType: string; metadata?: Record<string, string>; ifNotExists?: boolean; resumable?: boolean; timeoutMs?: number }
   ): Promise<UploadResult> {
     if (!stream) throw new Error('File stream is empty or invalid');
     if (!options.path) throw new Error('Path is required');
@@ -164,39 +154,6 @@ export class S3StorageService implements StorageService {
     return { filename: options.path, path: options.path, size };
   }
 
-  /** S3 evaluates If-None-Match atomically, avoiding a HEAD-then-PUT race. */
-  async uploadFileIfAbsent(
-    buffer: Buffer,
-    options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> },
-  ): Promise<ConditionalUploadResult> {
-    if (!buffer.length) throw new Error('File buffer is empty or invalid');
-    try {
-      await this.client.send(new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: options.path,
-        Body: buffer,
-        ContentType: options.contentType,
-        CacheControl: options.cacheControl ?? 'private, max-age=0',
-        Metadata: this.sanitizeMetadata(options.metadata),
-        IfNoneMatch: '*',
-      }));
-      return { filename: options.path, path: options.path, size: buffer.length, created: true };
-    } catch (error) {
-      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-      const name = (error as { name?: string }).name;
-      if (status === 409 || status === 412 || name === 'PreconditionFailed') {
-        const metadata = await this.getFileMetadata(options.path);
-        return {
-          filename: options.path,
-          path: options.path,
-          size: Number(metadata.size ?? 0),
-          created: false,
-        };
-      }
-      throw error;
-    }
-  }
-
   async deleteFile(filename: string): Promise<DeleteResult> {
     if (!filename) throw new Error('Filename is required for deletion');
 
@@ -221,25 +178,6 @@ export class S3StorageService implements StorageService {
       this.client,
       new GetObjectCommand({ Bucket: this.bucketName, Key: filename }),
       { expiresIn: expirationHours * 3600 }
-    );
-  }
-
-  async generateUploadSignedUrl(
-    path: string,
-    options: { contentType: string; expirySeconds?: number }
-  ): Promise<string> {
-    if (!path) throw new Error('Path is required for signed upload URL generation');
-
-    // Presigned PUT; the object need not exist yet. The client must send the same
-    // Content-Type that is bound into the signature here.
-    return getSignedUrl(
-      this.client,
-      new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: path,
-        ContentType: options.contentType,
-      }),
-      { expiresIn: options.expirySeconds ?? 900 }
     );
   }
 
