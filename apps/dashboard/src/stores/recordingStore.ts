@@ -72,6 +72,12 @@ export interface RecordingState {
   sttModel: SttModel;
   pendingAutoStart: boolean;
   autoStartRequestedAt: number | null;
+  /** conversationId/channelId of the thread that triggered `requestAutoStart`,
+   * consumed by RecordingsScreen's auto-start effect and forwarded to
+   * recordingService.startRecording so the backend can post/update the
+   * thread's anchor message. Cleared as soon as the recording actually starts. */
+  pendingConversationId: string | null;
+  pendingChannelId: string | null;
   pendingStop: boolean;
   /** Canvas created as part of starting a headless recording. */
   notesCanvasId: string | null;
@@ -102,6 +108,8 @@ const initialContext: RecordingState = {
   markedMoments: [],
   pendingAutoStart: false,
   autoStartRequestedAt: null,
+  pendingConversationId: null,
+  pendingChannelId: null,
   pendingStop: false,
   notesCanvasId: null,
   notesCanvasViewAccessId: null,
@@ -118,16 +126,23 @@ export const recordingStore = createStore({
   context: initialContext,
   on: {
     // Actions
-    requestAutoStart: (context): RecordingState => ({
+    requestAutoStart: (
+      context,
+      event: { conversationId?: string; channelId?: string } = {},
+    ): RecordingState => ({
       ...context,
       pendingAutoStart: true,
       autoStartRequestedAt: Date.now(),
+      pendingConversationId: event.conversationId ?? null,
+      pendingChannelId: event.channelId ?? null,
     }),
 
     clearAutoStart: (context): RecordingState => ({
       ...context,
       pendingAutoStart: false,
       autoStartRequestedAt: null,
+      pendingConversationId: null,
+      pendingChannelId: null,
     }),
 
     requestStop: (context): RecordingState => {
@@ -144,17 +159,28 @@ export const recordingStore = createStore({
 
     startRecording: (
       context,
-      event: { sttModel?: SttModel; defaultLayout?: RecordingLayout },
+      event: {
+        sttModel?: SttModel;
+        defaultLayout?: RecordingLayout;
+        conversationId?: string;
+        channelId?: string;
+      },
     ): RecordingState => {
       const sttModel = event.sttModel || context.sttModel;
       const defaultLayout = event.defaultLayout ?? 'transcript';
+      const conversationId = event.conversationId ?? context.pendingConversationId ?? undefined;
+      const threadChannelId = event.channelId ?? context.pendingChannelId ?? undefined;
 
       // Set starting status
       recordingStore.send({ type: 'setStatus', status: 'starting' });
 
       // Call API to start recording
       recordingService
-        .startRecording({ sttModel })
+        .startRecording({
+          sttModel,
+          ...(conversationId ? { conversationId } : {}),
+          ...(threadChannelId ? { channelId: threadChannelId } : {}),
+        })
         .then(async session => {
           // Create LiveKit room
           const room = new Room();
@@ -204,6 +230,8 @@ export const recordingStore = createStore({
         sttModel,
         error: null,
         pendingAutoStart: false,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         activeLayout: defaultLayout,
       };
@@ -455,6 +483,8 @@ export const recordingStore = createStore({
         markedMoments: [],
         pendingAutoStart: false,
         autoStartRequestedAt: null,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -520,6 +550,8 @@ export const recordingStore = createStore({
         markedMoments: [],
         pendingAutoStart: false,
         autoStartRequestedAt: null,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
