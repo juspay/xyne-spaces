@@ -569,6 +569,38 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('ticket');
     }
   ),
+  groupDmByMemberKey: defineQuery(
+    z.object({ memberKey: z.string() }),
+    ({ args: { memberKey } }) =>
+      zql.channels
+        .where('scopeType', ChannelScopeType.GROUP_DM)
+        .where('name', memberKey)
+        .orderBy('createdAt', 'asc')
+        .limit(1),
+  ),
+  channelConversationsSince: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      since: z.number().nullable(),
+      limit: z.number().optional(),
+    }),
+    ({ ctx, args: { channelId, since, limit } }) => {
+      const base = zql.conversations.where('channelId', channelId);
+      const scoped = since === null ? base : base.where('createdAt', '>=', since);
+      return scoped
+        .orderBy('createdAt', 'asc')
+        .limit(limit ?? 20)
+        .related('initialMessage', (initialMessageQuery) =>
+          initialMessageQuery
+            .where(({ or, cmp }) =>
+              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+            )
+            .related('sender')
+        )
+        .related('initialMessageAttachments');
+    }
+  ),
   channelConversationsV2: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {

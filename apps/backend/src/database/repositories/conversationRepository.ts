@@ -1,3 +1,30 @@
+import { randomUUID } from 'crypto';
+import { serializeInitialMessageMd, MessageType, ATTACHMENT_WITHHELD_TEXT } from '@xyne/shared';
+
+export interface CopyConversationsOptions {
+  includeAttachments?: boolean;
+}
+
+const sourceMetadata = (metadata: unknown): Record<string, unknown> =>
+  metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>)
+    : {};
+
+const ATTACHMENT_WITHHELD_HTML = `<p class="m-0 leading-6">${ATTACHMENT_WITHHELD_TEXT}</p>`;
+
+const hasVisibleText = (content: string): boolean =>
+  content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
+
+const contentForCopy = (
+  message: { content: string; hasAttachment: boolean },
+  includeAttachments: boolean
+): string =>
+  !includeAttachments && message.hasAttachment && !hasVisibleText(message.content)
+    ? ATTACHMENT_WITHHELD_HTML
+    : message.content;
+
+const toMessageType = (value: string): MessageType =>
+  (Object.values(MessageType) as string[]).includes(value) ? (value as MessageType) : MessageType.USER;
 import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
@@ -268,26 +295,203 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
-  async migrateConversationsToChannel(
-    conversationIds: string[],
-    targetChannelId: string
+  async copyConversationsToChannel(
+    sourceChannelId: string,
+    targetChannelId: string,
+    workspaceId: string,
+    createdAfter?: Date | null,
+    options: CopyConversationsOptions = {}
   ): Promise<number> {
-    if (conversationIds.length === 0) {
+    const includeAttachments = options.includeAttachments ?? false;
+    const conversations = await this.db.conversation.findMany({
+      where: {
+        channelId: sourceChannelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    if (conversations.length === 0) {
       return 0;
     }
 
-    const result = await this.db.conversation.updateMany({
-      where: {
-        conversationId: {
-          in: conversationIds
-        }
-      },
-      data: {
-        channelId: targetChannelId
-      }
+    const sourceConversationIds = conversations.map(c => c.conversationId);
+    const messages = await this.db.message.findMany({
+      where: { conversationId: { in: sourceConversationIds }, isDeleted: false },
+      orderBy: { createdAt: 'asc' }
     });
 
-    return result.count;
+    const messagesByConversation = new Map<string, typeof messages>();
+    for (const message of messages) {
+      const bucket = messagesByConversation.get(message.conversationId) ?? [];
+      bucket.push(message);
+      messagesByConversation.set(message.conversationId, bucket);
+    }
+
+    const attachments =
+      includeAttachments && messages.length
+        ? await this.db.messageAttachment.findMany({
+            where: { entityId: { in: messages.map(m => m.messageId) }, isDeleted: false }
+          })
+        : [];
+    const attachmentsByMessage = new Map<string, typeof attachments>();
+    for (const attachment of attachments) {
+      const bucket = attachmentsByMessage.get(attachment.entityId) ?? [];
+      bucket.push(attachment);
+      attachmentsByMessage.set(attachment.entityId, bucket);
+    }
+
+    const sourceParticipants = await this.db.conversationParticipant.findMany({
+      where: { conversationId: { in: sourceConversationIds } }
+    });
+    const participantsByConversation = new Map<string, typeof sourceParticipants>();
+    for (const participant of sourceParticipants) {
+      const bucket = participantsByConversation.get(participant.conversationId) ?? [];
+      bucket.push(participant);
+      participantsByConversation.set(participant.conversationId, bucket);
+    }
+
+    const existingCopies = await this.db.conversation.findMany({
+      where: { channelId: targetChannelId },
+      select: { metadata: true }
+    });
+    const alreadyCopied = new Set<string>();
+    for (const row of existingCopies) {
+      const source = (row.metadata as { copiedFrom?: unknown } | null)?.copiedFrom;
+      if (typeof source === 'string') {
+        alreadyCopied.add(source);
+      }
+    }
+
+    let copied = 0;
+
+    for (const conversation of conversations) {
+      if (alreadyCopied.has(conversation.conversationId)) {
+        continue;
+      }
+
+      const sourceMessages = messagesByConversation.get(conversation.conversationId) ?? [];
+      if (sourceMessages.length === 0) {
+        continue;
+      }
+
+      const newConversationId = randomUUID();
+      const copiedMessages = sourceMessages.map(message => ({
+        source: message,
+        newMessageId: randomUUID()
+      }));
+
+      const initial =
+        copiedMessages.find(m => m.source.messageId === conversation.initialMessageId) ??
+        copiedMessages[0];
+      if (!initial) {
+        continue;
+      }
+      const sourceInitialMessage = initial.source;
+      const newInitialMessageId = initial.newMessageId;
+
+      const initialMessageMd = serializeInitialMessageMd({
+        messageId: newInitialMessageId,
+        conversationId: newConversationId,
+        workspaceId,
+        senderId: sourceInitialMessage.senderId,
+        content: contentForCopy(sourceInitialMessage, includeAttachments),
+        msgType: toMessageType(sourceInitialMessage.msgType),
+        hasAttachment: includeAttachments && sourceInitialMessage.hasAttachment,
+        edited: sourceInitialMessage.edited,
+        isDeleted: false,
+        showInChannel: sourceInitialMessage.showInChannel,
+        visibleTo: sourceInitialMessage.visibleTo,
+        createdAt: sourceInitialMessage.createdAt.getTime(),
+        metadata: sourceInitialMessage.metadata
+          ? JSON.stringify(sourceInitialMessage.metadata)
+          : null,
+        nudgeCount: null,
+        isSent: true,
+        reactions_md: null,
+        link_preview_md: null,
+        childConversationId: null
+      });
+
+      await this.db.$transaction(async tx => {
+        await tx.conversation.create({
+          data: {
+            conversationId: newConversationId,
+            channelId: targetChannelId,
+            createdBy: conversation.createdBy,
+            initialMessageId: newInitialMessageId,
+            workspaceId,
+            lastActivityAt: conversation.lastActivityAt,
+            replyCount: Math.max(copiedMessages.length - 1, 0),
+            createdAt: conversation.createdAt,
+            threadType: conversation.threadType,
+            initial_message_md: initialMessageMd,
+            metadata: { ...sourceMetadata(conversation.metadata), copiedFrom: conversation.conversationId }
+          }
+        });
+
+        await tx.message.createMany({
+          data: copiedMessages.map(({ source: message, newMessageId }) => ({
+            messageId: newMessageId,
+            conversationId: newConversationId,
+            senderId: message.senderId,
+            workspaceId,
+            content: contentForCopy(message, includeAttachments),
+            msgType: message.msgType,
+            hasAttachment: includeAttachments && message.hasAttachment,
+            edited: message.edited,
+            showInChannel: message.showInChannel,
+            visibleTo: message.visibleTo,
+            createdAt: message.createdAt,
+            metadata: message.metadata ?? undefined
+          }))
+        });
+
+        const attachmentRows = copiedMessages.flatMap(({ source: message, newMessageId }) =>
+          (attachmentsByMessage.get(message.messageId) ?? []).map(attachment => ({
+            entityType: attachment.entityType,
+            entityId: newMessageId,
+            workspaceId,
+            storageProvider: attachment.storageProvider,
+            originalFilename: attachment.originalFilename,
+            mimetype: attachment.mimetype,
+            size: attachment.size,
+            width: attachment.width,
+            height: attachment.height,
+            uploadedByUserId: attachment.uploadedByUserId,
+            url: attachment.url,
+            createdBy: attachment.createdBy,
+            metadata: attachment.metadata ?? undefined,
+            conversationId: newConversationId,
+            thumbnailUrl: attachment.thumbnailUrl,
+            uploadStatus: attachment.uploadStatus
+          }))
+        );
+
+        if (attachmentRows.length > 0) {
+          await tx.messageAttachment.createMany({ data: attachmentRows });
+        }
+
+        const participantRows = (
+          participantsByConversation.get(conversation.conversationId) ?? []
+        ).map(participant => ({
+          conversationId: newConversationId,
+          userId: participant.userId,
+          channelId: targetChannelId,
+          workspaceId,
+          participationType: participant.participationType,
+          isSubscribed: participant.isSubscribed
+        }));
+
+        if (participantRows.length > 0) {
+          await tx.conversationParticipant.createMany({ data: participantRows });
+        }
+      });
+
+      copied++;
+    }
+
+    return copied;
   }
 
   /**
