@@ -1,3 +1,10 @@
+## [1.189.7](https://github.com/juspay/xyne-spaces/compare/v1.189.6...v1.189.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* sudoQuery product metrics ([#427](https://github.com/juspay/xyne-spaces/issues/427)) ([b5aeb3c](https://github.com/juspay/xyne-spaces/commit/b5aeb3c814dd911b6fe20013015c4f948f0499b9))
+
 ## [1.189.6](https://github.com/juspay/xyne-spaces/compare/v1.189.5...v1.189.6) (2026-08-17)
 
 
