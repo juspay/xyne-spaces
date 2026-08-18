@@ -190,7 +190,7 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
-import { createSdlcProxy } from '@/middleware/sdlcProxy';
+import { createSdlcProxy, createSdlcAskAiGate } from '@/middleware/sdlcProxy';
 
 
 export class App {
@@ -204,6 +204,19 @@ export class App {
     this.initializeRoutes();
     this.initializeErrorHandling();
   }
+
+  // Shared S2S guard for trusted service-to-service calls (internal routes on
+  // CORE, and every route the SDLC role serves — the SDLC role must never
+  // trust a request that didn't come through main's proxy).
+  private validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
+    const supplied = req.headers['x-s2s-key'];
+    const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+    if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
+      res.status(401).json({ error: 'Invalid or missing S2S key' });
+      return;
+    }
+    next();
+  };
 
   private initializeMiddlewares(): void {
     // Security middleware
@@ -480,15 +493,7 @@ export class App {
     this.app.use('/api/apps', appRoutes);
 
     // Internal S2S endpoints (trusted service-to-service calls)
-    const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const supplied = req.headers['x-s2s-key'];
-      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
-      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
-        res.status(401).json({ error: 'Invalid or missing S2S key' });
-        return;
-      }
-      next();
-    };
+    const validateS2SKey = this.validateS2SKey;
 
     this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
       // Mark this request so ChatController.postMessage persists the message as a
@@ -632,8 +637,8 @@ export class App {
     // Summarization routes (auth required, uses JAF agent)
     this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
 
-    // Xyne AI routes (unified AI assistant with context awareness)
-    this.app.use('/api/xyne-ai', authMiddleware.authenticate, createSdlcProxy());
+    // Xyne AI routes: only the repository-scoped query proxies to SDLC.
+    this.app.use('/api/xyne-ai', authMiddleware.authenticate, createSdlcAskAiGate(), xyneAIRoutes);
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
@@ -732,16 +737,10 @@ export class App {
     // role never reaches) — every route below needs req.body populated.
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    this.app.use(decryptRequestBodyMiddleware);
+    this.app.use(encryptResponseBodyMiddleware);
 
-    const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const supplied = req.headers['x-s2s-key'];
-      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
-      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
-        res.status(401).json({ error: 'Invalid or missing S2S key' });
-        return;
-      }
-      next();
-    };
+    const validateS2SKey = this.validateS2SKey;
 
     this.app.post(
       '/api/internal/sdlc/claw-callback/:executionId/:step',
@@ -756,15 +755,18 @@ export class App {
       sdlcArtifactVersionsInternalRoutes
     );
 
-    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
-    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
+    // Every route below is only ever meant to be reached via main's proxy —
+    // validateS2SKey first (proves the request came from main, not straight
+    // from the internet) and only then the normal user/app auth.
+    this.app.use('/api/sdlc/claw', validateS2SKey, authenticateUserOrApp, sdlcClawRoutes);
+    this.app.use('/api/sdlc', validateS2SKey, authMiddleware.authenticate, sdlcRoutes);
 
     // Full mutator/query registry — an SDLC-scoped batch forwarded from main
     // executes here unmodified; a mixed batch containing core mutations also
     // executes here since this registry isn't namespace-restricted.
-    this.app.use('/api/zero', zeroRoutes);
+    this.app.use('/api/zero', validateS2SKey, zeroRoutes);
 
-    this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
+    this.app.use('/api/xyne-ai', validateS2SKey, authMiddleware.authenticate, xyneAIRoutes);
   }
 
   private initializeErrorHandling(): void {
