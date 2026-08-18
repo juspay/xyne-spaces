@@ -8,6 +8,7 @@ import {
   automationScheduleQueue,
   type AutomationScheduleJobData,
 } from './automation-schedule.queue';
+import { initializeBotRegistry } from '@/bots/registry';
 
 class AutomationScheduleWorker {
   private isInitialized = false;
@@ -15,6 +16,11 @@ class AutomationScheduleWorker {
 
   async start(): Promise<void> {
     if (this.isInitialized) return;
+
+    // Ensure the bot catalog is populated in this process so the default
+    // Automations-bot sender (getAutomationsBotUserId -> botCatalog) resolves.
+    // Idempotent — safe to call more than once.
+    initializeBotRegistry();
 
     await automationScheduleQueue.initialize();
     if (!automationScheduleQueue.isReady) {
