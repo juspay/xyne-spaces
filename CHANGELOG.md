@@ -1,3 +1,10 @@
+## [1.190.0](https://github.com/juspay/xyne-spaces/compare/v1.189.9...v1.190.0) (2026-08-18)
+
+
+### Features
+
+* recording in thread ([#659](https://github.com/juspay/xyne-spaces/issues/659)) ([7509107](https://github.com/juspay/xyne-spaces/commit/75091070b470b366ae4b6d0e7dad8280b9a39085))
+
 ## [1.189.9](https://github.com/juspay/xyne-spaces/compare/v1.189.8...v1.189.9) (2026-08-18)
 
 
