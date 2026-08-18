@@ -20,6 +20,9 @@ import { triggerRegistry } from '../triggers/trigger-registry';
 import { DataNotReadyError, RetryableError } from '../engine/retryability';
 import type { TriggerType } from '../types/trigger-types';
 
+const EXECUTION_FETCH_MAX_RETRIES = 3;
+const EXECUTION_FETCH_RETRY_DELAY_MS = 100;
+
 class AutomationWorker {
   private isInitialized = false;
   private executor: AutomationExecutor | null = null;
@@ -51,7 +54,12 @@ class AutomationWorker {
     const { executionId } = job.data;
     logger.info(`[AUTOMATION-WORKER] Job ${job.id} starting — execution=${executionId}`);
 
-    const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
+    const fetchExecution = () => db.workflowExecution.findUnique({ where: { id: executionId } });
+    let execution = await fetchExecution();
+    for (let retry = 0; !execution && retry < EXECUTION_FETCH_MAX_RETRIES; retry++) {
+      await new Promise(resolve => setTimeout(resolve, EXECUTION_FETCH_RETRY_DELAY_MS));
+      execution = await fetchExecution();
+    }
     if (!execution) {
       throw new DataNotReadyError('workflow execution', executionId);
     }
