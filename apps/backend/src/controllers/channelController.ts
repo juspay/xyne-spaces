@@ -29,7 +29,7 @@ import {
   AppPermissionStatus,
   AppPermissionType,
   ActivityClassification,
-  ActivityClassificationJobType, ChannelType, ChannelRole,
+  ActivityClassificationJobType, ChannelType, ChannelRole, WorkspaceRole,
 } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -798,6 +798,20 @@ export class ChannelController {
       } = req.body;
 
       const userId = req.user!.id;
+
+      // Guests are invited to specific channels only and have read-only
+      // resource access; they must not create workspace channels. The Zero
+      // ChannelsACL already blocks guest channel inserts, but channel
+      // creation via this REST endpoint bypasses that ACL, so enforce the
+      // same restriction here. DM creation has its own endpoint and is not
+      // affected.
+      if (req.user!.role === WorkspaceRole.GUEST && scopeType !== ChannelScopeType.DM) {
+        res.status(403).json({
+          error: 'Guests cannot create channels',
+          message: 'Your role does not permit creating channels in this workspace',
+        });
+        return;
+      }
 
       // Validate required fields
       if (!scopeType || !projectId) {
