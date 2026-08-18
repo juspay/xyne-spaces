@@ -1053,6 +1053,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
           title='Post to channel'
           data-testid='post-recording-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
         >
           <PostRecordingToChannelModal
             recording={recording}

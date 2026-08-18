@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Hash } from 'lucide-react';
@@ -68,6 +68,10 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
   const [noteText, setNoteText] = useState('');
   const [posting, setPosting] = useState(false);
   const inputBoxRef = useRef<InputBoxHandle>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   const channels = useChannelSearch(searchQuery, 10);
   const selectedChannelId = useMemo(
@@ -252,6 +256,7 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
           Post this recording to a channel, or send it to people
         </p>
         <SearchParticipants
+          ref={searchInputRef}
           options={options}
           selectedValues={selectedValues}
           onMultiSelect={setSelectedValues}
