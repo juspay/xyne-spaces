@@ -17,6 +17,7 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   moduleNameMapper: {
+    '^@/(.*)\\.js$': '<rootDir>/src/$1',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
 };
