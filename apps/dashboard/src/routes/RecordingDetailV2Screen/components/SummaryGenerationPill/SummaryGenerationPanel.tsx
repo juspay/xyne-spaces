@@ -210,7 +210,7 @@ export const SummaryGenerationPanel = ({
                 size='sm'
                 onClick={onGenerate}
                 disabled={!canGenerate}
-                className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground hover:bg-foreground/80 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
+                className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground text-background hover:bg-foreground/80 hover:text-background disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
                 data-track-category='RecordingDetailV2'
                 data-track-name='generate_summary'
               >
