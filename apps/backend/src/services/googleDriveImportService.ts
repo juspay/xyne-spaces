@@ -1,6 +1,7 @@
 import fetch, { type Response as FetchResponse } from 'node-fetch';
 import https from 'https';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 // Fresh-socket direct agent — mirrors googleSheetsService: the egress proxy in
 // some environments prematurely closes reused connections to googleapis, causing
@@ -52,14 +53,16 @@ async function driveFetch(url: string, headers?: Record<string, string>): Promis
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
-/** Per-file hard cap (bytes) for a synchronous import. */
-export const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
+// Import caps, configurable via DRIVE_IMPORT_MAX_* env (see config/env.ts). Read
+// once at module load; defaults preserve the original limits.
+/** Per-file hard cap (bytes) for an import. */
+export const MAX_FILE_BYTES = config.driveImport.maxFileBytes;
 /** Max number of files pulled from a single folder import. */
-export const MAX_FILES = 200;
+export const MAX_FILES = config.driveImport.maxFiles;
 /** Max total bytes across a folder import. */
-export const MAX_TOTAL_BYTES = 1024 * 1024 * 1024; // 1 GB
+export const MAX_TOTAL_BYTES = config.driveImport.maxTotalBytes;
 /** Max folder nesting we recurse into. */
-export const MAX_DEPTH = 20;
+export const MAX_DEPTH = config.driveImport.maxDepth;
 /** Per-file download timeout. */
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 
