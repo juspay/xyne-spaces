@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import type { CustomSubagentSpec } from "./subagent-tools.js";
 
@@ -105,7 +105,7 @@ export function buildToolCatalog(params: {
   const seen = new Set<string>();
 
   for (const group of params.groups) {
-    const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === group.serverType);
+    const def = findSubagentDefinitionForServer(group.serverType);
     if (!def) continue;
     const writeSet = new Set(group.writeTools.map(String));
     for (const tool of group.tools) {
@@ -146,7 +146,7 @@ export function buildFastModeDirectTools(params: {
   const remainingCustomTools: ToolDefinition[] = [];
 
   for (const group of params.groups) {
-    const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === group.serverType);
+    const def = findSubagentDefinitionForServer(group.serverType);
     if (!def) {
       directTools.push(...group.tools);
       continue;
@@ -163,7 +163,7 @@ export function buildFastModeDirectTools(params: {
   for (const tool of params.customTools ?? []) {
     const source = customToolSource(tool);
     const wrappedBySubagent = source
-      ? SUBAGENT_DEFINITIONS.some((def) => def.serverType === source)
+      ? findSubagentDefinitionForServer(source) !== undefined
       : false;
     if (!wrappedBySubagent) {
       remainingCustomTools.push(tool);

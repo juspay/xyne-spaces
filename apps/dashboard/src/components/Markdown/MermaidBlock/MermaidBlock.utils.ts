@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import mermaid from 'mermaid';
 import DOMPurify from 'dompurify';
 import { v4 as uuidv4 } from 'uuid';
@@ -105,7 +106,11 @@ export const renderMermaidDiagram = async ({
       }
     } catch (err) {
       // Cache load failed, continue with rendering
-      console.warn('Failed to load cached mermaid diagram:', err);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to load cached mermaid diagram:'),
+        context: [err],
+      });
     }
   }
 
@@ -126,7 +131,11 @@ export const renderMermaidDiagram = async ({
       void saveMermaidDiagram(messageId, chart, safeSvg);
     }
   } catch (err) {
-    console.error('Mermaid rendering error:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Mermaid rendering error:'),
+      error: err,
+    });
     // Only set error if it looks like a complete diagram
     if (chart.split('\n').length > 2) {
       onError('Failed to render diagram');
@@ -144,7 +153,11 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     await navigator.clipboard.writeText(text);
     return true;
   } catch (err) {
-    console.error('Failed to copy code:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to copy code:'),
+      error: err,
+    });
     return false;
   }
 };
@@ -216,11 +229,18 @@ export const downloadDiagramAsPng = (svgElement: SVGElement): void => {
     };
 
     img.onerror = (): void => {
-      console.error('Failed to load SVG image');
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load SVG image'),
+      });
     };
 
     img.src = svgDataUrl;
   } catch (err) {
-    console.error('Failed to download diagram:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to download diagram:'),
+      error: err,
+    });
   }
 };

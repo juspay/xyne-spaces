@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-export type ThreadListSection = 'unread' | 'read';
+export type ThreadListSection = 'unread' | 'read' | 'recent';
+
+// Sort mode for the threads inbox.
+// - 'sections' (default): unread threads first, then read threads (existing behavior).
+// - 'recent': a single flat list ordered by lastReplyAt desc, without a read/unread
+//   divider and WITHOUT mutating read-state.
+export type ThreadListSort = 'sections' | 'recent';
 
 export interface ThreadListCursor {
   section: ThreadListSection;
@@ -10,7 +16,7 @@ export interface ThreadListCursor {
 const encodedThreadListCursorSchema = z
   .object({
     version: z.literal(1),
-    section: z.enum(['unread', 'read']),
+    section: z.enum(['unread', 'read', 'recent']),
     participantId: z.string().min(1).max(256),
   })
   .strict();

@@ -60,10 +60,7 @@ export class ExternalSourceCore {
   }
 
   private async resolveChannelMessageSenderId(source: ExternalSource): Promise<string> {
-    if (
-      this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType) &&
-      source.workspaceId
-    ) {
+    if (this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType)) {
       let botUser = await unifiedBotUserService.getBotByBotId(XYNE_MAIL_BOT_ID, source.workspaceId);
       if (!botUser) {
         await unifiedBotUserService.syncAllBotUsers(source.workspaceId);
@@ -170,7 +167,7 @@ export class ExternalSourceCore {
       throw new SourceNotFoundError(sourceName);
     }
 
-    if (source.workspaceId && !source.channelId) {
+    if (!source.channelId) {
       const resolvedChannelIds = await this.resolveDlChannels(source, normalizedData);
       if (resolvedChannelIds.length === 0) {
         return [{ success: true, conversationId: '', entityId: '', action: 'skipped' }];
@@ -395,7 +392,7 @@ export class ExternalSourceCore {
     source: ExternalSource,
     normalizedData: NormalizedData,
   ): Promise<string[]> {
-    const workspaceId = source.workspaceId!;
+    const workspaceId = source.workspaceId;
     if (source.sourceType === 'ozonetel') {
       const channelId =
         typeof normalizedData.metadata.ozonetelChannelId === 'string'

@@ -217,6 +217,7 @@ export function showRecordingPill(state: RecordingPillState): void {
     skipTaskbar: true,
     hasShadow: false,
     focusable: true,
+    fullscreenable: false,
     show: false,
     type: 'panel',
     webPreferences: {

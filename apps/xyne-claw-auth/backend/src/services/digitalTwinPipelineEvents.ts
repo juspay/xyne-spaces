@@ -42,6 +42,20 @@ export interface SynthFileResult {
   action: "updated" | "skipped" | "error";
   chars?: number;
   error?: string;
+  model?: string;
+  durationMs?: number;
+  systemPrompt?: string;
+  userPrompt?: string;
+  rawOutput?: string;
+  promptChars?: number;
+  factsAvailable?: number;
+  factsDropped?: number;
+  factsClipped?: number;
+  factInputChars?: number;
+  factInputBudgetChars?: number;
+  contextLimited?: boolean;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
 }
 
 /** Stored in DigitalTwinPipelineEvent.trace for runType="synthesize" runs, so
@@ -205,17 +219,21 @@ export async function finishSynthesisEvent(
 ): Promise<void> {
   try {
     const updated = result.files.filter((f) => f.action === "updated");
+    const errored = result.files.filter((f) => f.action === "error");
     const factsTotal = result.files.reduce((s, f) => s + f.factsUsed, 0);
+    const synthesisError = result.error ?? (errored.length > 0
+      ? `${errored.length} persona file${errored.length === 1 ? "" : "s"} failed to compile`
+      : null);
     await (prisma.digitalTwinPipelineEvent.update as any)({
       where: { id },
       data: {
-        status: result.error ? "error" : updated.length > 0 ? "ok" : "empty",
+        status: synthesisError ? "error" : updated.length > 0 ? "ok" : "empty",
         recordCount: factsTotal,
         emittedCount: result.files.length,
         keptCount: updated.length,
         candidatesCreated: updated.length,
         durationMs: result.durationMs,
-        error: result.error ?? null,
+        error: synthesisError,
         trace: { kind: "synthesize", trigger, files: result.files } satisfies SynthTrace,
       },
     });

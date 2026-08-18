@@ -335,7 +335,7 @@ export class BitbucketService {
       return pullRequests as PullRequestData[];
     } catch (error) {
       // No pull requests found for this commit (not an error, just empty result)
-      console.log(`No pull requests found for merge commit ${commitHash}`);
+      logger.info(`No pull requests found for merge commit ${commitHash}`);
       return [];
     }
   }
@@ -528,7 +528,7 @@ export class BitbucketService {
       const commits = await this.fetchAllPages<BitbucketCommitsResponse>(endpoint);
       const commitIds = commits.map((commit) => commit.id);
 
-      console.log(
+      logger.info(
         `Found ${commitIds.length} commit(s) between ${sinceCommitId} and ${untilCommitId}${branch ? ` on branch ${branch}` : ''} in ${projectKey}/${repositorySlug}`
       );
 

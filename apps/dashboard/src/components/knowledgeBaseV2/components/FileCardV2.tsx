@@ -111,10 +111,10 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
         type='button'
         onClick={isRenaming ? undefined : onClick}
         className={cn(
-          // Surface uses `ai-page-bg` so the card blends with the
+          // Surface uses `bg-background` so the card blends with the
           // knowledge-base page background instead of the slightly warm
           // `bg-secondary` token (which read as yellowish against the page).
-          'ai-page-bg flex w-full flex-col items-start gap-3 rounded-2xl border p-4 text-left transition',
+          'bg-background flex w-full flex-col items-start gap-3 rounded-2xl border p-4 text-left transition',
           String(file.ingestionStatus) === 'PENDING' ||
             String(file.ingestionStatus) === 'PROCESSING'
             ? 'animate-pulse border-ring/60 ring-1 ring-ring/25'
@@ -217,7 +217,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
         className={cn(
           // Matches FileCardV2's surface so mixed folder + file grids feel
           // consistent across light and dark themes.
-          'ai-page-bg flex w-full flex-col items-start gap-3 rounded-2xl border border-border p-4 text-left transition',
+          'bg-background flex w-full flex-col items-start gap-3 rounded-2xl border border-border p-4 text-left transition',
           isRenaming ? '' : 'hover:border-ring/40 hover:bg-muted active:scale-[0.99]',
         )}
         title={folder.name}

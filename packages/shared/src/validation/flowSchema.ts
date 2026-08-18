@@ -648,7 +648,45 @@ export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
-// Recursive container schemas need z.lazy
+
+// ── MCP configure card ────────────────────────────────────────────────────────
+// The agent asks for an account it needs but the user hasn't connected. It posts
+// this card; the USER types the credentials in the dashboard and they go
+// browser → claw-auth directly.
+//
+// INVARIANT: no secret ever appears in these props. `fields` describes WHICH
+// inputs to render (name/label/type), never their values — a credential passed
+// as a tool argument would land in the model's context, the run transcript and
+// the logs. `mcpServerId` is the only thing the server acts on, and the whole
+// flowJSON round-trips through the client, so props are untrusted regardless.
+export const mcpCredentialFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    type: z.enum(['text', 'password']),
+    placeholder: z.string().optional(),
+    optional: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpConfigurePropsSchema = z
+  .object({
+    serverType: z.string().min(1),
+    serverName: z.string().min(1),
+    mcpServerId: z.string().min(1),
+    reason: z.string().optional(),
+    fields: z.array(mcpCredentialFieldSchema).min(1),
+  })
+  .strict();
+
+export const mcpConfigureComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcpConfigure'),
+  props: mcpConfigurePropsSchema,
+});
+
+export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
+export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
+
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
     textComponentSchema,
@@ -669,6 +707,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prApprovalComponentSchema,
     callScheduleComponentSchema,
     agentComponentSchema,
+    mcpConfigureComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
@@ -683,6 +722,44 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
       children: z.array(z.lazy(() => flowComponentSchema)).optional(),
     }),
   ]),
+);
+
+// TEMPORARY — remove once every deploy target ships the same @xyne/shared.
+//
+// The union above is a HARD gate: an unrecognised `type` fails validation for
+// the WHOLE flow, and this same schema runs on Spaces' postMessage ingest. So a
+// card emitted by a newer claw against an older backend is not partially
+// rendered — the entire message is rejected and nothing reaches the thread, with
+// no error the user can see. That is how the `agent` card (PR #279) went dark:
+// the emitter shipped, the schema did not.
+//
+// Until shared/backend/dashboard are deployed in lockstep, an unknown component
+// is allowed through as an opaque passthrough node. Known types keep their
+// strict validation — this only widens the door for types this build has never
+// heard of. The renderer degrades them to a readable JSON block.
+// Component types THIS build knows. The lenient branch must refuse these —
+// otherwise a malformed `text` node (say, one missing `content`) stops failing
+// validation and quietly degrades to an "unsupported card" instead, which is a
+// worse bug than the one this shim fixes.
+const KNOWN_COMPONENT_TYPES = new Set([
+  'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
+  'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
+  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
+]);
+
+const unknownComponentSchema = baseComponentSchema
+  .extend({
+    type: z
+      .string()
+      .min(1)
+      .refine((t) => !KNOWN_COMPONENT_TYPES.has(t), {
+        message: 'known component type must satisfy its own schema',
+      }),
+  })
+  .passthrough();
+
+export const flowComponentSchemaLenient: z.ZodType<any> = z.lazy(() =>
+  z.union([flowComponentSchema, unknownComponentSchema]),
 );
 
 // ============================================================================
@@ -707,7 +784,9 @@ export const flowDefinitionSchema = z.object({
   version: z.literal('2.0'),
   screenId: z.string().min(1),
   title: z.string().optional(),
-  components: z.array(flowComponentSchema).min(1),
+  // Lenient on purpose — see flowComponentSchemaLenient. A single unknown
+  // component must not reject the entire message at ingest.
+  components: z.array(flowComponentSchemaLenient).min(1),
   data: z.record(z.unknown()).optional(),
   state: flowStateSchema,
 });

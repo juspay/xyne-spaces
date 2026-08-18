@@ -4011,6 +4011,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     }
   ),
 
+  getUserWorkloadMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_workload_mappings.where('userGroupId', userGroupId);
+    }
+  ),
+
   getUserExpertiseMappings: defineQuery(
     z.object({ userGroupId: z.string(), boardId: z.string() }),
     ({ args: { userGroupId, boardId } }) => {

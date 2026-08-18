@@ -174,7 +174,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       return { action: 'allow' };
       
     } catch (error) {
-      console.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
       return { action: 'deny' };
     }
 });
@@ -217,7 +217,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     }
   });
 
-  console.log('✅ setWindowOpenHandler configured for main window');
+  log.info('✅ setWindowOpenHandler configured for main window');
 
 
   // Setup spellchecker context menu

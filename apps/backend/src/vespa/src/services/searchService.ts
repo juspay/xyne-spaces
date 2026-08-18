@@ -415,6 +415,7 @@ export class SearchService {
           wsId,
           sort,
           isExactMatch,
+          rankProfile,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());

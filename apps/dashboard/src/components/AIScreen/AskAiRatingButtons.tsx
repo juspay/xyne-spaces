@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { useEffect, useState, type ReactElement } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { cn } from '../../utils/classNames';
@@ -64,7 +65,11 @@ export function AskAiRatingButtons({
       await rateV2Message(messageId, rating, trimmed);
       onChange?.(next, trimmed ?? null);
     } catch (error) {
-      console.error('[AskAiRatingButtons] failed to rate:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AskAiRatingButtons] failed to rate:'),
+        error: error,
+      });
       setCurrent(feedback ?? 0); // revert
     } finally {
       setSaving(false);

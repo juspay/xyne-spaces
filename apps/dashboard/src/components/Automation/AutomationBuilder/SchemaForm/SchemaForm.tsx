@@ -210,7 +210,7 @@ function Field({
       try {
         el.setSelectionRange(cursor, cursor);
       } catch {
-        void 0;
+        /* Intentionally ignored. */
       }
     });
   };

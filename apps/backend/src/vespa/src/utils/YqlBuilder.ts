@@ -1,6 +1,7 @@
 import {
   type VespaSchema,
   VespaDocType,
+  RankProfile,
   ticketSchema,
   messageSchema,
   attachmentSchema,
@@ -200,6 +201,7 @@ export class YqlBuilder {
     workspaceId?: string,
     sort?: string,
     useExactMatch: boolean = false,
+    rankProfile?: string,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -263,6 +265,15 @@ export class YqlBuilder {
         } else {
           whereConditions.push(userInputClause());
         }
+      }
+
+      // `personalized` only: caller as rank-only terms on the search block so the profile can
+      // read matches(userId|mentions|threadSenders). rank()'s extra args never change what
+      // matches; every other profile's YQL is untouched. Needs chat_message selected
+      // (`mentions` exists only there).
+      if (rankProfile === RankProfile.personalizedRank && userId && schemas.includes(messageSchema)) {
+        const me = params.bind('involvedUser', userId);
+        whereConditions[0] = `rank(${whereConditions[0]}, userId contains ${me}, mentions contains ${me}, threadSenders contains ${me})`;
       }
     }
     // Build app-specific conditions.

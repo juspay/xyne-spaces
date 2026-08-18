@@ -24,8 +24,10 @@ import {
 } from '../../utils/recordingTabPreference';
 import {
   clearSummaryRequested,
-  isSummaryRequested,
+  getSummaryProgress,
+  getSummaryRequest,
   markSummaryRequested,
+  saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -139,6 +141,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [postToEmailNonce, setPostToEmailNonce] = useState(0);
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
@@ -206,10 +209,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     if (connected) {
       toast.success('Google email connected');
+      // Remount so the compose context is refetched — in Electron the modal is still
+      // mounted from before the consent screen opened in the system browser.
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
     if (connectionError) {
       toast.error(connectionError);
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
 
@@ -325,7 +332,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   // A summary asked for on a previous visit is still pending, so restore the skeleton.
   useEffect(() => {
-    setAwaitingSummary(isSummaryRequested(recordingId));
+    const request = getSummaryRequest(recordingId);
+    setAwaitingSummary(request !== null);
+    setPendingSummaryTemplateId(request?.templateId ?? null);
+    if (request?.templateId) setShouldLoadSummaryTemplates(true);
     setSummaryFailed(false);
     setLocalSessionEnded(false);
     ownedLiveSessionRef.current = null;
@@ -409,10 +419,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recordingRow]);
 
   useEffect(() => {
-    if (!recording?.detailedSummaryCanvasId) return;
+    const request = getSummaryRequest(recordingId);
+    if (!request || recording?.externalId !== recordingId) return;
+    const requestedSummaryIsReady = request.templateId
+      ? recording?.summaryTemplateId === request.templateId
+      : !!recording?.detailedSummaryCanvasId;
+    if (!requestedSummaryIsReady) return;
     setAwaitingSummary(false);
+    setPendingSummaryTemplateId(null);
     clearSummaryRequested(recordingId);
-  }, [recording?.detailedSummaryCanvasId, recordingId]);
+  }, [
+    recording?.detailedSummaryCanvasId,
+    recording?.externalId,
+    recording?.summaryTemplateId,
+    recordingId,
+  ]);
 
   // The audio is stitched after the room closes, so `hasRecording` is still false for
   // a while once a recording ends — and it is REST-only, so nothing pushes it here.
@@ -528,16 +549,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return;
     }
 
+    const resolvedTemplateId = summaryTemplateId || 'default';
     handleTabSelect('summary');
-    markSummaryRequested(recordingId);
+    markSummaryRequested(recordingId, resolvedTemplateId);
     setSummaryRunNonce(value => value + 1);
     setAwaitingSummary(true);
     setSummaryFailed(false);
     setIsRegeneratingSummary(true);
     try {
       // The default template is code-backed and intentionally has no database row.
-      const resolvedTemplateId = summaryTemplateId || 'default';
-
       setPendingSummaryTemplateId(resolvedTemplateId);
       const result = await recordingService.regenerateSummary(
         recording.externalId,
@@ -652,6 +672,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     });
   }, [recording, message, notesCanvasId]);
 
+  const handleSummaryProgressPause = useCallback(
+    (progress: number): void => saveSummaryProgress(recordingId, progress),
+    [recordingId],
+  );
+
   const transcriptText =
     speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
       ? (recording.identifiedTranscript ?? recording.transcript)
@@ -753,6 +778,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   };
 
   const handleShowSummaryShimmer = (): void => {
+    markSummaryRequested(recordingId);
+    setSummaryRunNonce(value => value + 1);
+    setSummaryFailed(false);
     setAwaitingSummary(true);
   };
 
@@ -830,7 +858,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   {...(isLive || !isOwner
                     ? {}
                     : {
-                        isRegenerating: isRegeneratingSummary,
+                        isRegenerating: isRegeneratingSummary || awaitingSummary,
                         templates: summaryTemplateOptions,
                         templatesLoading: summaryTemplatesLoading,
                         onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
@@ -993,8 +1021,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   isAwaiting={awaitingSummary}
                   canGenerate={hasTranscript}
                   onGenerate={handleShowSummaryShimmer}
+                  onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
+                  initialProgress={getSummaryProgress(recordingId)}
+                  onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
@@ -1027,6 +1058,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
           title='Post to channel'
           data-testid='post-recording-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
         >
           <PostRecordingToChannelModal
             recording={recording}
@@ -1045,6 +1077,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           testId='post-recording-to-email-dialog'
         >
           <PostRecordingToEmailModal
+            key={postToEmailNonce}
             recording={recording}
             onClose={() => setShowPostToEmailModal(false)}
           />

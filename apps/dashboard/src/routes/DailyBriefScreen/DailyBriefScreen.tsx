@@ -440,7 +440,7 @@ const DailyBriefScreen = (): ReactElement => {
     <div
       data-testid='daily-brief-page'
       className={cn(
-        'relative flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground',
+        'relative flex h-full flex-1 flex-col overflow-hidden text-foreground',
         !isInPanelWebview && 'rounded-lg',
       )}
     >

@@ -6,10 +6,86 @@ const BACKEND_URL = frontendConfig.spacesAuthBaseUrl;
 const AUTH_API_URL = frontendConfig.clawApiBaseUrl;
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export interface DesignArtifactShare {
+  id: string;
+  title: string;
+  attachmentId: string;
+  conversationId: string;
+  sharePath: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicDesignArtifact {
+  title: string;
+  updatedAt: string;
+  expiresAt: string | null;
+}
+
+export async function publishDesignArtifact(input: {
+  attachmentId: string;
+  conversationId: string;
+  title: string;
+  expiresInDays?: 1 | 7 | 30 | 90 | null;
+}): Promise<DesignArtifactShare> {
+  const result = await request<{ success: true; data: DesignArtifactShare }>(
+    `${AUTH_API_URL}/api/v1/design-shares`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return result.data;
+}
+
+export async function getDesignArtifactShare(conversationId: string): Promise<DesignArtifactShare | null> {
+  const result = await request<{ success: true; data: DesignArtifactShare | null }>(
+    `${AUTH_API_URL}/api/v1/design-shares/conversation/${encodeURIComponent(conversationId)}`,
+  );
+  return result.data;
+}
+
+export async function revokeDesignArtifactShare(shareId: string): Promise<void> {
+  await request<{ success: true }>(
+    `${AUTH_API_URL}/api/v1/design-shares/${encodeURIComponent(shareId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function getPublicDesignArtifact(token: string): Promise<PublicDesignArtifact> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/metadata`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  const result = await response.json() as { success: true; data: PublicDesignArtifact };
+  return result.data;
+}
+
+export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/content`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  return response.blob();
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -23,8 +99,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string };
-    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`);
+    const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code);
   }
 
   return res.json() as Promise<T>;
@@ -618,6 +694,17 @@ export async function updateAgent(
   const data = await request<{ success: boolean; data: Agent }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}`,
     { method: "PUT", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+export async function updateAgentDesignSystem(
+  slug: string,
+  designSystem: string | null,
+): Promise<Agent> {
+  const data = await request<{ success: boolean; data: Agent }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/design-system`,
+    { method: "PATCH", body: JSON.stringify({ designSystem }) },
   );
   return data.data;
 }
@@ -1609,6 +1696,120 @@ export interface AdminRole {
   user: { id: string; name: string; email: string; orgId?: string; orgName?: string | null };
 }
 
+export type AdminDigitalTwinBackfillStatus =
+  | "not_started"
+  | "running"
+  | "paused"
+  | "complete"
+  | "error";
+
+export interface AdminDigitalTwinUser {
+  id: string;
+  name: string;
+  email: string;
+  orgId: string;
+  orgName: string;
+  enabled: boolean;
+  enabledAt: string | null;
+  backfill: {
+    status: AdminDigitalTwinBackfillStatus;
+    from: string | null;
+    to: string | null;
+    progressPct: number | null;
+    recordsSeen: number;
+    candidatesMade: number;
+    lastError: string | null;
+  };
+}
+
+export interface AdminDigitalTwinUsersPage {
+  rows: AdminDigitalTwinUser[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: { enabled: number; disabled: number; total: number };
+  organizations: Array<{ id: string; name: string }>;
+}
+
+export interface AdminDigitalTwinUsersQuery {
+  search?: string;
+  status?: "all" | "enabled" | "disabled";
+  orgId?: string;
+  sort?: "name_asc" | "name_desc" | "email_asc" | "recently_enabled";
+  limit?: 10 | 25 | 50 | 100;
+  offset?: number;
+}
+
+export interface AdminDigitalTwinBackfillWindow {
+  from: string;
+  to: string;
+}
+
+export async function listAdminDigitalTwinUsers(
+  userId: string,
+  query: AdminDigitalTwinUsersQuery = {},
+): Promise<AdminDigitalTwinUsersPage> {
+  const params = new URLSearchParams();
+  if (query.search) params.set("search", query.search);
+  if (query.status) params.set("status", query.status);
+  if (query.orgId) params.set("orgId", query.orgId);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset != null) params.set("offset", String(query.offset));
+  const data = await request<{ success: boolean; data: AdminDigitalTwinUsersPage }>(
+    `${AUTH_API_URL}/api/v1/admin/digital-twin/users?${params.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function adminEnableDigitalTwinForUser(
+  userId: string,
+  targetUserId: string,
+  backfill: AdminDigitalTwinBackfillWindow | null,
+): Promise<{ enabled: true; enabledAt: string; backfillJobIds: string[] }> {
+  const data = await request<{
+    success: boolean;
+    data: { enabled: true; enabledAt: string; backfillJobIds: string[] };
+  }>(`${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/enable`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({ backfill }),
+  });
+  return data.data;
+}
+
+export async function adminDisableDigitalTwinForUser(
+  userId: string,
+  targetUserId: string,
+): Promise<{ disabled: true; cancelledJobs: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { disabled: true; cancelledJobs: number };
+  }>(`${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/disable`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({}),
+  });
+  return data.data;
+}
+
+export async function adminStartDigitalTwinBackfillForUser(
+  userId: string,
+  targetUserId: string,
+  backfill: AdminDigitalTwinBackfillWindow,
+): Promise<{ backfillJobIds: string[] }> {
+  const data = await request<{ success: boolean; data: { backfillJobIds: string[] } }>(
+    `${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/backfill`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify({ backfill }),
+    },
+  );
+  return data.data;
+}
+
 export interface AuditLogEntry {
   id: string;
   actorUserId: string | null;
@@ -1862,7 +2063,7 @@ export async function listOrgServiceTokens(
 export async function mintOrgServiceToken(
   userId: string,
   orgId: string,
-  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[] },
+  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[]; allowChannelPost?: boolean },
 ): Promise<MintedServiceAccessToken> {
   const data = await request<{ success: boolean; data: MintedServiceAccessToken }>(
     `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
@@ -2368,6 +2569,25 @@ export async function removeAgentShare(slug: string, requesterId: string, target
   );
 }
 
+/**
+ * Health-check a single agent-pinned MCP instance. Hits the agent-scoped
+ * health route (mirrors checkConnectionHealth for global connections) so the
+ * agent MCP tab can show a real reachability status instead of a hardcoded
+ * "connected" badge.
+ */
+export async function checkAgentMcpConnectionHealth(
+  slug: string,
+  requesterId: string,
+  mcpServerType: string,
+  instanceSlug = "default",
+): Promise<HealthResult> {
+  const data = await request<{ success: boolean; data: HealthResult }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/mcp/connections/${encodeURIComponent(mcpServerType)}/${encodeURIComponent(instanceSlug)}/health`,
+    { headers: { "x-user-id": requesterId } },
+  );
+  return data.data;
+}
+
 // ── Agent-scoped MCP connections ────────────────────────────────────
 //
 // Lists / upserts / deletes credentials pinned to a specific agent. The
@@ -2517,7 +2737,7 @@ export interface ChatMsg {
   contextItems?: AttachedContextRef[];
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {
@@ -2529,7 +2749,7 @@ export interface ContextItem {
 }
 
 export interface AttachedContextRef {
-  type: ContextType;
+  type: Exclude<ContextType, "repository">;
   id: string;
   title: string;
   threadId?: string;
@@ -2722,9 +2942,26 @@ export async function sendChatMessage(
   requestOptions?: {
     disableTools?: boolean;
     additionalInstructions?: string;
+    studioMode?: "design";
+    designArtifactAttachmentId?: string;
+    designSelection?: {
+      scope: "element" | "component" | "design-system";
+      selector: string;
+      tagName: string;
+      label: string;
+      id?: string;
+      classes: string[];
+      text: string;
+      ancestors: string[];
+      styles: Record<string, string>;
+      rect: { x: number; y: number; width: number; height: number };
+    };
     /** Per-request model/provider override. Used by the in-chat model switcher
      *  to pin a LiteLLM model off the agent's shared key for this turn. */
     providerOverride?: { provider: string; model?: string };
+    /** Trusted SDLC repository selection. The backend resolves and authorizes
+     *  the id; URL/branch values are never accepted from the browser. */
+    researchContext?: { type: "repository"; id: string; name?: string };
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -2764,7 +3001,13 @@ export async function sendChatMessage(
       ...(requestOptions?.additionalInstructions?.trim()
         ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
         : {}),
+      ...(requestOptions?.studioMode ? { studioMode: requestOptions.studioMode } : {}),
+      ...(requestOptions?.designArtifactAttachmentId
+        ? { designArtifactAttachmentId: requestOptions.designArtifactAttachmentId }
+        : {}),
+      ...(requestOptions?.designSelection ? { designSelection: requestOptions.designSelection } : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
+      ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });
@@ -4205,7 +4448,7 @@ export interface CuratorEmittedCandidate {
   signalScore?: number;
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
-  dropReason?: "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
 }
 
 /** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
@@ -4242,6 +4485,20 @@ export interface SynthFileResult {
   action: "updated" | "skipped" | "error";
   chars?: number;
   error?: string;
+  model?: string;
+  durationMs?: number;
+  systemPrompt?: string;
+  userPrompt?: string;
+  rawOutput?: string;
+  promptChars?: number;
+  factsAvailable?: number;
+  factsDropped?: number;
+  factsClipped?: number;
+  factInputChars?: number;
+  factInputBudgetChars?: number;
+  contextLimited?: boolean;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
 }
 
 /** Trace stored on a synthesize pipeline event (instead of a CuratorTrace). */
@@ -4676,6 +4933,9 @@ export interface MemoryBankMemory {
   id: string;
   hindsightMemoryId: string;
   category: string | null;
+  /** Hindsight storage type. Observations are derived and cannot be curated
+   *  directly; delete their supporting world/experience facts instead. */
+  factType?: string | null;
   content: string;
   curatorReasoning: string | null;
   curatorConfidence: number | null;
@@ -4703,6 +4963,7 @@ export interface MemoryBankStats {
     lastRecalledAt: string | null;
     content: string;
     category: string | null;
+    factType?: string | null;
     status: string | null;
     createdAt: string | null;
   }>;
@@ -4763,7 +5024,14 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
     `${MEMORY_BASE}/banks/digital-twin/memories/${encodeURIComponent(hindsightMemoryId)}?userTag=${encodeURIComponent(`user:${userId}`)}`,
     { method: "DELETE", credentials: "include" },
   );
-  if (!res.ok) throw new Error(`Failed to delete memory: ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    throw new ApiError(
+      res.status,
+      body.error ?? `Failed to delete memory: ${res.status}`,
+      body.code,
+    );
+  }
 }
 
 
@@ -5944,6 +6212,18 @@ export async function startSearchEvalRun(
     `${AUTH_API_URL}/api/v1/search-evals/sheets/${sheetId}/runs`,
     { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
   );
+}
+
+/** Live rank-profile names for a UI entity type ("messages"/"tickets"/
+ *  "files"/"emails"/"channels"), or the common-to-every-schema set when
+ *  `queryType` is "" ("All types") — read straight off Vespa's deployed .sd
+ *  schema (see rank-profiles.ts), not a hardcoded list. */
+export async function getSearchEvalRankProfiles(queryType: string, userId: string): Promise<string[]> {
+  const data = await request<{ success: boolean; profiles: string[] }>(
+    `${AUTH_API_URL}/api/v1/search-evals/rank-profiles?type=${encodeURIComponent(queryType)}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.profiles ?? [];
 }
 
 interface SearchEvalTopKStat {
