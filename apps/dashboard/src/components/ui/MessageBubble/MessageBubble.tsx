@@ -874,12 +874,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             ) : showAvatar && isRecordingMessage && !isForwardedMessage ? (
               <div
-                className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-success/15 border-status-success/30'}`}
+                className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-failure/15 border-status-failure/30'}`}
               >
                 <MicOn
                   size={16}
                   color={
-                    isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-success)'
+                    isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-failure)'
                   }
                 />
               </div>

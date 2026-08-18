@@ -76,13 +76,13 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
       type='button'
       onClick={goToRecording}
       disabled={!canView}
-      className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-status-success/30 bg-status-success/5 enabled:hover:bg-status-success/10 transition-colors px-3 py-1.5 text-left disabled:cursor-default'
+      className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card enabled:hover:bg-muted/50 transition-colors px-3 py-1.5 text-left disabled:cursor-default'
       data-testid='recording-active-card'
       data-track-category='RECORDING'
       data-track-name='OPEN_LIVE_RECORDING_FROM_THREAD'
     >
-      <span className='flex size-5 shrink-0 items-center justify-center rounded-md border border-status-success/30 bg-status-success/15'>
-        <AudioLines size={12} strokeWidth={2.5} className='text-status-success' />
+      <span className='flex size-5 shrink-0 items-center justify-center rounded-md bg-muted'>
+        <AudioLines size={12} strokeWidth={2.5} className='text-muted-foreground' />
       </span>
       <span className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
         Recording notes
@@ -91,11 +91,11 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
         </span>
       </span>
       <span className='relative flex size-2 shrink-0' aria-hidden='true'>
-        <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-status-success opacity-75' />
-        <span className='relative inline-flex size-2 rounded-full bg-status-success' />
+        <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-status-failure opacity-75' />
+        <span className='relative inline-flex size-2 rounded-full bg-status-failure' />
       </span>
       {canView && (
-        <span className='text-xs font-medium text-status-success shrink-0 rounded-full border border-status-success/30 px-2 py-0.5'>
+        <span className='text-xs font-medium text-foreground shrink-0 rounded-full border border-border px-2 py-0.5'>
           View
         </span>
       )}

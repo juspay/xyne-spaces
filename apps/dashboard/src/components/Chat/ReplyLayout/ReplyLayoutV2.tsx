@@ -110,10 +110,10 @@ const ReplyLayoutV2: React.FC<{
         )}
 
         {isRecordingActive && (
-          <span className='flex items-center gap-1 shrink-0 font-medium text-status-success'>
+          <span className='flex items-center gap-1 shrink-0 font-medium text-status-failure'>
             <span className='relative flex size-1.5'>
-              <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-status-success opacity-75' />
-              <span className='relative inline-flex rounded-full size-1.5 bg-status-success' />
+              <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-status-failure opacity-75' />
+              <span className='relative inline-flex rounded-full size-1.5 bg-status-failure' />
             </span>
             Recording
           </span>
