@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.5](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.4...v1.187.1-release-20260817.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* making workspaceId non nullable in external_sources table ([#687](https://github.com/juspay/xyne-spaces/issues/687)) ([f8f62b3](https://github.com/juspay/xyne-spaces/commit/f8f62b3b41b30a35cbc9050c8f7c20b9c95e8923))
+
 ## [1.187.1-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.3...v1.187.1-release-20260817.4) (2026-08-18)
 
 
