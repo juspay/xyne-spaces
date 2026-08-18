@@ -96,9 +96,12 @@ async function resolveStartOffsets(
 
   if (newcomers.length === 0) return offsets;
 
+  // Baseline is the frontier of the virtual schedule, so peers count at their
+  // effective position (raw load + the offset they were given), not raw load.
+  // Reading raw here would let each newcomer reset the floor below the last one.
   const establishedLoads = pool
     .filter(id => hasWorkloadHistory(id))
-    .map(id => workloadMap.get(id) ?? 0);
+    .map(id => (workloadMap.get(id) ?? 0) + (offsets.get(id) ?? 0));
   const baseline = establishedLoads.length > 0 ? Math.round(Math.min(...establishedLoads)) : 0;
 
   for (const userId of newcomers) {
@@ -308,6 +311,12 @@ export async function evaluateAssignmentRule(
     allBoardScores.map(score => [score.boardId, score.weight])
   );
 
+  // The percentDiff term only applies when "Use percentage assignment" is enabled
+  // for this board; otherwise it silently skews scoring toward whoever holds the
+  // smallest share of the board (see boardComplexityScore.usePercentage).
+  const usePercentageForBoard =
+    allBoardScores.find(s => s.boardId === boardId)?.usePercentage === true;
+
   // Aggregate WEIGHTED workload (active tasks only) across all boards for each user
   const workloadMap = new Map<string, number>();
 
@@ -353,7 +362,7 @@ export async function evaluateAssignmentRule(
 
     // Current percentage of tickets assigned to this user on this board
     const currentPercent = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
-    const percentDiff = percentage - currentPercent;
+    const percentDiff = usePercentageForBoard ? percentage - currentPercent : 0;
 
     // Scoring formula: effectiveActiveTasks - expertiseBonus - percentDiff
     const expertiseBonus = hasExpertise ? 10 : 0;
@@ -458,7 +467,7 @@ export async function evaluateAssignmentRule(
       const userTickets = userWorkload?.activeTasks || 0;
 
       const currentPercent = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
-      const percentDiff = percentage - currentPercent;
+      const percentDiff = usePercentageForBoard ? percentage - currentPercent : 0;
 
       const expertiseBonus = hasExpertise ? 10 : 0;
       const score = effectiveActiveTasks - expertiseBonus - percentDiff;
@@ -542,6 +551,7 @@ interface SharedContext {
   workloadByUserAndBoard:   Map<string, UserWorkloadMapping>;
   expertiseMap:             Map<string, UserExpertiseMapping>;
   userGroupMappingByUserId: Map<string, UserGroupMapping>;
+  usePercentageForBoard:    boolean;
   totalTicketsOnBoard:      number;
 }
 
@@ -556,7 +566,7 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, totalTicketsOnBoard } = ctx;
+  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, totalTicketsOnBoard } = ctx;
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
@@ -612,7 +622,7 @@ async function pickBest(
     const userWorkload  = workloadByUserAndBoard.get(`${userId}#${boardId}`);
     const userTickets   = userWorkload?.activeTasks ?? 0;
     const currentPct    = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
-    const percentDiff   = percentage - currentPct;
+    const percentDiff   = usePercentageForBoard ? percentage - currentPct : 0;
     const expertBonus   = expert ? 10 : 0;
     return {
       userId,
@@ -702,7 +712,9 @@ export async function evaluateAllRoles(
   }
 
   const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
-  
+  const usePercentageForBoard =
+    allBoardScores.find(s => s.boardId === boardId)?.usePercentage === true;
+
   // Pre-compute userStateMap for O(1) lookups across all 5 roles
   const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
   
@@ -746,6 +758,7 @@ export async function evaluateAllRoles(
     workloadByUserAndBoard,
     expertiseMap,
     userGroupMappingByUserId,
+    usePercentageForBoard,
     totalTicketsOnBoard,
   };
 
@@ -849,6 +862,8 @@ export async function evaluateRoleSlots(
   }
 
   const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
+  const usePercentageForBoard =
+    allBoardScores.find(s => s.boardId === boardId)?.usePercentage === true;
   const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
   const workloadsByUserId = new Map<string, UserWorkloadMapping[]>();
   for (const w of allWorkloadMappings) {
@@ -874,6 +889,7 @@ export async function evaluateRoleSlots(
     workloadByUserAndBoard,
     expertiseMap,
     userGroupMappingByUserId,
+    usePercentageForBoard,
     totalTicketsOnBoard,
   };
 
