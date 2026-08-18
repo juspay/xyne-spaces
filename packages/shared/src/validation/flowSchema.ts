@@ -526,9 +526,15 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+/** A bare label, or a label plus the secondary line the option card renders under it. */
+export const userQuestionOptionSchema = z.union([
+  z.string().min(1),
+  z.object({ label: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+]);
+
 export const userQuestionItemSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(z.string().min(1)).min(2).max(9), required: z.boolean().optional() }).strict(),
-  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(z.string().min(1)).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
   z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('open_ended'), placeholder: z.string().optional(), required: z.boolean().optional() }).strict(),
 ]);
 
@@ -548,6 +554,7 @@ export const userQuestionPropsSchema = z.object({
 
 export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.literal('user_question'), props: userQuestionPropsSchema });
 export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
+export type UserQuestionOption = z.infer<typeof userQuestionOptionSchema>;
 export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
 
 export const codePropsSchema = z
@@ -579,12 +586,22 @@ export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
 export const ticketPropsSchema = z
   .object({
-    xyneId: z.string().min(1),
+    xyneId: z.string().min(1).optional(),
+    ticketId: z.string().min(1).optional(),
     title: z.string().min(1),
+    description: z.string().optional(),
     status: ticketStatusSchema,
     priority: ticketPrioritySchema,
+    stageName: z.string().min(1).optional(),
     eta: z.string().optional(),
-    url: z.string().min(1),
+    url: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    conversationId: z.string().min(1).optional(),
+    assigneeId: z.string().min(1).optional(),
+    phase: z.enum(['proposed', 'created']).optional(),
+    approveAction: flowActionSchema.optional(),
+    approveContinueAction: flowActionSchema.optional(),
+    declineAction: flowActionSchema.optional(),
   })
   .strict();
 
