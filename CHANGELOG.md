@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.3...v1.187.1-release-20260817.4) (2026-08-18)
+
+
+### Bug Fixes
+
+* pass caller as rank-only terms for personalized message ranking ([#693](https://github.com/juspay/xyne-spaces/issues/693)) ([0001b60](https://github.com/juspay/xyne-spaces/commit/0001b601f0d64c62a5ee25be892c31c297964fe0))
+
 ## [1.187.1-release-20260817.3](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.2...v1.187.1-release-20260817.3) (2026-08-18)
 
 
