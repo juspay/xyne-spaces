@@ -61,7 +61,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -407,7 +406,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
