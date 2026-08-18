@@ -17,14 +17,25 @@ import type { Todo } from "../flow/plan-flow.js";
 
 export type UserQuestionType = "single_choice" | "multiple_choice" | "open_ended";
 
+/** An option carrying a secondary line under its label. */
+export interface UserQuestionOption {
+  label: string;
+  description?: string;
+}
+
 export interface UserQuestion {
   id: string;
   label?: string;
   question: string;
   type: UserQuestionType;
-  options?: string[];
+  options?: (string | UserQuestionOption)[];
   required?: boolean;
   placeholder?: string;
+}
+
+/** The stored/submitted answer value for an option, whichever form it takes. */
+export function userQuestionOptionLabel(option: string | UserQuestionOption): string {
+  return typeof option === "string" ? option : option.label;
 }
 
 interface UiWidgetBase {
@@ -73,7 +84,7 @@ function isQuestion(value: unknown): value is UserQuestion {
   if (value["label"] !== undefined && typeof value["label"] !== "string") return false;
   if (value["required"] !== undefined && typeof value["required"] !== "boolean") return false;
   if (value["placeholder"] !== undefined && typeof value["placeholder"] !== "string") return false;
-  return value["options"] === undefined || (Array.isArray(value["options"]) && value["options"].every((item) => typeof item === "string"));
+  return value["options"] === undefined || (Array.isArray(value["options"]) && value["options"].every((item) => typeof item === "string" || (isRecord(item) && typeof item["label"] === "string")));
 }
 
 function hasValidChartPayload(payload: Record<string, unknown>): boolean {

@@ -1086,11 +1086,16 @@ export function buildDiffFlow(path: string, patch: string): FlowDefinition {
 
 export interface TicketArtifact {
   xyneId: string;
+  ticketId?: string;
   title: string;
   status: 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  stageName?: string;
   eta?: string;
   url: string;
+  channelId?: string;
+  conversationId?: string;
+  assigneeId?: string;
 }
 
 export function buildTicketFlow(ticket: TicketArtifact): FlowDefinition {
@@ -1099,13 +1104,67 @@ export function buildTicketFlow(ticket: TicketArtifact): FlowDefinition {
       id: 'ticket',
       type: 'ticket',
       props: {
+        phase: 'created',
         xyneId: ticket.xyneId,
+        ...(ticket.ticketId ? { ticketId: ticket.ticketId } : {}),
         title: ticket.title,
         status: ticket.status,
         priority: ticket.priority,
+        ...(ticket.stageName ? { stageName: ticket.stageName } : {}),
         ...(ticket.eta ? { eta: ticket.eta } : {}),
+        ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+        ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+        ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
         url: ticket.url,
       },
+    })
+    .build();
+}
+
+export function buildTicketProposalFlow(
+  ticket: {
+    title: string;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    eta?: string;
+    assigneeId?: string;
+  },
+  action: {
+    serverType: string;
+    tool: string;
+    params: Record<string, unknown>;
+    userId: string;
+    signature: string;
+    agentSlug: string;
+    channelId?: string;
+    conversationId?: string;
+  },
+): FlowDefinition {
+  return new FlowBuilder(`ticket-proposal-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'ticket',
+      type: 'ticket',
+      props: {
+        phase: 'proposed',
+        title: ticket.title,
+        status: 'TODO',
+        priority: ticket.priority ?? 'MEDIUM',
+        ...(ticket.eta ? { eta: ticket.eta } : {}),
+        ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
+        approveAction: { type: 'submit', actionId: 'approve-write', successMessage: 'Approved' },
+        approveContinueAction: { type: 'submit', actionId: 'approve-continue', successMessage: 'Approved — continuing' },
+        declineAction: { type: 'submit', actionId: 'decline-write' },
+      },
+    })
+    .setData({
+      actionType: 'write',
+      serverType: action.serverType,
+      tool: action.tool,
+      params: JSON.stringify(action.params),
+      userId: action.userId,
+      signature: action.signature,
+      agentSlug: action.agentSlug,
+      ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
+      ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })
     .build();
 }
