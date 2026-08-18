@@ -38,7 +38,9 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType, AttachmentEntityType } from '@xyne/shared';
+  RecordingType,
+  AttachmentEntityType,
+} from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -386,7 +388,15 @@ export class CallController {
     let stage = 'setup';
 
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
+      const {
+        callType = 'AUDIO',
+        channelId,
+        invitedUserIds,
+        isHeadless,
+        sttModel,
+        conversationId,
+        artifactMessageId,
+      } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -515,6 +525,12 @@ export class CallController {
         res.status(400).json({ success: false, error: 'Invalid call type' });
         return;
       }
+
+      // No pre-flight validation of artifactMessageId: every artifact write is
+      // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
+      // an id that does not belong to this channel matches zero rows.
+      const linkedArtifactMessageId =
+        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -655,6 +671,7 @@ export class CallController {
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
+        ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 

@@ -33,7 +33,8 @@ export type FlowComponentType =
   | 'ticket'
   | 'chart'
   | 'agent'
-  | 'mcpConfigure';
+  | 'mcpConfigure'
+  | 'slash_command_artifact';
 
 export interface FlowComponent {
   id: string;

@@ -14,6 +14,7 @@ export interface InitiateCallRequest {
   callType: CallType;
   isHeadless?: boolean; // For recordings without a specific channel
   conversationId?: string; // Optional: for thread-initiated calls
+  artifactMessageId?: string; // Exact slash-command artifact that owns this call
 }
 
 export interface InitiateCallResponse {
@@ -225,6 +226,7 @@ export class CallService {
         callType: data.callType,
         isHeadless: data.isHeadless,
         ...(data.conversationId && { conversationId: data.conversationId }),
+        ...(data.artifactMessageId && { artifactMessageId: data.artifactMessageId }),
       });
 
       return response.data;

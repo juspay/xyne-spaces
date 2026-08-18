@@ -787,6 +787,52 @@ export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
+// ── Slash-command artifact ────────────────────────────────────────────────
+// A slash command can emit a persistent, structured message card. Message
+// content carries ONLY the command identifier and the body: presentation and
+// side-effect policy (badge, labels, who gets notified) are resolved from the
+// registry in utils/slashCommandArtifact.ts. Message content is authored by
+// the client, so anything it declared about its own audience would be
+// self-granted privilege. Lifecycle state (active/completed, linked call)
+// likewise lives only on the `message_artifacts` row.
+// Unknown props are stripped rather than rejected so artifacts written by an
+// older client still render.
+export const slashCommandArtifactEndedCallSchema = z.object({
+  durationMs: z.number().int().nonnegative(),
+  joinedCount: z.number().int().nonnegative(),
+});
+
+export const slashCommandArtifactPropsSchema = z.object({
+  command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+  /**
+   * Summary of the last call this artifact ran, written by the server exactly
+   * once when that call ends. It lives here rather than on `message_artifacts`
+   * because an ended call has already left the client's active-call
+   * subscription, and this is the same shape the standard call system message
+   * uses (content rewritten once at end-of-call).
+   *
+   * Only trusted when no live artifact row contradicts it — message content is
+   * client-authored, so a crafted client could ship a message that already
+   * claims a call ended.
+   */
+  endedCall: slashCommandArtifactEndedCallSchema.optional(),
+});
+
+export type SlashCommandArtifactEndedCall = z.infer<
+  typeof slashCommandArtifactEndedCallSchema
+>;
+
+export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
+  type: z.literal('slash_command_artifact'),
+  props: slashCommandArtifactPropsSchema,
+  // The message body is a normal Flow text node, which keeps mentions and
+  // formatting consistent with every other FlowJSON message.
+  children: z.array(textComponentSchema).min(1).max(1),
+});
+
+export type SlashCommandArtifactProps = z.infer<
+  typeof slashCommandArtifactPropsSchema
+>;
 
 // ── MCP configure card ────────────────────────────────────────────────────────
 // The agent asks for an account it needs but the user hasn't connected. It posts
@@ -826,6 +872,7 @@ export const mcpConfigureComponentSchema = baseComponentSchema.extend({
 export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
 export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
 
+// Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
     textComponentSchema,
@@ -852,6 +899,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     chartComponentSchema,
     agentComponentSchema,
     mcpConfigureComponentSchema,
+    slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

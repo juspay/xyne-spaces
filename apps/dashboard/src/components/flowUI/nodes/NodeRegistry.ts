@@ -23,6 +23,7 @@ import { TicketNode } from './TicketNode';
 import { ChartNode } from './ChartNode';
 import { AgentNode } from './AgentNode';
 import { McpConfigureNode } from './McpConfigureNode';
+import { SlashCommandArtifactNode } from '../../Chat/SlashCommandArtifacts';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
 // is kept in ./PrApprovalNode.tsx but unlinked so 'pr_approval' isn't a live artifact.
 
@@ -78,6 +79,7 @@ NodeRegistry.register('ticket', TicketNode);
 NodeRegistry.register('chart', ChartNode);
 NodeRegistry.register('agent', AgentNode);
 NodeRegistry.register('mcpConfigure', McpConfigureNode);
+NodeRegistry.register('slash_command_artifact', SlashCommandArtifactNode);
 
 /**
  * Kept for backward compatibility with existing callers/imports.
