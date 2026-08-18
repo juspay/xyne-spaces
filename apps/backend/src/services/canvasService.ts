@@ -14,7 +14,6 @@ import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
-
 /**
  * Convert markdown to BlockNote JSON format
  */
@@ -223,7 +222,9 @@ export async function createKnowledgeCanvas(
     const participantId = uuidv4();
 
     // Generate title with fallback to default
-    const finalTitle = canvasTitle ? `📚 ${canvasTitle}` : `📚 Knowledge Learnings - ${new Date().toLocaleDateString()}`;
+    const finalTitle = canvasTitle
+      ? `📚 ${canvasTitle}`
+      : `📚 Knowledge Learnings - ${new Date().toLocaleDateString()}`;
 
     // Format learnings to BlockNote content
     const content = formatLearningsToBlockNote(learnings, workflowExecutionId, finalTitle);
@@ -287,7 +288,7 @@ export async function createKnowledgeCanvas(
       logger.error(`[CanvasService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
       // Don't fail the canvas creation if Vespa queueing fails
     }
-    
+
     return canvasId;
   } catch (error) {
     logger.error('[CanvasService] Failed to create knowledge canvas:', error);
@@ -303,13 +304,16 @@ export async function createKnowledgeCanvas(
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
   const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
-  const path = workspaceId
-    ? `/${workspaceId}/chat/canvas/${canvasId}`
-    : `/chat/canvas/${canvasId}`;
+  const path = workspaceId ? `/${workspaceId}/chat/canvas/${canvasId}` : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
 }
 
-type LooseInline = { type?: string; text?: string; props?: Record<string, unknown>; styles?: unknown };
+type LooseInline = {
+  type?: string;
+  text?: string;
+  props?: Record<string, unknown>;
+  styles?: unknown;
+};
 type LooseBlock = {
   type?: string;
   content?: unknown;
@@ -319,6 +323,7 @@ type LooseBlock = {
 // ServerBlockNoteEditor.create() only knows the default schema, so custom inline
 // nodes must be rewritten before Markdown export.
 const CUSTOM_INLINE_TYPES = new Set(['mention', 'citation']);
+const CUSTOM_STYLE_KEYS = new Set(['canvasCommentThread']);
 
 // Render a custom inline node as plain text, mirroring the frontend display
 // logic (CanvasMentionSpec: prefer the group name for group mentions, otherwise
@@ -351,13 +356,26 @@ function normalizeInlineContent(content: unknown): unknown {
   }
 
   return Object.fromEntries(
-    Object.entries(content).map(([key, value]) => [key, normalizeInlineContent(value)]),
+    Object.entries(content).map(([key, value]) => {
+      if (key === 'styles' && value && typeof value === 'object' && !Array.isArray(value)) {
+        return [
+          key,
+          Object.fromEntries(
+            Object.entries(value as Record<string, unknown>).filter(
+              ([styleKey]) => !CUSTOM_STYLE_KEYS.has(styleKey)
+            )
+          ),
+        ];
+      }
+
+      return [key, normalizeInlineContent(value)];
+    })
   );
 }
 
 // Remove citation blocks and replace custom inline nodes before serialization.
 function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
-  return blocks.flatMap(block => {
+  return blocks.flatMap((block) => {
     if (block.type === 'citation') return [];
 
     const next: LooseBlock = { ...block };
@@ -568,9 +586,12 @@ export async function approveKnowledgeCanvas(
       });
       logger.info(`[CanvasService] Queued Vespa update for approved canvas ${canvasId}`);
     } catch (error) {
-      logger.error(`[CanvasService] Failed to queue Vespa update for approved canvas ${canvasId}:`, error);
+      logger.error(
+        `[CanvasService] Failed to queue Vespa update for approved canvas ${canvasId}:`,
+        error
+      );
     }
-    
+
     return { success: true, documentIds: [document.id] };
   } catch (error) {
     logger.error('[CanvasService] Failed to approve knowledge canvas:', error);
