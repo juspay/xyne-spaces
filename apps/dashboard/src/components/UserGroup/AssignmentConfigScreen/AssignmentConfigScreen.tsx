@@ -1215,6 +1215,7 @@ export const AssignmentConfigScreen = ({
               workloadMappings={userWorkloadMappings}
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
+              userGroupMappings={userGroupMembers}
             />
           )}
         </div>
