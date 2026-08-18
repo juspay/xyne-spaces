@@ -373,8 +373,9 @@ router.post("/callback", async (req: Request, res: Response) => {
     const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
     const { setSession } = await import("./webhook.js");
     const question = await getQuestion(questionId);
-    const questionText = question?.question ?? "a question";
-    const optionsList = question?.options?.join(", ") ?? "";
+    const firstPrompt = question?.questions?.[0];
+    const questionText = firstPrompt?.question ?? "a question";
+    const optionsList = firstPrompt?.options?.join(", ") ?? "";
 
     try {
       const agent = await findAgent(answerAgentSlug, answerSpacesAppId);

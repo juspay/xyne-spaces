@@ -3,7 +3,7 @@
  *
  * The agent maintains an explicit plan (todo list) for multi-step tasks. Each
  * `todo-write` call replaces the full list, stores it in per-run state, and
- * fires a `kind:"plan"` event to claw-auth's /webhook/progress endpoint, which
+ * publishes a typed `ui-widget` event, which
  * renders/updates the live plan card in Spaces (see flow/plan-flow.ts + the
  * claw-auth handler). `todo-read` returns the current list so the agent can
  * re-orient without re-deriving the plan.
@@ -15,6 +15,7 @@
 
 import type { ToolDefinition, ToolExecutionContext } from '../types.js';
 import type { Todo, TodoStatus } from '../../flow/plan-flow.js';
+import { publishUiWidget } from '../ui-widget.js';
 
 const VALID_STATUS: TodoStatus[] = ['pending', 'in_progress', 'completed', 'failed'];
 
@@ -55,30 +56,6 @@ function normalize(raw: unknown[]): Todo[] {
   });
 }
 
-/**
- * Fire the plan card render to claw-auth. Fire-and-forget: rendering must never
- * block or fail the tool. claw-auth branches on kind:"plan" → postMessage(flow)
- * first time (stores messageId on the session), updateMessage(flowJSON) after.
- */
-function pushPlanCard(ctx: ToolExecutionContext | undefined, todos: Todo[]): void {
-  const url = ctx?.progressUrl;
-  if (url && ctx?.sessionId) {
-    void fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(ctx.s2sKey ? { 'x-s2s-key': ctx.s2sKey } : {}),
-      },
-      body: JSON.stringify({ sessionId: ctx.sessionId, kind: 'plan', todos }),
-    }).catch(() => {});
-  }
-  try {
-    ctx?.emitPlan?.(todos);
-  } catch {
-    // Fire-and-forget: plan rendering must never affect tool execution.
-  }
-}
-
 // ── Tools ─────────────────────────────────────────────────────────────────
 export const todoWriteTool: ToolDefinition = {
   slug: 'todo-write',
@@ -116,7 +93,16 @@ export const todoWriteTool: ToolDefinition = {
       return 'Error: only one todo may be in_progress at a time. Fix the statuses and call todo-write again.';
     }
     if (ctx?.sessionId) planStore.set(ctx.sessionId, todos);
-    pushPlanCard(ctx, todos);
+    try {
+      await publishUiWidget(ctx, {
+        id: 'plan',
+        type: 'plan',
+        operation: 'upsert',
+        payload: { todos },
+      });
+    } catch (err) {
+      return `Error publishing plan widget: ${err instanceof Error ? err.message : String(err)}`;
+    }
     return `Plan updated (${todos.length} todos):\n${renderPlanText(todos)}`;
   },
 };

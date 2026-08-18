@@ -25,6 +25,7 @@ import type {
   ClawSandboxPreviewPayload,
   ClawStreamMeta,
   Todo,
+  UiWidget,
 } from "xyne-claw-shared";
 import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
@@ -985,11 +986,13 @@ export interface ProgressEmitter {
   invocation(sessionId: string, invocation: unknown): void;
   attachment(sessionId: string, attachment: ClawAttachmentPayload): void;
   sandboxPreview(sessionId: string, payload: ClawSandboxPreviewPayload, meta?: ClawStreamMeta): void;
+  /** @deprecated Kept for rolling compatibility; new producers use uiWidget. */
   plan(sessionId: string, todos: Todo[]): void;
   /** A create/merge pull-request tool completed — carries the canonical PR fact
    *  for the Spaces PR card (mirrors `plan`; consumer bridges it to a kind:"pr"
    *  progress POST → renderPrCard). */
   pr(sessionId: string, pr: Record<string, unknown>): void;
+  uiWidget(sessionId: string, widget: UiWidget): void;
   streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string }): void;
   debugProgress(sessionId: string, event: DebugEventRecord): void;
   progressLabel(sessionId: string, toolLabel: string, meta?: ClawStreamMeta): void;
