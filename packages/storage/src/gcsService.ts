@@ -438,6 +438,36 @@ export class GCSService {
     }
   }
 
+  async generateUploadSignedUrl(
+    filename: string,
+    options: { contentType: string; expirySeconds?: number }
+  ): Promise<string> {
+    try {
+      if (!filename) {
+        throw new Error('Filename is required for signed upload URL generation');
+      }
+
+      // v4 write URL. The object need not exist yet. The bound Content-Type must
+      // be sent verbatim on the client PUT or GCS rejects the signature.
+      const [signedUrl] = await this.bucket.file(filename).getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        contentType: options.contentType,
+        expires: Date.now() + (options.expirySeconds ?? 900) * 1000,
+      });
+
+      return signedUrl;
+    } catch (error) {
+      logger.error(`Failed to generate signed upload URL for: ${filename}`, error);
+
+      if (error instanceof Error) {
+        throw new Error(`Signed upload URL generation failed: ${error.message}`);
+      }
+
+      throw new Error('Signed upload URL generation failed: Unknown error');
+    }
+  }
+
   async fileExists(filename: string): Promise<boolean> {
     try {
       const file = this.bucket.file(filename);

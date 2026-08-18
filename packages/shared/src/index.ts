@@ -2,6 +2,7 @@
 export * from './zero/schema';
 export { defineQuery } from './zero/acl';
 export * from './ai';
+export * from './recording';
 export * from './dashboard';
 export * from './types/activity';
 export * from './forwardedMessage';

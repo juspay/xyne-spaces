@@ -9,14 +9,8 @@ import { summaryTemplateController } from '@/controllers/summaryTemplateControll
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
 import { recordingRepairController } from '@/controllers/recordingRepairController';
-import multer from 'multer';
 
 const router = Router();
-const recordingRepairUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-  fileFilter: (_req, file, callback) => callback(null, file.mimetype.startsWith('audio/webm')),
-});
 
 // Call management endpoints
 router.post('/series', scheduleCallController.createRecurringSeries);
@@ -49,10 +43,9 @@ router.get('/pulse-orgs', callController.getPulseOrgs);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
-router.put(
-  '/:callId/recording-repairs/:captureId/chunks/:sequence',
-  recordingRepairUpload.single('audio'),
-  recordingRepairController.uploadChunk,
+router.post(
+  '/:callId/recording-repairs/:captureId/upload-urls',
+  recordingRepairController.getUploadUrls,
 );
 router.post(
   '/:callId/recording-repairs/:captureId/finalize',

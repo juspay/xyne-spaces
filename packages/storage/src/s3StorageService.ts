@@ -224,6 +224,25 @@ export class S3StorageService implements StorageService {
     );
   }
 
+  async generateUploadSignedUrl(
+    path: string,
+    options: { contentType: string; expirySeconds?: number }
+  ): Promise<string> {
+    if (!path) throw new Error('Path is required for signed upload URL generation');
+
+    // Presigned PUT; the object need not exist yet. The client must send the same
+    // Content-Type that is bound into the signature here.
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: path,
+        ContentType: options.contentType,
+      }),
+      { expiresIn: options.expirySeconds ?? 900 }
+    );
+  }
+
   async fileExists(filename: string): Promise<boolean> {
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.bucketName, Key: filename }));

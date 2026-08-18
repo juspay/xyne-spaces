@@ -1,3 +1,6 @@
+import { createHash } from 'crypto';
+import type { RecordingCaptureManifest } from '@xyne/shared';
+
 const claim = jest.fn();
 const isLiveTranscriptFinalized = jest.fn();
 const markMerged = jest.fn();
@@ -6,9 +9,9 @@ const heartbeat = jest.fn();
 const assertLease = jest.fn();
 const hasUnmergedForCall = jest.fn();
 const listDeletableCaptureIdsForCall = jest.fn();
-const listChunks = jest.fn();
-const readChunk = jest.fn();
-const deleteChunks = jest.fn();
+const readManifest = jest.fn();
+const readChunkPart = jest.fn();
+const deleteCaptureObjects = jest.fn();
 const transcribeRecordingRepair = jest.fn();
 const applyRecordingRepair = jest.fn();
 const refreshRecordingArtifacts = jest.fn();
@@ -26,7 +29,7 @@ jest.mock('@/services/recordingRepairStateService', () => ({
   },
 }));
 jest.mock('@/services/recordingRepairStorageService', () => ({
-  recordingRepairStorageService: { listChunks, readChunk, deleteChunks },
+  recordingRepairStorageService: { readManifest, readChunkPart, deleteCaptureObjects },
 }));
 jest.mock('@/services/voiceInputService', () => ({
   voiceInputService: { transcribeRecordingRepair },
@@ -37,31 +40,64 @@ jest.mock('@/services/noteTakerTranscriptService', () => ({
 jest.mock('@/utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
+// @xyne/shared ships ESM dist that jest's CJS runtime can't load; provide the three
+// pure helpers the worker uses. neededChunkSequences mirrors the real prefix logic.
+jest.mock('@xyne/shared', () => ({
+  serializeManifestForHash: (): string => '',
+  validateManifestStructure: (): string | null => null,
+  neededChunkSequences: (m: {
+    offlineAtStart: boolean;
+    chunks: Array<{ sequence: number; startedAtMs: number; endedAtMs: number }>;
+    outages: Array<{ startedAtMs: number; endedAtMs: number }>;
+  }): number[] => {
+    if (m.offlineAtStart) return m.chunks.map((c) => c.sequence);
+    let max = -1;
+    for (const c of m.chunks) {
+      if (m.outages.some((o) => c.startedAtMs < o.endedAtMs && c.endedAtMs > o.startedAtMs)) {
+        max = Math.max(max, c.sequence);
+      }
+    }
+    return max < 0 ? [] : m.chunks.filter((c) => c.sequence <= max).map((c) => c.sequence);
+  },
+}));
 
 import { RecordingRepairService } from './recordingRepairService';
 
-describe('RecordingRepairService', () => {
-  const chunk = {
-    path: 'repair.webm',
-    sequence: 0,
+// EBML header so isStandaloneWebm() accepts the reconstructed buffer.
+const chunkBuffer = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+const chunkSha = createHash('sha256').update(chunkBuffer).digest('hex');
+
+function manifest(overrides: Partial<RecordingCaptureManifest> = {}): RecordingCaptureManifest {
+  return {
+    version: 1,
+    callId: 'call-1',
+    captureId: 'capture-1',
     startedAt: 1_000,
     endedAt: 11_000,
-    sha256: 'a'.repeat(64),
     mimeType: 'audio/webm',
-    size: 4,
+    audioBitsPerSecond: 48_000,
+    offlineAtStart: false,
+    chunks: [
+      { sequence: 0, byteOffset: 0, byteLength: 4, startedAtMs: 1_000, endedAtMs: 11_000, sha256: chunkSha },
+    ],
+    outages: [{ startedAtMs: 6_000, endedAtMs: 8_000, reasons: ['browser_offline'] }],
+    markedMoments: [],
+    uploadedSequences: [0],
+    completed: true,
+    manifestHash: null,
+    ...overrides,
   };
+}
 
+describe('RecordingRepairService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     isLiveTranscriptFinalized.mockResolvedValue(true);
-    claim.mockResolvedValue({
-      status: 'PROCESSING',
-      leaseId: 'lease-1',
-      outages: [{ startedAt: 5_000, endedAt: 7_000, reasons: ['browser_offline'] }],
-    });
-    listChunks.mockResolvedValue([chunk]);
-    readChunk.mockResolvedValue(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
-    deleteChunks.mockResolvedValue(undefined);
+    // manifestHash null → the worker skips the integrity check for the test.
+    claim.mockResolvedValue({ status: 'PROCESSING', leaseId: 'lease-1', manifestHash: null });
+    readManifest.mockResolvedValue(manifest());
+    readChunkPart.mockResolvedValue(chunkBuffer);
+    deleteCaptureObjects.mockResolvedValue(undefined);
     heartbeat.mockResolvedValue(true);
     assertLease.mockResolvedValue(undefined);
     hasUnmergedForCall.mockResolvedValue(false);
@@ -69,7 +105,7 @@ describe('RecordingRepairService', () => {
     refreshRecordingArtifacts.mockResolvedValue(undefined);
   });
 
-  it('sends only the exact outage intersection to VAD/STT', async () => {
+  it('reconstructs the WebM and transcribes each outage as a media offset', async () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: true,
       text: 'recovered',
@@ -79,20 +115,21 @@ describe('RecordingRepairService', () => {
 
     await new RecordingRepairService().process('call-1', 'capture-1');
 
+    // outage [6000,8000] wall-clock → media offsets [5000,7000] (chunk starts at 1000).
     expect(transcribeRecordingRepair).toHaveBeenCalledWith(
-      expect.objectContaining({ originalname: '0.webm' }),
-      { startOffsetMs: 4_000, endOffsetMs: 6_000 }
+      expect.objectContaining({ originalname: 'capture-1.webm' }),
+      { startOffsetMs: 5_000, endOffsetMs: 7_000 }
     );
     expect(applyRecordingRepair).toHaveBeenCalledWith(
       'call-1',
-      [expect.objectContaining({ text: 'recovered', timestamp: 5 })],
-      [{ startedAt: 5_000, endedAt: 7_000 }],
+      [expect.objectContaining({ text: 'recovered', timestamp: 6 })],
+      [{ startedAt: 6_000, endedAt: 8_000 }],
       expect.any(Function)
     );
     expect(markMerged).toHaveBeenCalledWith('call-1', 'capture-1', 'lease-1');
   });
 
-  it('does not delete canonical transcript coverage when VAD finds silence', async () => {
+  it('does not replace transcript coverage when VAD finds silence', async () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: false,
       text: '',
@@ -115,7 +152,23 @@ describe('RecordingRepairService', () => {
     expect(claim).not.toHaveBeenCalled();
   });
 
-  it('rejects client metadata that claims substantially more audio than was decoded', async () => {
+  it('fails a chunk whose bytes do not match the manifest checksum', async () => {
+    readChunkPart.mockResolvedValue(Buffer.from([0x1a, 0x45, 0xdf, 0xa4]));
+
+    await expect(new RecordingRepairService().process('call-1', 'capture-1')).rejects.toThrow(
+      'checksum mismatch'
+    );
+    expect(applyRecordingRepair).not.toHaveBeenCalled();
+    expect(markFailed).toHaveBeenCalledWith(
+      'call-1',
+      'capture-1',
+      expect.stringContaining('checksum mismatch'),
+      'lease-1',
+      false
+    );
+  });
+
+  it('rejects decoded audio whose duration disagrees with the requested window', async () => {
     transcribeRecordingRepair.mockResolvedValue({
       speechDetected: true,
       text: 'too short',
@@ -124,33 +177,15 @@ describe('RecordingRepairService', () => {
     });
 
     await expect(new RecordingRepairService().process('call-1', 'capture-1')).rejects.toThrow(
-      'Decoded repair audio duration differs from metadata'
+      'duration differs from manifest'
     );
     expect(applyRecordingRepair).not.toHaveBeenCalled();
     expect(markFailed).toHaveBeenCalledWith(
       'call-1',
       'capture-1',
-      expect.stringContaining('differs from metadata'),
+      expect.stringContaining('duration differs from manifest'),
       'lease-1',
       false
-    );
-  });
-
-  it('uses VAD segment boundaries for transcript timestamps and replacement coverage', async () => {
-    transcribeRecordingRepair.mockResolvedValue({
-      speechDetected: true,
-      text: 'first second',
-      audioDurationSeconds: 2,
-      segments: [{ startSeconds: 0.4, endSeconds: 1.4, text: 'first second' }],
-    });
-
-    await new RecordingRepairService().process('call-1', 'capture-1');
-
-    expect(applyRecordingRepair).toHaveBeenCalledWith(
-      'call-1',
-      [expect.objectContaining({ text: 'first second', timestamp: 5.4 })],
-      [{ startedAt: 5_400, endedAt: 6_400 }],
-      expect.any(Function)
     );
   });
 });

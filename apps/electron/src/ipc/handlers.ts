@@ -17,6 +17,7 @@ import {
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-window';
+import * as recordingFs from '../services/recording-fs';
 import {
   focusMainWindow,
   markRendererReady,
@@ -159,10 +160,100 @@ function assertTrustedErrorReportSender(event: IpcMainInvokeEvent): void {
   }
 }
 
+// The recording-fs handlers write files under the user's chosen directory and PUT
+// audio to object storage. Restrict them to the trusted top-level main-window frame.
+function assertRecordingFsSender(event: IpcMainInvokeEvent): void {
+  if (!isMainWindowSender(event)) {
+    throw new Error('Unauthorized sender for recording-fs');
+  }
+}
+
 export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
+
+  // Offline-first recorder native filesystem (see services/recording-fs.ts and
+  // the RecordingFsApi surface in dashboard/src/types/electron.d.ts).
+  ipcMain.handle('recording-fs:pick-directory', (event) => {
+    assertRecordingFsSender(event);
+    return recordingFs.pickDirectory();
+  });
+  ipcMain.handle('recording-fs:has-directory', (event) => {
+    assertRecordingFsSender(event);
+    return recordingFs.hasDirectory();
+  });
+  ipcMain.handle('recording-fs:create-capture', (event, { captureId }: { captureId: string }) => {
+    assertRecordingFsSender(event);
+    return recordingFs.createCapture(captureId);
+  });
+  ipcMain.handle(
+    'recording-fs:append',
+    (event, { captureId, bytes }: { captureId: string; bytes: ArrayBuffer }) => {
+      assertRecordingFsSender(event);
+      return recordingFs.appendFragment(captureId, bytes);
+    },
+  );
+  ipcMain.handle(
+    'recording-fs:write-manifest',
+    (event, { captureId, manifestJson }: { captureId: string; manifestJson: string }) => {
+      assertRecordingFsSender(event);
+      return recordingFs.writeManifest(captureId, manifestJson);
+    },
+  );
+  ipcMain.handle(
+    'recording-fs:read-range',
+    (
+      event,
+      {
+        captureId,
+        byteOffset,
+        byteLength,
+      }: { captureId: string; byteOffset: number; byteLength: number },
+    ) => {
+      assertRecordingFsSender(event);
+      return recordingFs.readRange(captureId, byteOffset, byteLength);
+    },
+  );
+  ipcMain.handle('recording-fs:finalize', (event, { captureId }: { captureId: string }) => {
+    assertRecordingFsSender(event);
+    return recordingFs.finalize(captureId);
+  });
+  ipcMain.handle('recording-fs:list-pending', (event) => {
+    assertRecordingFsSender(event);
+    return recordingFs.listPending();
+  });
+  ipcMain.handle('recording-fs:delete-capture', (event, { captureId }: { captureId: string }) => {
+    assertRecordingFsSender(event);
+    return recordingFs.deleteCapture(captureId);
+  });
+  ipcMain.handle('recording-fs:free-space', (event) => {
+    assertRecordingFsSender(event);
+    return recordingFs.freeSpace();
+  });
+  ipcMain.handle(
+    'recording-fs:put-chunk',
+    (
+      event,
+      args: {
+        url: string;
+        captureId: string;
+        byteOffset: number;
+        byteLength: number;
+        contentType: string;
+      },
+    ) => {
+      assertRecordingFsSender(event);
+      return recordingFs.putChunk(args);
+    },
+  );
+  ipcMain.handle(
+    'recording-fs:put-manifest',
+    (event, { captureId, url }: { captureId: string; url: string }) => {
+      assertRecordingFsSender(event);
+      return recordingFs.putManifest(captureId, url);
+    },
+  );
 
   // Webview preload path handler
   ipcMain.on('get-webview-preload-path', (event) => {

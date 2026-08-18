@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "RecordingRepairCapture", "RecordingRepairCallState"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain"]
 }
 
 datasource db {
@@ -2635,42 +2635,10 @@ model Call {
   @@schema("public")
 }
 
-/// Durable control-plane state for browser-local note-taker recording repairs.
-/// Audio bytes remain in object storage; Bull/Redis only carries this row's identity.
-model RecordingRepairCapture {
-  captureId          String    @id
-  callExternalId     String
-  status             String
-  outages            Json
-  outagesHash        String?
-  finalizedAt        DateTime
-  processingError    String?
-  mergedAt           DateTime?
-  retryable          Boolean   @default(true)
-  leaseId            String?
-  leaseExpiresAt     DateTime?
-  artifactsRefreshed Boolean   @default(false)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-
-  @@index([status, finalizedAt])
-  @@index([callExternalId])
-  @@index([leaseExpiresAt])
-  @@index([callExternalId, status, artifactsRefreshed])
-  @@map("recording_repair_captures")
-  @@schema("public")
-}
-
-/// Per-call commit signal written after the live agent closes its canonical transcript.
-model RecordingRepairCallState {
-  callExternalId        String   @id
-  transcriptFinalizedAt DateTime
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  @@map("recording_repair_call_states")
-  @@schema("public")
-}
+// NOTE: RecordingRepairCapture and RecordingRepairCallState were removed. The
+// offline-recorder repair control plane is now Redis-only (see
+// recordingRepairStateService.ts + recordingRepairRedisKeys.ts). The durability
+// backstop is the user's local recording.webm, not Postgres.
 
 /// Polymorphic sharing record. `entityId` is resolved according to
 /// `shareableEntityType`; application services enforce target existence and access.

@@ -8,6 +8,7 @@ import type {
   DeleteResult,
   FileMetadata,
   ListedFile,
+  UploadSignedUrlOptions,
 } from './types.js';
 
 export class GCSAdapter implements StorageService {
@@ -57,6 +58,13 @@ export class GCSAdapter implements StorageService {
 
   async generateSignedUrl(filename: string, expirationHours?: number): Promise<string> {
     return this.gcs.generateSignedUrl(filename, expirationHours);
+  }
+
+  async generateUploadSignedUrl(
+    path: string,
+    options: UploadSignedUrlOptions,
+  ): Promise<string> {
+    return this.gcs.generateUploadSignedUrl(path, options);
   }
 
   async fileExists(filename: string): Promise<boolean> {

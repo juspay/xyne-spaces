@@ -70,6 +70,13 @@ export interface UploadToPathOptions {
   timeoutMs?: number;
 }
 
+export interface UploadSignedUrlOptions {
+  /** Content-Type the client MUST send on the PUT; it is bound into the signature. */
+  contentType: string;
+  /** URL validity in seconds (default 900 = 15 min). */
+  expirySeconds?: number;
+}
+
 export interface StorageService {
   uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult>;
   uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult>;
@@ -78,6 +85,8 @@ export interface StorageService {
   uploadFileIfAbsent(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<ConditionalUploadResult>;
   deleteFile(filename: string): Promise<DeleteResult>;
   generateSignedUrl(filename: string, expirationHours?: number): Promise<string>;
+  /** Short-lived signed URL for a direct client PUT to `path` (object need not exist yet). */
+  generateUploadSignedUrl(path: string, options: UploadSignedUrlOptions): Promise<string>;
   fileExists(filename: string): Promise<boolean>;
   getFileMetadata(filename: string): Promise<FileMetadata>;
   getFileBuffer(path: string, maxRetries?: number): Promise<Buffer>;

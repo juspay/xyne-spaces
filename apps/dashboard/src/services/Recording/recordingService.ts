@@ -404,36 +404,28 @@ class RecordingService {
     await apiInstance.delete(`/calls/recordings/${callId}`);
   }
 
-  async uploadRecordingRepairChunk(
+  async requestRecordingRepairUploadUrls(
     callId: string,
     captureId: string,
-    sequence: number,
-    chunk: {
-      audio: Blob;
-      startedAt: string;
-      endedAt: string;
-      checksum: string;
-      mimeType: string;
-    },
-  ): Promise<void> {
-    const form = new FormData();
-    form.append('audio', chunk.audio, `${sequence}.webm`);
-    form.append('startedAt', chunk.startedAt);
-    form.append('endedAt', chunk.endedAt);
-    form.append('checksum', chunk.checksum);
-    form.append('mimeType', chunk.mimeType);
-    await apiInstance.put(
-      `/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`,
-      form,
-    );
+    sequences: number[],
+  ): Promise<{ chunks: Array<{ sequence: number; url: string }>; manifestUrl: string }> {
+    const response: AxiosResponse<{
+      chunks: Array<{ sequence: number; url: string }>;
+      manifestUrl: string;
+    }> = await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/upload-urls`, {
+      sequences,
+    });
+    return { chunks: response.data.chunks, manifestUrl: response.data.manifestUrl };
   }
 
   async finalizeRecordingRepair(
     callId: string,
     captureId: string,
-    outages: RecordingRepairOutage[],
+    manifestHash: string,
   ): Promise<void> {
-    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, { outages });
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {
+      manifestHash,
+    });
   }
 
   async getRecordingRepairStatus(

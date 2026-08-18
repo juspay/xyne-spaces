@@ -1,149 +1,114 @@
+import type { RecordingCaptureManifest } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getStorageService, type ListedFile, type StorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
-export interface RecordingRepairChunkMetadata {
-  path: string;
-  sequence: number;
-  startedAt: number;
-  endedAt: number;
-  sha256: string;
-  mimeType: string;
-  size: number;
-}
+// GCS layout for the offline-first recorder repair path:
+//   recording-repairs/{callId}/{captureId}/chunks/{sequence}.part   (MediaRecorder fragments)
+//   recording-repairs/{callId}/{captureId}/chunk_manifest.json      (source of truth)
+// Chunks are uploaded directly by the client via signed PUT URLs; the manifest is
+// uploaded LAST as the commit marker. Fragments are NOT standalone WebM — the worker
+// concatenates them in sequence order to reconstruct the original recording.
 
-export interface RecordingRepairChunkInput {
-  sequence: number;
-  startedAt: number;
-  endedAt: number;
-  sha256: string;
-  mimeType: string;
+const CHUNK_CONTENT_TYPE = 'application/octet-stream';
+const MANIFEST_CONTENT_TYPE = 'application/json';
+const UPLOAD_URL_EXPIRY_SECONDS = 15 * 60;
+
+function isNotFound(error: unknown): boolean {
+  const status =
+    (error as { $metadata?: { httpStatusCode?: number }; code?: number }).$metadata?.httpStatusCode ??
+    (error as { code?: number }).code;
+  const name = (error as { name?: string }).name;
+  return status === 404 || name === 'NoSuchKey' || name === 'NotFound';
 }
 
 class RecordingRepairStorageService {
-  constructor(
-    private readonly storage: StorageService = getStorageService(config.gcs.transcriptionBucketName)
-  ) {}
+  private readonly storage: StorageService;
 
-  chunkPath(callId: string, captureId: string, sequence: number): string {
-    return `recording-repairs/${callId}/${captureId}/${sequence}.webm`;
+  constructor(storage: StorageService = getStorageService(config.gcs.transcriptionBucketName)) {
+    this.storage = storage;
   }
 
   capturePrefix(callId: string, captureId: string): string {
     return `recording-repairs/${callId}/${captureId}/`;
   }
 
-  async writeChunkIfAbsent(
-    callId: string,
-    captureId: string,
-    buffer: Buffer,
-    input: RecordingRepairChunkInput
-  ): Promise<{ created: boolean; chunk: RecordingRepairChunkMetadata | null }> {
-    const path = this.chunkPath(callId, captureId, input.sequence);
-    const result = await this.storage.uploadFileIfAbsent(buffer, {
-      path,
-      contentType: input.mimeType,
-      cacheControl: 'private, max-age=0',
-      metadata: {
-        sequence: String(input.sequence),
-        startedat: String(input.startedAt),
-        endedat: String(input.endedAt),
-        sha256: input.sha256,
-        mimetype: input.mimeType,
-      },
-    });
-    return {
-      created: result.created,
-      chunk: result.created ? { path, size: buffer.length, ...input } : await this.getChunk(path),
-    };
+  chunkPartPath(callId: string, captureId: string, sequence: number): string {
+    return `${this.capturePrefix(callId, captureId)}chunks/${sequence}.part`;
   }
 
-  async getChunk(path: string): Promise<RecordingRepairChunkMetadata | null> {
+  manifestPath(callId: string, captureId: string): string {
+    return `${this.capturePrefix(callId, captureId)}chunk_manifest.json`;
+  }
+
+  chunkUploadUrl(callId: string, captureId: string, sequence: number): Promise<string> {
+    return this.storage.generateUploadSignedUrl(this.chunkPartPath(callId, captureId, sequence), {
+      contentType: CHUNK_CONTENT_TYPE,
+      expirySeconds: UPLOAD_URL_EXPIRY_SECONDS,
+    });
+  }
+
+  manifestUploadUrl(callId: string, captureId: string): Promise<string> {
+    return this.storage.generateUploadSignedUrl(this.manifestPath(callId, captureId), {
+      contentType: MANIFEST_CONTENT_TYPE,
+      expirySeconds: UPLOAD_URL_EXPIRY_SECONDS,
+    });
+  }
+
+  async readManifest(callId: string, captureId: string): Promise<RecordingCaptureManifest | null> {
     try {
-      return this.parse(path, await this.storage.getFileMetadata(path));
+      const buffer = await this.storage.getFileBuffer(this.manifestPath(callId, captureId));
+      return JSON.parse(buffer.toString('utf8')) as RecordingCaptureManifest;
     } catch (error) {
-      const status =
-        (error as { $metadata?: { httpStatusCode?: number }; code?: number }).$metadata
-          ?.httpStatusCode ?? (error as { code?: number }).code;
-      const name = (error as { name?: string }).name;
-      if (status === 404 || name === 'NoSuchKey' || name === 'NotFound') return null;
-      logger.warn('[RecordingRepairStorage] Failed to read chunk metadata', { path, error });
+      if (isNotFound(error)) return null;
       throw error;
     }
   }
 
-  async listChunks(callId: string, captureId: string): Promise<RecordingRepairChunkMetadata[]> {
-    const files = await this.storage.listFiles(this.capturePrefix(callId, captureId));
-    const chunks = await Promise.all(
-      files.map((file) =>
-        file.metadata
-          ? this.parse(file.name, {
-              size: file.size,
-              contentType: file.contentType,
-              metadata: file.metadata,
-            })
-          : this.getChunk(file.name)
-      )
-    );
-    return chunks
-      .filter((chunk): chunk is RecordingRepairChunkMetadata => chunk !== null)
-      .sort((a, b) => a.sequence - b.sequence || a.startedAt - b.startedAt);
+  readChunkPart(callId: string, captureId: string, sequence: number): Promise<Buffer> {
+    return this.storage.getFileBuffer(this.chunkPartPath(callId, captureId, sequence));
   }
 
-  async readChunk(path: string): Promise<Buffer> {
-    return this.storage.getFileBuffer(path);
+  /** Sequences whose `.part` object currently exists in storage. */
+  async listUploadedSequences(callId: string, captureId: string): Promise<Set<number>> {
+    const files = await this.storage.listFiles(`${this.capturePrefix(callId, captureId)}chunks/`);
+    const sequences = new Set<number>();
+    for (const file of files) {
+      const match = /\/chunks\/(\d+)\.part$/.exec(file.name);
+      if (match) sequences.add(Number(match[1]));
+    }
+    return sequences;
   }
 
-  async listRepairObjects(): Promise<ListedFile[]> {
+  listRepairObjects(): Promise<ListedFile[]> {
     return this.storage.listFiles('recording-repairs/');
   }
 
-  async deletePaths(paths: string[]): Promise<void> {
-    const chunks = paths.map((path) => ({ path })) as RecordingRepairChunkMetadata[];
-    await this.deleteChunks(chunks);
+  async deleteCaptureObjects(callId: string, captureId: string): Promise<void> {
+    const files = await this.storage.listFiles(this.capturePrefix(callId, captureId));
+    await this.deletePaths(files.map((file) => file.name));
   }
 
-  async deleteChunks(chunks: RecordingRepairChunkMetadata[]): Promise<void> {
-    const results = await Promise.allSettled(
-      chunks.map((chunk) => this.storage.deleteFile(chunk.path))
-    );
+  async deletePaths(paths: string[]): Promise<void> {
+    const results = await Promise.allSettled(paths.map((path) => this.storage.deleteFile(path)));
     const failures = results.flatMap((result, index) =>
-      result.status === 'rejected' ? [{ path: chunks[index]?.path, error: result.reason }] : []
+      result.status === 'rejected' ? [{ path: paths[index], error: result.reason }] : []
     );
     if (failures.length > 0) {
       throw new Error(
-        `Failed to delete ${failures.length} recording repair chunk(s): ${failures
+        `Failed to delete ${failures.length} recording repair object(s): ${failures
           .map((failure) => `${failure.path} (${String(failure.error)})`)
           .join(', ')}`
       );
     }
   }
 
-  private parse(
-    path: string,
-    file: { size?: number | string; contentType?: string; metadata?: Record<string, string> }
-  ): RecordingRepairChunkMetadata | null {
-    const metadata = file.metadata ?? {};
-    const sequence = Number(metadata.sequence);
-    const startedAt = Number(metadata.startedat ?? metadata.startedAt);
-    const endedAt = Number(metadata.endedat ?? metadata.endedAt);
-    const size = Number(file.size);
-    const sha256 = metadata.sha256;
-    const mimeType = metadata.mimetype ?? metadata.mimeType ?? file.contentType;
-    if (
-      !Number.isInteger(sequence) ||
-      sequence < 0 ||
-      !Number.isFinite(startedAt) ||
-      !Number.isFinite(endedAt) ||
-      endedAt <= startedAt ||
-      !Number.isFinite(size) ||
-      !/^[a-f0-9]{64}$/i.test(sha256 ?? '') ||
-      !mimeType
-    ) {
-      logger.warn('[RecordingRepairStorage] Ignoring invalid chunk metadata', { path });
-      return null;
-    }
-    return { path, sequence, startedAt, endedAt, size, sha256: sha256!, mimeType };
+  logMissing(callId: string, captureId: string, missing: number[]): void {
+    logger.warn('[RecordingRepairStorage] Manifest references chunk parts missing from storage', {
+      callId,
+      captureId,
+      missing,
+    });
   }
 }
 

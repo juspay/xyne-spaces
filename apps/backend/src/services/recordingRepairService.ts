@@ -1,9 +1,14 @@
+import { createHash } from 'crypto';
+import {
+  neededChunkSequences,
+  serializeManifestForHash,
+  validateManifestStructure,
+  type RecordingCaptureManifest,
+  type RecordingChunkDescriptor,
+} from '@xyne/shared';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
-import {
-  recordingRepairStorageService,
-  type RecordingRepairChunkMetadata,
-} from '@/services/recordingRepairStorageService';
+import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
 import { voiceInputService } from '@/services/voiceInputService';
 import { logger } from '@/utils/logger';
 import { isStandaloneWebm } from '@/utils/webm';
@@ -15,6 +20,25 @@ export class RecordingRepairTerminalError extends Error {
 
 export class RecordingRepairDeferredError extends Error {
   override readonly name = 'RecordingRepairDeferredError';
+}
+
+function manifestContentHash(manifest: RecordingCaptureManifest): string {
+  return createHash('sha256').update(serializeManifestForHash(manifest)).digest('hex');
+}
+
+/**
+ * Wall-clock ms → offset (ms) into the reconstructed audio. Each chunk's media
+ * duration is its wall-clock span; pause gaps between chunks contribute no media,
+ * so summing chunk spans up to `wallMs` excludes paused time.
+ */
+function wallToMediaMs(chunks: RecordingChunkDescriptor[], wallMs: number): number {
+  let media = 0;
+  for (const chunk of chunks) {
+    if (wallMs >= chunk.endedAtMs) media += chunk.endedAtMs - chunk.startedAtMs;
+    else if (wallMs > chunk.startedAtMs) return media + (wallMs - chunk.startedAtMs);
+    else break;
+  }
+  return media;
 }
 
 export class RecordingRepairService {
@@ -36,11 +60,7 @@ export class RecordingRepairService {
         leaseLost = !(await recordingRepairStateService.heartbeat(callId, captureId, leaseId));
       } catch (error) {
         leaseLost = true;
-        logger.warn('[RecordingRepairService] Lease heartbeat failed', {
-          callId,
-          captureId,
-          error,
-        });
+        logger.warn('[RecordingRepairService] Lease heartbeat failed', { callId, captureId, error });
       } finally {
         heartbeatRunning = false;
       }
@@ -51,18 +71,55 @@ export class RecordingRepairService {
       await recordingRepairStateService.assertLease(callId, captureId, leaseId);
     };
 
-    let chunks: RecordingRepairChunkMetadata[] = [];
     let merged = false;
     try {
-      chunks = await recordingRepairStorageService.listChunks(callId, captureId);
-      const selected = chunks.filter((chunk) =>
-        capture.outages.some(
-          (outage) => chunk.startedAt < outage.endedAt && chunk.endedAt > outage.startedAt
-        )
-      );
-      if (selected.length === 0) {
-        throw new RecordingRepairTerminalError('No repair chunks overlap the finalized outages');
+      const manifest = await recordingRepairStorageService.readManifest(callId, captureId);
+      if (!manifest) throw new RecordingRepairTerminalError('Recording repair manifest is missing');
+      if (capture.manifestHash && manifestContentHash(manifest) !== capture.manifestHash) {
+        throw new RecordingRepairTerminalError('Recording repair manifest hash mismatch');
       }
+      const structureError = validateManifestStructure(manifest);
+      if (structureError) throw new RecordingRepairTerminalError(structureError);
+
+      const needed = neededChunkSequences(manifest);
+      if (needed.length === 0) {
+        throw new RecordingRepairTerminalError('Manifest has no outage windows to repair');
+      }
+
+      // Download + verify + concatenate the contiguous prefix into the original WebM.
+      const buffers: Buffer[] = [];
+      for (const sequence of needed) {
+        await heartbeat();
+        await assertLease();
+        const chunk = manifest.chunks.find((c) => c.sequence === sequence);
+        if (!chunk) throw new RecordingRepairTerminalError(`Manifest is missing chunk ${sequence}`);
+        const buffer = await recordingRepairStorageService.readChunkPart(callId, captureId, sequence);
+        if (buffer.length !== chunk.byteLength) {
+          throw new RecordingRepairTerminalError(`Chunk ${sequence} size differs from manifest`);
+        }
+        if (createHash('sha256').update(buffer).digest('hex') !== chunk.sha256) {
+          throw new RecordingRepairTerminalError(`Chunk ${sequence} checksum mismatch`);
+        }
+        buffers.push(buffer);
+      }
+      const reconstructed = Buffer.concat(buffers);
+      if (!isStandaloneWebm(reconstructed)) {
+        throw new RecordingRepairTerminalError('Reconstructed audio has no WebM header');
+      }
+      const uploadedChunks = manifest.chunks.filter((c) => needed.includes(c.sequence));
+
+      // Windows of the call to transcribe: each outage, or the whole call if offline.
+      const windows = manifest.offlineAtStart
+        ? [
+            {
+              startedAtMs: manifest.startedAt,
+              endedAtMs: manifest.endedAt ?? uploadedChunks[uploadedChunks.length - 1]!.endedAtMs,
+            },
+          ]
+        : manifest.outages.map((outage) => ({
+            startedAtMs: outage.startedAtMs,
+            endedAtMs: outage.endedAtMs,
+          }));
 
       const repairs: Array<{
         user: string;
@@ -71,71 +128,41 @@ export class RecordingRepairService {
         participant_identity: string;
       }> = [];
       const replacementCoverage: Array<{ startedAt: number; endedAt: number }> = [];
-      for (const chunk of selected) {
+
+      for (const window of windows) {
         await heartbeat();
         await assertLease();
-        const buffer = await recordingRepairStorageService.readChunk(chunk.path);
-        if (!isStandaloneWebm(buffer)) {
-          throw new RecordingRepairTerminalError(
-            `Stored recording repair chunk ${chunk.sequence} has no standalone WebM header`
-          );
-        }
-        const file = {
-          buffer,
-          size: chunk.size,
-          mimetype: chunk.mimeType,
-          originalname: `${chunk.sequence}.webm`,
-        } as Express.Multer.File;
-        const intersections = coalesceRecordingRepairCoverage(
-          capture.outages
-            .map((outage) => ({
-              startedAt: Math.max(chunk.startedAt, outage.startedAt),
-              endedAt: Math.min(chunk.endedAt, outage.endedAt),
-            }))
-            .filter((interval) => interval.endedAt > interval.startedAt)
+        const startOffsetMs = wallToMediaMs(uploadedChunks, window.startedAtMs);
+        const endOffsetMs = wallToMediaMs(uploadedChunks, window.endedAtMs);
+        if (endOffsetMs <= startOffsetMs) continue;
+        const result = await voiceInputService.transcribeRecordingRepair(
+          {
+            buffer: reconstructed,
+            size: reconstructed.length,
+            mimetype: manifest.mimeType,
+            originalname: `${captureId}.webm`,
+          } as Express.Multer.File,
+          { startOffsetMs, endOffsetMs }
         );
-
-        for (const interval of intersections) {
-          await heartbeat();
-          await assertLease();
-          const result = await voiceInputService.transcribeRecordingRepair(file, {
-            startOffsetMs: interval.startedAt - chunk.startedAt,
-            endOffsetMs: interval.endedAt - chunk.startedAt,
-          });
-          const requestedDurationSeconds = (interval.endedAt - interval.startedAt) / 1000;
-          if (Math.abs(result.audioDurationSeconds - requestedDurationSeconds) > 0.5) {
-            throw new RecordingRepairTerminalError(
-              `Decoded repair audio duration differs from metadata for chunk ${chunk.sequence}`
-            );
-          }
-          if (!result.speechDetected) continue;
-          const segments =
-            result.segments.length > 0
-              ? result.segments
-              : [
-                  {
-                    startSeconds: 0,
-                    endSeconds: result.audioDurationSeconds,
-                    text: result.text,
-                  },
-                ];
-          for (const segment of segments) {
-            const text = segment.text.trim();
-            if (!text) continue;
-            const startedAt = interval.startedAt + segment.startSeconds * 1000;
-            const endedAt = Math.min(
-              interval.endedAt,
-              interval.startedAt + segment.endSeconds * 1000
-            );
-            if (endedAt <= startedAt) continue;
-            repairs.push({
-              user: 'Recovered audio',
-              text,
-              timestamp: startedAt / 1000,
-              participant_identity: '',
-            });
-            replacementCoverage.push({ startedAt, endedAt });
-          }
+        const requestedSeconds = (endOffsetMs - startOffsetMs) / 1000;
+        if (Math.abs(result.audioDurationSeconds - requestedSeconds) > 0.5) {
+          throw new RecordingRepairTerminalError('Decoded repair audio duration differs from manifest');
+        }
+        if (!result.speechDetected) continue;
+        const segments =
+          result.segments.length > 0
+            ? result.segments
+            : [{ startSeconds: 0, endSeconds: result.audioDurationSeconds, text: result.text }];
+        for (const segment of segments) {
+          const text = segment.text.trim();
+          if (!text) continue;
+          // Within a window (no pause) media time is linear, so map the segment
+          // back to the wall-clock transcript timeline off the window start.
+          const startedAt = window.startedAtMs + segment.startSeconds * 1000;
+          const endedAt = Math.min(window.endedAtMs, window.startedAtMs + segment.endSeconds * 1000);
+          if (endedAt <= startedAt) continue;
+          repairs.push({ user: 'Recovered audio', text, timestamp: startedAt / 1000, participant_identity: '' });
+          replacementCoverage.push({ startedAt, endedAt });
         }
       }
 
@@ -148,10 +175,7 @@ export class RecordingRepairService {
           () => recordingRepairStateService.assertLease(callId, captureId, leaseId)
         );
       } else {
-        logger.info('[RecordingRepairService] VAD/STT found no replacement speech', {
-          callId,
-          captureId,
-        });
+        logger.info('[RecordingRepairService] VAD/STT found no replacement speech', { callId, captureId });
       }
       await recordingRepairStateService.markMerged(callId, captureId, leaseId);
       merged = true;
@@ -178,11 +202,7 @@ export class RecordingRepairService {
           markError,
         });
       }
-      logger.error('[RecordingRepairService] Repair processing failed', {
-        callId,
-        captureId,
-        error,
-      });
+      logger.error('[RecordingRepairService] Repair processing failed', { callId, captureId, error });
       throw failure;
     } finally {
       clearInterval(heartbeatTimer);
@@ -198,10 +218,7 @@ export class RecordingRepairService {
       try {
         await this.refreshArtifactsForCall(callId);
       } catch (error) {
-        logger.error('[RecordingRepairService] Artifact refresh recovery failed', {
-          callId,
-          error,
-        });
+        logger.error('[RecordingRepairService] Artifact refresh recovery failed', { callId, error });
       }
     }
   }
@@ -209,12 +226,9 @@ export class RecordingRepairService {
   async cleanupStaleObjects(now = Date.now()): Promise<void> {
     const orphanCutoff = now - 7 * 24 * 60 * 60_000;
     const files = await recordingRepairStorageService.listRepairObjects();
-    const groups = new Map<
-      string,
-      { callId: string; captureId: string; paths: string[]; newest: number }
-    >();
+    const groups = new Map<string, { callId: string; captureId: string; paths: string[]; newest: number }>();
     for (const file of files) {
-      const match = /^recording-repairs\/([^/]+)\/([^/]+)\/[^/]+\.webm$/.exec(file.name);
+      const match = /^recording-repairs\/([^/]+)\/([^/]+)\//.exec(file.name);
       if (!match) continue;
       const [, callId, captureId] = match;
       if (!callId || !captureId) continue;
@@ -248,12 +262,12 @@ export class RecordingRepairService {
   }
 
   private async refreshArtifactsForCall(callId: string): Promise<void> {
+    // refreshRecordingArtifacts marks the call's captures artifacts-refreshed on success.
     await noteTakerTranscriptService.refreshRecordingArtifacts(callId);
-    for (const captureId of await recordingRepairStateService.listDeletableCaptureIdsForCall(
-      callId
-    )) {
-      const chunks = await recordingRepairStorageService.listChunks(callId, captureId);
-      if (chunks.length > 0) await recordingRepairStorageService.deleteChunks(chunks);
+    for (const captureId of await recordingRepairStateService.listDeletableCaptureIdsForCall(callId)) {
+      await recordingRepairStorageService.deleteCaptureObjects(callId, captureId).catch((error) => {
+        logger.warn('[RecordingRepairService] Failed to delete repair objects', { callId, captureId, error });
+      });
     }
   }
 }

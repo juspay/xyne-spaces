@@ -17,7 +17,44 @@ export interface ErrorReportRecordingInfo {
   elapsedSeconds?: number;
 }
 
+/**
+ * Native filesystem surface for the offline-first note-taker recorder. Bytes cross
+ * IPC as ArrayBuffers; the manifest crosses as a JSON string. The renderer holds
+ * only captureIds — the main process owns the user-selected root path. Implemented
+ * in electron/src/services/recording-fs.ts.
+ */
+export interface RecordingFsApi {
+  /** Open a native directory picker and remember the chosen root. */
+  pickDirectory: () => Promise<{ granted: boolean }>;
+  /** Whether a recording root directory is already configured (no prompt). */
+  hasDirectory: () => Promise<boolean>;
+  /** Create the capture folder + empty recording.webm under the root. */
+  createCapture: (captureId: string) => Promise<void>;
+  /** Durably append one fragment to recording.webm; returns its byte range. */
+  appendFragment: (
+    captureId: string,
+    bytes: ArrayBuffer,
+  ) => Promise<{ byteOffset: number; byteLength: number }>;
+  writeManifest: (captureId: string, manifestJson: string) => Promise<void>;
+  readRange: (captureId: string, byteOffset: number, byteLength: number) => Promise<ArrayBuffer>;
+  finalize: (captureId: string) => Promise<void>;
+  listPending: () => Promise<Array<{ captureId: string; manifestJson: string }>>;
+  deleteCapture: (captureId: string) => Promise<void>;
+  freeSpace: () => Promise<{ availableBytes: number | null }>;
+  /** Signed PUT of a byte range straight from the main process (no CORS). */
+  putChunk: (args: {
+    url: string;
+    captureId: string;
+    byteOffset: number;
+    byteLength: number;
+    contentType: string;
+  }) => Promise<{ status: number }>;
+  /** Signed PUT of the capture's chunk_manifest.json from the main process. */
+  putManifest: (captureId: string, url: string) => Promise<{ status: number }>;
+}
+
 export interface ElectronAPI {
+  recordingFs?: RecordingFsApi;
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
   // Only exposed by the webview preload (`electron/src/webview-preload.js`),
