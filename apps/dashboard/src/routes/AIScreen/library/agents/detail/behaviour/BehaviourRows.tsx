@@ -2,40 +2,45 @@ import { type ReactElement, type ReactNode } from 'react';
 import { PencilEditLine } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import {
+  DIGITAL_TWIN_EASE_OUT,
+  DIGITAL_TWIN_MOTION,
+} from '@/components/ClawAgents/digitalTwin/motion';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select/index';
-import { DetailValue } from '../../../shared/primitives/DetailPrimitives';
+import {
+  DETAIL_SELECT_TRIGGER_CLASS_FOR,
+  DetailRow,
+  DetailValue,
+  type DetailTypeScale,
+} from '../../../shared/primitives/DetailPrimitives';
+
+const TOGGLE_TRANSITION = {
+  transitionDuration: `${DIGITAL_TWIN_MOTION.press}s`,
+  transitionTimingFunction: `cubic-bezier(${DIGITAL_TWIN_EASE_OUT.join(',')})`,
+} as const;
 
 export function BehaviourRow({
   title,
   hint,
   children,
   last = false,
+  typeScale = 'library',
 }: {
   title: string;
   hint: string;
   children: ReactNode;
   last?: boolean;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   return (
-    <div
-      className={cn(
-        'flex w-full items-start justify-between gap-6 px-4 py-3',
-        !last && 'border-b border-border',
-      )}
-    >
-      <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-        <span className='text-sm font-medium leading-5 text-foreground'>{title}</span>
-        <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-          {hint}
-        </span>
-      </div>
-      <div className='flex shrink-0 items-center gap-2 pt-0.5'>{children}</div>
-    </div>
+    <DetailRow title={title} hint={hint} last={last} typeScale={typeScale}>
+      {children}
+    </DetailRow>
   );
 }
 
@@ -67,15 +72,21 @@ export function BehaviourToggle({
       onClick={() => onChange(!checked)}
       data-track-category='Claw Agents'
       data-track-name={trackName}
+      style={TOGGLE_TRANSITION}
       className={cn(
-        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
-        checked ? 'bg-foreground' : 'bg-border',
+        'relative inline-flex h-5 w-8 shrink-0 items-center overflow-clip rounded-full p-0.5',
+        'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none',
+        checked ? 'bg-primary' : 'bg-foreground/[0.08]',
       )}
     >
       <span
+        style={TOGGLE_TRANSITION}
         className={cn(
-          'inline-block size-4 rounded-full bg-background shadow-sm transition-transform',
-          checked ? 'translate-x-[18px]' : 'translate-x-0.5',
+          'block size-4 shrink-0 rounded-full bg-primary-foreground',
+          'shadow-[0_0_1.23px_rgba(0,0,0,0.03),0_1.23px_1.23px_rgba(0,0,0,0.03),0_3.7px_2.47px_rgba(0,0,0,0.02)]',
+          'transition-transform motion-reduce:transition-none',
+          checked ? 'translate-x-3' : 'translate-x-0',
         )}
       />
     </button>
@@ -90,6 +101,7 @@ export function BehaviourSelect({
   label,
   trackName,
   onChange,
+  typeScale = 'library',
 }: {
   value: string;
   options: ReadonlyArray<{ value: string; label: string }>;
@@ -98,6 +110,7 @@ export function BehaviourSelect({
   label: string;
   trackName: string;
   onChange: (next: string) => void;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   const current = options.find(option => option.value === value);
   if (!editable) return <DetailValue>{current?.label ?? '—'}</DetailValue>;
@@ -105,11 +118,10 @@ export function BehaviourSelect({
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
-        size='sm'
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        className='h-9 w-auto min-w-0 max-w-[240px] gap-2 rounded-[10px]'
+        className={DETAIL_SELECT_TRIGGER_CLASS_FOR[typeScale]}
       >
         <SelectValue />
       </SelectTrigger>

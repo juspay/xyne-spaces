@@ -32,17 +32,17 @@ export function ProseBox({
         ref={scrollRef}
         onScroll={sync}
         className={cn(
-          'h-full w-full overflow-y-auto rounded-2xl border border-border bg-card p-4',
+          'dt-details-text-field h-full w-full overflow-y-auto rounded-2xl border border-[#e8e8e8] bg-[#fcfcfc] p-4',
           className,
         )}
       >
-        <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+        <p className='whitespace-pre-wrap break-words text-[14px] font-[450] leading-5 tracking-[-0.28px] text-foreground'>
           {children}
         </p>
       </div>
       {showFade && (
         <span
-          className='pointer-events-none absolute inset-x-px bottom-px h-16 rounded-b-2xl bg-gradient-to-t from-card to-transparent'
+          className='dt-details-text-fade pointer-events-none absolute inset-x-px bottom-px h-16 rounded-b-2xl bg-gradient-to-t from-[#fcfcfc] to-transparent'
           aria-hidden
         />
       )}

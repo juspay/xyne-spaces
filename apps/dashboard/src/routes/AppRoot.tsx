@@ -38,6 +38,7 @@ import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
 import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
 import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
 import DigitalTwinPersonaTab from './ClawAgentsScreen/tabs/DigitalTwinPersonaTab';
+import DigitalTwinOverviewTab from './ClawAgentsScreen/tabs/DigitalTwinOverviewTab';
 import DigitalTwinActivityTab from './ClawAgentsScreen/tabs/DigitalTwinActivityTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
@@ -887,8 +888,10 @@ export const router = createBrowserRouter([
                         path: 'digital-twin',
                         element: <ClawDigitalTwinScreen />,
                         children: [
-                          { index: true, element: <Navigate to='persona' replace /> },
-                          { path: 'persona', element: <DigitalTwinPersonaTab /> },
+                          { index: true, element: <Navigate to='overview' replace /> },
+                          { path: 'overview', element: <DigitalTwinOverviewTab /> },
+                          { path: 'configuration', element: <DigitalTwinPersonaTab /> },
+                          { path: 'persona', element: <Navigate to='../configuration' replace /> },
                           { path: 'memories', element: <DigitalTwinMemoriesTab /> },
                           { path: 'hot', element: <DigitalTwinHotTab /> },
                           { path: 'proposals', element: <DigitalTwinProposalsTab /> },
@@ -1159,8 +1162,10 @@ export const router = createBrowserRouter([
                     path: 'digital-twin',
                     element: <ClawDigitalTwinScreen />,
                     children: [
-                      { index: true, element: <Navigate to='persona' replace /> },
-                      { path: 'persona', element: <DigitalTwinPersonaTab /> },
+                      { index: true, element: <Navigate to='overview' replace /> },
+                      { path: 'overview', element: <DigitalTwinOverviewTab /> },
+                      { path: 'configuration', element: <DigitalTwinPersonaTab /> },
+                      { path: 'persona', element: <Navigate to='../configuration' replace /> },
                       { path: 'memories', element: <DigitalTwinMemoriesTab /> },
                       { path: 'hot', element: <DigitalTwinHotTab /> },
                       { path: 'proposals', element: <DigitalTwinProposalsTab /> },

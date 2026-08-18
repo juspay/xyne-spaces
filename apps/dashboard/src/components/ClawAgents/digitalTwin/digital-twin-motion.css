@@ -1,4 +1,12 @@
 .digital-twin-ledger {
+  --panel-open-dur: 400ms;
+  --panel-close-dur: 350ms;
+  --panel-translate-y: 100px;
+  --panel-blur: 2px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.digital-twin-ledger {
   --dt-duration-press: 120ms;
   --dt-duration-feedback: 180ms;
   --dt-duration-state: 240ms;
@@ -12,6 +20,71 @@
 
 .digital-twin-ledger .dt-shell-header {
   animation: dt-motion-enter var(--dt-duration-entrance) var(--dt-motion-ease-out) both;
+}
+
+.digital-twin-ledger .dt-ask-composer {
+  overflow: visible !important;
+  transition: box-shadow var(--dt-duration-press) var(--dt-motion-ease-out);
+}
+
+.digital-twin-ledger .dt-ask-composer-clip {
+  overflow: hidden;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.digital-twin-ledger .dt-ask-composer-shadow {
+  overflow: visible;
+  background: transparent;
+  border-radius: 18px;
+}
+
+.digital-twin-ledger .dt-ask-composer-shadow,
+.digital-twin-ledger .dt-ask-composer-shadow:focus-within {
+  box-shadow: var(--dt-ask-composer-elevated-shadow);
+}
+
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer:focus-within,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer-shadow,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer-shadow:focus-within {
+  box-shadow: none;
+}
+
+.digital-twin-ledger .dt-chat-overlay-panel.is-docked:not(.dt-chat-overlay) {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 20px;
+}
+
+.t-panel-slide {
+  transform: translateY(var(--panel-translate-y));
+  opacity: 0;
+  filter: blur(var(--panel-blur));
+  pointer-events: none;
+  overflow: visible;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity var(--panel-close-dur) var(--panel-ease),
+    filter var(--panel-close-dur) var(--panel-ease);
+  will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+  transform: translateY(0);
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+  will-change: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity var(--panel-open-dur) var(--panel-ease),
+    filter var(--panel-open-dur) var(--panel-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-panel-slide {
+    transition: none !important;
+  }
 }
 
 .digital-twin-ledger .dt-route-stage {
@@ -68,7 +141,8 @@
    motion contract rather than relying on inherited page tokens. */
 .dt-menu-content.dt-menu-content,
 .dt-filter-menu-content.dt-filter-menu-content,
-.dt-select-content.dt-select-content {
+.dt-select-content.dt-select-content,
+html:has(.digital-twin-ledger) [data-slot="select-content"] {
   animation-duration: 180ms !important;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
 }
@@ -121,9 +195,13 @@
   .dt-menu-content.dt-menu-content,
   .dt-filter-menu-content.dt-filter-menu-content,
   .dt-select-content.dt-select-content,
+  html:has(.digital-twin-ledger) [data-slot="select-content"],
   :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content) *,
   :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content)::before,
-  :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content)::after {
+  :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content)::after,
+  html:has(.digital-twin-ledger) [data-slot="select-content"] *,
+  html:has(.digital-twin-ledger) [data-slot="select-content"]::before,
+  html:has(.digital-twin-ledger) [data-slot="select-content"]::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
@@ -131,7 +209,8 @@
 
   .dt-menu-content.dt-menu-content,
   .dt-filter-menu-content.dt-filter-menu-content,
-  .dt-select-content.dt-select-content {
+  .dt-select-content.dt-select-content,
+  html:has(.digital-twin-ledger) [data-slot="select-content"] {
     opacity: 1 !important;
     transform: none !important;
   }

@@ -85,6 +85,7 @@ import {
   type SelectionInfo,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
+import type { ComposerContext } from '../../AIScreen/composerContext';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
 import {
   buildXyneAIStreamThreadId,
@@ -137,6 +138,11 @@ interface XyneAISidebarProps {
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
   onFinalResponse?: (content: string) => void;
+  /** Twin overlay: hide the Ask AI chrome and keep message functionality. */
+  hideHeader?: boolean;
+  hideComposer?: boolean;
+  embedded?: boolean;
+  seedComposerContext?: ComposerContext;
 }
 
 const XyneAISidebar = ({
@@ -161,6 +167,10 @@ const XyneAISidebar = ({
   autoSendNonce,
   onStreamingChange,
   onFinalResponse,
+  hideHeader = false,
+  hideComposer = false,
+  embedded = false,
+  seedComposerContext,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -245,16 +255,8 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
-  // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
-    if (!initialQuery?.trim()) return;
-    lastAutoSendNonceRef.current = autoSendNonce;
-    autoSendPendingQueryRef.current = initialQuery;
-    setInputValue(initialQuery);
-  }, [autoSendNonce, initialQuery]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -265,6 +267,26 @@ const XyneAISidebar = ({
   const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
+  // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
+  useEffect(() => {
+    if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
+    if (!initialQuery?.trim()) return;
+    lastAutoSendNonceRef.current = autoSendNonce;
+    if (seedComposerContext) {
+      setWebSearchEnabled(seedComposerContext.webSearchEnabled);
+      setDeepResearchEnabled(seedComposerContext.deepResearchEnabled);
+      setCreateCanvasEnabled(seedComposerContext.createCanvasEnabled);
+      setSelectedCollectionIds(seedComposerContext.collections.map(collection => collection.id));
+      setFileScopes(seedComposerContext.fileScopes);
+      setSelectedChannels(seedComposerContext.channels);
+      setSelectedTickets(seedComposerContext.tickets);
+      setSelectedCanvases(seedComposerContext.canvases);
+      setSelectedTranscripts(seedComposerContext.transcripts);
+      setSelectedRecordings(seedComposerContext.recordings);
+    }
+    autoSendPendingQueryRef.current = initialQuery;
+    setInputValue(initialQuery);
+  }, [autoSendNonce, initialQuery, seedComposerContext]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -822,6 +844,12 @@ const XyneAISidebar = ({
       return;
     }
 
+    if (embedded && initialConversationId) {
+      hasLoadedInitialConversationRef.current = true;
+      setIsLoadingConversation(false);
+      return;
+    }
+
     if (xyneAIActor.getSnapshot().context.focusSessionId) {
       hasLoadedInitialConversationRef.current = true;
       setIsLoadingConversation(false);
@@ -1170,7 +1198,8 @@ const XyneAISidebar = ({
   // Fullscreen / parent-driven session id (no remount required)
   const prevFullscreenSessionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!isFullscreen) return;
+    if (!isFullscreen && !embedded) return;
+    if (embedded && startFreshChat) return;
     if (initialConversationId === prevFullscreenSessionRef.current) return;
     prevFullscreenSessionRef.current = initialConversationId;
 
@@ -1189,7 +1218,7 @@ const XyneAISidebar = ({
       lastUpdated: new Date(),
     };
     void handleLoadConversationRef.current(stub);
-  }, [initialConversationId, isFullscreen, handleNewChat]);
+  }, [initialConversationId, isFullscreen, embedded, startFreshChat, handleNewChat]);
 
   useEffect(() => {
     const processFocus = (focus: string | null | undefined): void => {
@@ -1852,14 +1881,16 @@ const XyneAISidebar = ({
     <div
       className={cn(
         'grid h-full min-h-0 w-full overflow-hidden',
-        isMobile && 'border bg-background',
-        isFullscreen
-          ? isMobile
-            ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
-            : 'h-full'
-          : isMobile
-            ? 'h-[95vh] pb-4'
-            : 'h-full rounded-2xl',
+        !embedded && isMobile && 'border bg-background',
+        embedded
+          ? 'h-full'
+          : isFullscreen
+            ? isMobile
+              ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
+              : 'h-full'
+            : isMobile
+              ? 'h-[95vh] pb-4'
+              : 'h-full rounded-2xl',
       )}
       style={{
         gridTemplateColumns: showInlineDebugger
@@ -1917,7 +1948,7 @@ const XyneAISidebar = ({
           <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
             {aiOnboarding.isActive ? (
               <XyneAIOnboardingHeader onClose={completeOnboarding} />
-            ) : isFullscreen && messages.length === 0 ? null : (
+            ) : hideHeader || (isFullscreen && messages.length === 0) ? null : (
               <XyneAIHeader
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
@@ -1956,7 +1987,7 @@ const XyneAISidebar = ({
               />
             )}
 
-            {hasBackgroundStreamingElsewhere ? (
+            {hasBackgroundStreamingElsewhere && !embedded ? (
               <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
@@ -2063,6 +2094,8 @@ const XyneAISidebar = ({
                         ))}
                       </div>
                     </div>
+                  ) : embedded ? (
+                    <div className='h-full min-h-0' />
                   ) : (
                     <XyneAIEmptyState />
                   )
@@ -2230,7 +2263,7 @@ const XyneAISidebar = ({
             )}
 
             {/* composer-container — owns the gutter around the composer */}
-            {!(isFullscreen && messages.length === 0) && (
+            {!(isFullscreen && messages.length === 0) && !hideComposer && (
               <div
                 className={cn(
                   isFullscreen ? 'flex justify-center px-4 pb-6' : 'px-3',

@@ -25,9 +25,19 @@
   --dt-space-xl: 1.5rem;
   --dt-space-2xl: 2rem;
   --dt-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --dt-input-fill: #fcfcfc;
+  --dt-input-border: rgb(35 34 41 / 0.1);
+  /* Figma 1615:43372 text-field elevation (current effects): 0/36/10/0 @ 0%,
+     0/23/9/0 @ 0%, 0/13/8/0 @ 2%, 0/6/6/0 @ 3%, 0/1/3/0 @ 3% (black, same
+     family as other DT elevation shadows — not foreground, which would invert
+     in midnight). */
+  --dt-ask-composer-elevated-shadow:
+    0 36px 10px 0 rgb(0 0 0 / 0%), 0 23px 9px 0 rgb(0 0 0 / 0%), 0 13px 8px 0 rgb(0 0 0 / 2%),
+    0 6px 6px 0 rgb(0 0 0 / 3%), 0 1px 3px 0 rgb(0 0 0 / 3%);
   color: hsl(var(--foreground));
   font: inherit;
   container-type: inline-size;
+  position: relative;
 }
 
 [data-theme="midnight"] .digital-twin-ledger {
@@ -36,10 +46,126 @@
   --dt-memory-fill: hsl(var(--card));
   --dt-memory-card: hsl(var(--background));
   --dt-memory-snippet: hsl(var(--accent) / 0.7);
+  --dt-input-fill: hsl(var(--card));
+  --dt-input-border: hsl(var(--border));
 }
 
 .digital-twin-ledger .dt-display {
   font: inherit;
+}
+
+.digital-twin-ledger .dt-twin-portrait-image {
+  width: 196.25%;
+  height: 121.14%;
+  left: -48.12%;
+  top: -17.57%;
+  max-width: none;
+}
+
+/* The origin pill stays in document flow. After send, a separate session
+   overlay docks to the viewport bottom; height grows up from that bar so the
+   ask footer does not translate down the page. The top origin pill remains. */
+.digital-twin-ledger .dt-ask-origin {
+  position: relative;
+  padding-top: 1rem;
+  overflow: visible;
+}
+
+.digital-twin-ledger .dt-ask-overlay-open {
+  z-index: 20;
+}
+
+.digital-twin-ledger .dt-ask-origin.dt-ask-session-active {
+  padding-top: 0;
+}
+
+.digital-twin-ledger .dt-ask-origin-bar,
+.digital-twin-ledger .dt-ask-composer-origin,
+.digital-twin-ledger .dt-ask-composer-shadow {
+  overflow: visible;
+  background: transparent;
+}
+
+.digital-twin-ledger .dt-ask-composer-shadow {
+  box-shadow: var(--dt-ask-composer-elevated-shadow);
+}
+
+.digital-twin-ledger .dt-ask-origin-bar {
+  position: relative;
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+.digital-twin-ledger .dt-ask-floating {
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 60;
+}
+
+.digital-twin-ledger .dt-chat-overlay-host {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+.digital-twin-ledger .dt-chat-overlay-frame,
+.digital-twin-ledger .dt-chat-overlay-panel,
+.digital-twin-ledger .dt-chat-overlay {
+  overflow: visible !important;
+}
+
+.digital-twin-ledger .dt-chat-overlay-clip {
+  min-height: 0;
+}
+
+.digital-twin-ledger .dt-chat-overlay .dt-chat-overlay-clip {
+  overflow: hidden;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+.digital-twin-ledger .dt-chat-overlay-panel {
+  position: absolute;
+  right: auto;
+  bottom: 0;
+  left: 50%;
+  z-index: 20;
+  translate: -50% 0;
+}
+
+.digital-twin-ledger .dt-chat-overlay-panel.is-docked {
+  position: fixed;
+  bottom: 1.5rem;
+  left: var(--dt-ask-dock-center);
+  z-index: 60;
+}
+
+.digital-twin-ledger .dt-chat-overlay-panel.is-docked:not(.dt-chat-overlay) {
+  background: transparent;
+}
+
+.digital-twin-ledger .dt-chat-overlay {
+  z-index: 30;
+  overflow: visible !important;
+  border: 1px solid hsl(var(--border));
+  border-radius: 20px;
+  box-shadow: var(--dt-ask-composer-elevated-shadow);
+}
+
+.digital-twin-ledger .dt-chat-overlay-clip .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.5rem;
+}
+
+.digital-twin-ledger .dt-chat-overlay header button[data-state="open"] .dt-details-chevron {
+  transform: rotate(180deg);
+}
+
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer:focus-within,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer-shadow,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay .dt-ask-composer-shadow:focus-within {
+  box-shadow: none;
 }
 
 .digital-twin-ledger.dt-paper,
@@ -59,6 +185,22 @@
 
 .digital-twin-ledger .dt-muted {
   color: var(--dt-muted);
+}
+
+/* Details text fields (1478:37735). */
+.digital-twin-ledger .dt-details-text-field {
+  background: var(--dt-input-fill);
+  border-color: var(--dt-input-border);
+}
+
+.digital-twin-ledger .dt-details-text-field:focus-visible {
+  border-color: var(--dt-input-border);
+  outline: none;
+  box-shadow: none;
+}
+
+.digital-twin-ledger .dt-details-text-fade {
+  background-image: linear-gradient(to top, var(--dt-input-fill), transparent);
 }
 
 .digital-twin-ledger .dt-accent {
@@ -635,14 +777,27 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The filter menu is portaled outside .digital-twin-ledger. Keep these styles
-   component-specific so other application menus retain their own properties. */
-.dt-filter-menu-content.dt-filter-menu-content {
-  width: 200px;
+/* Digital Twin menu chrome — composer + menu is the source of truth.
+   Portaled outside .digital-twin-ledger, so tokens live on the panel itself.
+   html:has(.digital-twin-ledger) restyles Details/Select menus without
+   changing Gemini's shared BehaviourSelect defaults. */
+.dt-filter-menu-content.dt-filter-menu-content,
+.dt-menu-content.dt-menu-content,
+.dt-select-content.dt-select-content,
+html:has(.digital-twin-ledger) [data-slot="select-content"] {
+  --dt-menu-panel-radius: 1rem;
+  --dt-menu-panel-pad: 0.25rem;
+  --dt-menu-item-radius: 0.625rem;
+  --dt-menu-item-pad: 0.5rem;
+  --dt-menu-item-min: 2.25rem;
+  --dt-menu-item-gap: 0.5rem;
+  --dt-menu-icon: 1rem;
+  --dt-menu-type: 0.875rem;
+  --dt-menu-hover: hsl(var(--foreground) / 0.06);
   overflow: hidden;
-  padding: 0.25rem;
+  padding: var(--dt-menu-panel-pad);
   border: 0.8px solid hsl(var(--foreground) / 0.1);
-  border-radius: 1rem;
+  border-radius: var(--dt-menu-panel-radius);
   background: hsl(var(--popover));
   color: hsl(var(--popover-foreground));
   box-shadow:
@@ -653,37 +808,256 @@
     0 5px 11px rgb(0 0 0 / 4%);
 }
 
-.dt-filter-menu-item.dt-filter-menu-item {
-  min-height: 2.25rem;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  border-radius: 0.625rem;
-  color: hsl(var(--foreground));
-  font-size: 0.875rem;
+.dt-filter-menu-content.dt-filter-menu-content {
+  width: 200px;
+}
+
+.dt-filter-menu-content.dt-filter-menu-wide {
+  width: 250px;
+}
+
+/* Submenus are not portaled; they must paint outside the 250px panel. */
+.dt-filter-menu-content.dt-composer-plus-menu {
+  overflow: visible;
+}
+
+/* Select viewport ships with p-1; zero it so panel pad is the only inset. */
+html:has(.digital-twin-ledger) [data-slot="select-content"] [data-radix-select-viewport],
+.dt-select-content [data-radix-select-viewport] {
+  padding: 0;
+}
+
+.dt-filter-menu-item.dt-filter-menu-item,
+.dt-menu-item.dt-menu-item,
+html:has(.digital-twin-ledger) [data-slot="select-item"],
+.dt-select-content [data-slot="select-item"] {
+  min-height: var(--dt-menu-item-min, 2.25rem);
+  margin: 0;
+  gap: var(--dt-menu-item-gap, 0.5rem);
+  padding: var(--dt-menu-item-pad, 0.5rem);
+  border-radius: var(--dt-menu-item-radius, 0.625rem);
+  font-size: var(--dt-menu-type, 0.875rem);
   font-weight: 500;
   line-height: 1.25rem;
   letter-spacing: -0.01em;
 }
 
+.dt-filter-menu-item.dt-filter-menu-item,
+html:has(.digital-twin-ledger) [data-slot="select-item"],
+.dt-select-content [data-slot="select-item"] {
+  color: hsl(var(--foreground));
+}
+
+.dt-filter-menu-item.dt-filter-menu-item {
+  justify-content: space-between;
+}
+
+html:has(.digital-twin-ledger) [data-slot="select-item"],
+.dt-select-content [data-slot="select-item"] {
+  justify-content: flex-start;
+  padding-right: 2rem;
+}
+
+.dt-filter-menu-item.dt-filter-menu-item:hover,
 .dt-filter-menu-item.dt-filter-menu-item:focus,
 .dt-filter-menu-item.dt-filter-menu-item[data-highlighted],
-.dt-filter-menu-item.dt-filter-menu-item[data-selected="true"] {
-  background: hsl(var(--foreground) / 0.06);
+.dt-filter-menu-item.dt-filter-menu-item[data-selected="true"],
+.dt-filter-menu-item.dt-filter-menu-item[data-state="open"],
+.dt-menu-item.dt-menu-item:hover,
+.dt-menu-item.dt-menu-item:focus,
+.dt-menu-item.dt-menu-item[data-highlighted],
+html:has(.digital-twin-ledger) [data-slot="select-item"]:hover,
+html:has(.digital-twin-ledger) [data-slot="select-item"]:focus,
+html:has(.digital-twin-ledger) [data-slot="select-item"][data-highlighted],
+html:has(.digital-twin-ledger) [data-slot="select-item"][data-state="checked"],
+.dt-select-content [data-slot="select-item"]:hover,
+.dt-select-content [data-slot="select-item"]:focus,
+.dt-select-content [data-slot="select-item"][data-highlighted],
+.dt-select-content [data-slot="select-item"][data-state="checked"] {
+  background: var(--dt-menu-hover, hsl(var(--foreground) / 0.06));
+}
+
+.dt-filter-menu-item.dt-filter-menu-item:hover,
+.dt-filter-menu-item.dt-filter-menu-item:focus,
+.dt-filter-menu-item.dt-filter-menu-item[data-highlighted],
+.dt-filter-menu-item.dt-filter-menu-item[data-selected="true"],
+.dt-filter-menu-item.dt-filter-menu-item[data-state="open"],
+html:has(.digital-twin-ledger) [data-slot="select-item"]:hover,
+html:has(.digital-twin-ledger) [data-slot="select-item"]:focus,
+html:has(.digital-twin-ledger) [data-slot="select-item"][data-highlighted],
+html:has(.digital-twin-ledger) [data-slot="select-item"][data-state="checked"],
+.dt-select-content [data-slot="select-item"]:hover,
+.dt-select-content [data-slot="select-item"]:focus,
+.dt-select-content [data-slot="select-item"][data-highlighted],
+.dt-select-content [data-slot="select-item"][data-state="checked"] {
   color: hsl(var(--foreground));
+}
+
+.dt-filter-menu-item.dt-filter-menu-item.text-destructive,
+.dt-menu-item.dt-menu-item.text-destructive,
+.dt-filter-menu-item.dt-filter-menu-item.text-destructive:hover,
+.dt-filter-menu-item.dt-filter-menu-item.text-destructive:focus,
+.dt-filter-menu-item.dt-filter-menu-item.text-destructive[data-highlighted],
+.dt-menu-item.dt-menu-item.text-destructive:hover,
+.dt-menu-item.dt-menu-item.text-destructive:focus,
+.dt-menu-item.dt-menu-item.text-destructive[data-highlighted] {
+  color: hsl(var(--destructive));
+}
+
+html:has(.digital-twin-ledger) [data-slot="select-item-indicator"],
+.dt-select-content [data-slot="select-item-indicator"] {
+  right: var(--dt-menu-item-pad, 0.5rem);
+  width: var(--dt-menu-icon, 1rem);
+  height: var(--dt-menu-icon, 1rem);
+  color: hsl(var(--foreground) / 0.45);
 }
 
 .dt-filter-menu-item-label {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--dt-menu-item-gap, 0.5rem);
 }
 
-.dt-filter-menu-item.dt-filter-menu-item .dt-filter-menu-item-label > svg {
+.dt-filter-menu-item.dt-filter-menu-item .dt-filter-menu-item-label > svg,
+.dt-filter-menu-item.dt-filter-menu-item > svg,
+.dt-menu-item.dt-menu-item > svg {
+  width: var(--dt-menu-icon, 1rem);
+  height: var(--dt-menu-icon, 1rem);
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.dt-filter-menu-content.dt-filter-menu-sub {
+  z-index: 70;
+  width: 300px;
+  max-height: 300px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Hairline sits on the item-to-item boundary so dividers add no extra gap. */
+.dt-filter-menu-separator.dt-filter-menu-separator {
+  height: 0;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  position: relative;
+}
+
+.dt-filter-menu-separator.dt-filter-menu-separator::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 8px;
+  left: 8px;
+  height: 0.8px;
+  background: hsl(var(--foreground) / 0.1);
+}
+
+.dt-filter-menu-search {
+  display: flex;
+  min-height: var(--dt-menu-item-min, 2.25rem);
+  width: 100%;
+  align-items: center;
+  gap: var(--dt-menu-item-gap, 0.5rem);
+  padding: 0 var(--dt-menu-item-pad, 0.5rem);
+}
+
+.dt-filter-menu-search > svg {
   width: 1rem;
   height: 1rem;
-  color: currentColor;
+  flex-shrink: 0;
+  color: hsl(var(--foreground) / 0.4);
+}
+
+.dt-filter-menu-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.25rem;
+  outline: none;
+}
+
+.dt-filter-menu-search input::placeholder {
+  color: hsl(var(--foreground) / 0.4);
+}
+
+.dt-filter-menu-icon-btn {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.dt-filter-menu-icon-btn > svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.dt-filter-menu-icon-btn:hover,
+.dt-filter-menu-icon-btn:focus-visible {
+  background: hsl(var(--foreground) / 0.06);
+  opacity: 1;
+  outline: none;
+}
+
+.dt-filter-menu-heading {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  padding: 0.375rem 0.5rem;
+  color: hsl(var(--foreground) / 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1rem;
+  text-transform: capitalize;
+}
+
+.dt-filter-menu-avatar {
+  display: flex;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  color: #fff;
+  font-size: 0.4375rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.dt-filter-menu-item-meta {
+  flex-shrink: 0;
+  color: hsl(var(--foreground) / 0.8);
+  font-size: 0.75rem;
+  font-weight: 450;
+  line-height: 1.375rem;
+  opacity: 0.7;
+}
+
+.dt-filter-menu-empty {
+  padding: 0.5rem;
+  color: hsl(var(--foreground) / 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
 }
 
 .dt-filter-menu-check {

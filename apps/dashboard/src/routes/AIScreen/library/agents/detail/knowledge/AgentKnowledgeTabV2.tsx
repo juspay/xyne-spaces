@@ -18,10 +18,14 @@ import { disableSkill, isSkillSelected } from '../../../shared/pickers/skill/ski
 import { useSkillCatalog } from '../../../shared/pickers/skill/useSkillCatalog';
 import { DetailListCard, type DetailListItem } from '../../../shared/primitives/DetailListCard';
 import {
+  DETAIL_CONTROL_CLASS,
+  DetailGroup,
   DetailLockedNote,
   DetailRow,
   DetailSection,
+  DetailStack,
   DetailValue,
+  ManageButton,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
@@ -33,7 +37,8 @@ import {
   useAgentMemoryStatus,
 } from './agentMemoryService';
 import { MemoryManageDialog } from './MemoryManageDialog';
-import { useAgentKnowledge } from './useAgentKnowledge';
+import { AgentKnowledgeChips } from './AgentKnowledgeChips';
+import { useAgentKnowledge, type AgentKnowledge } from './useAgentKnowledge';
 
 const LOCK_NOTE = 'Only the owner, a contributor, or an admin can change what this agent knows.';
 
@@ -56,30 +61,16 @@ function formatAdded(value: string | null): string {
   return Number.isNaN(parsed.getTime()) ? 'Added recently' : `Added ${DATE.format(parsed)}`;
 }
 
-function ManageButton({ label, onClick }: { label: string; onClick: () => void }): ReactElement {
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      aria-label={label}
-      data-track-category='Claw Agents'
-      data-track-name='Agent detail v2: manage knowledge'
-      className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
-    >
-      Manage
-    </button>
-  );
-}
-
-export function AgentKnowledgeTabV2({
+function AgentKnowledgeList({
   agent,
   canEdit,
+  knowledge,
 }: {
   agent: Agent;
   canEdit: boolean;
+  knowledge: AgentKnowledge;
 }): ReactElement {
   const queryClient = useQueryClient();
-  const knowledge = useAgentKnowledge(agent);
   const skills = useSkillCatalog();
   const tree = useClawKnowledgeBaseTree();
 
@@ -129,7 +120,11 @@ export function AgentKnowledgeTabV2({
   const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
 
   const trailingFor = (label: string, onClick: () => void): ReactElement =>
-    canEdit ? <ManageButton label={label} onClick={onClick} /> : <ReadOnlyBadge />;
+    canEdit ? (
+      <ManageButton label={label} onClick={onClick} trackName='Agent detail v2: manage knowledge' />
+    ) : (
+      <ReadOnlyBadge />
+    );
 
   const removeMemory = async (id: string): Promise<void> => {
     if (removingMemory) return;
@@ -146,158 +141,198 @@ export function AgentKnowledgeTabV2({
   };
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Skills'
-        info='Reusable instruction packs this agent can run as a slash command'
-        trailing={trailingFor('Manage skills', () => knowledge.openBrowse('skills'))}
-        trailingAlign='end'
-      >
-        <DetailListCard
-          items={skillItems}
-          loading={skills.loading}
-          emptyLabel='No skills attached yet.'
-          canEdit={canEdit}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item => {
-            const entry = skills.entries.find(candidate => candidate.id === item.key);
-            if (!entry) return;
-            knowledge.saveSkills(disableSkill(knowledge.skillIds, entry), `${item.name} removed`);
-          }}
-        />
-      </DetailSection>
-
-      <DetailSection
-        label='Documents'
-        info='Collections and files this agent can look things up in'
-        {...(canEdit ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const })}
-      >
-        <DetailListCard
-          items={grantItems}
-          loading={tree.isLoading && knowledge.scope === 'COLLECTIONS'}
-          emptyLabel={
-            knowledge.scope === 'USER'
-              ? 'This agent reads whatever the person running it can already see.'
-              : 'No collections attached yet.'
-          }
-          canEdit={canEdit}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item => {
-            const index = buildKbIndex(tree.data?.collections ?? []);
-            const target = describeGrants(knowledge.grants, index).find(
-              grant => grant.key === item.key,
-            );
-            if (!target) return;
-            knowledge.saveKb(
-              knowledge.scope,
-              removeGrant(knowledge.grants, target.selection),
-              `${item.name} removed`,
-            );
-          }}
-        >
-          <DetailRow title='Applies To' hint='Whose access decides what this agent can read'>
-            <BehaviourSelect
-              value={knowledge.scope}
-              options={SCOPE_OPTIONS}
-              editable={canEdit}
-              disabled={knowledge.saving}
-              label='Who this applies to'
-              trackName='Agent detail v2: set kb scope'
-              onChange={next =>
-                knowledge.saveKb(
-                  next === 'USER' ? 'USER' : 'COLLECTIONS',
-                  knowledge.grants,
-                  'Document access updated',
-                )
-              }
-            />
-          </DetailRow>
-
-          <DetailRow title='Collections' hint='What it can look things up in'>
-            {knowledge.scope === 'USER' ? (
-              <DetailValue>Not used</DetailValue>
-            ) : canEdit ? (
-              <button
-                type='button'
-                onClick={() => knowledge.openBrowse('documents')}
-                data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: add collections'
-                className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm leading-5 text-foreground transition-colors hover:bg-muted/50'
-              >
-                <PlusDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                Add
-              </button>
-            ) : (
-              <DetailValue>{knowledge.grants.length} attached</DetailValue>
-            )}
-          </DetailRow>
-        </DetailListCard>
-      </DetailSection>
-
-      {!isDigitalTwin(agent.slug) && (
+    <DetailSection heading='section' label='Knowledge'>
+      <DetailStack>
         <DetailSection
-          label='Memory'
-          info='Facts this agent carries between sessions'
-          trailing={trailingFor('Manage memory', () => setMemoryOpen(true))}
+          label='Skills'
+          info='Reusable instruction packs this agent can run as a slash command'
+          trailing={trailingFor('Manage skills', () => knowledge.openBrowse('skills'))}
           trailingAlign='end'
         >
           <DetailListCard
-            items={memoryItems}
-            loading={memories.isLoading}
-            emptyLabel={
-              memoryStatus.data?.memoryEnabled === false
-                ? 'Memory is off for this agent.'
-                : 'Nothing remembered yet.'
-            }
-            canEdit={canEdit && !removingMemory}
+            items={skillItems}
+            loading={skills.loading}
+            emptyLabel='No skills attached yet.'
+            canEdit={canEdit}
             note={note}
-            removeLabel={() => 'Forget this memory'}
-            onRemove={item => void removeMemory(item.key)}
+            removeLabel={item => `Remove ${item.name}`}
+            onRemove={item => {
+              const entry = skills.entries.find(candidate => candidate.id === item.key);
+              if (!entry) return;
+              knowledge.saveSkills(disableSkill(knowledge.skillIds, entry), `${item.name} removed`);
+            }}
           />
         </DetailSection>
-      )}
 
-      {knowledge.saving && (
-        <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
-          <Loader2 className='size-3.5 animate-spin' aria-hidden />
-          Saving…
-        </span>
-      )}
+        <DetailSection
+          label='Documents'
+          info='Collections and files this agent can look things up in'
+          {...(canEdit ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const })}
+        >
+          <div className='flex w-full flex-col gap-6'>
+            {note}
+            <DetailGroup>
+              <DetailRow title='Applies To' hint='Whose access decides what this agent can read'>
+                <BehaviourSelect
+                  value={knowledge.scope}
+                  options={SCOPE_OPTIONS}
+                  editable={canEdit}
+                  disabled={knowledge.saving}
+                  label='Who this applies to'
+                  trackName='Agent detail v2: set kb scope'
+                  onChange={next =>
+                    knowledge.saveKb(
+                      next === 'USER' ? 'USER' : 'COLLECTIONS',
+                      knowledge.grants,
+                      'Document access updated',
+                    )
+                  }
+                />
+              </DetailRow>
 
-      <BrowseSkillsDialog
-        open={knowledge.browse === 'skills'}
-        onOpenChange={open => {
-          if (!open) knowledge.closeBrowse();
-        }}
-        catalog={skills.entries}
-        loading={skills.loading}
-        isError={skills.isError}
-        onRetry={skills.refetch}
-        selectedIds={knowledge.draftSkillIds}
-        onChange={knowledge.setDraftSkillIds}
-      />
+              <DetailRow title='Collections' hint='What it can look things up in' last>
+                {knowledge.scope === 'USER' ? (
+                  <DetailValue>Not used</DetailValue>
+                ) : canEdit ? (
+                  <button
+                    type='button'
+                    onClick={() => knowledge.openBrowse('documents')}
+                    data-track-category='Claw Agents'
+                    data-track-name='Agent detail v2: add collections'
+                    className={DETAIL_CONTROL_CLASS}
+                  >
+                    <PlusDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                    Add
+                  </button>
+                ) : (
+                  <DetailValue>{knowledge.grants.length} attached</DetailValue>
+                )}
+              </DetailRow>
+            </DetailGroup>
+            <DetailListCard
+              items={grantItems}
+              loading={tree.isLoading && knowledge.scope === 'COLLECTIONS'}
+              emptyLabel={
+                knowledge.scope === 'USER'
+                  ? 'This agent reads whatever the person running it can already see.'
+                  : 'No collections attached yet.'
+              }
+              canEdit={canEdit}
+              removeLabel={item => `Remove ${item.name}`}
+              onRemove={item => {
+                const index = buildKbIndex(tree.data?.collections ?? []);
+                const target = describeGrants(knowledge.grants, index).find(
+                  grant => grant.key === item.key,
+                );
+                if (!target) return;
+                knowledge.saveKb(
+                  knowledge.scope,
+                  removeGrant(knowledge.grants, target.selection),
+                  `${item.name} removed`,
+                );
+              }}
+            />
+          </div>
+        </DetailSection>
 
-      <BrowseKnowledgeDialog
-        open={knowledge.browse === 'documents'}
-        onOpenChange={open => {
-          if (!open) knowledge.closeBrowse();
-        }}
-        scope={knowledge.draftScope}
-        onScopeChange={knowledge.setDraftScope}
-        grants={knowledge.draftGrants}
-        onGrantsChange={knowledge.setDraftGrants}
-      />
+        {!isDigitalTwin(agent.slug) && (
+          <DetailSection
+            label='Memory'
+            info='Facts this agent carries between sessions'
+            trailing={trailingFor('Manage memory', () => setMemoryOpen(true))}
+            trailingAlign='end'
+          >
+            <DetailListCard
+              items={memoryItems}
+              loading={memories.isLoading}
+              emptyLabel={
+                memoryStatus.data?.memoryEnabled === false
+                  ? 'Memory is off for this agent.'
+                  : 'Nothing remembered yet.'
+              }
+              canEdit={canEdit && !removingMemory}
+              note={note}
+              removeLabel={() => 'Forget this memory'}
+              onRemove={item => void removeMemory(item.key)}
+            />
+          </DetailSection>
+        )}
 
-      <MemoryManageDialog
-        open={memoryOpen}
-        onOpenChange={setMemoryOpen}
-        slug={agent.slug}
-        status={memoryStatus.data}
-        memoryCount={memoryItems.length}
-        canEdit={canEdit}
-      />
-    </div>
+        {knowledge.saving && (
+          <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
+            <Loader2 className='size-3.5 animate-spin' aria-hidden />
+            Saving…
+          </span>
+        )}
+
+        <BrowseSkillsDialog
+          open={knowledge.browse === 'skills'}
+          onOpenChange={open => {
+            if (!open) knowledge.closeBrowse();
+          }}
+          catalog={skills.entries}
+          loading={skills.loading}
+          isError={skills.isError}
+          onRetry={skills.refetch}
+          selectedIds={knowledge.draftSkillIds}
+          onChange={knowledge.setDraftSkillIds}
+        />
+
+        <BrowseKnowledgeDialog
+          open={knowledge.browse === 'documents'}
+          onOpenChange={open => {
+            if (!open) knowledge.closeBrowse();
+          }}
+          scope={knowledge.draftScope}
+          onScopeChange={knowledge.setDraftScope}
+          grants={knowledge.draftGrants}
+          onGrantsChange={knowledge.setDraftGrants}
+        />
+
+        <MemoryManageDialog
+          open={memoryOpen}
+          onOpenChange={setMemoryOpen}
+          slug={agent.slug}
+          status={memoryStatus.data}
+          memoryCount={memoryItems.length}
+          canEdit={canEdit}
+        />
+      </DetailStack>
+    </DetailSection>
   );
+}
+
+export function AgentKnowledgeTabV2({
+  agent,
+  canEdit,
+  layout = 'list',
+  heading = 'Knowledge',
+}: {
+  agent: Agent;
+  canEdit: boolean;
+  layout?: 'list' | 'chips';
+  heading?: string | false;
+}): ReactElement {
+  const knowledge = useAgentKnowledge(agent);
+
+  if (layout === 'chips') {
+    const body = (
+      <div className='flex w-full flex-col gap-8'>
+        {!canEdit && <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>}
+        <AgentKnowledgeChips
+          canEdit={canEdit}
+          knowledge={knowledge}
+          trackName='Digital Twin configuration'
+        />
+      </div>
+    );
+    if (heading === false) return body;
+    return (
+      <DetailSection heading='section' label={heading}>
+        {body}
+      </DetailSection>
+    );
+  }
+
+  return <AgentKnowledgeList agent={agent} canEdit={canEdit} knowledge={knowledge} />;
 }

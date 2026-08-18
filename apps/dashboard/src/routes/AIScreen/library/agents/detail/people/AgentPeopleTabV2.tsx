@@ -1,13 +1,8 @@
-import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import {
-  CheckTickSingle,
-  MultipleCrossCancelDefault,
-  PlusDefault,
-  SearchDefault,
-} from '@xyne/icons';
+import { CheckTickSingle, MultipleCrossCancelDefault, SearchDefault } from '@xyne/icons';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawAgentShares } from '@/hooks/useClawAgentDetail';
@@ -15,16 +10,24 @@ import { useClawCloneRequests } from '@/hooks/useClawCloneRequests';
 import { addClawAgentShare, removeClawAgentShare } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { Agent, AgentShareRole, ClawUser } from '@/services/claw/clawAuthAgentTypes';
+import { cn } from '@/utils/classNames';
 import { Pill } from '../../../shared/primitives/Pill';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
 import {
   DetailCard,
   DetailEmpty,
+  DetailGroup,
   DetailLockedNote,
   DetailRow,
   DetailSection,
+  DetailStack,
   DetailValue,
+  ManageButton,
   ReadOnlyBadge,
+  TWIN_STROKE_CLASS,
+  nestedDetailHeading,
+  type DetailHeading,
+  type DetailTypeScale,
 } from '../../../shared/primitives/DetailPrimitives';
 import type { AgentDetailActions } from '../useAgentDetailActions';
 import { AddMemberDialog } from './AddMemberDialog';
@@ -39,12 +42,28 @@ const VISIBILITY_OPTIONS = [
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
 
+/** Twin: grey DetailGroup, heading stays outside. Library: bordered card when `card`. */
+function peopleSurface(
+  typeScale: DetailTypeScale,
+  content: ReactNode,
+  library: 'card' | 'plain' = 'card',
+): ReactNode {
+  if (typeScale === 'twin') return <DetailGroup typeScale={typeScale}>{content}</DetailGroup>;
+  return library === 'card' ? <DetailCard>{content}</DetailCard> : content;
+}
+
 export function AgentPeopleTabV2({
   agent,
   actions,
+  className,
+  heading = 'section',
+  typeScale = 'library',
 }: {
   agent: Agent;
   actions: AgentDetailActions;
+  className?: string;
+  heading?: DetailHeading;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -161,232 +180,272 @@ export function AgentPeopleTabV2({
 
   const pending = cloneRequests.data ?? [];
   const resolving = cloneRequests.approve.isPending || cloneRequests.reject.isPending;
+  // Twin: Figma setting-subcategory (14/450/1.35/tertiary), not nested field titles.
+  const nestedHeading: DetailHeading =
+    typeScale === 'twin' ? 'subcategory' : nestedDetailHeading(typeScale);
+  const isTwin = typeScale === 'twin';
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Access'
-        info='Who can find and run this agent'
-        {...(isAdmin ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const })}
-      >
-        <DetailCard>
+    <DetailSection
+      heading={heading}
+      typeScale={typeScale}
+      label='People'
+      {...(className === undefined ? {} : { className })}
+    >
+      <DetailStack>
+        <DetailSection
+          heading={nestedHeading}
+          typeScale={typeScale}
+          label='Access'
+          info='Who can find and run this agent'
+          {...(isAdmin ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const })}
+        >
           {!isAdmin && (
             <DetailLockedNote>
               Only an admin can change who this agent is visible to.
             </DetailLockedNote>
           )}
-
-          <DetailRow title='Visibility' hint='Who can find and run this agent'>
-            <BehaviourSelect
-              value={agent.scope === 'global' ? 'global' : 'personal'}
-              options={VISIBILITY_OPTIONS}
-              editable={isAdmin}
-              disabled={actions.busy.moderating !== null}
-              label='Agent visibility'
-              trackName='Agent detail v2: set visibility'
-              onChange={next => {
-                const wantsGlobal = next === 'global';
-                if (wantsGlobal === (agent.scope === 'global')) return;
-                void actions.moderate(wantsGlobal ? 'promote' : 'demote');
-              }}
-            />
-          </DetailRow>
-
-          <DetailRow title='Default role' hint='What new people get when added' last>
-            <BehaviourSelect
-              value={defaultRole}
-              options={ROLE_OPTIONS}
-              editable={canShare}
-              disabled={busyUserId !== null}
-              label='Default role for new people'
-              trackName='Agent detail v2: set default role'
-              onChange={next => {
-                if (isShareRole(next)) setDefaultRole(next);
-              }}
-            />
-          </DetailRow>
-        </DetailCard>
-      </DetailSection>
-
-      <DetailSection
-        label='Members'
-        trailing={
-          <span className='flex items-center gap-1'>
-            <button
-              type='button'
-              onClick={toggleSearch}
-              aria-label={searchOpen ? 'Hide search' : 'Search members'}
-              aria-expanded={searchOpen}
-              data-track-category='Claw Agents'
-              data-track-name='Agent detail v2: toggle member search'
-              className={ICON_BUTTON}
+          <DetailGroup typeScale={typeScale}>
+            <DetailRow
+              title='Visibility'
+              hint='Who can find and run this agent'
+              typeScale={typeScale}
             >
-              <SearchDefault className='size-4' aria-hidden />
-            </button>
-            {canShare && (
+              <BehaviourSelect
+                value={agent.scope === 'global' ? 'global' : 'personal'}
+                options={VISIBILITY_OPTIONS}
+                editable={isAdmin}
+                disabled={actions.busy.moderating !== null}
+                typeScale={typeScale}
+                label='Agent visibility'
+                trackName='Agent detail v2: set visibility'
+                onChange={next => {
+                  const wantsGlobal = next === 'global';
+                  if (wantsGlobal === (agent.scope === 'global')) return;
+                  void actions.moderate(wantsGlobal ? 'promote' : 'demote');
+                }}
+              />
+            </DetailRow>
+
+            <DetailRow
+              title='Default role'
+              hint='What new people get when added'
+              last
+              typeScale={typeScale}
+            >
+              <BehaviourSelect
+                value={defaultRole}
+                options={ROLE_OPTIONS}
+                editable={canShare}
+                disabled={busyUserId !== null}
+                typeScale={typeScale}
+                label='Default role for new people'
+                trackName='Agent detail v2: set default role'
+                onChange={next => {
+                  if (isShareRole(next)) setDefaultRole(next);
+                }}
+              />
+            </DetailRow>
+          </DetailGroup>
+        </DetailSection>
+
+        <DetailSection
+          heading={nestedHeading}
+          typeScale={typeScale}
+          label='Members'
+          trailing={
+            <span className='flex items-center gap-1'>
               <button
                 type='button'
-                onClick={() => setAddOpen(true)}
-                aria-label='Add people'
+                onClick={toggleSearch}
+                aria-label={searchOpen ? 'Hide search' : 'Search members'}
+                aria-expanded={searchOpen}
                 data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: open add member'
+                data-track-name='Agent detail v2: toggle member search'
                 className={ICON_BUTTON}
               >
-                <PlusDefault className='size-4' aria-hidden />
+                <SearchDefault className='size-4' aria-hidden />
               </button>
-            )}
-          </span>
-        }
-        trailingAlign='end'
-      >
-        <DetailCard>
-          {searchOpen && (
-            <div className='border-b border-border p-3'>
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder='Filter members'
-                aria-label='Filter members'
-                data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: filter members'
-                className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-              />
-            </div>
-          )}
-
-          {shares.isLoading ? (
-            <div className='flex w-full flex-col'>
-              {[0, 1, 2].map(row => (
-                <div
-                  key={row}
-                  className='flex items-center gap-3 border-b border-border p-4 last:border-b-0'
-                >
-                  <Skeleton className='size-10 shrink-0 rounded-full' />
-                  <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-                    <Skeleton className='h-3.5 w-32' />
-                    <Skeleton className='h-3 w-48' />
-                  </div>
+              {canShare && (
+                <ManageButton
+                  label='Add people'
+                  onClick={() => setAddOpen(true)}
+                  trackName='Agent detail v2: open add member'
+                />
+              )}
+            </span>
+          }
+          trailingAlign='end'
+        >
+          {peopleSurface(
+            typeScale,
+            <>
+              {searchOpen && (
+                <div className={isTwin ? undefined : 'border-b border-border p-3'}>
+                  <input
+                    ref={searchRef}
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder='Filter members'
+                    aria-label='Filter members'
+                    data-track-category='Claw Agents'
+                    data-track-name='Agent detail v2: filter members'
+                    className={cn(
+                      'h-9 w-full rounded-[10px] bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring',
+                      isTwin ? TWIN_STROKE_CLASS : 'border border-border',
+                    )}
+                  />
                 </div>
-              ))}
-            </div>
-          ) : rows.length === 0 ? (
-            <DetailEmpty>
-              {query.trim() ? 'No members matched that search.' : 'No one has access yet.'}
-            </DetailEmpty>
-          ) : (
-            rows.map(row => (
-              <PersonRow
-                key={row.key}
-                userId={row.userId}
-                name={row.name}
-                detail={row.detail}
-                trailing={
-                  row.owner ? (
-                    <Pill tone='neutral'>Agent Creator</Pill>
-                  ) : (
-                    <>
-                      {busyUserId === row.userId && (
-                        <Loader2
-                          className='size-3.5 animate-spin text-muted-foreground'
-                          aria-hidden
-                        />
-                      )}
-                      {canShare ? (
-                        <BehaviourSelect
-                          value={row.role}
-                          options={ROLE_OPTIONS}
-                          editable
-                          disabled={busyUserId !== null}
-                          label={`Role for ${row.name}`}
-                          trackName='Agent detail v2: set member role'
-                          onChange={next => {
-                            if (isShareRole(next)) void setRole(row.userId, next);
-                          }}
-                        />
+              )}
+              {shares.isLoading ? (
+                [0, 1, 2].map(row => (
+                  <div
+                    key={row}
+                    className={cn(
+                      'flex items-center gap-3',
+                      !isTwin && 'border-b border-border p-4 last:border-b-0',
+                    )}
+                  >
+                    <Skeleton className='size-10 shrink-0 rounded-full' />
+                    <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+                      <Skeleton className='h-3.5 w-32' />
+                      <Skeleton className='h-3 w-48' />
+                    </div>
+                  </div>
+                ))
+              ) : rows.length === 0 ? (
+                <DetailEmpty
+                  {...(!isTwin && searchOpen ? { className: 'px-4 py-3' } : {})}
+                  typeScale={typeScale}
+                >
+                  {query.trim() ? 'No members matched that search.' : 'No one has access yet.'}
+                </DetailEmpty>
+              ) : (
+                rows.map(row => (
+                  <PersonRow
+                    key={row.key}
+                    userId={row.userId}
+                    name={row.name}
+                    detail={row.detail}
+                    typeScale={typeScale}
+                    trailing={
+                      row.owner ? (
+                        <Pill tone='neutral'>Agent Creator</Pill>
                       ) : (
-                        <DetailValue>{roleLabel(row.role)}</DetailValue>
-                      )}
-                      {canShare && (
+                        <>
+                          {busyUserId === row.userId && (
+                            <Loader2
+                              className='size-3.5 animate-spin text-muted-foreground'
+                              aria-hidden
+                            />
+                          )}
+                          {canShare ? (
+                            <BehaviourSelect
+                              value={row.role}
+                              options={ROLE_OPTIONS}
+                              editable
+                              disabled={busyUserId !== null}
+                              typeScale={typeScale}
+                              label={`Role for ${row.name}`}
+                              trackName='Agent detail v2: set member role'
+                              onChange={next => {
+                                if (isShareRole(next)) void setRole(row.userId, next);
+                              }}
+                            />
+                          ) : (
+                            <DetailValue>{roleLabel(row.role)}</DetailValue>
+                          )}
+                          {canShare && (
+                            <button
+                              type='button'
+                              onClick={() => void removeMember(row.userId, row.name)}
+                              disabled={busyUserId !== null}
+                              aria-label={`Remove ${row.name}`}
+                              title={`Remove ${row.name}`}
+                              data-track-category='Claw Agents'
+                              data-track-name='Agent detail v2: remove member'
+                              className={ICON_BUTTON}
+                            >
+                              <MultipleCrossCancelDefault className='size-4' aria-hidden />
+                            </button>
+                          )}
+                        </>
+                      )
+                    }
+                  />
+                ))
+              )}
+            </>,
+            shares.isLoading || searchOpen || rows.length > 0 ? 'card' : 'plain',
+          )}
+        </DetailSection>
+
+        {canShare && (
+          <DetailSection
+            heading={nestedHeading}
+            typeScale={typeScale}
+            label='Pending Requests'
+            info='People asking for a copy of this agent'
+          >
+            {peopleSurface(
+              typeScale,
+              cloneRequests.isLoading || pending.length === 0 ? (
+                <DetailEmpty typeScale={typeScale}>
+                  {cloneRequests.isLoading ? 'Loading requests…' : 'No pending requests.'}
+                </DetailEmpty>
+              ) : (
+                pending.map(request => (
+                  <PersonRow
+                    key={request.id}
+                    userId={request.requesterId}
+                    name={request.requesterName || request.requesterEmail || request.requesterId}
+                    detail={request.requesterEmail ?? 'Requested a copy of this agent'}
+                    typeScale={typeScale}
+                    trailing={
+                      <>
                         <button
                           type='button'
-                          onClick={() => void removeMember(row.userId, row.name)}
-                          disabled={busyUserId !== null}
-                          aria-label={`Remove ${row.name}`}
-                          title={`Remove ${row.name}`}
+                          onClick={() => cloneRequests.approve.mutate(request)}
+                          disabled={resolving}
+                          aria-label='Approve request'
+                          title='Approve request'
                           data-track-category='Claw Agents'
-                          data-track-name='Agent detail v2: remove member'
+                          data-track-name='Agent detail v2: approve clone request'
+                          className={ICON_BUTTON}
+                        >
+                          <CheckTickSingle className='size-4' aria-hidden />
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => cloneRequests.reject.mutate(request)}
+                          disabled={resolving}
+                          aria-label='Reject request'
+                          title='Reject request'
+                          data-track-category='Claw Agents'
+                          data-track-name='Agent detail v2: reject clone request'
                           className={ICON_BUTTON}
                         >
                           <MultipleCrossCancelDefault className='size-4' aria-hidden />
                         </button>
-                      )}
-                    </>
-                  )
-                }
-              />
-            ))
-          )}
-        </DetailCard>
-      </DetailSection>
-
-      {canShare && (
-        <DetailSection label='Pending Requests' info='People asking for a copy of this agent'>
-          <DetailCard>
-            {cloneRequests.isLoading ? (
-              <DetailEmpty>Loading requests…</DetailEmpty>
-            ) : pending.length === 0 ? (
-              <DetailEmpty>No pending requests.</DetailEmpty>
-            ) : (
-              pending.map(request => (
-                <PersonRow
-                  key={request.id}
-                  userId={request.requesterId}
-                  name={request.requesterName || request.requesterEmail || request.requesterId}
-                  detail={request.requesterEmail ?? 'Requested a copy of this agent'}
-                  trailing={
-                    <>
-                      <button
-                        type='button'
-                        onClick={() => cloneRequests.approve.mutate(request)}
-                        disabled={resolving}
-                        aria-label='Approve request'
-                        title='Approve request'
-                        data-track-category='Claw Agents'
-                        data-track-name='Agent detail v2: approve clone request'
-                        className={ICON_BUTTON}
-                      >
-                        <CheckTickSingle className='size-4' aria-hidden />
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => cloneRequests.reject.mutate(request)}
-                        disabled={resolving}
-                        aria-label='Reject request'
-                        title='Reject request'
-                        data-track-category='Claw Agents'
-                        data-track-name='Agent detail v2: reject clone request'
-                        className={ICON_BUTTON}
-                      >
-                        <MultipleCrossCancelDefault className='size-4' aria-hidden />
-                      </button>
-                    </>
-                  }
-                />
-              ))
+                      </>
+                    }
+                  />
+                ))
+              ),
+              cloneRequests.isLoading || pending.length === 0 ? 'plain' : 'card',
             )}
-          </DetailCard>
-        </DetailSection>
-      )}
+          </DetailSection>
+        )}
 
-      <AddMemberDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        existingUserIds={existingUserIds}
-        defaultRole={defaultRole}
-        saving={busyUserId !== null}
-        onAdd={(target, role) => void addMember(target, role)}
-      />
-    </div>
+        <AddMemberDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          existingUserIds={existingUserIds}
+          defaultRole={defaultRole}
+          saving={busyUserId !== null}
+          onAdd={(target, role) => void addMember(target, role)}
+        />
+      </DetailStack>
+    </DetailSection>
   );
 }

@@ -177,7 +177,7 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
                 </span>
                 <span className='dt-filter-menu-check' aria-hidden='true'>
                   {selected ? (
-                    <CheckTickSquare className='size-4 text-primary' />
+                    <CheckTickSquare variant='Solid' className='size-4 text-primary' />
                   ) : (
                     <Square className='size-4 text-foreground/25' />
                   )}

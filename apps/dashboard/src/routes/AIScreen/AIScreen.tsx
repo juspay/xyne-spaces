@@ -1,5 +1,5 @@
 import { type ReactElement, useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
 import { AIEmptyState } from '../../components/AIScreen/AIEmptyState';
@@ -42,14 +42,37 @@ const AIScreen = (): ReactElement => {
   // chat instead of clearing them — matching XyneAISidebar.
   const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
-  const { selectedAgentSlug } = useSelectedAgent();
+  const location = useLocation();
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
+  const consumedHandoffRef = useRef(false);
 
   useEffect(() => {
     showChatViewRef.current = showChatView;
   }, [showChatView]);
+
+  useEffect(() => {
+    if (consumedHandoffRef.current) return;
+    const state = location.state as {
+      initialQuery?: string;
+      agentSlug?: string;
+      extras?: ComposerContext;
+    } | null;
+    const query = state?.initialQuery?.trim();
+    if (!state?.agentSlug && !query) return;
+    consumedHandoffRef.current = true;
+    if (state?.agentSlug) setSelectedAgentSlug(state.agentSlug);
+    if (state?.extras) setInitialExtras(state.extras);
+    if (query) {
+      setInitialQuery(query);
+      setActiveSessionId('');
+      setShowChatView(true);
+      setChatKey(prev => prev + 1);
+    }
+    void navigate('.', { replace: true, state: null });
+  }, [location.state, navigate, setSelectedAgentSlug]);
 
   useEffect(() => {
     if (activeSessionId) {

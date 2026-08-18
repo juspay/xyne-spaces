@@ -16,12 +16,15 @@ import { clawErrorText } from '@/services/claw/clawRequest';
 import { PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import {
-  DetailCard,
+  DETAIL_SELECT_TRIGGER_CLASS_FOR,
+  DetailGroup,
+  DetailLockedNote,
   DetailRow,
   DetailSection,
-  DetailLockedNote,
   DetailValue,
   ReadOnlyBadge,
+  type DetailHeading,
+  type DetailTypeScale,
 } from '../../../../shared/primitives/DetailPrimitives';
 import { ProviderOrderDialog } from './ProviderOrderDialog';
 import {
@@ -40,6 +43,7 @@ const RowSelect = <T extends string>({
   onChange,
   label,
   trackName,
+  typeScale = 'library',
 }: {
   value: T;
   options: ReadonlyArray<{ value: string; label: string }>;
@@ -47,17 +51,17 @@ const RowSelect = <T extends string>({
   onChange: (next: T) => void;
   label: string;
   trackName: string;
+  typeScale?: DetailTypeScale;
 }): ReactElement =>
   !editable ? (
     <DetailValue>{options.find(o => o.value === value)?.label ?? value}</DetailValue>
   ) : (
     <Select value={value} onValueChange={next => onChange(next as T)}>
       <SelectTrigger
-        size='sm'
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        className='h-9 w-auto min-w-0 gap-2 rounded-[10px]'
+        className={DETAIL_SELECT_TRIGGER_CLASS_FOR[typeScale]}
       >
         <SelectValue />
       </SelectTrigger>
@@ -71,7 +75,19 @@ const RowSelect = <T extends string>({
     </Select>
   );
 
-export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }): ReactElement {
+export function ModelCard({
+  agent,
+  canEdit,
+  className,
+  heading = 'section',
+  typeScale = 'library',
+}: {
+  agent: Agent;
+  canEdit: boolean;
+  className?: string;
+  heading?: DetailHeading;
+  typeScale?: DetailTypeScale;
+}): ReactElement {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
@@ -105,15 +121,18 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
     <DetailSection
       label='Model'
       info='Which provider answers, and when'
+      heading={heading}
+      typeScale={typeScale}
+      {...(className === undefined ? {} : { className })}
       {...(canEdit ? {} : { trailing: <ReadOnlyBadge /> })}
     >
-      <DetailCard>
-        {!canEdit && (
-          <DetailLockedNote>
-            Only the owner, a contributor, or an admin can change the model settings.
-          </DetailLockedNote>
-        )}
-        <DetailRow title='Providers' hint='Top to bottom order'>
+      {!canEdit && (
+        <DetailLockedNote>
+          Only the owner, a contributor, or an admin can change the model settings.
+        </DetailLockedNote>
+      )}
+      <DetailGroup typeScale={typeScale}>
+        <DetailRow title='Providers' hint='Top to bottom order' typeScale={typeScale}>
           {saving && (
             <Loader2 className='size-3.5 animate-spin text-muted-foreground' aria-hidden />
           )}
@@ -132,11 +151,16 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
           )}
         </DetailRow>
 
-        <DetailRow title='Applies To' hint='When the provider order takes effect'>
+        <DetailRow
+          title='Applies To'
+          hint='When the provider order takes effect'
+          typeScale={typeScale}
+        >
           <RowSelect
             value={draft.alwaysOn ? 'always' : 'upgrade'}
             options={ALWAYS_ON_OPTIONS}
             editable={canEdit && !saving}
+            typeScale={typeScale}
             label="When to use the agent's premium provider"
             trackName='Agent detail v2: set provider applies-to'
             onChange={next =>
@@ -145,11 +169,16 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
           />
         </DetailRow>
 
-        <DetailRow title='Subagents' hint='A per-subagent override always wins over this'>
+        <DetailRow
+          title='Subagents'
+          hint='A per-subagent override always wins over this'
+          typeScale={typeScale}
+        >
           <RowSelect
             value={draft.subagentMode}
             options={SUBAGENT_OPTIONS}
             editable={canEdit && !saving}
+            typeScale={typeScale}
             label='Which provider subagents run on'
             trackName='Agent detail v2: set subagent provider'
             onChange={next =>
@@ -165,11 +194,13 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
           title='Automated runs'
           hint='Scheduled jobs, automations and error-pipeline runs'
           last
+          typeScale={typeScale}
         >
           <RowSelect
             value={draft.automationMode}
             options={AUTOMATION_OPTIONS}
             editable={canEdit && !saving}
+            typeScale={typeScale}
             label='Which provider automation and scheduled runs use'
             trackName='Agent detail v2: set automation provider'
             onChange={next =>
@@ -180,7 +211,7 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
             }
           />
         </DetailRow>
-      </DetailCard>
+      </DetailGroup>
 
       <ProviderOrderDialog
         open={orderOpen}

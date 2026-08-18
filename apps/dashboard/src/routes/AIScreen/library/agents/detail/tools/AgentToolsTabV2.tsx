@@ -25,10 +25,17 @@ import { useSubagentCatalog } from '../../../shared/pickers/subagent/useSubagent
 import {
   DetailLockedNote,
   DetailSection,
+  DetailStack,
+  ManageButton,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { DetailListCard, type DetailListItem } from '../../../shared/primitives/DetailListCard';
-import { useAgentToolSelection, type ManageSectionId } from './useAgentToolSelection';
+import { AgentToolChips } from './AgentToolChips';
+import {
+  useAgentToolSelection,
+  type AgentToolSelection,
+  type ManageSectionId,
+} from './useAgentToolSelection';
 
 const LOCK_NOTE = 'Only the owner, a contributor, or an admin can change this agent’s tools.';
 
@@ -36,33 +43,16 @@ function toolCountLabel(count: number): string {
   return `${count} ${count === 1 ? 'tool' : 'tools'}`;
 }
 
-function ManageButton({ label, onClick }: { label: string; onClick: () => void }): ReactElement {
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      aria-label={label}
-      data-track-category='Claw Agents'
-      data-track-name='Agent detail v2: manage tools'
-      className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
-    >
-      Manage
-    </button>
-  );
-}
-
-export function AgentToolsTabV2({
-  agent,
+function AgentToolsList({
   canEdit,
+  tools,
 }: {
-  agent: Agent;
   canEdit: boolean;
+  tools: AgentToolSelection;
 }): ReactElement {
-  const tools = useAgentToolSelection(agent);
   const subagents = useSubagentCatalog();
   const mcp = useMcpCatalog();
   const builtin = useBuiltinCatalog();
-
   const { saved } = tools;
 
   const subagentItems = useMemo<DetailListItem[]>(
@@ -115,128 +105,164 @@ export function AgentToolsTabV2({
 
   const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
 
-  /** Manage opens the same browse dialog the create flow uses; read-only says why. */
   const trailingFor = (label: string, section: ManageSectionId): ReactElement =>
     canEdit ? (
-      <ManageButton label={`Manage ${label}`} onClick={() => tools.openManage(section)} />
+      <ManageButton
+        label={`Manage ${label}`}
+        onClick={(): void => tools.openManage(section)}
+        trackName='Agent detail v2: manage tools'
+      />
     ) : (
       <ReadOnlyBadge />
     );
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Subagents'
-        info='Specialists this agent can delegate a whole task to'
-        trailing={trailingFor('subagents', 'subagents')}
-        trailingAlign='end'
-      >
-        <DetailListCard
-          items={subagentItems}
+    <DetailSection heading='section' label='Tools'>
+      <DetailStack>
+        <DetailSection
+          label='Subagents'
+          info='Specialists this agent can delegate a whole task to'
+          trailing={trailingFor('subagents', 'subagents')}
+          trailingAlign='end'
+        >
+          <DetailListCard
+            items={subagentItems}
+            loading={subagents.loading}
+            emptyLabel='No subagents added yet.'
+            canEdit={canEdit}
+            note={note}
+            removeLabel={(item): string => `Remove ${item.name}`}
+            onRemove={(item): void => {
+              const entry = subagents.entries.find(candidate => candidate.name === item.key);
+              if (!entry) return;
+              tools.commit(disableSubagent(saved, entry), `${item.name} removed`);
+            }}
+          />
+        </DetailSection>
+
+        <DetailSection
+          label='MCP Tools'
+          info='Tools this agent calls directly on connected integrations'
+          trailing={trailingFor('MCP tools', 'mcp')}
+          trailingAlign='end'
+        >
+          <DetailListCard
+            items={mcpItems}
+            loading={mcp.loading}
+            emptyLabel='No MCP tools added yet.'
+            canEdit={canEdit}
+            note={note}
+            removeLabel={(item): string => `Remove ${item.name}`}
+            onRemove={(item): void => {
+              const entry = mcp.entries.find(candidate => candidate.slug === item.key);
+              if (!entry) return;
+              tools.commit(disableMcpEntry(mcp.entries, saved, entry), `${item.name} removed`);
+            }}
+          />
+        </DetailSection>
+
+        <DetailSection
+          label='Built-In tools'
+          info='Tools that ship with the platform, no connection needed'
+          trailing={trailingFor('built-in tools', 'builtin')}
+          trailingAlign='end'
+        >
+          <DetailListCard
+            items={builtinItems}
+            loading={builtin.loading}
+            emptyLabel='No built-in tools added yet.'
+            canEdit={canEdit}
+            note={note}
+            removeLabel={(item): string => `Remove ${item.name}`}
+            onRemove={(item): void => {
+              const entry = builtin.entries.find(candidate => candidate.source === item.key);
+              if (!entry) return;
+              tools.commit(disableBuiltinEntry(saved, entry), `${item.name} removed`);
+            }}
+          />
+        </DetailSection>
+
+        {tools.saving && (
+          <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
+            <Loader2 className='size-3.5 animate-spin' aria-hidden />
+            Saving…
+          </span>
+        )}
+
+        <BrowseSubagentsDialog
+          open={tools.manage === 'subagents'}
+          onOpenChange={(open): void => {
+            if (!open) tools.closeManage();
+          }}
+          catalog={subagents.entries}
           loading={subagents.loading}
-          emptyLabel='No subagents added yet.'
-          canEdit={canEdit}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item => {
-            const entry = subagents.entries.find(candidate => candidate.name === item.key);
-            if (!entry) return;
-            tools.commit(disableSubagent(saved, entry), `${item.name} removed`);
-          }}
+          isError={subagents.isError}
+          onRetry={subagents.refetch}
+          selection={tools.draft}
+          onSelectionChange={tools.setDraft}
+          suggested={[]}
         />
-      </DetailSection>
 
-      <DetailSection
-        label='MCP Tools'
-        info='Tools this agent calls directly on connected integrations'
-        trailing={trailingFor('MCP tools', 'mcp')}
-        trailingAlign='end'
-      >
-        <DetailListCard
-          items={mcpItems}
+        <BrowseMcpsDialog
+          open={tools.manage === 'mcp'}
+          onOpenChange={(open): void => {
+            if (!open) tools.closeManage();
+          }}
+          catalog={mcp.entries}
+          connectedServerIds={mcp.connectedServerIds}
           loading={mcp.loading}
-          emptyLabel='No MCP tools added yet.'
-          canEdit={canEdit}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item => {
-            const entry = mcp.entries.find(candidate => candidate.slug === item.key);
-            if (!entry) return;
-            tools.commit(disableMcpEntry(mcp.entries, saved, entry), `${item.name} removed`);
-          }}
+          isError={mcp.isError}
+          onRetry={mcp.refetch}
+          selection={tools.draft}
+          onSelectionChange={tools.setDraft}
+          suggested={[]}
         />
-      </DetailSection>
 
-      <DetailSection
-        label='Built-In tools'
-        info='Tools that ship with the platform, no connection needed'
-        trailing={trailingFor('built-in tools', 'builtin')}
-        trailingAlign='end'
-      >
-        <DetailListCard
-          items={builtinItems}
+        <BrowseBuiltinToolsDialog
+          open={tools.manage === 'builtin'}
+          onOpenChange={(open): void => {
+            if (!open) tools.closeManage();
+          }}
+          catalog={builtin.entries}
           loading={builtin.loading}
-          emptyLabel='No built-in tools added yet.'
-          canEdit={canEdit}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item => {
-            const entry = builtin.entries.find(candidate => candidate.source === item.key);
-            if (!entry) return;
-            tools.commit(disableBuiltinEntry(saved, entry), `${item.name} removed`);
-          }}
+          isError={builtin.isError}
+          onRetry={builtin.refetch}
+          selection={tools.draft}
+          onSelectionChange={tools.setDraft}
+          suggested={[]}
         />
-      </DetailSection>
-
-      {tools.saving && (
-        <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
-          <Loader2 className='size-3.5 animate-spin' aria-hidden />
-          Saving…
-        </span>
-      )}
-
-      <BrowseSubagentsDialog
-        open={tools.manage === 'subagents'}
-        onOpenChange={open => {
-          if (!open) tools.closeManage();
-        }}
-        catalog={subagents.entries}
-        loading={subagents.loading}
-        isError={subagents.isError}
-        onRetry={subagents.refetch}
-        selection={tools.draft}
-        onSelectionChange={tools.setDraft}
-        suggested={[]}
-      />
-
-      <BrowseMcpsDialog
-        open={tools.manage === 'mcp'}
-        onOpenChange={open => {
-          if (!open) tools.closeManage();
-        }}
-        catalog={mcp.entries}
-        connectedServerIds={mcp.connectedServerIds}
-        loading={mcp.loading}
-        isError={mcp.isError}
-        onRetry={mcp.refetch}
-        selection={tools.draft}
-        onSelectionChange={tools.setDraft}
-        suggested={[]}
-      />
-
-      <BrowseBuiltinToolsDialog
-        open={tools.manage === 'builtin'}
-        onOpenChange={open => {
-          if (!open) tools.closeManage();
-        }}
-        catalog={builtin.entries}
-        loading={builtin.loading}
-        isError={builtin.isError}
-        onRetry={builtin.refetch}
-        selection={tools.draft}
-        onSelectionChange={tools.setDraft}
-        suggested={[]}
-      />
-    </div>
+      </DetailStack>
+    </DetailSection>
   );
+}
+
+export function AgentToolsTabV2({
+  agent,
+  canEdit,
+  layout = 'list',
+  heading = 'Tools',
+}: {
+  agent: Agent;
+  canEdit: boolean;
+  layout?: 'list' | 'chips';
+  heading?: string | false;
+}): ReactElement {
+  const tools = useAgentToolSelection(agent);
+
+  if (layout === 'chips') {
+    const body = (
+      <div className='flex w-full flex-col gap-8'>
+        {!canEdit && <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>}
+        <AgentToolChips canEdit={canEdit} tools={tools} trackName='Digital Twin configuration' />
+      </div>
+    );
+    if (heading === false) return body;
+    return (
+      <DetailSection heading='section' label={heading}>
+        {body}
+      </DetailSection>
+    );
+  }
+
+  return <AgentToolsList canEdit={canEdit} tools={tools} />;
 }

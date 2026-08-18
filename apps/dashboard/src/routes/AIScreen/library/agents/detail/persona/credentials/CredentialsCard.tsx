@@ -2,12 +2,15 @@ import { useState, type ReactElement } from 'react';
 import { ChevronBigDown } from '@xyne/icons';
 import { Pill } from '../../../../shared/primitives/Pill';
 import {
-  DetailCard,
+  DETAIL_CONTROL_CLASS_FOR,
+  DetailGroup,
+  DetailLockedNote,
   DetailRow,
   DetailSection,
-  DetailLockedNote,
   DetailValue,
   ReadOnlyBadge,
+  type DetailHeading,
+  type DetailTypeScale,
 } from '../../../../shared/primitives/DetailPrimitives';
 import { AgentKeysDialog } from './AgentKeysDialog';
 import { useAgentCredentials } from './useAgentCredentials';
@@ -16,9 +19,19 @@ interface CredentialsCardProps {
   slug: string;
   canRead: boolean;
   canManage: boolean;
+  className?: string;
+  heading?: DetailHeading;
+  typeScale?: DetailTypeScale;
 }
 
-export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardProps): ReactElement {
+export function CredentialsCard({
+  slug,
+  canRead,
+  canManage,
+  className,
+  heading = 'section',
+  typeScale = 'library',
+}: CredentialsCardProps): ReactElement {
   const [keysOpen, setKeysOpen] = useState(false);
   const { data: credentials } = useAgentCredentials(slug, canRead);
 
@@ -28,9 +41,12 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
     <DetailSection
       label='Credentials'
       info='Which keys this agent calls providers with'
+      heading={heading}
+      typeScale={typeScale}
+      {...(className === undefined ? {} : { className })}
       {...(canManage ? {} : { trailing: <ReadOnlyBadge /> })}
     >
-      <DetailCard>
+      <DetailGroup typeScale={typeScale}>
         {!canManage && (
           <DetailLockedNote>
             {canRead
@@ -38,13 +54,14 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
               : 'Only the owner or an admin can view and change agent keys.'}
           </DetailLockedNote>
         )}
-        <DetailRow title='Spaces' hint='Platform default no key required'>
+        <DetailRow title='Spaces' hint='Platform default no key required' typeScale={typeScale}>
           <Pill tone='success'>Always Available</Pill>
         </DetailRow>
         <DetailRow
           title='Agent keys'
           hint='Everyone falls through to their own provider, or to Spaces'
           last
+          typeScale={typeScale}
         >
           {canRead ? (
             <button
@@ -52,16 +69,16 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
               onClick={() => setKeysOpen(true)}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: open agent keys'
-              className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm font-normal leading-5 text-foreground transition-colors hover:bg-muted'
+              className={DETAIL_CONTROL_CLASS_FOR[typeScale]}
             >
               {configured > 0 ? `${configured} configured` : 'Configure'}
-              <ChevronBigDown className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+              <ChevronBigDown className='size-5 shrink-0 text-foreground' aria-hidden />
             </button>
           ) : (
             <DetailValue>—</DetailValue>
           )}
         </DetailRow>
-      </DetailCard>
+      </DetailGroup>
 
       <AgentKeysDialog
         open={keysOpen}
