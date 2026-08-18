@@ -62,6 +62,7 @@ import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { artifactCta } from './artifactCtaPolicy';
+import { buildSdlcArtifactCreationPrompt } from './artifactCreationPrompt';
 import { baselineApprovalAction } from './baselinePolicy';
 import { shouldLoadSdlcWikiPages, shouldLoadSdlcWikiRun } from './sdlcWikiQueryPolicy';
 import {
@@ -181,7 +182,6 @@ export default function SdlcScreen(): ReactElement {
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<ArtifactKind | null>(null);
   const [artifactTitle, setArtifactTitle] = useState('');
-  const [artifactAiDraft, setArtifactAiDraft] = useState(false);
   const [artifactAiPrompt, setArtifactAiPrompt] = useState('');
   const [parentCanvasId, setParentCanvasId] = useState('');
   const [startWorkPicker, setStartWorkPicker] = useState<{
@@ -193,7 +193,6 @@ export default function SdlcScreen(): ReactElement {
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
   const [linkTargetType, setLinkTargetType] = useState('MESSAGE');
   const [linkTargetId, setLinkTargetId] = useState('');
-  const [pendingArtifactExecutionId, setPendingArtifactExecutionId] = useState<string | null>(null);
   const automaticAccessChecksRef = useRef(new Set<string>());
   const externalDebuggerTarget = useExternalDebuggerStore(state => state.target);
   const openExternalDebugger = useExternalDebuggerStore(state => state.open);
@@ -667,21 +666,6 @@ export default function SdlcScreen(): ReactElement {
     [location.search, navigate, ownerHasConversations],
   );
 
-  useEffect(() => {
-    if (!pendingArtifactExecutionId || !repoId) return;
-    const created = canvases.find(
-      canvas => metadataOf(canvas.metadata)['workflowExecutionId'] === pendingArtifactExecutionId,
-    );
-    if (!created) return;
-    setPendingArtifactExecutionId(null);
-    toast.success('Claw created the editable SDLC canvas');
-    navigateWithinSdlc(
-      `/sdlc/${repoId}/${section}`,
-      `?canvas=${encodeURIComponent(created.id)}`,
-      resolveCanvasDiscussionOwner(created.id, canvases, links)?.canvasId ?? null,
-    );
-  }, [canvases, navigateWithinSdlc, pendingArtifactExecutionId, repoId, links, section]);
-
   const openCanvas = (canvasId: string): void => {
     if (!repoId) return;
     setRelatedSourceId(null);
@@ -807,11 +791,12 @@ export default function SdlcScreen(): ReactElement {
   ]);
 
   const askSdlcAssistant = useCallback(
-    (query: string, canvas: { canvasId: string; title: string }): void => {
+    (query: string, canvas?: { canvasId: string; title: string }, forceFreshChat = false): void => {
       if (!repo || repo instanceof Error || !repo.channelId) return;
       const assistantState = xyneAIActor.getSnapshot();
       const pinnedContext = assistantState.context.researchContext;
       const needsFreshChat =
+        forceFreshChat ||
         !assistantState.matches('open') ||
         selectedAgentSlug !== 'sdlc-agent' ||
         assistantState.context.channelId !== repo.channelId ||
@@ -826,7 +811,7 @@ export default function SdlcScreen(): ReactElement {
         contextId: repo.channelId,
         channelId: repo.channelId,
         startFreshChat: needsFreshChat,
-        canvasInfo: canvas,
+        ...(canvas && { canvasInfo: canvas }),
         researchContext: { type: 'repository', id: repo.id, name: repo.name },
         initialQuery: query,
       });
@@ -927,26 +912,29 @@ export default function SdlcScreen(): ReactElement {
   }, [openSdlcAssistant, sdlcChatTab]);
 
   const createArtifact = async (): Promise<void> => {
-    if (!repoId || !artifactDialog || !artifactTitle.trim()) return;
-    const response = await apiInstance.post<{
-      artifact: { canvasId?: string; executionId?: string; conversationId?: string };
-    }>(`/sdlc/repositories/${repoId}/artifacts`, {
+    if (!repoId || !repo || repo instanceof Error || !artifactDialog || !artifactTitle.trim())
+      return;
+    const parentPrd =
+      artifactDialog === 'TECH_DOC' ? prds.find(prd => prd.id === parentCanvasId) : undefined;
+    if (artifactDialog === 'TECH_DOC' && !parentPrd) return;
+    const query = buildSdlcArtifactCreationPrompt({
       kind: artifactDialog,
       title: artifactTitle.trim(),
-      content: [],
-      generateWithAi: artifactAiDraft,
-      ...(artifactAiPrompt.trim() && { aiPrompt: artifactAiPrompt.trim() }),
-      ...(artifactDialog === 'TECH_DOC' && { parentCanvasId }),
+      repositoryName: repo.name,
+      ...(artifactAiPrompt.trim() && { direction: artifactAiPrompt.trim() }),
+      ...(parentPrd && {
+        parentPrd: { canvasId: parentPrd.id, title: parentPrd.title },
+      }),
     });
-    const canvasId = response.data.artifact.canvasId;
-    const executionId = response.data.artifact.executionId;
+    askSdlcAssistant(
+      query,
+      parentPrd ? { canvasId: parentPrd.id, title: parentPrd.title } : undefined,
+      true,
+    );
     setArtifactDialog(null);
     setArtifactTitle('');
-    setArtifactAiDraft(false);
     setArtifactAiPrompt('');
     setParentCanvasId('');
-    if (executionId) setPendingArtifactExecutionId(executionId);
-    if (canvasId) openCanvas(canvasId);
   };
 
   const sendStartWork = useCallback(
@@ -1830,13 +1818,7 @@ export default function SdlcScreen(): ReactElement {
           className='p-6'
           onSubmit={event => {
             event.preventDefault();
-            void call(
-              'artifact',
-              createArtifact,
-              artifactAiDraft
-                ? `${artifactDialog === 'PRD' ? 'PRD' : 'Tech Doc'} generation started in Claw`
-                : `${artifactDialog === 'PRD' ? 'PRD' : 'Tech Doc'} created`,
-            );
+            void call('artifact', createArtifact, 'Creation request sent to Ask AI');
           }}
         >
           <h2 className='text-lg font-semibold'>
@@ -1877,32 +1859,18 @@ export default function SdlcScreen(): ReactElement {
               </select>
             </>
           )}
-          <label className='mt-4 flex items-center gap-2 text-sm font-medium'>
-            <input
-              type='checkbox'
-              checked={artifactAiDraft}
-              onChange={event => setArtifactAiDraft(event.target.checked)}
-              data-track-category='SdlcHub'
-              data-track-name='ArtifactAiDraftChanged'
-            />
-            Draft content with Xyne AI
+          <label htmlFor='sdlc-artifact-ai-prompt' className='mt-4 block text-sm font-medium'>
+            Direction <span className='font-normal text-muted-foreground'>(optional)</span>
           </label>
-          {artifactAiDraft && (
-            <>
-              <label htmlFor='sdlc-artifact-ai-prompt' className='mt-4 block text-sm font-medium'>
-                AI direction <span className='font-normal text-muted-foreground'>(optional)</span>
-              </label>
-              <textarea
-                id='sdlc-artifact-ai-prompt'
-                value={artifactAiPrompt}
-                onChange={event => setArtifactAiPrompt(event.target.value)}
-                className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
-                placeholder='What should this draft emphasize?'
-                data-track-category='SdlcHub'
-                data-track-name='ArtifactAiPromptChanged'
-              />
-            </>
-          )}
+          <textarea
+            id='sdlc-artifact-ai-prompt'
+            value={artifactAiPrompt}
+            onChange={event => setArtifactAiPrompt(event.target.value)}
+            className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
+            placeholder='What should Ask AI emphasize?'
+            data-track-category='SdlcHub'
+            data-track-name='ArtifactAiPromptChanged'
+          />
           <div className='mt-6 flex justify-end gap-2'>
             <Button type='button' variant='outline' onClick={() => setArtifactDialog(null)}>
               Cancel
@@ -1912,7 +1880,7 @@ export default function SdlcScreen(): ReactElement {
               loading={busy === 'artifact'}
               disabled={!artifactTitle.trim() || (artifactDialog === 'TECH_DOC' && !parentCanvasId)}
             >
-              {artifactAiDraft ? 'Generate editable draft' : 'Create canvas'}
+              Ask AI to create
             </Button>
           </div>
         </form>

@@ -139,7 +139,6 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
 
 export const SDLC_REQUIRED_TOOLS = {
   baseline: [SDLC_TOOL_NAMES.mutateArtifact],
-  artifact: [SDLC_TOOL_NAMES.mutateArtifact],
   work: ["sandbox-repo-setup", "sandbox-run", SDLC_TOOL_NAMES.createPullRequest],
   wikiSurvey: [SDLC_TOOL_NAMES.listArtifacts, SDLC_TOOL_NAMES.gitContext],
   wikiPage: [SDLC_TOOL_NAMES.mutateArtifact],

@@ -262,7 +262,7 @@ export interface S2SRunAgentRequest {
   context?: string;
   workspaceId?: string;
   executionProfile?: 'sdlc';
-  sdlcOperation?: 'baseline' | 'artifact' | 'work' | 'wiki';
+  sdlcOperation?: 'baseline' | 'work' | 'wiki';
   sdlcWikiRole?:
     | 'BOOTSTRAP_SURVEY'
     | 'BOOTSTRAP_PAGE'

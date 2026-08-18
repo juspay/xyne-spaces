@@ -1,6 +1,5 @@
 import type {
   AttachSdlcRepositoryInput,
-  CreateSdlcArtifactInput,
   CreateSdlcClawArtifactInput,
   CreateSdlcLinkInput,
   UpdateSdlcBaselineDraftInput,
@@ -40,8 +39,6 @@ export interface SdlcArtifact {
   kind: 'BASELINE' | 'PRD' | 'TECH_DOC';
   viewAccessId?: string;
   url?: string;
-  executionId?: string;
-  conversationId?: string;
 }
 
 export interface SdlcLink {
@@ -75,11 +72,6 @@ export interface SdlcHub {
     repoId: string,
     conversationId: string
   ): Promise<SdlcRepositoryRunContext>;
-  createArtifact(
-    actor: SdlcActor,
-    repoId: string,
-    input: CreateSdlcArtifactInput
-  ): Promise<SdlcArtifact>;
   createArtifactFromClaw(
     actor: SdlcActor,
     input: CreateSdlcClawArtifactInput

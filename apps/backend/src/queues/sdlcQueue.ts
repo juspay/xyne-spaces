@@ -12,7 +12,7 @@ export type SdlcJobData = (
       userId: string;
       realFailures?: number;
     }
-  | { type: 'SETUP' | 'ARTIFACT' | 'WORK' | 'WIKI'; repoId: string; executionId: string }
+  | { type: 'SETUP' | 'WORK' | 'WIKI'; repoId: string; executionId: string }
 ) & { capacityBlockedAt?: number };
 
 export interface SdlcAccessCheckState {
@@ -90,10 +90,6 @@ class SdlcQueue {
 
   async enqueueSetup(executionId: string, repoId: string): Promise<void> {
     await this.enqueue({ type: 'SETUP', executionId, repoId });
-  }
-
-  async enqueueArtifact(executionId: string, repoId: string): Promise<void> {
-    await this.enqueue({ type: 'ARTIFACT', executionId, repoId });
   }
 
   async enqueueWork(executionId: string, repoId: string): Promise<void> {

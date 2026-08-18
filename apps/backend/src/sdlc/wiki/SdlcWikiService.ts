@@ -73,46 +73,6 @@ export class SdlcWikiService implements SdlcWiki {
       )
       .sort((left, right) => left.path.localeCompare(right.path));
   }
-
-  async repairPreview(
-    actor: SdlcWikiActor,
-    repoId: string
-  ): Promise<Array<{
-    path: string;
-    action: 'archive' | 'review';
-    reason: string;
-    canvasId: string;
-    preservesCanvasIdentity: true;
-    preservesVersionHistory: true;
-    preservesSourceEvidence: true;
-    applied: false;
-  }>> {
-    const pages = await this.listPages(actor, repoId);
-    const preview: Awaited<ReturnType<SdlcWikiService['repairPreview']>> = [];
-    const proposal = (
-      page: SdlcWikiPageSummary,
-      action: 'archive' | 'review',
-      reason: string
-    ) => ({
-      path: page.path,
-      action,
-      reason,
-      canvasId: page.canvasId,
-      preservesCanvasIdentity: true as const,
-      preservesVersionHistory: true as const,
-      preservesSourceEvidence: true as const,
-      applied: false as const,
-    });
-    for (const page of pages) {
-      if (/^(?:scratch|tmp|draft)\//i.test(page.path)) {
-        preview.push(proposal(page, 'archive', 'Active scratch page'));
-      }
-      else if (/^archive\//i.test(page.path)) {
-        preview.push(proposal(page, 'review', 'Archive path is still active'));
-      }
-    }
-    return preview;
-  }
 }
 
 export const sdlcWiki = new SdlcWikiService();

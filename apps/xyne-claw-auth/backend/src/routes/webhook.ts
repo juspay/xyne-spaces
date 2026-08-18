@@ -3672,7 +3672,7 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
-    sdlcOperation?: "baseline" | "artifact" | "work" | "wiki";
+    sdlcOperation?: "baseline" | "work" | "wiki";
     sdlcWikiRole?:
       | "BOOTSTRAP_SURVEY"
       | "BOOTSTRAP_PAGE"
@@ -4027,10 +4027,7 @@ export async function handleAutomationWebhook(
             },
             required: ["created", "canvasId", "artifactKind"],
           },
-          requireToolsBeforeSubmit:
-            payload.sdlcOperation === "baseline"
-              ? [...SDLC_REQUIRED_TOOLS.baseline]
-              : [...SDLC_REQUIRED_TOOLS.artifact],
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
         };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile

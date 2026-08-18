@@ -485,16 +485,6 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
 
-export const createSdlcArtifactSchema = z.object({
-  kind: z.enum(["PRD", "TECH_DOC"]),
-  title: z.string().trim().min(1).max(255),
-  content: z.array(z.unknown()).default([]),
-  parentCanvasId: z.string().min(1).optional(),
-  generateWithAi: z.boolean().default(false),
-  aiPrompt: z.string().trim().max(5_000).optional(),
-});
-export type CreateSdlcArtifactInput = z.infer<typeof createSdlcArtifactSchema>;
-
 export const createSdlcClawArtifactSchema = z
   .object({
     repoId: z.string().min(1),
@@ -536,16 +526,10 @@ export const updateSdlcClawArtifactSchema = z
   .object({
     repoId: z.string().min(1),
     kind: z.enum(["PRD", "TECH_DOC"]),
-    canvasId: z.string().min(1).optional(),
-    // Compatibility for tool sessions started before canvasId became canonical.
-    viewAccessId: z.string().min(1).optional(),
+    canvasId: z.string().min(1),
     title: z.string().trim().min(1).max(255).optional(),
     markdown: z.string().min(1).max(5_000_000),
     sourceReferences: sdlcSourceReferencesSchema,
-  })
-  .refine((input) => Boolean(input.canvasId || input.viewAccessId), {
-    message: "canvasId is required",
-    path: ["canvasId"],
   });
 export type UpdateSdlcClawArtifactInput = z.infer<
   typeof updateSdlcClawArtifactSchema

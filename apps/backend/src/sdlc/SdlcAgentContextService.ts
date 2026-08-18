@@ -7,7 +7,7 @@ import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
 import { issueSdlcInteractiveGrant } from './vcs/sdlcInteractiveGrant';
 
-export type SdlcAgentOperation = 'interactive' | 'baseline' | 'artifact' | 'work' | 'wiki';
+export type SdlcAgentOperation = 'interactive' | 'baseline' | 'work' | 'wiki';
 export type SdlcWikiAgentRole =
   | 'BOOTSTRAP_SURVEY'
   | 'BOOTSTRAP_PAGE'
