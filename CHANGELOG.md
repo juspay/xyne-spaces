@@ -1,3 +1,10 @@
+## [1.189.8](https://github.com/juspay/xyne-spaces/compare/v1.189.7...v1.189.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* round Xyne AI main panel corners to match chat ([#654](https://github.com/juspay/xyne-spaces/issues/654)) ([7f5ea4b](https://github.com/juspay/xyne-spaces/commit/7f5ea4ba1e6d24daa39a7aad4896341b6a92f325))
+
 ## [1.189.7](https://github.com/juspay/xyne-spaces/compare/v1.189.6...v1.189.7) (2026-08-18)
 
 
