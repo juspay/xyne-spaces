@@ -94,82 +94,10 @@ const DEFAULT_ADMIN_USER = {
   status: UserStatus.ACTIVE,
 };
 
-const EXTRA_ADMIN_USERS = [
-  {
-    name: 'Ganesh Pendem',
-    email: 'pendemganesh2003@gmail.com',
-    authProvider: AuthProvider.GOOGLE,
-    providerUserId: 'google-pendemganesh2003@gmail.com',
-    status: UserStatus.ACTIVE,
-  },
-  {
-    name: 'Ganesh Pendem',
-    email: 'ganesh.pendem@juspay.in',
-    authProvider: AuthProvider.GOOGLE,
-    providerUserId: 'google-ganesh.pendem@juspay.in',
-    status: UserStatus.ACTIVE,
-  },
-];
-
 async function main() {
   console.log('🚀 Starting ACL system seeding...');
 
   try {
-    // Step 0: Create default organization and workspace (must be first — groups need workspaceId)
-    console.log('\n🏢 Creating default organization and workspace...');
-    let defaultWorkspaceId: string;
-    let defaultOrgId: string;
-    {
-      let defaultOrg = await prisma.organization.findFirst({ where: { name: 'Xyne Default' } });
-      if (!defaultOrg) {
-        defaultOrg = await prisma.organization.create({
-          data: { name: 'Xyne Default', orgId: 'xyne-default-org', createdBy: 'system' },
-        });
-        console.log('  ✅ Created default organization');
-      } else {
-        console.log('  ✅ Default organization already exists');
-      }
-      defaultOrgId = defaultOrg.orgId;
-
-      let defaultWorkspace = await prisma.workspace.findFirst({ where: { name: 'Default Workspace' } });
-      if (!defaultWorkspace) {
-        defaultWorkspace = await prisma.workspace.create({
-          data: {
-            name: 'Default Workspace',
-            orgId: defaultOrg.orgId,
-            createdBy: 'system',
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          },
-        });
-        console.log('  ✅ Created default workspace');
-        await prisma.project.create({
-          data: {
-            name: 'Direct Messages',
-            code: 'DM',
-            description: 'DM project for direct message channels',
-            type: ProjectType.DM,
-            workspaceId: defaultWorkspace.id,
-            createdBy: 'system',
-          },
-        });
-        console.log('  ✅ Created DM project for default workspace');
-      } else {
-        console.log('  ✅ Default workspace already exists');
-      }
-      defaultWorkspaceId = defaultWorkspace.id;
-
-      const existingLink = await prisma.workspaceOrganization.findFirst({
-        where: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id },
-      });
-      if (!existingLink) {
-        await prisma.workspaceOrganization.create({
-          data: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id, role: WorkspaceRole.OWNER },
-        });
-        console.log('  ✅ Linked organization to workspace');
-      }
-    }
-
     // Step 1: Create essential resources
     console.log('\n📦 Creating essential resources...');
     const createdResources = new Map<string, string>();
@@ -202,7 +130,7 @@ async function main() {
       try {
         // Check if group already exists
         let group = await prisma.userGroup.findUnique({
-          where: { workspaceId_name: { workspaceId: defaultWorkspaceId, name: groupData.name } }
+          where: { name: groupData.name }
         });
 
         if (group) {
@@ -212,8 +140,7 @@ async function main() {
           // Create new group
           group = await repositories.userGroups.create({
             name: groupData.name,
-            description: groupData.description,
-            workspaceId: defaultWorkspaceId,
+            description: groupData.description
           });
           createdGroups.set(groupData.name, group.id);
           console.log(`  ✅ Created user group: ${groupData.name}`);
@@ -236,12 +163,13 @@ async function main() {
 
           try {
             // Check if permission already exists
-            const existingPermission = await prisma.resourceAccess.findFirst({
+            const existingPermission = await prisma.resourceAccess.findUnique({
               where: {
-                groupId: group.id,
-                resourceId: resourceId,
-                accessType: permission.accessType,
-                workspaceId: defaultWorkspaceId,
+                groupId_resourceId_accessType: {
+                  groupId: group.id,
+                  resourceId: resourceId,
+                  accessType: permission.accessType
+                }
               }
             });
 
@@ -254,8 +182,7 @@ async function main() {
             await repositories.resourceAccess.create({
               groupId: group.id,
               resourceId: resourceId,
-              accessType: permission.accessType,
-              workspaceId: defaultWorkspaceId,
+              accessType: permission.accessType
             });
             console.log(`    ✅ Granted ${permission.accessType} access to ${permission.resourceName}`);
           } catch (error) {
@@ -266,6 +193,82 @@ async function main() {
         console.error(`  ❌ Failed to create group ${groupData.name}:`, error);
         throw error;
       }
+    }
+
+    // Step 4: Create default organization and workspace
+    console.log('\n🏢 Creating default organization and workspace...');
+    let defaultWorkspaceId: string;
+    try {
+      // Check if default org exists
+      let defaultOrg = await prisma.organization.findFirst({
+        where: { name: 'Xyne Default' }
+      });
+
+      if (!defaultOrg) {
+        defaultOrg = await prisma.organization.create({
+          data: {
+            name: 'Xyne Default',
+            orgId: 'xyne-default-org',
+            createdBy: 'system',
+          }
+        });
+        console.log('  ✅ Created default organization');
+      } else {
+        console.log('  ✅ Default organization already exists');
+      }
+
+      // Check if default workspace exists
+      let defaultWorkspace = await prisma.workspace.findFirst({
+        where: { name: 'Default Workspace' }
+      });
+
+      if (!defaultWorkspace) {
+        defaultWorkspace = await prisma.workspace.create({
+          data: {
+            name: 'Default Workspace',
+            orgId: defaultOrg.orgId,
+            createdBy: 'system',
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
+          }
+        });
+        console.log('  ✅ Created default workspace');
+
+        // Create DM project for the workspace
+        await prisma.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project for direct message channels',
+            type: ProjectType.DM,
+            workspaceId: defaultWorkspace.id,
+            createdBy: 'system',
+          }
+        });
+        console.log('  ✅ Created DM project for default workspace');
+      } else {
+        console.log('  ✅ Default workspace already exists');
+      }
+
+      defaultWorkspaceId = defaultWorkspace.id;
+
+      // Link org to workspace if not already linked
+      const existingLink = await prisma.workspaceOrganization.findFirst({
+        where: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id }
+      });
+      if (!existingLink) {
+        await prisma.workspaceOrganization.create({
+          data: {
+            orgId: defaultOrg.orgId,
+            workspaceId: defaultWorkspace.id,
+            role: WorkspaceRole.OWNER,
+          }
+        });
+        console.log('  ✅ Linked organization to workspace');
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to create default organization/workspace:', error);
+      throw error;
     }
 
     // Step 5: Create default admin user
@@ -320,8 +323,7 @@ async function main() {
         }
 
         // Create orgMember FIRST (to get the memberId)
-        const existingOrgMember = await prisma.orgMember.findUnique({ where: { email: DEFAULT_ADMIN_USER.email } });
-        const orgMember = existingOrgMember ?? await prisma.orgMember.create({
+        const orgMember = await prisma.orgMember.create({
           data: {
             orgId: defaultOrg.orgId,
             email: DEFAULT_ADMIN_USER.email,
@@ -335,6 +337,7 @@ async function main() {
         adminUser = await repositories.users.create({
           ...DEFAULT_ADMIN_USER,
           workspaceId: defaultWorkspaceId,
+          userGroupId: adminGroupId,
           role: WorkspaceRole.ADMIN,
           orgMemberId: orgMemberId,
         });
@@ -390,40 +393,6 @@ async function main() {
     } catch (error) {
       console.error('  ❌ Failed to create default admin user:', error);
       throw error;
-    }
-
-    // Step 4b: Create extra admin users
-    console.log('\n👤 Creating extra admin users...');
-    const adminGroupId2 = createdGroups.get('ADMIN');
-    const defaultOrg2 = await prisma.organization.findFirst();
-    if (adminGroupId2 && defaultWorkspaceId && defaultOrg2) {
-      for (const userData of EXTRA_ADMIN_USERS) {
-        try {
-          let orgMember = await prisma.orgMember.findUnique({ where: { email: userData.email } });
-          if (!orgMember) {
-            orgMember = await prisma.orgMember.create({
-              data: { email: userData.email, orgId: defaultOrg2.orgId, role: OrgRole.ADMIN },
-            });
-          }
-          const existing = await repositories.users.findByEmail(userData.email, defaultWorkspaceId);
-          if (!existing) {
-            const newUser = await repositories.users.create({
-              ...userData,
-              workspaceId: defaultWorkspaceId,
-              role: WorkspaceRole.ADMIN,
-              orgMemberId: orgMember.memberId,
-            });
-            await prisma.userGroupMapping.create({
-              data: { userId: newUser.id, userGroupId: adminGroupId2, workspaceId: defaultWorkspaceId },
-            });
-            console.log(`  ✅ Created admin user: ${userData.email}`);
-          } else {
-            console.log(`  ✅ User already exists: ${userData.email}`);
-          }
-        } catch (err) {
-          console.error(`  ❌ Failed to create user ${userData.email}:`, err);
-        }
-      }
     }
 
     // Step 5: Seed org LLM service account credentials from env

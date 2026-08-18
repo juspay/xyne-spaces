@@ -119,7 +119,7 @@ export class ExternalMessageRepository {
     return await this.db.externalMessage.findFirst({
       where: {
         externalSourceId,
-        externalThreadId: { startsWith: igsid },
+        externalThreadId: { startsWith: `${igsid}:` },
         direction: 'INCOMING',
       },
       orderBy: { createdAt: 'desc' },

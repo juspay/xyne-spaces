@@ -18,7 +18,6 @@ import {
   Share2,
   Plus,
   Trash2,
-  Instagram,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -146,6 +145,7 @@ interface AddChannelFormProps {
       installedAppId?: string;
       platform?: 'web' | 'electron';
       applications?: GooglePlayApplicationInput[];
+      socialMediaProvider?: 'instagram' | 'google-play';
     },
   ) => void;
   onCancel: () => void;
@@ -175,6 +175,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
     createGooglePlayApplication(),
   ]);
+  const [socialMediaProvider, setSocialMediaProvider] = useState<'instagram' | 'google-play'>('instagram');
   const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
@@ -285,6 +286,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
         if (
           deskType === DeskType.SOCIAL_MEDIA &&
+          socialMediaProvider === 'google-play' &&
           (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
         )
           return;
@@ -320,15 +322,20 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'SOCIAL_MEDIA',
             deskType: DeskType.SOCIAL_MEDIA,
-            applications: googlePlayApplications.map(application => ({
-              displayName: application.displayName.trim(),
-              packageName: application.packageName,
-            })),
+            socialMediaProvider,
+            platform: isElectron ? 'electron' : 'web',
+            ...(socialMediaProvider === 'google-play' && {
+              applications: googlePlayApplications.map(application => ({
+                displayName: application.displayName.trim(),
+                packageName: application.packageName,
+              })),
+            }),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -348,15 +355,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
-          });
-        } else if (deskType === DeskType.SOCIAL_MEDIA) {
-          const isElectron = typeof window.electronAPI?.openExternal === 'function';
-          onSubmit?.({
-            ...value,
-            connector: null,
-            deskType: DeskType.SOCIAL_MEDIA,
-            assigneeUserGroupId: value.assigneeUserGroupId,
-            platform: isElectron ? 'electron' : 'web',
           });
         } else {
           onSubmit?.({
@@ -405,6 +403,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
+      socialMediaProvider === 'google-play' &&
       (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
     (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
@@ -424,7 +423,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
-      if (deskType === DeskType.SOCIAL_MEDIA) {
+      if (deskType === DeskType.SOCIAL_MEDIA && socialMediaProvider === 'google-play') {
         if (googlePlayApplications.some(application => !application.displayName.trim()))
           return 'Please enter a display name for every application';
         if (
@@ -785,15 +784,26 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
               Source <span className='text-muted-foreground'>*</span>
             </label>
-            <Select value='GOOGLE_PLAY' disabled>
+            <Select
+              value={socialMediaProvider}
+              onValueChange={v => setSocialMediaProvider(v as 'instagram' | 'google-play')}
+            >
               <SelectTrigger id='social-provider' className='w-full'>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
+                <SelectItem value='instagram'>Instagram DMs</SelectItem>
+                <SelectItem value='google-play'>Google Play reviews</SelectItem>
               </SelectContent>
             </Select>
           </div>
+
+          {socialMediaProvider === 'instagram' && (
+            <p className='text-sm text-muted-foreground'>
+              You'll be redirected to Instagram to authorize access. DMs from customers will automatically create tickets in this desk.
+            </p>
+          )}
+          {socialMediaProvider === 'google-play' && (
           <div className='space-y-3'>
             <div className='flex items-center justify-between'>
               <div className='text-sm font-medium text-foreground'>
@@ -916,6 +926,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               One Google authorization will be used for every application in this channel.
             </p>
           </div>
+          )}
         </div>
       )}
 

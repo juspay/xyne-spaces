@@ -49,6 +49,8 @@ export class InstagramFlow extends BaseFlow {
             : null;
           if (fetched?.message !== undefined && fetched.from?.id) {
             const senderId = fetched.from.id;
+            // Skip messages sent by the business itself (outbound DMs)
+            if (businessIgUserId && senderId === businessIgUserId) continue;
             const senderUsername = (accessToken && businessIgUserId)
               ? (await metaGraphClient.getSenderUsername(accessToken, businessIgUserId, senderId)) ?? undefined
               : undefined;

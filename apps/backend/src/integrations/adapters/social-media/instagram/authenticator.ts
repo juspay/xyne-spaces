@@ -8,7 +8,8 @@ export class InstagramAuthenticator extends BaseAuthenticator {
     rawBody: string,
     headers: Record<string, string | string[]>,
   ): Promise<AuthResult> {
-    const signature = (headers['x-hub-signature-256'] as string) ?? '';
+    const sigHeader = headers['x-hub-signature-256'];
+    const signature = Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? '');
     // Instagram Login app webhook is signed with the Instagram App Secret,
     // not the Facebook App Secret.
     const appSecret = (config.META_IG_APP_SECRET || config.META_APP_SECRET) as string;
@@ -17,7 +18,11 @@ export class InstagramAuthenticator extends BaseAuthenticator {
       return { authenticated: false, reason: 'META_APP_SECRET not configured' };
     }
 
-    if (signature && !metaGraphClient.verifyWebhookSignature(rawBody, signature, appSecret)) {
+    if (!signature) {
+      return { authenticated: false, reason: 'Missing x-hub-signature-256 header' };
+    }
+
+    if (!metaGraphClient.verifyWebhookSignature(rawBody, signature, appSecret)) {
       return { authenticated: false, reason: 'Invalid webhook signature' };
     }
 

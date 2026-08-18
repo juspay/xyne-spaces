@@ -119,7 +119,7 @@ router.post(
         return;
       }
 
-      const { state } = await instagramOAuthStateService.create({
+      const { state, codeChallenge } = await instagramOAuthStateService.create({
         userId,
         workspaceId,
         channelName: input.name,
@@ -137,6 +137,8 @@ router.post(
         response_type: 'code',
         state,
         enable_fb_login: '0',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
       });
 
       res.json({ authUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
@@ -182,7 +184,7 @@ router.post(
         return;
       }
 
-      const { state } = await instagramOAuthStateService.create({
+      const { state, codeChallenge } = await instagramOAuthStateService.create({
         mode: 'reconnect',
         userId,
         workspaceId,
@@ -205,6 +207,8 @@ router.post(
         response_type: 'code',
         state,
         enable_fb_login: '0',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
       });
 
       res.json({ authUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
@@ -230,6 +234,16 @@ router.get(
       return;
     }
 
+    if (!code && !errorParam) {
+      redirectToDesk(req, res, {
+        workspaceId: state.workspaceId,
+        channelId: state.channelId,
+        platform: state.platform,
+        error: 'instagram_connection_failed',
+      });
+      return;
+    }
+
     if (errorParam) {
       logger.warn(`${TAG} User denied Instagram OAuth`, { error: errorParam });
       redirectToDesk(req, res, {
@@ -246,6 +260,7 @@ router.get(
       const shortLived = await metaGraphClient.exchangeCodeForToken(
         code,
         callbackUri(req),
+        state.codeVerifier,
       );
 
       // Exchange short-lived for long-lived IG User token (60 days)
@@ -254,7 +269,7 @@ router.get(
 
       // Fetch the real IG user ID + username so we know exactly which account connected.
       const { igUserId, username: igUsername } = await metaGraphClient.getMe(longLived.access_token);
-      logger.info(`${TAG} OAuth callback: connected Instagram account @${igUsername} (igUserId=${igUserId})`);
+      logger.debug(`${TAG} OAuth callback: connected Instagram account @${igUsername} (igUserId=${igUserId})`);
 
       const credentials: InstagramCredentials = {
         accessToken: longLived.access_token,
@@ -347,7 +362,7 @@ router.get(
           data: {
             name: state.channelName,
             type: ChannelType.SOCIAL_MEDIA,
-            scopeType: ChannelScopeType.TICKET,
+            scopeType: ChannelScopeType.DEFAULT,
             visibility: state.visibility === 'PUBLIC' ? ChannelVisibility.PUBLIC : ChannelVisibility.PRIVATE,
             createdBy: state.userId,
             projectId: state.projectId,
@@ -424,6 +439,24 @@ router.get(
   },
 );
 
+// GET /instagram/data-deletion-status?code=...
+// Public page Meta's App Review will load after POSTing to /instagram/data-deletion.
+// Returns a minimal HTML confirmation so the reviewer sees a real response.
+router.get(
+  '/instagram/data-deletion-status',
+  (_req: Request, res: Response): void => {
+    const code = typeof _req.query.code === 'string' ? _req.query.code : '';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(
+      `<!DOCTYPE html><html><head><title>Data Deletion Status</title></head><body>` +
+      `<h1>Data Deletion Request</h1>` +
+      `<p>Your data deletion request has been received and processed.</p>` +
+      (code ? `<p>Confirmation code: <strong>${code.replace(/[^a-zA-Z0-9-]/g, '')}</strong></p>` : '') +
+      `</body></html>`,
+    );
+  },
+);
+
 // POST /:channelId/instagram/disconnect
 router.post(
   '/:channelId/instagram/disconnect',
@@ -474,7 +507,7 @@ router.post(
       }
 
       // Verify the HMAC-SHA256 signature before trusting the payload.
-      const payload = metaGraphClient.verifySignedRequest(signedRequest, config.META_APP_SECRET);
+      const payload = metaGraphClient.verifySignedRequest(signedRequest, config.META_IG_APP_SECRET || config.META_APP_SECRET);
       if (!payload) {
         res.status(401).json({ error: 'Invalid signed_request signature' });
         return;
@@ -508,7 +541,7 @@ router.post(
         if (toDeactivate.length > 0) {
           await db.externalSource.updateMany({
             where: { id: { in: toDeactivate } },
-            data: { isActive: false },
+            data: { isActive: false, credentials: '' },
           });
           logger.info(`${TAG} Deactivated ${toDeactivate.length} source(s) for igUserId=${igUserId}`);
         }
@@ -516,7 +549,7 @@ router.post(
 
       const confirmationCode = `xyne-del-${Date.now()}`;
       res.json({
-        url: `${getFrontendUrl(req)}/privacy/deletion-status?code=${confirmationCode}`,
+        url: `${getBackendUrl(req)}/api/integrations/social-media/instagram/data-deletion-status?code=${confirmationCode}`,
         confirmation_code: confirmationCode,
       });
     } catch (error) {
