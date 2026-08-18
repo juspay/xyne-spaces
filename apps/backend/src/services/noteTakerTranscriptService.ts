@@ -136,16 +136,7 @@ class NoteTakerTranscriptService {
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
         try {
-          const existing = (await repositories.calls.findByExternalId(call.externalId))?.labels ?? [];
-          const priorTags =
-            existing.length > 0 && call.workspaceId
-              ? await tagService.getTagsByIds(existing, call.workspaceId)
-              : [];
-          const stale = new Set(priorTags.filter(t => t.method === TagMethod.LLM).map(t => t.id));
-
-          await repositories.calls.update(call.id, {
-            labels: [...new Set([...existing.filter(id => !stale.has(id)), ...labelIds])],
-          });
+          await repositories.calls.appendLabels(call.id, labelIds);
           logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
         } catch (error) {
           logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });

@@ -293,6 +293,18 @@ export class CallRepository {
     return rowsUpdated > 0;
   }
 
+  async appendLabels(callId: string, labelIds: string[]): Promise<void> {
+    if (labelIds.length === 0) return;
+    await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "labels" = (
+        SELECT array_agg(DISTINCT x) FROM unnest("labels" || ${labelIds}::text[]) AS x
+      )
+      WHERE "id" = ${callId}
+    `;
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
+  }
+
   async findById(id: string): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findUnique({
       where: { id }
