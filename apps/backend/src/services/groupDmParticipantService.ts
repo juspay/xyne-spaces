@@ -22,7 +22,6 @@ export interface AddGroupDmParticipantsParams {
   userIds: string[];
   historyScope: HistoryScope;
   includeAttachments: boolean;
-  now?: Date;
 }
 
 export interface AddedParticipant {
@@ -61,8 +60,6 @@ export class GroupDmParticipantService {
   ): Promise<AddGroupDmParticipantsResult> {
     const { channelId, currentUserId, workspaceId, userIds, historyScope, includeAttachments } =
       params;
-    const now = params.now ?? new Date();
-
     const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
     if (!dmProjectId) {
       throw new AppError('DM project not found for workspace', 500);
@@ -104,7 +101,7 @@ export class GroupDmParticipantService {
       );
     }
 
-    const cutoff = historyScopeToCutoff(historyScope, now);
+    const cutoff = historyScopeToCutoff(historyScope);
     const carriesHistory = historyScope.mode !== 'none';
 
     if (historyScope.mode === 'custom' && (!cutoff || Number.isNaN(cutoff.getTime()))) {

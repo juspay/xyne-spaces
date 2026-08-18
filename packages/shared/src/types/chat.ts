@@ -2,8 +2,8 @@ export type HistoryScopeMode = 'none' | 'today' | 'beginning' | 'custom';
 
 export type HistoryScope =
   | { mode: 'none' }
-  | { mode: 'today' }
   | { mode: 'beginning' }
+  | { mode: 'today'; from: string }
   | { mode: 'custom'; from: string };
 
 export interface AddGroupDmParticipantsRequest {
@@ -47,18 +47,10 @@ export function normalizeIncludeAttachments(input: { includeAttachments?: boolea
   return input.includeAttachments ?? true;
 }
 
-export function historyScopeToCutoff(scope: HistoryScope, now: Date): Date | null {
-  switch (scope.mode) {
-    case 'beginning':
-      return null;
-    case 'today': {
-      const startOfDay = new Date(now);
-      startOfDay.setHours(0, 0, 0, 0);
-      return startOfDay;
-    }
-    case 'custom':
-      return new Date(scope.from);
-    case 'none':
-      return null;
+export function historyScopeToCutoff(scope: HistoryScope): Date | null {
+  if (scope.mode === 'beginning' || scope.mode === 'none') {
+    return null;
   }
+  const cutoff = new Date(scope.from);
+  return Number.isNaN(cutoff.getTime()) ? null : cutoff;
 }

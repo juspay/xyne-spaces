@@ -16,24 +16,36 @@ export const HISTORY_SCOPE_OPTIONS: HistoryScopeOption[] = [
   { mode: 'custom', label: 'Custom', requiresDate: true },
 ];
 
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function parseInputDate(value: string): Date | null {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+  const parsed = new Date(year, month - 1, day);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function buildHistoryScope(mode: HistoryScopeMode, customDate: string): HistoryScope {
   switch (mode) {
     case 'none':
       return { mode: 'none' };
-    case 'today':
-      return { mode: 'today' };
     case 'beginning':
       return { mode: 'beginning' };
+    case 'today':
+      return { mode: 'today', from: startOfLocalDay(new Date()).toISOString() };
     case 'custom': {
-      const parsed = customDate ? new Date(customDate) : null;
-      const isValid = parsed !== null && !Number.isNaN(parsed.getTime());
-      return { mode: 'custom', from: isValid ? parsed.toISOString() : '' };
+      const parsed = customDate ? parseInputDate(customDate) : null;
+      return { mode: 'custom', from: parsed ? parsed.toISOString() : '' };
     }
   }
 }
 
 export function previewLowerBound(scope: HistoryScope): number | null {
-  const cutoff = historyScopeToCutoff(scope, new Date());
+  const cutoff = historyScopeToCutoff(scope);
   if (!cutoff || Number.isNaN(cutoff.getTime())) {
     return null;
   }

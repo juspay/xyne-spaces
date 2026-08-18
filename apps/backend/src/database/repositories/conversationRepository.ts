@@ -26,7 +26,7 @@ const contentForCopy = (
 const toMessageType = (value: string): MessageType =>
   (Object.values(MessageType) as string[]).includes(value) ? (value as MessageType) : MessageType.USER;
 import { BaseRepository } from './base';
-import { Conversation } from '@prisma/client';
+import { Conversation, Message, MessageAttachment } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 
 export interface CreateConversationInput {
@@ -295,6 +295,114 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
+  private async attachFilesToCopy(
+    targetConversationId: string,
+    sourceMessages: Message[],
+    attachmentsByMessage: Map<string, MessageAttachment[]>,
+    workspaceId: string
+  ): Promise<number> {
+    const carriesFiles = sourceMessages.some(
+      message => (attachmentsByMessage.get(message.messageId) ?? []).length > 0
+    );
+    if (!carriesFiles) {
+      return 0;
+    }
+
+    const targetConversation = await this.db.conversation.findUnique({
+      where: { conversationId: targetConversationId }
+    });
+    if (!targetConversation) {
+      return 0;
+    }
+
+    const copiedMessages = await this.db.message.findMany({
+      where: { conversationId: targetConversationId, isDeleted: false },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Copies preserve createdAt and insertion order, so positional pairing is exact.
+    // A length mismatch means the copy drifted; skip rather than mis-attach files.
+    if (copiedMessages.length !== sourceMessages.length) {
+      return 0;
+    }
+
+    await this.db.$transaction(async tx => {
+      for (const [index, source] of sourceMessages.entries()) {
+        const target = copiedMessages[index];
+        const files = attachmentsByMessage.get(source.messageId) ?? [];
+        if (!target || files.length === 0) {
+          continue;
+        }
+
+        await tx.messageAttachment.createMany({
+          data: files.map(attachment => ({
+            entityType: attachment.entityType,
+            entityId: target.messageId,
+            workspaceId,
+            storageProvider: attachment.storageProvider,
+            originalFilename: attachment.originalFilename,
+            mimetype: attachment.mimetype,
+            size: attachment.size,
+            width: attachment.width,
+            height: attachment.height,
+            uploadedByUserId: attachment.uploadedByUserId,
+            url: attachment.url,
+            createdBy: attachment.createdBy,
+            metadata: attachment.metadata ?? undefined,
+            conversationId: targetConversationId,
+            thumbnailUrl: attachment.thumbnailUrl,
+            uploadStatus: attachment.uploadStatus
+          }))
+        });
+
+        await tx.message.update({
+          where: { messageId: target.messageId },
+          data: { hasAttachment: true, content: source.content }
+        });
+
+        if (target.messageId === targetConversation.initialMessageId) {
+          await tx.conversation.update({
+            where: { conversationId: targetConversationId },
+            data: {
+              initial_message_md: serializeInitialMessageMd({
+                messageId: target.messageId,
+                conversationId: targetConversationId,
+                workspaceId,
+                senderId: source.senderId,
+                content: source.content,
+                msgType: toMessageType(source.msgType),
+                hasAttachment: true,
+                edited: source.edited,
+                isDeleted: false,
+                showInChannel: source.showInChannel,
+                visibleTo: source.visibleTo,
+                createdAt: source.createdAt.getTime(),
+                metadata: source.metadata ? JSON.stringify(source.metadata) : null,
+                nudgeCount: null,
+                isSent: true,
+                reactions_md: null,
+                link_preview_md: null,
+                childConversationId: null
+              })
+            }
+          });
+        }
+      }
+
+      await tx.conversation.update({
+        where: { conversationId: targetConversationId },
+        data: {
+          metadata: {
+            ...sourceMetadata(targetConversation.metadata),
+            copiedWithAttachments: true
+          }
+        }
+      });
+    });
+
+    return 1;
+  }
+
   async copyConversationsToChannel(
     sourceChannelId: string,
     targetChannelId: string,
@@ -353,20 +461,32 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
 
     const existingCopies = await this.db.conversation.findMany({
       where: { channelId: targetChannelId },
-      select: { metadata: true }
+      select: { conversationId: true, metadata: true }
     });
-    const alreadyCopied = new Set<string>();
+    const alreadyCopied = new Map<string, { conversationId: string; withAttachments: boolean }>();
     for (const row of existingCopies) {
-      const source = (row.metadata as { copiedFrom?: unknown } | null)?.copiedFrom;
-      if (typeof source === 'string') {
-        alreadyCopied.add(source);
+      const meta = row.metadata as { copiedFrom?: unknown; copiedWithAttachments?: unknown } | null;
+      if (typeof meta?.copiedFrom === 'string') {
+        alreadyCopied.set(meta.copiedFrom, {
+          conversationId: row.conversationId,
+          withAttachments: meta.copiedWithAttachments === true
+        });
       }
     }
 
     let copied = 0;
 
     for (const conversation of conversations) {
-      if (alreadyCopied.has(conversation.conversationId)) {
+      const existing = alreadyCopied.get(conversation.conversationId);
+      if (existing) {
+        if (includeAttachments && !existing.withAttachments) {
+          copied += await this.attachFilesToCopy(
+            existing.conversationId,
+            messagesByConversation.get(conversation.conversationId) ?? [],
+            attachmentsByMessage,
+            workspaceId
+          );
+        }
         continue;
       }
 
@@ -426,7 +546,11 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
             createdAt: conversation.createdAt,
             threadType: conversation.threadType,
             initial_message_md: initialMessageMd,
-            metadata: { ...sourceMetadata(conversation.metadata), copiedFrom: conversation.conversationId }
+            metadata: {
+              ...sourceMetadata(conversation.metadata),
+              copiedFrom: conversation.conversationId,
+              copiedWithAttachments: includeAttachments
+            }
           }
         });
 

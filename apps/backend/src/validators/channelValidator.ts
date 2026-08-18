@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 export const HistoryScopeSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('none') }),
-  z.object({ mode: z.literal('today') }),
+  z.object({
+    mode: z.literal('today'),
+    from: z
+      .string()
+      .refine(val => !isNaN(Date.parse(val)), { message: 'Invalid date format' }),
+  }),
   z.object({ mode: z.literal('beginning') }),
   z.object({
     mode: z.literal('custom'),
