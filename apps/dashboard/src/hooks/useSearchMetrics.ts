@@ -541,6 +541,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const pendingSearchCountRef = useRef(0);
   const latestResultsRef = useRef<DisplaySearchResult[]>([]);
   const sessionFiltersRef = useRef<Set<string>>(new Set());
+  // Guards out-of-order search responses. Each performSearch run claims the next
+  // sequence number; only the latest run is allowed to commit. A slow/stale response
+  // (e.g. a partial `from` query that resolves seconds after the completed `from:`
+  // filter) is discarded instead of overwriting fresh results with an empty payload.
+  const searchSeqRef = useRef(0);
+  // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   /**
    * Generate a unique session ID
@@ -1000,6 +1007,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
+      // Claim this run's sequence and abort any previous in-flight request so a slow,
+      // stale response can neither waste the network nor overwrite fresh results.
+      const seq = ++searchSeqRef.current;
+      const isStale = () => seq !== searchSeqRef.current;
+      searchAbortRef.current?.abort();
+      const abortController = new AbortController();
+      searchAbortRef.current = abortController;
+
       const {
         searchText,
         board: boardFilter,
@@ -1315,18 +1330,24 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             if (activeTab === TabType.ALL) {
               const currentSessionId = searchSessionId || '';
-              const vespaResponse = await searchService.vespaSearch({
-                ...searchFilters,
-                //unified rank profile filters
-                ...(effectiveRankProfile === 'unified'
-                  ? {
-                      groupBy: '',
-                      apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
-                    }
-                  : options.groupByDocType && { groupBy: 'docType' }),
-                searchId: currentSessionId,
-                presentationSummary: 'lean',
-              });
+              const vespaResponse = await searchService.vespaSearch(
+                {
+                  ...searchFilters,
+                  //unified rank profile filters
+                  ...(effectiveRankProfile === 'unified'
+                    ? {
+                        groupBy: '',
+                        apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+                      }
+                    : options.groupByDocType && { groupBy: 'docType' }),
+                  searchId: currentSessionId,
+                  presentationSummary: 'lean',
+                },
+                abortController.signal,
+              );
+
+              // A newer search superseded this one — drop this out-of-order response.
+              if (isStale()) return;
 
               // Honor the backend grouping decision: flat response => flat ALL view.
               setIsGrouped(vespaResponse.grouped);
@@ -1362,11 +1383,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
             } else {
               const currentSessionId = searchSessionId || '';
-              const results = await searchService.vespaSearch({
-                ...searchFilters,
-                searchId: currentSessionId,
-                presentationSummary: 'lean',
-              });
+              const results = await searchService.vespaSearch(
+                {
+                  ...searchFilters,
+                  searchId: currentSessionId,
+                  presentationSummary: 'lean',
+                },
+                abortController.signal,
+              );
+
+              // A newer search superseded this one — drop this out-of-order response.
+              if (isStale()) return;
+
               mergedResults = results.results;
               totalCount = results.totalCount;
               currentOffset = results.results.length;
@@ -1392,14 +1420,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             }));
           }
         } catch (searchError) {
-          setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
-          setSearchResults([]);
-          // Reset to the default (sectioned) mode so a failed search doesn't render
-          // stale results in the previous grouped/flat mode.
-          setIsGrouped(true);
+          // Ignore failures from a superseded/aborted request (e.g. axios CanceledError
+          // when a newer search aborted this one) — they must not clear fresh results.
+          if (!isStale()) {
+            setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
+            setSearchResults([]);
+            // Reset to the default (sectioned) mode so a failed search doesn't render
+            // stale results in the previous grouped/flat mode.
+            setIsGrouped(true);
+          }
         } finally {
-          setIsSearching(false);
           pendingSearchCountRef.current -= 1;
+          // Only the latest run may flip the shared loading flag off.
+          if (!isStale()) {
+            setIsSearching(false);
+          }
           if (
             pendingSearchCountRef.current === 0 &&
             latestResultsRef.current.length > 0 &&
