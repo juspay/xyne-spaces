@@ -41,7 +41,7 @@ const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "kimi-latest";
 const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmModel;
 
 export const LITELLM = {
-  url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
+  url: (process.env["LITELLM_URL"] ?? "http://localhost:4000").replace(/\/$/, ""),
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
   // Separate low-priority key for non-interactive load: automation/scheduled
   // agent runs and background curators. Keeps batch traffic from saturating

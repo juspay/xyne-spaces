@@ -297,6 +297,9 @@ export function initProviderRetryWorker(): void {
   worker.on("failed", (job, err) => {
     log.error(`[capacity-retry] job ${job?.id} failed: ${err.message}`);
   });
+  worker.on("error", (err) => {
+    log.error(`[capacity-retry] worker error: ${err.message}`);
+  });
   log.info("[capacity-retry] worker started");
 }
 
