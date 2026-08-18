@@ -9,6 +9,7 @@ import {
   computeAssignmentScores,
   type ComplexityScoreLike,
   type ExpertiseMappingLike,
+  type UserGroupMappingLike,
   type WorkloadMappingLike,
 } from './AssignmentConfigScreen.utils';
 
@@ -27,6 +28,7 @@ interface VisibilityTabProps {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   isCurrentUserGroupMember: boolean;
+  userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
 }
 
 /**
@@ -43,6 +45,7 @@ export function VisibilityTab({
   boardComplexityScores,
   expertiseMappings,
   isCurrentUserGroupMember,
+  userGroupMappings,
 }: VisibilityTabProps): ReactElement {
   const scoreRows = useMemo(
     () =>
@@ -51,13 +54,23 @@ export function VisibilityTab({
         workloadMappings,
         boardComplexityScores,
         expertiseMappings,
+        userGroupMappings,
         boards,
         selectedBoardId,
       }),
-    [users, workloadMappings, boardComplexityScores, expertiseMappings, boards, selectedBoardId],
+    [
+      users,
+      workloadMappings,
+      boardComplexityScores,
+      expertiseMappings,
+      userGroupMappings,
+      boards,
+      selectedBoardId,
+    ],
   );
 
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;
+  const hasAnyStartOffset = scoreRows.some(row => row.startOffset > 0);
 
   if (!isCurrentUserGroupMember) {
     return (
@@ -93,7 +106,7 @@ export function VisibilityTab({
           </Select>
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
-              ? 'Score = weightedActiveTasks − expertiseBonus − percentDiff. Lowest score is assigned next.'
+              ? 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus − percentDiff. Lowest score is assigned next.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>
         </div>
@@ -110,6 +123,9 @@ export function VisibilityTab({
                 {selectedBoardId ? ` (${selectedBoardName})` : ' (all boards)'}
               </th>
               <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Weighted Load</th>
+              {hasAnyStartOffset && (
+                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Cold-Start Offset</th>
+              )}
               {selectedBoardId && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
             </tr>
           </thead>
@@ -133,6 +149,11 @@ export function VisibilityTab({
                 <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
                   {row.weightedActiveTasks}
                 </td>
+                {hasAnyStartOffset && (
+                  <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
+                    {row.startOffset > 0 ? `+${row.startOffset}` : '—'}
+                  </td>
+                )}
                 {selectedBoardId && (
                   <td className='px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-foreground'>
                     {row.score !== null ? row.score.toFixed(2) : '—'}
@@ -143,7 +164,7 @@ export function VisibilityTab({
             {scoreRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={selectedBoardId ? 4 : 3}
+                  colSpan={3 + (hasAnyStartOffset ? 1 : 0) + (selectedBoardId ? 1 : 0)}
                   className='px-6 py-8 text-center text-[13px] text-muted-foreground'
                 >
                   No members to show.
@@ -157,7 +178,10 @@ export function VisibilityTab({
       <div className='rounded-2xl border border-border bg-muted/40 p-4'>
         <p className='text-[13px] leading-[1.5] text-muted-foreground'>
           Lower score is assigned first. Numbers reflect the last synced workload the engine scores
-          on. Eligibility (on-call / active / expertise) is configured in the Availability tab.
+          on. A Cold-Start Offset appears once for brand-new members so they start at parity with
+          the group instead of being flooded with tickets — it&apos;s fixed the moment it&apos;s set
+          and never decays. Eligibility (on-call / active / expertise) is configured in the
+          Availability tab.
         </p>
       </div>
     </>

@@ -1,12 +1,24 @@
 // Pure helpers for the Assignment Config "Visibility" tab.
 // Replicates the backend `pickBest` per-user score (assignmentEngine.ts) from
 // already-synced Zero data — no backend call:
-//   score = weightedActiveTasks − expertiseBonus − (percentage − currentPct)
+//   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
+//   score = effectiveActiveTasks − expertiseBonus − (percentage − currentPct)
+//
+// startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
+// a one-time, persisted value on user_group_mappings that keeps a brand-new member's
+// effective load at parity with established peers instead of flooding them from 0.
+// It's a single aggregate per (user, group) — not per board — so it's added
+// unconditionally regardless of which board is selected.
 
 export interface WorkloadMappingLike {
   userId: string;
   boardId: string;
   activeTasks: number | null;
+}
+
+export interface UserGroupMappingLike {
+  userId: string;
+  startOffset: number | null;
 }
 
 export interface ComplexityScoreLike {
@@ -33,6 +45,10 @@ export interface AssignmentScoreRow<U> {
   totalActive: number;
   /** Σ activeTasks × boardWeight, scoped to the selected board's project. */
   weightedActiveTasks: number;
+  /** One-time cold-start offset from user_group_mappings.startOffset (0 for established members). */
+  startOffset: number;
+  /** weightedActiveTasks + startOffset — what the engine actually scores on. */
+  effectiveActiveTasks: number;
   hasExpertise: boolean;
   /** Engine score for the selected board; null when no board is selected. */
   score: number | null;
@@ -78,6 +94,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   workloadMappings: readonly WorkloadMappingLike[] | null | undefined;
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
+  userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
   boards: readonly BoardLike[];
   selectedBoardId: string | null;
 }): AssignmentScoreRow<U>[] {
@@ -86,6 +103,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     workloadMappings,
     boardComplexityScores,
     expertiseMappings,
+    userGroupMappings,
     boards,
     selectedBoardId,
   } = params;
@@ -94,6 +112,9 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const projectBoardIds = computeProjectBoardIds(boards, selectedBoardId);
   const totalTicketsOnBoard = computeTotalTicketsOnBoard(workloadMappings, selectedBoardId);
   const expertiseByUser = new Map((expertiseMappings ?? []).map(e => [e.userId, e] as const));
+  const startOffsetByUser = new Map(
+    (userGroupMappings ?? []).map(m => [m.userId, m.startOffset ?? 0] as const),
+  );
 
   return users
     .map(user => {
@@ -105,6 +126,8 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         (sum, w) => sum + (w.activeTasks ?? 0) * (weightByBoard.get(w.boardId) ?? 1),
         0,
       );
+      const startOffset = startOffsetByUser.get(user.id) ?? 0;
+      const effectiveActiveTasks = weightedActiveTasks + startOffset;
       const totalActive = userRows.reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
       const userTickets = selectedBoardId
         ? (userRows.find(w => w.boardId === selectedBoardId)?.activeTasks ?? 0)
@@ -115,9 +138,18 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
       const expertiseBonus = hasExpertise ? 10 : 0;
       const currentPct = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
       const score = selectedBoardId
-        ? weightedActiveTasks - expertiseBonus - (percentage - currentPct)
+        ? effectiveActiveTasks - expertiseBonus - (percentage - currentPct)
         : null;
-      return { user, userTickets, totalActive, weightedActiveTasks, hasExpertise, score };
+      return {
+        user,
+        userTickets,
+        totalActive,
+        weightedActiveTasks,
+        startOffset,
+        effectiveActiveTasks,
+        hasExpertise,
+        score,
+      };
     })
-    .sort((a, b) => (a.score ?? a.weightedActiveTasks) - (b.score ?? b.weightedActiveTasks));
+    .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));
 }
