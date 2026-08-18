@@ -24,6 +24,7 @@ import {
   ChannelRecapsACL,
   RecapsACL,
   ChannelParticipantsACL,
+  ChannelBoardMappingsACL,
   ChannelsACL,
   ChannelSectionsACL,
   ChannelStatsACL,
@@ -48,6 +49,7 @@ import {
   TicketReferenceMappingsACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
+  TicketExportsACL,
   ProjectTagsACL,
   TicketTagMappingsACL,
   TicketsACL,
@@ -179,6 +181,8 @@ export class QueryACLFactory {
         return new ChannelRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channels':
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_board_mappings':
+        return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':
@@ -227,6 +231,8 @@ export class QueryACLFactory {
         return new TicketSubTicketMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_tags':
         return new TicketTagsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_exports':
+        return new TicketExportsACL(ctx) as BaseQueryACL<TTable>;
       case 'project_tags':
         return new ProjectTagsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_tag_mappings':

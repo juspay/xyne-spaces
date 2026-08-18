@@ -40,8 +40,8 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
-import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import type { MentionResult } from '@xyne/shared';
+import { sendMessage, type ConversationRef } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
@@ -213,7 +213,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       appsService
         .getChannelShortcuts(channelId, { type: 'GLOBAL' })
         .then(setGlobalShortcuts)
-        .catch(() => {});
+        .catch(() => undefined);
     }, [channelId, conversation?.conversationId]);
 
     const handleCommandSelect = useCallback(
@@ -284,47 +284,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Whether the agent-progress pill currently has content — lets InputBox flip
     // between the typing indicator and the agent pill when both are active.
     const [agentActive, setAgentActive] = useState(false);
-    // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)
-    const handleTicketCreated = (ticket: {
-      id: string;
-      conversationId?: string;
-      createdBy?: string;
-      assignedTo?: string;
-      workflowType?: string;
-      xyneId?: string;
-    }): void => {
-      // Workflow selection
-      const workflowType: string | undefined = ticket.workflowType;
-
-      // Only trigger workflow if one is selected
-      if (workflowType) {
-        // Base workflow data
-        const workflowData: CreateWorkflowRequest = {
-          title: `Ticket: ${ticketDescription.slice(0, 50)}${ticketDescription.length > 50 ? '...' : ''}`,
-          workflowType,
-          description: ticketDescription,
-          ticketId: ticket.id,
-          ...(ticket.conversationId && { conversationId: ticket.conversationId }),
-          ...(ticket.xyneId && { xyneId: ticket.xyneId }),
-        };
-
-        // Add BUG_WORKFLOW specific required fields
-        if (workflowType === 'BUG_WORKFLOW') {
-          const bugWorkflowData = {
-            ...workflowData,
-            bugId: ticket.id,
-            severity: 'medium', // Default severity
-            reportedBy: ticket.createdBy || 'unknown',
-            assignedTo: ticket.assignedTo || ticket.createdBy || 'unknown',
-          };
-
-          void createWorkflow(bugWorkflowData);
-        } else {
-          void createWorkflow(workflowData);
-        }
-      }
-
-      // Close the modal after workflow is triggered
+    // Handle post-ticket creation cleanup (close modal, clear input)
+    const handleTicketCreated = (): void => {
       setIsCreateTicketModalOpen(false);
       setTicketDescription('');
 
@@ -563,18 +524,24 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           twinEdit.onApprove(edited);
           return;
         }
-        if (isOffline) {
+        // Edits and thread replies still require a live connection. New
+        // top-level channel messages are allowed offline: the pending-message
+        // framework queues them and auto-retries on reconnect.
+        if (isOffline && (messageId || conversationId)) {
           toast.warning("You're offline", {
             description: messageId
               ? "Edits can't be saved until you reconnect."
-              : 'Your message has been saved as a draft. It will be ready to send when you reconnect.',
+              : "Thread replies can't be sent until you reconnect.",
           });
           throw new Error('offline');
         }
 
-        console.info(
-          `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
-        );
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_info',
+          message: String(
+            `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
+          ),
+        });
 
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
@@ -784,28 +751,23 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // Scope the agent-progress spinner to this new conversation right away,
             // before the `conversationId` prop catches up (see pendingConversationId).
             setPendingConversationId(newConversationId);
-            const result = zero.mutate(
-              mutators.conversations.send({
-                channelId,
-                content: processedHtml,
-                type: MessageType.USER,
-                conversationId: newConversationId,
-                messageId: newMessageId,
-                timestamp: messageCreatedAt,
-              }),
-            );
+            // Route top-level channel sends through the shared pending-message
+            // framework. sendMessage writes a durable pending entry, fires
+            // mutators.conversations.send when Zero is connected (and queues it
+            // for auto-retry when it is not), and clears the entry once the
+            // server confirms the write. Failed sends stay queued and surface a
+            // retry/delete affordance instead of being restored to the composer.
+            const channelRef: ConversationRef = { kind: 'channel', channelId };
+            sendMessage(zero as Parameters<typeof sendMessage>[0], channelRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              conversationId: newConversationId,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+            });
 
             saveDraft(lookupId, '', '');
-            handleMutationResult(
-              result,
-              restoreDraft,
-              () => dispatchChatMessageSentEvent(channelId),
-              undefined,
-              {
-                channelId,
-                isNewConversation: true,
-              },
-            );
+            dispatchChatMessageSentEvent(channelId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -1066,7 +1028,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                               'Your support request has been submitted and picked up by AI.',
                           });
                         } catch (error) {
-                          console.error('Failed to create support ticket:', error);
+                          logger.error(Event.FRONTEND_ERROR, {
+                            type: 'migrated_console_error',
+                            message: String('Failed to create support ticket:'),
+                            error: error,
+                          });
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });

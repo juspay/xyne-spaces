@@ -20,6 +20,7 @@ import {
   CanvasCommentsACL,
   CanvasCommentThreadsACL,
   ChannelParticipantsACL,
+  ChannelBoardMappingsACL,
   ChannelsACL,
   ChannelStatsACL,
   ChannelUserStatusACL,
@@ -58,6 +59,7 @@ import {
   OrgMembersACL,
   ProactiveNudgesACL,
   ProjectsACL,
+  QuestionnaireResponsesACL,
   PullRequestsACL,
   QueriesACL,
   RcasACL,
@@ -175,6 +177,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
+    case 'channelBoardMapping':
+      return new ChannelBoardMappingsACL(ctx, prisma)
     case 'channelParticipant':
       return new ChannelParticipantsACL(ctx, prisma)
     case 'channelStats':
@@ -247,6 +251,8 @@ export class ACLFactory {
       return new PullRequestsACL(ctx, prisma)
     case 'query':
       return new QueriesACL(ctx, prisma)
+    case 'questionnaireResponse':
+      return new QuestionnaireResponsesACL(ctx, prisma)
     case 'rCA':
       return new RcasACL(ctx, prisma)
     case 'reaction':
@@ -419,8 +425,6 @@ export class ACLFactory {
       return new InstalledAppsACL(ctx, prisma)
     case 'knowledgeDocument':
       return new BaseQueryACL(ctx, prisma)
-    case 'messageSearch':
-      return new BaseQueryACL(ctx, prisma)
     case 'prThreadLink':
       return new BaseQueryACL(ctx, prisma)
     case 'projectTag':
@@ -488,6 +492,8 @@ export class ACLFactory {
     case 'guestAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'entity':
+      return new BaseQueryACL(ctx, prisma)
+    case 'ticketExport':
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)

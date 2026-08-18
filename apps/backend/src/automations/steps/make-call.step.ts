@@ -11,6 +11,7 @@ import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/s
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -237,7 +238,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     const callId = uuidv4();
     const conversationId = uuidv4();
     const messageId = uuidv4();
-    const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${callType}`;
+    const roomLink = buildCallInviteUrl(externalId);
     const now = new Date();
 
     // Create the LiveKit room BEFORE committing the DB transaction. This removes

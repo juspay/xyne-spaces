@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
@@ -45,6 +46,7 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   MentionType,
+  type MentionData,
   ChannelCommandMenuProps,
   TYPE_SUGGESTIONS,
   SearchableTypes,
@@ -70,6 +72,8 @@ import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
+import type { CommandTarget } from './SlashCommands/QuickDmComposer';
+import { ResultActionsMenu } from './ResultActionsMenu';
 import { SlashCommandPalette } from './SlashCommands/SlashCommandPalette';
 import { useSlashCommands, type SlashCommandClickInfo } from './SlashCommands/useSlashCommands';
 import { getCommand, COMMAND_KINDS } from './SlashCommands/commands';
@@ -85,7 +89,7 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { LexicalSearchInput } from './LexicalSearchInput';
+import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
@@ -93,6 +97,8 @@ import {
   rankUsers,
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
+import { searchMetricsService } from '../../../services/searchMetricsService';
+import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -144,6 +150,8 @@ export const ChannelCommandItem = ({
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
       data-item-label={displayName}
+      data-result-id={channel.id}
+      data-result-type='channel'
       onSelect={() => onSelect(displayName)}
       onMouseDownCapture={onItemMouseDown}
       className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
@@ -273,7 +281,11 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
-  const commandRef = useRef<HTMLDivElement>(null);
+  const commandRef = useRef<HTMLDivElement | null>(null);
+  // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
+  const rowListObserverRef = useRef<MutationObserver | null>(null);
+  // The highlighted result row the ⌥↵ Actions menu opens above.
+  const actionsAnchorRef = useRef<HTMLElement | null>(null);
   // Tracks whether the most recent activation gesture (mouse or keyboard)
   // carried a Cmd/Ctrl modifier. cmdk's onSelect strips the event and a
   // synthetic .click() strips modifier flags, so we prime this ref from
@@ -302,18 +314,60 @@ const ChannelCommandMenu = ({
 
   const { searchMode } = useSearchMode();
 
+  // The top-bar palette (screen mode, tabs hidden) always routes to the results page;
+  // the default cmd+K popup renders results inline. Both show the "Show results for"
+  // row, but only the screen palette lets it own the default Enter target.
+  const isScreenPalette = hideTabs && searchMode === 'screen';
+
+  // The row's onSelect fires for both a click and an Enter press, and cmdk hands it no
+  // event — so the pointer path stamps this ref and Enter falls through to the default.
+  const showResultsTriggerRef = useRef<'click' | 'keyboard'>('keyboard');
+
+  // Guards the jump to the results page against a double activation (onClick + onSelect).
+  // Reset whenever the palette opens again.
+  const navigatingToResultsRef = useRef(false);
+  useEffect(() => {
+    if (open) navigatingToResultsRef.current = false;
+  }, [open]);
+
   // When opened via the `mod+/` shortcut, seed the search box with `/` so it lands in command mode.
   // The popup path flips this on in the shortcut handler; the screen overlay is mounted fresh with a
   // `/` initialQuery, so seed from that here to render the palette on frame 1 (no normal-search flash).
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
-  // caller's query straight through. Memoized so the reference stays stable across renders.
+  // The search the user left behind when the palette sent them to the results page, handed
+  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+
+  // While seeding, feed the editor a `/` through the existing initial-query path; a restored
+  // search goes down the same path. Otherwise pass the caller's query straight through.
+  // Memoized so the reference stays stable across renders.
   const effectiveInitialQuery = useMemo(
-    () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
-    [seedCommandMode, initialQuery],
+    () =>
+      seedCommandMode ? { mentions: [], text: '/' } : restoredQuery ? restoredQuery : initialQuery,
+    [seedCommandMode, restoredQuery, initialQuery],
   );
+
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
+  // (and the browser back gesture) closes the palette instead of leaving the page. When a
+  // row sends the user to the results page, that entry keeps the search — so back from the
+  // results page reopens the palette with it rather than landing on a bare page.
+  const { markNavigating, setPayload } = useHistoryBackedOverlay<InitialQueryData>({
+    open,
+    onClose: () => onOpenChange(false),
+    onRestore: restored => {
+      setRestoredQuery(restored ?? null);
+      onOpenChange(true);
+    },
+    id: 'command-menu',
+    enabled: !inline && !contextSelectionMode,
+  });
+
+  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
+  useEffect(() => {
+    if (!open) setRestoredQuery(null);
+  }, [open]);
 
   useShortcutById(
     'global.search',
@@ -594,6 +648,9 @@ const ChannelCommandMenu = ({
   // enterWillOpen = Enter opens the row vs. runs a search; activeItemLabel = its name.
   const [enterWillOpen, setEnterWillOpen] = useState(false);
   const [activeItemLabel, setActiveItemLabel] = useState<string | null>(null);
+  // Whether the highlighted row is a user/channel — the only rows ⌥↵ can act on. Gates the footer
+  // Actions hint so it isn't shown (misleadingly) on messages/tickets/etc. where ⌥↵ does nothing.
+  const [activeItemActionable, setActiveItemActionable] = useState(false);
 
   // Slash-command mode (`/call`, `/chat`, `/askai`). All command state + logic lives in the hook;
   // the parent feeds it the shared cmdk selection (activeItemLabel/hasNavigated) and wires its
@@ -608,6 +665,17 @@ const ChannelCommandMenu = ({
     (info: SlashCommandClickInfo): void => {
       const selectionType = lastSlashSelectionRef.current;
       lastSlashSelectionRef.current = 'unknown';
+      // The ⌥↵ Actions menu dispatches a command WITHOUT first typing `/`, so the commandActive
+      // effect hasn't opened a slash session yet (⌥↵ Call never enters command mode at all) and
+      // onClick would be dropped for want of a session id. Demand-start one here (mirroring the
+      // effect's start branch) so the click — and its `source` — is logged; the effect won't
+      // double-start because slashSessionActiveRef is now set.
+      if (!slashSessionActiveRef.current) {
+        slashSessionActiveRef.current = true;
+        slashInvokedRef.current = false;
+        lastSlashImpressionKeyRef.current = '';
+        slashMetrics.onSessionStart();
+      }
       if (info.terminal) slashInvokedRef.current = true;
       slashMetrics.onClick({
         stage: info.stage,
@@ -616,6 +684,7 @@ const ChannelCommandMenu = ({
         terminal: info.terminal,
         ...(info.targetType && { targetType: info.targetType }),
         ...(info.destination && { destination: info.destination }),
+        ...(info.source && { source: info.source }),
       });
     },
     [slashMetrics],
@@ -653,6 +722,9 @@ const ChannelCommandMenu = ({
     handleEditorText,
   } = slash;
 
+  // ⌥↵ Actions menu: the highlighted user/channel result to act on (Message / Call). Null = closed.
+  const [actionsMenuTarget, setActionsMenuTarget] = useState<CommandTarget | null>(null);
+
   // ── Slash-command funnel: session start / end ────────────────────────────
   // A session spans one entry into command mode (`/`) until a command executes
   // or the box leaves command mode. `commandActive` covers discovery, picker,
@@ -679,7 +751,12 @@ const ChannelCommandMenu = ({
   // command's picker — deduped by a stage+command key so keystrokes within the
   // same view don't re-log.
   useEffect(() => {
-    if (!(commandActive && open && commandText.startsWith('/'))) {
+    // `isComposing` means a target is picked and the composer is on screen — there's no options
+    // view to impress, so bail. This drops the phantom picker impression on the ⌥↵ Message path
+    // (which seeds `/chat ` then jumps straight to compose) and, in the normal `/chat` flow, stops
+    // re-logging the picker once a recipient is chosen. Clearing the key lets the picker re-log if
+    // the user goes back to it.
+    if (!(commandActive && open && commandText.startsWith('/')) || isComposing) {
       lastSlashImpressionKeyRef.current = '';
       return;
     }
@@ -744,6 +821,7 @@ const ChannelCommandMenu = ({
     slash.commandChannelResults,
     slash.commandGroupDmResults,
     slashMetrics,
+    isComposing,
   ]);
 
   // Once the seeded `/` actually lands (command mode is genuinely active), drop the seed flag so
@@ -755,11 +833,40 @@ const ChannelCommandMenu = ({
   }, [seedCommandMode, commandText]);
 
   const syncEnterIntent = useCallback((): void => {
-    const active = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
+    const container = commandRef.current;
+    // The auto-select timer below can fire after the Command unmounts (Escape mid-timer), leaving a
+    // null container — bail before the querySelector.
+    if (!container) return;
+    const active = container.querySelector('[cmdk-item][aria-selected="true"]');
     const willOpen = !!active && active.getAttribute('data-show-results-item') !== 'true';
     setEnterWillOpen(willOpen);
     setActiveItemLabel(willOpen ? (active?.getAttribute('data-item-label') ?? null) : null);
+    // At rest (nothing selected yet) fall back to the first enabled row — the row ⌥↵ acts on
+    // (matching resolveActionTarget) — so the hint is right before any arrow/hover.
+    const actionRow = active ?? container.querySelector('[cmdk-item]:not([aria-disabled="true"])');
+    const resultType = actionRow?.getAttribute('data-result-type');
+    setActiveItemActionable(resultType === 'user' || resultType === 'channel');
   }, []);
+
+  // Callback ref for the <Command> root. Recompute the ⌥↵ hint when rows actually land instead of
+  // guessing with a setTimeout: sync once on mount (browse rows are already children), then observe
+  // the results list for late/streamed rows. Null on unmount/branch swap → disconnect.
+  const attachCommandRef = useCallback(
+    (node: HTMLDivElement | null): void => {
+      commandRef.current = node;
+      rowListObserverRef.current?.disconnect();
+      rowListObserverRef.current = null;
+      if (!node) return;
+      syncEnterIntent();
+      // Observe the results list, not the <Command> root: the footer hint syncEnterIntent toggles
+      // sits outside [cmdk-list], so scoping here avoids re-firing on our own hint writes.
+      const listEl = node.querySelector('[cmdk-list]') ?? node;
+      const observer = new MutationObserver((): void => syncEnterIntent());
+      observer.observe(listEl, { childList: true, subtree: true });
+      rowListObserverRef.current = observer;
+    },
+    [syncEnterIntent],
+  );
 
   // Ghost suffix telling the user what Enter does - shown when there's typed text or a filter
   // chip and no mention typeahead is open. getScreenSearchSuffix() picks the text.
@@ -916,6 +1023,55 @@ const ChannelCommandMenu = ({
 
     return params;
   }
+
+  // Keep the palette's history entry carrying the current search. The palette can be left
+  // in many ways — opening a DM, a channel, a message, a ticket, the results page — and
+  // each goes through its own handler, so recording it here is what makes ANY of them
+  // restorable when the user comes back.
+  useEffect(() => {
+    if (!open) return;
+    setPayload({
+      text: searchText,
+      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
+      // same values at runtime, they're only ever set from that union.
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+    });
+  }, [open, searchText, selectedMentions, setPayload]);
+
+  // Leave the palette for the full-screen results page via the "Show results for" row.
+  // Logged as its own event so the jump-out rate is readable per palette and trigger.
+  const goToSearchResults = (trigger: 'click' | 'keyboard'): void => {
+    // The row fires both onClick and cmdk's onSelect for one activation — first one wins.
+    if (navigatingToResultsRef.current) return;
+    navigatingToResultsRef.current = true;
+    showResultsTriggerRef.current = 'keyboard';
+
+    // Mark the close as a navigation so the palette's entry isn't popped out from under
+    // us. The search itself is already on that entry, kept current by the effect above.
+    markNavigating();
+
+    // Metrics must never be able to swallow the navigation.
+    try {
+      if (searchSessionId && currentUserID) {
+        searchMetricsService.trackShowResults({
+          searchSessionId,
+          userId: currentUserID,
+          queryText: searchText.trim(),
+          tab: activeTab,
+          trigger,
+          searchMode,
+          filtersUsed: selectedMentions.length,
+        });
+      }
+    } catch {
+      // Swallowed on purpose — a broken log line must not block the results page.
+    }
+
+    onOpenChange(false);
+    void navigate(
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+    );
+  };
 
   // Navigate to the full results page with a specific section's tab pre-selected
   // (from the screen-mode "See N more" links).
@@ -1573,6 +1729,16 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // A tab-switch swaps the result set, so reset the navigation flag (new tab re-auto-selects row 0)
+  // and the ghost. activeItemActionable is deliberately NOT reset — syncEnterIntent owns it and the
+  // row-swap MutationObserver recomputes it; forcing false here races that sync and clobbers it.
+  useEffect(() => {
+    hasNavigatedRef.current = false;
+    setHasNavigated(false);
+    setActiveItemLabel(null);
+    setEnterWillOpen(false);
+  }, [activeTab]);
+
   // Reset active tab if the current tab is no longer in the enabled set.
   // In inline mode, fall back to the first enabled tab (never ALL).
   useEffect(() => {
@@ -1618,6 +1784,11 @@ const ChannelCommandMenu = ({
       hasNavigatedRef.current = false;
       setEnterWillOpen(false);
       setActiveItemLabel(null);
+      // Close the ⌥↵ Actions menu on palette close too. It renders as a sibling (survives the
+      // dialog), so a leftover target keeps the popup open over a stale, detached anchor row and
+      // re-surfaces it on the next Cmd+K open.
+      setActionsMenuTarget(null);
+      actionsAnchorRef.current = null;
       setActiveTab(TabType.ALL);
       onTabChange?.(TabType.ALL);
       resetSearchState();
@@ -1732,7 +1903,11 @@ const ChannelCommandMenu = ({
       }
       onOpenChange(false);
     } catch (err) {
-      console.error('Navigation failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Navigation failed:'),
+        error: err,
+      });
     }
   };
 
@@ -1762,24 +1937,30 @@ const ChannelCommandMenu = ({
       items.forEach(item => {
         item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
       });
+      // Hover moves aria-selected (an attribute) — the row-list MutationObserver only watches
+      // childList, so it's blind to this. Recompute the hint here or it freezes while hovering.
       syncEnterIntent();
       markNavigated();
     });
   }, [syncEnterIntent, markNavigated]);
 
-  const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
-    // Handle attachment preview - show file preview modal
-    if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
-      return;
-    }
+  const handleFilePreview = useCallback(
+    (result: DisplaySearchResult): void => {
+      // Handle attachment preview - show file preview modal
+      if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+        return;
+      }
 
-    setPreviewFile({
-      fileName: result.title,
-      fileUrl: result.searchContext.internalUrl,
-      mimeType: result.searchContext.mimeType || 'application/octet-stream',
-      fileSize: result.searchContext.fileSize || 0,
-    });
-  }, []);
+      setPreviewFile({
+        fileName: result.title,
+        fileUrl: result.searchContext.internalUrl,
+        mimeType: result.searchContext.mimeType || 'application/octet-stream',
+        fileSize: result.searchContext.fileSize || 0,
+      });
+      onOpenChange(false);
+    },
+    [onOpenChange],
+  );
 
   // Handle mouse hover over ticket and Desk items to show preview
   const handleTicketMouseEnter = useCallback(
@@ -2027,7 +2208,12 @@ const ChannelCommandMenu = ({
   // log the raw backend error to the console so devs can still triage from
   // DevTools without exposing implementation details in the UI.
   useEffect(() => {
-    if (error) console.warn('[Cmd+K search]', error);
+    if (error)
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[Cmd+K search]'),
+        context: [error],
+      });
   }, [error]);
 
   // Signature of the backend result ORDER, not just count: a re-rank that keeps the same row
@@ -2059,11 +2245,22 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
+        // The popup pins "Show results for" first in the DOM, but it must not become the
+        // resting Enter target — highlight the first real result instead, falling back to
+        // the row only when it is the sole item. The screen palette keeps first-row.
+        const firstReal = isScreenPalette
+          ? -1
+          : Array.from(items).findIndex(
+              item => item.getAttribute('data-show-results-item') !== 'true',
+            );
+        const selectedIndex = firstReal === -1 ? 0 : firstReal;
         items.forEach((item, i) => {
-          item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
       }
-      syncEnterIntent();
+      // No sync here: the results-list observer recomputes actionability whenever rows change
+      // (incl. a re-rank, which reorders keyed rows = a childList mutation), and enterWillOpen/label
+      // stay hidden until the user navigates (arrow/hover re-sync them then).
     }, 50);
     return () => clearTimeout(timer);
   }, [
@@ -2074,12 +2271,14 @@ const ChannelCommandMenu = ({
     filteredLocalUsers.length,
     backendResultOrder,
     mentionSearchType,
-    syncEnterIntent,
     commandActive,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
     commandText,
   ]);
+
+  // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
+  // only runs during an active search).
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
@@ -2360,6 +2559,7 @@ const ChannelCommandMenu = ({
           const items = groupedChannels['channels'];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -2389,11 +2589,17 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <SeeMoreItem
                   value={`__see-more-group-dm-${category as string}__`}
-                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                  onSelect={() => toggleCategoryExpansion(category)}
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('channels')
+                      : toggleCategoryExpansion(category)
+                  }
                   hoverable={!isMobile}
-                  trackCategory='CHANNEL_SEARCH'
-                  trackName='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={
+                    routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  }
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
@@ -2416,6 +2622,7 @@ const ChannelCommandMenu = ({
           const items = groupedChannels['starred'];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -2445,11 +2652,17 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <SeeMoreItem
                   value={`__see-more-channel-${category as string}__`}
-                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                  onSelect={() => toggleCategoryExpansion(category)}
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('channels')
+                      : toggleCategoryExpansion(category)
+                  }
                   hoverable={!isMobile}
-                  trackCategory='CHANNEL_SEARCH'
-                  trackName='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={
+                    routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  }
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
@@ -2477,32 +2690,63 @@ const ChannelCommandMenu = ({
       {/* 2. Group DMs (from local channels) */}
       {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
         showGroupedLocalResults &&
-        localGroupDMs.length > 0 && (
-          <div className='mb-4'>
-            <Command.Group
-              heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-            >
-              {localGroupDMs.map(({ channel }, index) => {
-                const unreadCount = unreadCounts[channel.id] ?? 0;
-                return (
-                  <ChannelCommandItem
-                    key={channel.id}
-                    channel={channel}
-                    currentUserID={currentUserID}
-                    unreadCount={unreadCount}
-                    onSelect={displayName => {
-                      void handleChannelSelect(channel, displayName, index + 1);
-                    }}
-                    onItemMouseDown={handleItemMouseDown}
-                    getChannelIcon={getChannelIcon}
-                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+        localGroupDMs.length > 0 &&
+        (() => {
+          // Cap the number of mounted rows (with an inline expand) the same way
+          // the Starred / Channels sections do. A short query can match
+          // thousands of DMs; mounting them all as cmdk items is what drove the
+          // per-keystroke render + cmdk bookkeeping cost.
+          const category = ChannelCategory.GROUP_DMS;
+          const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
+          const hasMore = localGroupDMs.length > DISPLAY_LIMIT;
+          const displayItems =
+            !isExpanded && hasMore ? localGroupDMs.slice(0, DISPLAY_LIMIT) : localGroupDMs;
+          const hiddenCount = localGroupDMs.length - DISPLAY_LIMIT;
+          return (
+            <div className='mb-4'>
+              <Command.Group
+                heading={getCategoryLabel(category)}
+                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              >
+                {displayItems.map(({ channel }, index) => {
+                  const unreadCount = unreadCounts[channel.id] ?? 0;
+                  return (
+                    <ChannelCommandItem
+                      key={channel.id}
+                      channel={channel}
+                      currentUserID={currentUserID}
+                      unreadCount={unreadCount}
+                      onSelect={displayName => {
+                        void handleChannelSelect(channel, displayName, index + 1);
+                      }}
+                      onItemMouseDown={handleItemMouseDown}
+                      getChannelIcon={getChannelIcon}
+                      isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                    />
+                  );
+                })}
+                {hasMore && (
+                  <SeeMoreItem
+                    value={`__see-more-group-dm-${category as string}__`}
+                    label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                    onSelect={() =>
+                      routeSeeMore
+                        ? handleSeeMoreNavigate('channels')
+                        : toggleCategoryExpansion(category)
+                    }
+                    hoverable={!isMobile}
+                    trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                    trackName={
+                      routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                    }
+                    trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                   />
-                );
-              })}
-            </Command.Group>
-          </div>
-        )}
+                )}
+              </Command.Group>
+            </div>
+          );
+        })()}
 
       {/* 3. Channels (from local channels) */}
       {includeChannels && renderSearchChannelsSection()}
@@ -2614,19 +2858,104 @@ const ChannelCommandMenu = ({
     />
   );
 
+  // ⌥↵ Actions menu, rendered on top of the still-open palette (unlike the confirm dialogs, which
+  // close it first). Running an action dispatches through the slash-command hook; Esc/backdrop just
+  // closes the menu and hands focus back to the search editor.
+  const resultActionsMenu = (
+    <ResultActionsMenu
+      open={actionsMenuTarget !== null}
+      target={actionsMenuTarget}
+      anchorRef={actionsAnchorRef}
+      onRun={kind => {
+        if (actionsMenuTarget) slash.invokeActionOnTarget(kind, actionsMenuTarget);
+        setActionsMenuTarget(null);
+      }}
+      onClose={() => {
+        setActionsMenuTarget(null);
+        // Return focus to the search editor on the NEXT frame — after the DropdownMenu unmounts and
+        // Radix's modal focus-scope finishes its cleanup. Focusing synchronously loses that race
+        // (focus lands on <body>), which leaves cmd+K arrow navigation dead until the user clicks.
+        requestAnimationFrame(() => {
+          (
+            commandRef.current?.querySelector('[contenteditable="true"]') as HTMLElement | null
+          )?.focus();
+        });
+      }}
+    />
+  );
+
   const commandConfirmations = (
     <>
       {channelCallConfirm}
       {recordingActiveDialog}
+      {resultActionsMenu}
+      {!inline && previewFile && (
+        <FilePreviewModal
+          isOpen={!!previewFile}
+          onClose={() => setPreviewFile(null)}
+          fileName={stripHtmlTags(previewFile.fileName)}
+          fileUrl={previewFile.fileUrl}
+          mimeType={previewFile.mimeType}
+          fileSize={previewFile.fileSize}
+        />
+      )}
     </>
   );
 
   if (inline && !open) return commandConfirmations;
 
+  // Resolve the highlighted Cmd+K row into a chat/call target for the ⌥↵ Actions menu, then map it
+  // to the full user/channel object. Only user & channel results are actionable — chat/call need a
+  // target. Two rows can carry aria-selected at once (cmdk's own value + our manual arrow/hover
+  // setAttribute), so a plain first-match can grab a row the user isn't looking at; prefer the one
+  // whose label matches the visible "– Open" hint (activeItemLabel), then the first selected, then
+  // the first enabled row (mirrors the Enter target fallback).
+  const resolveActionTarget = (): { element: HTMLElement; target: CommandTarget } | null => {
+    const container = commandRef.current;
+    if (!container) return null;
+    const selected = Array.from(
+      container.querySelectorAll<HTMLElement>('[cmdk-item][aria-selected="true"]'),
+    );
+    const byLabel =
+      activeItemLabel !== null
+        ? selected.find(el => el.getAttribute('data-item-label') === activeItemLabel)
+        : undefined;
+    const element =
+      byLabel ??
+      selected[0] ??
+      container.querySelector<HTMLElement>('[cmdk-item]:not([aria-disabled="true"])');
+    if (!element) return null;
+    const resultId = element.getAttribute('data-result-id');
+    const resultType = element.getAttribute('data-result-type');
+    if (!resultId || !resultType) return null;
+    if (resultType === 'user') {
+      const user = usersById.get(resultId);
+      return user ? { element, target: { type: 'user', user } } : null;
+    }
+    if (resultType === 'channel') {
+      const entry = allChannels.find(item => item.channel.id === resultId);
+      if (!entry) return null;
+      return {
+        element,
+        target: {
+          type: 'channel',
+          channel: entry.channel,
+          displayName: getDMDisplayNameWithSelf(entry.channel, entry.searchableNames),
+          isDm: isDMChannel(entry.channel.scopeType),
+        },
+      };
+    }
+    return null;
+  };
+
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     // A picked target renders its own UI (composer or confirm modal) — let it own all
     // keys (typing, Enter to send/confirm, its own @/# mention pickers).
     if (commandTarget) return;
+
+    // While the ⌥↵ Actions menu is open it owns the keyboard (via its own document-level capture
+    // handler); the palette must stay inert underneath.
+    if (actionsMenuTarget) return;
 
     // ── Slash-command mode: picker / `/` discovery ───────────────────────
     // Escape is intentionally NOT handled here — it falls through so the menu
@@ -2880,6 +3209,19 @@ const ChannelCommandMenu = ({
     // Shift+Enter → allow newline in Lexical
     if (e.shiftKey) return;
 
+    // ⌥↵ → open the Actions menu (Message / Call) for the highlighted user/channel result. If the
+    // row isn't actionable (message/ticket/etc.), fall through to normal Enter navigation.
+    if (e.altKey && mentionSearchType === null) {
+      const resolved = resolveActionTarget();
+      if (resolved) {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsAnchorRef.current = resolved.element;
+        setActionsMenuTarget(resolved.target);
+        return;
+      }
+    }
+
     // If mention search is active, let the mention selection handle Enter
     if (mentionSearchType !== null) {
       // Select the currently highlighted mention
@@ -3007,22 +3349,35 @@ const ChannelCommandMenu = ({
     const enterTarget =
       activeItem ??
       (commandRef.current?.querySelector(
-        '[cmdk-item]:not([aria-disabled="true"])',
+        // In the popup the pinned "Show results for" row is the first item in the DOM,
+        // so exclude it here — the resting Enter target is still the first real result.
+        isScreenPalette
+          ? '[cmdk-item]:not([aria-disabled="true"])'
+          : '[cmdk-item]:not([aria-disabled="true"]):not([data-show-results-item])',
+      ) as HTMLElement | null) ??
+      // Zero results leave the pinned row as the only item — then it IS the Enter target,
+      // or Enter would go dead with an actionable row on screen.
+      (commandRef.current?.querySelector(
+        '[cmdk-item][data-show-results-item]',
       ) as HTMLElement | null);
 
     // Screen-mode popup: Enter navigates to search screen only when no result item is selected
     // (or when the "show results for" item is selected). If a regular result is selected, click it.
-    if (hideTabs && searchMode === 'screen') {
+    if (isScreenPalette) {
       const isShowResultsItem = enterTarget?.getAttribute('data-show-results-item') === 'true';
       if (enterTarget && !isShowResultsItem) {
         lastModifierRef.current = e.metaKey || e.ctrlKey;
         enterTarget.click();
         return;
       }
-      onOpenChange(false);
-      void navigate(
-        `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
-      );
+      goToSearchResults('keyboard');
+      return;
+    }
+
+    // The row is invoked directly, not via a synthetic .click() — that path would fire its
+    // onClick and log this keyboard activation as a click.
+    if (enterTarget?.getAttribute('data-show-results-item') === 'true') {
+      goToSearchResults('keyboard');
       return;
     }
 
@@ -3032,6 +3387,77 @@ const ChannelCommandMenu = ({
     lastModifierRef.current = e.metaKey || e.ctrlKey;
     enterTarget?.click();
   };
+
+  // "Show results for: <chips> <query>" — the row that leaves the palette for the
+  // full-screen results page. Rendered in both palettes; where it sits in the list is
+  // decided at the call sites below. Never in the inline/context-selection palettes
+  // (Ask AI context picker, thread-panel context) — navigating away would hijack the
+  // picking flow. The old screen-only gate excluded those implicitly.
+  const showResultsForRow =
+    !inline &&
+    !contextSelectionMode &&
+    !mentionSearchType &&
+    (searchText.trim() || selectedMentions.length > 0) ? (
+      <Command.Item
+        value='__show-results-for__'
+        data-show-results-item='true'
+        onPointerDown={() => {
+          showResultsTriggerRef.current = 'click';
+        }}
+        // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
+        // and the plain onClick covers the mouse without depending on cmdk's selection
+        // state. goToSearchResults de-dupes when a click fires both.
+        onClick={() => goToSearchResults('click')}
+        onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
+        className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
+        data-track-category='SEARCH'
+        data-track-name='SHOW_RESULTS_FOR'
+      >
+        <SearchDefault size={14} className='text-muted-foreground shrink-0' />
+        <span className='flex items-center flex-wrap gap-1'>
+          <span className='text-sm'>Show detailed results for:</span>
+          {selectedMentions.map(m => {
+            const isPriority = m.type === MentionType.PRIORITY;
+            const isUser = m.type === MentionType.USER;
+            const name = isPriority
+              ? m.id.toLowerCase()
+              : isUser
+                ? getUserDisplayName(usersById.get(m.id) ?? { displayName: m.id, email: '' })
+                : (() => {
+                    const ch = allChannels.find(c => c.channel.id === m.id);
+                    if (!ch) return m.id;
+                    return formatChannelLabel(ch);
+                  })();
+            const prefix = m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
+            return (
+              <span
+                key={`${m.prefix}-${m.id}`}
+                className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
+              >
+                {isPriority ? (
+                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                    <SignalHigh
+                      size={12}
+                      className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
+                    />
+                  </div>
+                ) : isUser ? (
+                  <Avatar userId={m.id} size='sm' className='rounded-none flex-shrink-0 size-3' />
+                ) : (
+                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                    <Hashtag size={12} className='text-foreground' />
+                  </div>
+                )}
+                <span className='leading-tight'>
+                  {prefix} {name}
+                </span>
+              </span>
+            );
+          })}
+          {searchText.trim() && <span className='font-semibold text-sm'>{searchText.trim()}</span>}
+        </span>
+      </Command.Item>
+    ) : null;
 
   const commandBody = (
     <>
@@ -3409,7 +3835,11 @@ const ChannelCommandMenu = ({
               // container (Chrome can keyboard-focus scrollers) — both outline. Row
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
-              suppressHover && '[&_[cmdk-item]]:pointer-events-none',
+              '[&_[cmdk-item]]:scroll-mb-[30px]',
+              // The pinned "Show results for" row is exempt: it sits where the cursor
+              // rests when the palette opens, and its first click must land even before
+              // any mousemove clears suppressHover. Result rows keep the guard.
+              suppressHover && '[&_[cmdk-item]:not([data-show-results-item])]:pointer-events-none',
             )}
             ref={el => {
               if (el) {
@@ -3421,6 +3851,11 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* Popup palette: the row is pinned here, directly under the tabs, so it
+                    sits in the same place no matter what matched. It is skipped by the
+                    first-row auto-select, so the top result keeps the Enter target. */}
+                {!isScreenPalette && showResultsForRow}
+
                 {/* Best local matches pinned to the top of the list — both popup and
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
@@ -3429,78 +3864,9 @@ const ChannelCommandMenu = ({
                 {hoistUser && renderSearchUsersSection()}
                 {hoistChannel && renderSearchChannelsSection()}
 
-                {/* Show results for: [query] — screen mode only */}
-                {hideTabs &&
-                  searchMode === 'screen' &&
-                  !mentionSearchType &&
-                  (searchText.trim() || selectedMentions.length > 0) && (
-                    <Command.Item
-                      value='__show-results-for__'
-                      data-show-results-item='true'
-                      onSelect={() => {
-                        onOpenChange(false);
-                        void navigate(
-                          `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
-                        );
-                      }}
-                      className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
-                      data-track-category='SEARCH'
-                      data-track-name='SHOW_RESULTS_FOR'
-                    >
-                      <SearchDefault size={14} className='text-muted-foreground shrink-0' />
-                      <span className='flex items-center flex-wrap gap-1'>
-                        <span className='text-sm'>Show results for:</span>
-                        {selectedMentions.map(m => {
-                          const isPriority = m.type === MentionType.PRIORITY;
-                          const isUser = m.type === MentionType.USER;
-                          const name = isPriority
-                            ? m.id.toLowerCase()
-                            : isUser
-                              ? getUserDisplayName(
-                                  usersById.get(m.id) ?? { displayName: m.id, email: '' },
-                                )
-                              : (() => {
-                                  const ch = allChannels.find(c => c.channel.id === m.id);
-                                  if (!ch) return m.id;
-                                  return formatChannelLabel(ch);
-                                })();
-                          const prefix =
-                            m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
-                          return (
-                            <span
-                              key={`${m.prefix}-${m.id}`}
-                              className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
-                            >
-                              {isPriority ? (
-                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                                  <SignalHigh
-                                    size={12}
-                                    className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
-                                  />
-                                </div>
-                              ) : isUser ? (
-                                <Avatar
-                                  userId={m.id}
-                                  size='sm'
-                                  className='rounded-none flex-shrink-0 size-3'
-                                />
-                              ) : (
-                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                                  <Hashtag size={12} className='text-foreground' />
-                                </div>
-                              )}
-                              <span className='leading-tight'>
-                                {prefix} {name}
-                              </span>
-                            </span>
-                          );
-                        })}
-                        {searchText.trim() && (
-                          <span className='font-semibold text-sm'>{searchText.trim()}</span>
-                        )}
-                      </span>
-                    </Command.Item>
-                  )}
+                {/* Screen palette: the row stays below the hoisted best matches, which
+                    own the Enter target there. */}
+                {isScreenPalette && showResultsForRow}
 
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
@@ -4179,8 +4545,10 @@ const ChannelCommandMenu = ({
       </div>
       {/* end body flex row */}
 
-      {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
-      {!inline && !isMobile && (
+      {/* Footer - outside body flex so TicketPreviewPanel only spans results area. Hidden while the
+          `/chat` composer is open (isComposing): its hints (Open/Navigate/Actions/Ask AI) are about
+          the results list, which the composer replaces — you're typing a message, not navigating. */}
+      {!inline && !isMobile && !isComposing && (
         <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 rounded-b-2xl'>
           {/* Fade the scrolling results into the footer (replaces the hard top border) */}
           <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
@@ -4211,18 +4579,34 @@ const ChannelCommandMenu = ({
                 <ArrowTurnDownLeft size={10} />
               </span>
             </span>
-            {/* <span className='text-gray-300'>|</span> */}
-            <span className='flex gap-2.5 items-center'>
-              <span>Navigate </span>
-              <span className='flex gap-1'>
-                <span className='p-1 bg-muted rounded-lg'>
-                  <ArrowUp size={12} />
-                </span>
-                <span className='p-1 bg-muted rounded-lg'>
-                  <ArrowDown size={12} />
+            {/* Navigate hint (↑↓). Shown when the selected row isn't ⌥↵-actionable — a message/
+                ticket/file/desk row, or nothing selected — so the footer always offers a next step.
+                Mutually exclusive with the Actions hint below (which covers user/channel rows). */}
+            {!activeItemActionable && (
+              <span className='flex gap-2.5 items-center'>
+                <span>Navigate</span>
+                <span className='flex items-center gap-1'>
+                  <span className='p-1 bg-muted rounded-lg'>
+                    <ArrowUp size={10} />
+                  </span>
+                  <span className='p-1 bg-muted rounded-lg'>
+                    <ArrowDown size={10} />
+                  </span>
                 </span>
               </span>
-            </span>
+            )}
+            {/* Actions menu hint (⌥↵). Shown whenever the selected row is a user/channel — whether
+                auto-selected on search or arrowed/hovered — since ⌥↵ acts on it. Non-actionable rows
+                (messages/tickets/files/desk) fall to the Navigate hint above. */}
+            {activeItemActionable && (
+              <span className='flex gap-2.5 items-center'>
+                <span>Actions</span>
+                <span className='flex items-center gap-1 px-1.5 py-1 bg-muted rounded-lg leading-none'>
+                  <span>⌥</span>
+                  <ArrowTurnDownLeft size={10} />
+                </span>
+              </span>
+            )}
             {previewTicket ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
@@ -4248,18 +4632,6 @@ const ChannelCommandMenu = ({
             ) : null}
           </div>
         </div>
-      )}
-
-      {/* File Preview Modal */}
-      {!inline && previewFile && (
-        <FilePreviewModal
-          isOpen={!!previewFile}
-          onClose={() => setPreviewFile(null)}
-          fileName={stripHtmlTags(previewFile.fileName)}
-          fileUrl={previewFile.fileUrl}
-          mimeType={previewFile.mimeType}
-          fileSize={previewFile.fileSize}
-        />
       )}
 
       {/* Desk Ticket Merge Dialog */}
@@ -4296,7 +4668,11 @@ const ChannelCommandMenu = ({
 
             toast.success(`${ticketsToMerge.length + 1} tickets merged successfully`);
           } catch (err) {
-            console.error('Merge failed:', err);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Merge failed:'),
+              error: err,
+            });
             toast.error('Failed to merge tickets. Please try again.');
           }
         }}
@@ -4307,13 +4683,13 @@ const ChannelCommandMenu = ({
   if (inline) {
     return (
       <Command
-        ref={commandRef}
+        ref={attachCommandRef}
         // Selection is managed imperatively (aria-selected via setAttribute) because cmdk's
         // arrow-nav needs a Command.Input we don't use. Pin cmdk's value to a sentinel that
         // matches no item so it never marks one selected too — otherwise it latches a result row
         // and a SECOND highlight appears alongside the manually-selected one.
         value='__none__'
-        onValueChange={() => {}}
+        onValueChange={() => undefined}
         data-nav-active={hasNavigated ? 'true' : undefined}
         data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
@@ -4366,6 +4742,12 @@ const ChannelCommandMenu = ({
               }
             }}
             onEscapeKeyDown={event => {
+              // While the ⌥↵ Actions menu is open, Escape closes only it — never the palette.
+              if (actionsMenuTarget !== null) {
+                event.preventDefault();
+                setActionsMenuTarget(null);
+                return;
+              }
               // While focus is inside such an overlay, Escape should close only
               // the overlay (it owns that via OverlayPortal), not the palette.
               // Scoped to the focused target — not a global query — so the
@@ -4381,11 +4763,11 @@ const ChannelCommandMenu = ({
             }}
           >
             <Command
-              ref={commandRef}
+              ref={attachCommandRef}
               // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
               // item so it never adds a second highlighted row next to the imperatively-managed one.
               value='__none__'
-              onValueChange={() => {}}
+              onValueChange={() => undefined}
               data-nav-active={hasNavigated ? 'true' : undefined}
               data-mention-active={mentionSearchType ? 'true' : undefined}
               shouldFilter={false}

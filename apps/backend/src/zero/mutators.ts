@@ -16,6 +16,7 @@ import {
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
+  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -56,6 +57,7 @@ import {
   SurfaceAreaType,
   SurfaceLinkKind,
   RotationInterval,
+  ReleaseEventType,
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
@@ -93,6 +95,13 @@ import {
   Platform 
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  FLOW_STAGE_NAMES,
+  FlowPlanSchema,
+  deserializeFlowPlan,
+  serializeFlowPlan,
+  validateFlowPlan,
+} from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   validateFieldBranches,
@@ -100,7 +109,6 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
@@ -150,6 +158,13 @@ import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
+import {
+  onFlowPlanUpdated,
+  onFlowStepBacklogged,
+  onFlowTicketStatusChanged,
+} from '@/services/flowCascadeService';
+import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
+import { getEncryptionProvider } from '@/services/encryption';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -212,6 +227,14 @@ const storageService = getStorageService();
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
+async function getCanvasThreadCommentCount(
+  tx: Transaction<Schema>,
+  threadId: string,
+): Promise<number> {
+  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  return comments.filter(comment => comment.deletedAt == null).length;
+}
+
 const XYNE_USER_IDS = new Set([
   'cmhesdd48001ghu4rc6bcb9m0', 'ou9fi7t9tmq2eeiss09km8j3',
   'vj6bzzhi4g1n7q3ikj26f9w1', 'ufvy4nv2jpi55f692hf7kq5e',
@@ -224,6 +247,7 @@ export type AuthData = {
   name: string;
   displayName?: string | null;
   workspaceId: string;
+  orgId: string;
   role: string;
   orgRole: string;
   memberId: string;
@@ -623,6 +647,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
+    channelId: channelId ?? undefined,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -879,7 +904,11 @@ async function createNonParticipantSystemMessages(
   }
 }
 
-export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
+export function createMutators(
+  authData: AuthData,
+  asyncTasks: Array<() => Promise<void>>,
+  awaitedPostCommitTasks: Array<() => Promise<void>>,
+) {
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -1059,7 +1088,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -2214,6 +2243,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
+            ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
         },
@@ -2263,9 +2293,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           isCollapsed: z.boolean().optional(),
           position: z.string().optional(),
           sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
+        async ({
+          tx,
+          args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
+        }) => {
           const section = await tx.run(
             zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
           );
@@ -2292,6 +2326,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(isCollapsed !== undefined && { isCollapsed }),
             ...(position !== undefined && { position }),
             ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             updatedAt: timestamp,
           });
         },
@@ -2376,7 +2411,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: now,
           });
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -2546,21 +2580,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM messages - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
@@ -3075,7 +3094,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -3373,22 +3391,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM replies - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
@@ -3609,26 +3611,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          if (content !== undefined) {
-            asyncTasks.push(async () => {
-              try {
-                // For forwarded messages, index both the forwarded content and the optionalText
-                // For regular messages, just index the content
-                let contentToIndex = content;
-                if (isForwardedMessage) {
-                  const parsedForwarded = parseForwardedMessageXml(message.content);
-                  contentToIndex = `${parsedForwarded?.content || ''} ${content}`.trim();
-                }
-                await repositories.messageSearch.upsert(
-                  messageId,
-                  generatePlainTextContent(contentToIndex),
-                  authData.workspaceId
-                );
-              } catch (error) {
-                logger.error('Failed to update message search index:', error);
-              }
-            });
-          }
         },
       ),
       react: defineMutator(
@@ -3930,15 +3912,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // Clean up asynchronously
-          asyncTasks.push(async () => {
-            try {
-              // Delete from search index
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to cleanup system message after non-participant action:', error);
-            }
-          });
         },
       ),
       delete: defineMutator(
@@ -4147,13 +4120,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 6. Async Side Effects
           asyncTasks.push(async () => {
-            // Delete from search index
-            try {
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to delete from message search index:', error);
-            }
-
             // Delete attachment files from GCS if any attachments exist
             if (attachments.length > 0) {
               await Promise.allSettled(
@@ -4353,6 +4319,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: now,
             labels: [],
             markedItems: [],
+            xyneManaged: false,
             metadata: {
               systemMessageId,
               conversationId,
@@ -5565,6 +5532,62 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const ticket = await tx.run(zql.tickets.where("id", params.id).one());
           if (!ticket) throw new Error("Ticket not found");
 
+          const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          if (
+            currentBoard?.boardType === BoardType.FLOW &&
+            (params.stageName !== undefined || params.statusV2 !== undefined)
+          ) {
+            if (!params.stageName) {
+              throw new Error('Flow ticket status must change through a stage transition');
+            }
+            const [currentStage, targetStage, transitions] = await Promise.all([
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+              ),
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', params.stageName).one(),
+              ),
+              tx.run(zql.stage_transitions.where('boardId', ticket.boardId)),
+            ]);
+            if (!currentStage || !targetStage) {
+              throw new Error('Flow ticket stage not found');
+            }
+            const allowed = transitions.some(
+              transition =>
+                transition.fromStageId === currentStage.id &&
+                transition.toStageId === targetStage.id,
+            );
+            if (!allowed) throw new Error('This Flow stage transition is not allowed');
+            if (
+              params.statusV2 !== undefined &&
+              params.statusV2 !== targetStage.defaultTicketStatusV2
+            ) {
+              throw new Error('Flow ticket status must match its target stage');
+            }
+            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
+            if (params.stageName === FLOW_STAGE_NAMES.BACKLOG && !flow?.planNodeId) {
+              throw new Error('The main Flow ticket cannot be moved to backlog');
+            }
+            if (
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              flow?.planNodeId &&
+              currentBoard.flowPlan
+            ) {
+              const plan = deserializeFlowPlan(currentBoard.flowPlan);
+              if (plan.decisions?.some(decision => decision.parentNodeId === flow.planNodeId)) {
+                throw new Error(
+                  'Conditional form steps cannot be moved to backlog. Submit the form to choose a path.',
+                );
+              }
+            }
+            if (flow?.planNodeId && flow.rootTicketId) {
+              const root = await tx.run(zql.tickets.where('id', flow.rootTicketId).one());
+              if (root?.statusV2 === TicketStatusV2.PAUSED) {
+                throw new Error('Flow run is paused');
+              }
+            }
+          }
+
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
@@ -5635,6 +5658,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Handle board transfer
           if (params.boardId !== undefined && params.boardId !== oldBoardId) {
             const now = Date.now();
+
+            // Flow boards only receive tickets through the flow cascade or
+            // "Start flow"; runs would break if tickets moved in or out.
+            const targetBoard = await tx.run(zql.boards.where('id', params.boardId).one());
+            if (targetBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved onto a Flow board');
+            }
+            const sourceBoard = await tx.run(zql.boards.where('id', oldBoardId).one());
+            if (sourceBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved off a Flow board');
+            }
 
             // 1. Fetch all stages of the new board
             const newBoardStages = await tx.run(
@@ -5763,8 +5797,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     }
                   }
                 } catch (error) {
-                  console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
+                  logger.error('Failed to retrigger autoassignment for board change', error);
                 }
+              });
+            }
+          }
+
+          // Flow-board cascade: instantiate the next plan steps / cascade-cancel
+          // after this transaction commits (ticket creation cannot run inside
+          // a Zero transaction).
+          if (currentBoard?.boardType === BoardType.FLOW) {
+            const movingToBacklog =
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              ticket.stageName !== FLOW_STAGE_NAMES.BACKLOG;
+            if (movingToBacklog) {
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowStepBacklogged({ ticketId: params.id, actorUserId: authData.sub });
+              });
+            } else if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
+              const newStatus = params.statusV2 as TicketStatusV2;
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowTicketStatusChanged({
+                  ticketId: params.id,
+                  newStatus,
+                  actorUserId: authData.sub,
+                });
               });
             }
           }
@@ -5824,6 +5881,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   : { oldValue: ticket[field], newValue: params[field] },
               });
             }
+          }
+
+          const flowSnapshot = (
+            ticket.metadata as {
+              flow?: {
+                nodeSnapshot?: {
+                  planNodeId?: string;
+                  title?: string;
+                  gate?: { type?: string; prompt?: string };
+                };
+              };
+            } | null
+          )?.flow?.nodeSnapshot;
+          if (
+            params.statusV2 === TicketStatusV2.COMPLETED &&
+            ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+            flowSnapshot?.gate?.type === 'confirmation'
+          ) {
+            activities.push({
+              activityType: ActivityType.METADATA,
+              value: {
+                field: 'flowConfirmation',
+                planNodeId: flowSnapshot.planNodeId ?? null,
+                prompt: flowSnapshot.gate.prompt?.trim() || null,
+                confirmationText:
+                  flowSnapshot.gate.prompt?.trim() || flowSnapshot.title?.trim() || null,
+              },
+            });
           }
 
 
@@ -6213,6 +6298,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const oldType = activity.value.oldValue || 'none';
               const newType = activity.value.newValue || 'none';
               activityMessage = `${userName} changed ticket type from ${oldType} to ${newType}`;
+            } else if (
+              activity.activityType === ActivityType.METADATA &&
+              activity.value.field === 'flowConfirmation'
+            ) {
+              const confirmationText = activity.value.confirmationText;
+              activityMessage = confirmationText
+                ? `${userName} confirmed “${confirmationText}”`
+                : `${userName} completed the confirmation`;
             }
 
             if (activityMessage && ticket.conversationId) {
@@ -6542,12 +6635,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
-          // A ticket that is itself mapped as a subticket cannot have its own subtickets
-          const parentAsSubTicket = await tx.run(zql.sub_tickets.where('mappedTicketId', ticketId).one());
+          const parentAsSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+          );
+          // Parent ticket is also needed below to denormalize channelId onto the activity.
+          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           if (parentAsSubTicket) {
-            throw new Error(`Cannot create a sub-ticket under a sub-ticket. Parent ticket ${ticketId} is already a sub-ticket.`);
+            const parentBoard = parentTicket
+              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+              : null;
+            if (parentBoard?.boardType !== BoardType.FLOW) {
+              throw new Error('Cannot create a sub-ticket under a sub-ticket');
+            }
           }
-
           // Create the subticket
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
@@ -6574,7 +6674,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Log activity and create system message
           const activityId = uuidv4();
-          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           await tx.mutate.ticket_activities.insert({
             workspaceId: authData.workspaceId,
             id: activityId,
@@ -6709,11 +6808,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           args: {
             projectId,
             mainBoardId,
-            mainBoardName,
+            mainBoardName: rawMainBoardName,
             vcsProvider,
             releaseTrackingMode,
             channelId,
-            applications,
+            applications: rawApplications,
           },
         }) => {
           // Validate project exists
@@ -6731,8 +6830,49 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Channel does not belong to this project');
           }
 
-          if (applications.length === 0) {
+          if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
+          }
+
+          // ── Normalize all user-typed strings up-front ─────────────────────
+          // Why: a single trailing space in `regex` previously caused commit
+          // analysis to silently match zero files (bug discovered 2026-06-25).
+          // Now: trim everything, drop empty path entries, and validate the
+          // regex compiles BEFORE any DB write. Downstream code already does
+          // some of these trims inline; those become no-ops on already-trimmed
+          // strings.
+          const mainBoardName = rawMainBoardName.trim();
+          const applications = rawApplications.map(app => {
+            const trimmedRegex = app.regex.trim();
+            const trimmedName = app.name.trim();
+            if (trimmedRegex !== '') {
+              try {
+                new RegExp(trimmedRegex);
+              } catch (e) {
+                const why = e instanceof Error ? e.message : 'unknown error';
+                throw new Error(
+                  `Invalid regex for application "${trimmedName || '(unnamed)'}": ${why}`,
+                );
+              }
+            }
+            return {
+              ...app,
+              name: trimmedName,
+              boardName: app.boardName.trim(),
+              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
+              regex: trimmedRegex,
+              ownerTeam: app.ownerTeam.trim(),
+              envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
+              migrationPaths: app.migrationPaths.map(p => p.trim()).filter(Boolean),
+            };
+          });
+
+          for (const app of applications) {
+            if (app.regex === '') {
+              throw new Error(
+                `Application "${app.name || '(unnamed)'}" is missing its file-path regex`,
+              );
+            }
           }
 
           const normalizedApplicationNames = applications.map(app => app.name.trim());
@@ -7076,8 +7216,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), userRoleUpdates: z.record(z.string(), z.string()).optional(), timestamp: z.number() }),
-        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp } }) => {
+        z.object({
+          userGroupId: z.string(),
+          name: z.string().optional(),
+          alias: z.string().optional(),
+          description: z.string().optional(),
+          reassignOnUnavailable: z.boolean().optional(),
+          userResponsibilityUpdates: z
+            .record(z.string(), z.nativeEnum(UserResponsibility))
+            .optional(),
+          userRoleUpdates: z.record(z.string(), z.string()).optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            userGroupId,
+            name,
+            alias,
+            description,
+            reassignOnUnavailable,
+            userResponsibilityUpdates,
+            userRoleUpdates,
+            timestamp,
+          },
+        }) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
 
@@ -7112,6 +7275,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(name !== undefined && { name }),
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
+            ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
             updatedAt: timestamp,
           });
 
@@ -7327,6 +7491,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     board: {
+      updateFlowPlan: defineMutator(
+        z.object({
+          boardId: z.string(),
+          plan: FlowPlanSchema,
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { boardId, plan, timestamp } }) => {
+          const board = await tx.run(zql.boards.where('id', boardId).one());
+          if (!board) {
+            throw new Error('Board not found');
+          }
+          if (board.boardType !== BoardType.FLOW) {
+            throw new Error('Flow plans can only be set on Flow boards');
+          }
+          validateFlowPlan(plan);
+          await validateFlowDecisionFields(tx, plan);
+          await tx.mutate.boards.update({
+            id: boardId,
+            flowPlan: serializeFlowPlan(plan),
+            updatedBy: authData.sub,
+            updatedAt: timestamp,
+          });
+          awaitedPostCommitTasks.push(async () => {
+            await onFlowPlanUpdated({ boardId, actorUserId: authData.sub });
+          });
+        },
+      ),
       update: defineMutator(
         z.object({
           boardId: z.string(),
@@ -7389,6 +7580,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
             if (boardType !== undefined && boardType !== BoardType.RELEASE) {
               throw new Error('Release boards cannot be converted to a normal board');
+            }
+          }
+
+          if (boardType !== undefined && boardType !== board.boardType) {
+            if (board.boardType === BoardType.FLOW) {
+              throw new Error('Flow boards cannot be converted to another board type');
+            }
+            if (boardType === BoardType.FLOW) {
+              throw new Error('Existing boards cannot be converted to a Flow board');
             }
           }
 
@@ -8268,6 +8468,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdBy: authData.sub,
             visibility: visibility || CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: false,
             docType: DocType.Canvas,
             lastEditedBy: authData.sub,
@@ -9005,6 +9206,46 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.canvases.delete({ id });
         },
       ),
+      archiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can archive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: true,
+          });
+        },
+      ),
+      unarchiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can unarchive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: false,
+          });
+        },
+      ),
     },
     canvasUserStatus: {
       toggleStarred: defineMutator(
@@ -9097,6 +9338,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             blockId,
             anchorText: anchorText || null,
             initialCommentId: commentId,
+            commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: null,
             statusUpdatedAt: null,
@@ -9148,12 +9390,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: timestamp,
           });
 
+          const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+
           if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
             await tx.mutate.canvas_comment_threads.update({
               id: threadId,
+              commentCount,
               status: CanvasCommentThreadStatus.OPEN,
               statusUpdatedBy: authData.sub,
               statusUpdatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.canvas_comment_threads.update({
+              id: threadId,
+              commentCount,
             });
           }
         },
@@ -9208,6 +9458,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             mentionedUserIds: '[]',
             deletedAt: timestamp,
           });
+
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+          if (thread) {
+            const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+            await tx.mutate.canvas_comment_threads.update({
+              id: comment.threadId,
+              commentCount,
+            });
+          }
         },
       ),
       setThreadStatus: defineMutator(
@@ -9834,6 +10093,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       upsert: defineMutator(
         z.object({
           displayName: z.string().nullable().optional(),
+          role: z.string().nullable().optional(),
           pronunciation: z.string().nullable().optional(),
           team: z.string().nullable().optional(),
           phoneNumber: z.string().nullable().optional(),
@@ -9858,6 +10118,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: string;
             userId: string;
             displayName?: string | null;
+            role?: string | null;
             pronunciation?: string | null;
             team?: string | null;
             phoneNumber?: string | null;
@@ -9869,6 +10130,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: profileId,
             userId: authData.sub,
             ...(params.displayName !== undefined && { displayName: params.displayName }),
+            ...(params.role !== undefined && { role: params.role }),
             ...(params.pronunciation !== undefined && { pronunciation: params.pronunciation }),
             ...(params.team !== undefined && { team: params.team }),
             ...(params.phoneNumber !== undefined && { phoneNumber: params.phoneNumber }),
@@ -12987,6 +13249,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               updatedAt: timestamp,
             });
           }
+
+          // Emit a TESTING event to the release timeline so the user can see
+          // QA stage changes in the audit feed. Requires looking up the release
+          // ticket for channelId/conversationId (ART doesn't store them).
+          if (stageName) {
+            const releaseTicket = await tx.run(
+              zql.tickets.where('id', row.releaseId).one(),
+            );
+            if (releaseTicket) {
+              const devTitle = devTicket?.title ?? 'dev ticket';
+              const message = failureReason
+                ? `${devTitle} → ${stageName} (reason: ${failureReason})`
+                : `${devTitle} → ${stageName}`;
+              await tx.mutate.release_events.insert({
+                id: uuidv4(),
+                workspaceId: authData.workspaceId,
+                releaseId: row.releaseId,
+                applicationReleaseId: row.applicationReleaseId ?? undefined,
+                eventType: ReleaseEventType.TESTING,
+                eventName: 'STAGE_CHANGED',
+                message,
+                userId: authData.sub,
+                userName: authData.name,
+                channelId: releaseTicket.channelId ?? '',
+                conversationId: releaseTicket.conversationId,
+                createdAt: timestamp,
+              });
+            }
+          }
         },
       ),
       // Set the QA assigned to test this ART row. Independent of status; users
@@ -13921,6 +14212,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
           if (existing) throw new Error('Organization name already exists');
 
+          await getEncryptionProvider().initializeOrg(orgId);
+
           await tx.mutate.organizations.insert({
             orgId,
             name: orgName,
@@ -14146,6 +14439,54 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     userPreference: {
+      setSidebarGroupPreference: defineMutator(
+        z.object({
+          id: z.string(),
+          group: z.enum(['starred', 'channels', 'dms']),
+          filterMode: z.nativeEnum(ChannelFilterMode).optional(),
+          sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
+          const filterField = {
+            starred: 'starredFilterMode',
+            channels: 'channelFilterMode',
+            dms: 'dmFilterMode',
+          }[group];
+          const sortField = {
+            starred: 'starredSortOrder',
+            channels: 'channelSortOrder',
+            dms: 'dmSortOrder',
+          }[group];
+          const fields = {
+            ...(filterMode !== undefined && { [filterField]: filterMode }),
+            ...(sortOrder !== undefined && { [sortField]: sortOrder }),
+          };
+          const existing = await tx.run(zql.user_preferences.where('userId', authData.sub).one());
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              ...fields,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              showThreadTags: false,
+              ...fields,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
       setChannelSortOrder: defineMutator(
         z.object({
           id: z.string(),
@@ -15768,8 +16109,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       disable: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { id, timestamp } }) => {
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+          cancelQueued: z.boolean().optional(),
+        }),
+        async ({ tx, args: { id, timestamp, cancelQueued } }) => {
           logger.info(`[Mutator] automations.disable START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
@@ -15794,7 +16139,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const { approvalService } = await import(
                 '../automations/services/approval.service'
               );
-              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED);
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED, {
+                cancelQueued: cancelQueued ?? true,
+              });
               logger.info(
                 `[Mutator] automations.disable asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
               );
@@ -15906,6 +16253,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+
+          logger.info(`[MUTATOR-NON-LINEAR] stage transitions for board ${boardId} updated by ${authData.sub}`, {
+            boardId,
+            userId: authData.sub,
+            oldTransitionIds: existing.map(t => t.id),
+            newTransitionIds: transitions.map(t => t.id),
+          });
+
           for (const t of existing) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', t.id),

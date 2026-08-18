@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
@@ -29,6 +29,8 @@ import {
   syncCustomFieldValues,
   type CustomFieldWritePayload,
 } from '../services/ticketCustomFieldService';
+import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
+import type { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
@@ -60,10 +62,16 @@ import { BaseTicketType,
   AttachmentEntityType,
   ChannelType,
   ActivityType,
-  TicketReferenceRelation, MessageType, ConversationParticipation } from '@xyne/shared';
+  TicketReferenceRelation,
+  MessageType,
+  ConversationParticipation,
+  BoardType,
+} from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
+import { backlogFlowGroup } from '@/services/flowCascadeService';
+import { AppError } from '@/middleware/errorHandler';
 
 import { z } from 'zod';
 
@@ -490,6 +498,7 @@ export class TicketController {
 
       // Handle both FormData (with files) and JSON requests
       const {
+        id: requestedTicketId,
         title,
         description,
         assignedTo,
@@ -556,22 +565,22 @@ export class TicketController {
         return;
       }
 
-      // Sub-ticket depth is limited to one level: reject before creating the backing ticket
-      // so a failed sub-ticket mapping cannot leave an orphan ticket behind
+      // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
+      // the existing one-level sub-ticket contract.
       if (parentTicketId) {
-        const parentAsSubTicket = await prisma.subTicket.findFirst({
-          where: { mappedTicketId: parentTicketId },
-          select: { id: true },
+        const parent = await prisma.ticket.findUnique({
+          where: { id: parentTicketId },
+          select: { board: { select: { boardType: true } } },
         });
-        if (parentAsSubTicket) {
-          logger.warn('[Ticket Creation] Rejected sub-ticket: parent is already a sub-ticket', {
-            parentTicketId,
-            userId: req.user?.id,
+        if (parent?.board.boardType !== BoardType.FLOW) {
+          const parentAsSubTicket = await prisma.subTicket.findFirst({
+            where: { mappedTicketId: parentTicketId },
+            select: { id: true },
           });
-          res.status(400).json({
-            error: `Cannot create a sub-ticket under a sub-ticket.`,
-          });
-          return;
+          if (parentAsSubTicket) {
+            res.status(400).json({ error: 'Cannot create a sub-ticket under a sub-ticket.' });
+            return;
+          }
         }
       }
 
@@ -648,6 +657,13 @@ export class TicketController {
       const initialMessageId = randomUUID();
 
       const board = await this.boardRepository.findBoardById(boardId);
+      const effectiveStatusV2 =
+        board?.boardType === BoardType.FLOW ? TicketStatusV2.TODO : (statusV2 as TicketStatusV2);
+      const effectiveStageName = board?.boardType === BoardType.FLOW ? 'TODO' : stageName;
+      const effectiveTicketType =
+        board?.boardType === BoardType.FLOW && !parentTicketId
+          ? BaseTicketType.Epic
+          : ticketType;
 
       // Process file uploads BEFORE transaction (external I/O operation)
       let uploadedFiles: UploadedFileResult[] = [];
@@ -713,6 +729,37 @@ export class TicketController {
         }
       }
 
+      let formMapping: Awaited<ReturnType<typeof prisma.formContextMapping.findFirst>> | null = null;
+      let formFields: Awaited<ReturnType<typeof prisma.formFields.findMany>> = [];
+      if (Object.keys(dynamicFields as Record<string, string>).length > 0) {
+        try {
+          formMapping = await prisma.formContextMapping.findFirst({
+            where: { contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
+          });
+          if (formMapping) {
+            formFields = await prisma.formFields.findMany({
+              where: { formId: formMapping.formId },
+            });
+          }
+        } catch (err) {
+          logger.error('[Ticket Creation] Error resolving form mapping/fields:', err);
+        }
+      }
+
+      let formFieldChangesForEmit: FormFieldChanges | undefined;
+      if (formFields.length > 0) {
+        const fieldsWithValues = formFields
+          .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
+          .map((f: any) => ({
+            fieldId: f.id,
+            fieldName: f.fieldName,
+            actualFieldValue: dynamicFields[f.fieldName],
+          }));
+        if (fieldsWithValues.length > 0) {
+          formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
+        }
+      }
+
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
         // Generate xyneId using project-scoped format
@@ -730,6 +777,7 @@ export class TicketController {
           const existingConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelIdFromConversation);
 
           ticket = await this.ticketRepository.createTicket({
+            ...(requestedTicketId && { id: requestedTicketId }),
             title,
             description,
             createdBy: userId,
@@ -741,7 +789,7 @@ export class TicketController {
             workspaceId: existingConversationWorkspaceId,
             userGroupId,
             boardId,
-            statusV2: statusV2 as TicketStatusV2,
+            statusV2: effectiveStatusV2,
             priority,
             eta,
             metadata,
@@ -749,9 +797,10 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
-            ticketType,
-            stageName,
+            ticketType: effectiveTicketType,
+            stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           const ticketMd = serializeTicketMd({
@@ -864,6 +913,7 @@ export class TicketController {
           const newConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelId!);
 
           ticket = await this.ticketRepository.createTicket({
+            ...(requestedTicketId && { id: requestedTicketId }),
             title,
             description,
             createdBy: userId,
@@ -875,7 +925,7 @@ export class TicketController {
             workspaceId: newConversationWorkspaceId,
             userGroupId,
             boardId,
-            statusV2: statusV2 as TicketStatusV2,
+            statusV2: effectiveStatusV2,
             priority,
             eta,
             metadata,
@@ -883,9 +933,10 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
-            ticketType,
-            stageName,
+            ticketType: effectiveTicketType,
+            stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           await this.messageRepository.createWithExecutionId({
@@ -1094,54 +1145,36 @@ export class TicketController {
 
 
       // Create FormEntityValues records for dynamic fields
-      if (Object.keys(dynamicFields).length > 0) {
+      if (Object.keys(dynamicFields).length > 0 && formMapping && formFields.length > 0) {
         try {
-          // Fetch form mapping for the board to get form ID
-          const formMapping = await prisma.formContextMapping.findFirst({
-            where: {
-              contextId: boardId,
-              contextType: FormContextType.BOARD,
-              entityType: FormEntityType.TICKET,
-            },
-          });
-
-          if (formMapping) {
-            // Fetch form fields separately
-            const formFields = await prisma.formFields.findMany({
-              where: {
+          // Create FormEntityValues for each dynamic field
+          const formEntityValuesData = formFields
+            .filter((field: any) => dynamicFields[field.fieldName] !== undefined)
+            .map((field: any) => {
+              const value = dynamicFields[field.fieldName];
+              // Provide both fields for backward compatibility
+              return {
                 formId: formMapping.formId,
-              },
+                entityId: ticket.id,
+                entityType: FormEntityType.TICKET,
+                fieldId: field.id,
+                contextId: boardId,
+                workspaceId: ticket.workspaceId,
+                fieldValue: '', // Empty string for backward compatibility (not used anymore)
+                actualFieldValue: value, // Actual value stored in JSON field
+              };
             });
 
-            // Create FormEntityValues for each dynamic field
-            const formEntityValuesData = formFields
-              .filter((field: any) => dynamicFields[field.fieldName] !== undefined)
-              .map((field: any) => {
-                const value = dynamicFields[field.fieldName];
-                // Provide both fields for backward compatibility
-                return {
-                  formId: formMapping.formId,
-                  entityId: ticket.id,
-                  entityType: FormEntityType.TICKET,
-                  fieldId: field.id,
-                  contextId: boardId,
-                  workspaceId: ticket.workspaceId,
-                  fieldValue: '', // Empty string for backward compatibility (not used anymore)
-                  actualFieldValue: value, // Actual value stored in JSON field
-                };
-              });
-
-            if (formEntityValuesData.length > 0) {
-              await prisma.formEntityValues.createMany({
-                data: formEntityValuesData,
-              });
-              logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
-              if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
+          if (formEntityValuesData.length > 0) {
+            await prisma.formEntityValues.createMany({
+              data: formEntityValuesData,
+            });
+            logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
+            if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
                 versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {
                   logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
                 });
               }
-            }
           }
         } catch (error) {
           logger.error('[Ticket Creation] Error creating form entity values:', error);
@@ -1327,9 +1360,11 @@ export class TicketController {
       if (releaseTicket && releaseTrackingMode === ReleaseTrackingMode.VERSION) {
         logger.info(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: releaseTrackingMode=VERSION`);
       } else {
-        const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;
-        const newCommitId = dynamicFields?.['newCommitId'] as string;
-        const branch = dynamicFields?.['branch'] as string;
+        // Trim — protects commit analysis from accidental whitespace in the form
+        // (e.g. user pastes "main " with a trailing space, GitHub returns 404).
+        const deployedCommitId = String(dynamicFields?.['deployedCommitId'] ?? '').trim();
+        const newCommitId = String(dynamicFields?.['newCommitId'] ?? '').trim();
+        const branch = String(dynamicFields?.['branch'] ?? '').trim();
 
         // Make silent-skip visible — log which condition(s) failed so this can be
         // debugged without staring at code. WARN level so it shows up by default.
@@ -1361,7 +1396,7 @@ export class TicketController {
             currentTicketId: ticket.id,
             userName: req.user?.name,
             isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
-            workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId!,
+            workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId,
           }).then((result) => {
             if (result.success) {
               logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);
@@ -1390,10 +1425,55 @@ export class TicketController {
             });
             return;
           }
+          // Client-supplied `id` (requestedTicketId) collided with an existing
+          // ticket. Signal 409 so the caller can retry with a new id.
+          if (!target || target.includes('id') || target.includes('PRIMARY')) {
+            res.status(409).json({
+              error: 'A ticket with this id already exists. Retry with a new id.',
+              code: 'DUPLICATE_TICKET_ID',
+            });
+            return;
+          }
         }
       }
 
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Move every live descendant of a Flow run group to backlog.
+   * POST /api/tickets/:ticketId/flow-groups/:groupId/backlog
+   */
+  backlogFlowGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      next(new AppError('User not authenticated', 401));
+      return;
+    }
+
+    const rootTicketId = req.params.ticketId;
+    const groupId = req.params.groupId;
+    if (!rootTicketId || !groupId) {
+      next(new AppError('ticketId and groupId are required', 400));
+      return;
+    }
+
+    try {
+      const result = await backlogFlowGroup({
+        rootTicketId,
+        groupId,
+        actorUserId: userId,
+        workspaceId,
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
     }
   };
 

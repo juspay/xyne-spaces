@@ -12,13 +12,15 @@ interface RecordingStoreSnapshot {
 }
 
 export type RecordingStoreEvent =
-  | { type: 'requestAutoStart' }
+  | { type: 'requestAutoStart'; conversationId?: string; channelId?: string }
   | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';
       sttModel?: 'google' | 'azure' | 'deepgram';
       defaultLayout?: RecordingLayout;
+      conversationId?: string;
+      channelId?: string;
     }
   | {
       type: 'recordingStarted';
@@ -72,6 +74,16 @@ export function sendRecordingEvent(event: RecordingStoreEvent): void {
 /** Read the current recording status imperatively (e.g. inside an event handler) without subscribing. */
 export function getRecordingStatus(): RecordingState['status'] {
   return store.getSnapshot().context.status;
+}
+
+/** Stop whatever is in flight because the page or the machine is going away. */
+export function stopRecordingForTeardown(): void {
+  const status = getRecordingStatus();
+  if (status === 'starting') {
+    sendRecordingEvent({ type: 'requestStop' });
+  } else if (status === 'recording' || status === 'paused') {
+    sendRecordingEvent({ type: 'stopRecording' });
+  }
 }
 
 export interface UseTranscriptStreamReturn {

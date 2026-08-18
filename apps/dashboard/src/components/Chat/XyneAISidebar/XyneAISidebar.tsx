@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -7,6 +8,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -29,6 +31,8 @@ import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAs
 import {
   deleteV2Conversation,
   fetchV2ConversationMessages,
+  deskAutoDraftMessagesUrl,
+  forkDeskAutoDraft,
 } from '../../../services/XyneAI/XyneAISessionsV2Service';
 import type {
   Message,
@@ -765,13 +769,12 @@ const XyneAISidebar = ({
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
-    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    // `block: 'nearest'` ALWAYS — not just for forced/embedded instances.
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth',
-      ...(isAgentForced && { block: 'nearest' }),
+      block: 'nearest',
     });
-  }, [isAgentForced]);
+  }, []);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -933,8 +936,11 @@ const XyneAISidebar = ({
           scrollToBottom();
         }, 100);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[XyneAISidebar] Failed to load most recent conversation:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAISidebar] Failed to load most recent conversation:'),
+          error: error,
+        });
       } finally {
         setIsLoadingConversation(false);
       }
@@ -1016,9 +1022,13 @@ const XyneAISidebar = ({
       if (isV2) {
         setDebugEvents([]);
         setDebugArtifactsReadyVersion(0);
+        const deskDraft = deskAutoDraftRef.current;
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
           effectiveAgentSlug,
+          deskDraft && deskDraft.conversationId === conversation.sessionId
+            ? deskAutoDraftMessagesUrl(deskDraft.conversationId, deskDraft.channelId)
+            : undefined,
         );
         // Overlay any local-only messages from the manager. If the user sent a
         // message in this conversation, switched away, came back AFTER the
@@ -1065,7 +1075,11 @@ const XyneAISidebar = ({
         }, 100);
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to load conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to load conversation:'),
+        error: error,
+      });
     } finally {
       setLoadingHistorySessionId(null);
     }
@@ -1095,7 +1109,11 @@ const XyneAISidebar = ({
         usesDraftStreamKeyRef.current = true;
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to delete conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to delete conversation:'),
+        error: error,
+      });
     }
   };
 
@@ -1203,8 +1221,13 @@ const XyneAISidebar = ({
       void handleLoadConversationRef.current(stub);
       xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
     };
-    processFocus(xyneAIActor.getSnapshot().context.focusSessionId);
-    const sub = xyneAIActor.subscribe(snapshot => processFocus(snapshot.context.focusSessionId));
+    const snap = xyneAIActor.getSnapshot().context;
+    if (snap.deskAutoDraft) deskAutoDraftRef.current = snap.deskAutoDraft;
+    processFocus(snap.focusSessionId);
+    const sub = xyneAIActor.subscribe(snapshot => {
+      if (snapshot.context.deskAutoDraft) deskAutoDraftRef.current = snapshot.context.deskAutoDraft;
+      processFocus(snapshot.context.focusSessionId);
+    });
     return () => sub.unsubscribe();
   }, [conversationId]);
 
@@ -1343,7 +1366,11 @@ const XyneAISidebar = ({
             }),
           });
         } catch (error) {
-          console.error('[XyneAISidebar] Failed to submit feedback:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[XyneAISidebar] Failed to submit feedback:'),
+            error: error,
+          });
           // Revert UI state on error
           setFeedbackMap(prev => ({
             ...prev,
@@ -1450,7 +1477,11 @@ const XyneAISidebar = ({
       const url = buildCitationUrl(citation);
 
       if (!url) {
-        console.warn('[XyneAI] Cannot build URL for citation:', citation);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAI] Cannot build URL for citation:'),
+          context: [citation],
+        });
         return;
       }
 
@@ -1568,11 +1599,24 @@ const XyneAISidebar = ({
     },
     [messages],
   );
+  const deskAutoDraftRef = useRef<{ conversationId: string; channelId: string } | null>(null);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     // Allow submission if there's input, activities, OR selection contexts
     if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
       return;
+
+    const deskDraft = deskAutoDraftRef.current;
+    if (deskDraft && deskDraft.conversationId === conversationId) {
+      try {
+        const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
+        deskAutoDraftRef.current = null;
+        setConversationId(forked.conversationId);
+      } catch {
+        toast.error('Could not continue this draft conversation');
+        return;
+      }
+    }
 
     // Store the display content (what the user typed, without hidden context)
     const displayContent = inputValue.trim();

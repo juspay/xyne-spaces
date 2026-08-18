@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
@@ -5,6 +6,7 @@ import {
   Archive,
   ArrowLeft,
   Check,
+  Copy,
   History,
   Pencil,
   Power,
@@ -287,9 +289,15 @@ export function AutomationBuilder({
       description: string;
       config: AutomationConfig;
     }): Promise<SaveResult> => {
-      console.info('[automations] save attempted', {
-        id: savedId,
-        status: savedStatus,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save attempted'),
+        context: [
+          {
+            id: savedId,
+            status: savedStatus,
+          },
+        ],
       });
 
       const validationResult = await validateAutomation(payload.config);
@@ -368,9 +376,15 @@ export function AutomationBuilder({
       }
       setSavedStatus(result.automation.status);
       setEditMode(false);
-      console.info('[automations] save succeeded', {
-        id: result.automation.id,
-        status: result.automation.status,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save succeeded'),
+        context: [
+          {
+            id: result.automation.id,
+            status: result.automation.status,
+          },
+        ],
       });
       toast.success('Saved');
       onSaved?.(result);
@@ -380,14 +394,22 @@ export function AutomationBuilder({
       const v = (err as Error & { validation?: ValidationResult }).validation;
       if (v) setValidation(v);
       setErrorMessage(message);
-      console.error('[automations] save failed', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[automations] save failed'),
+        error: err,
+      });
       toast.error(message);
     },
   });
 
   const activateMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      console.info('[automations] activate attempted', { id });
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] activate attempted'),
+        context: [{ id }],
+      });
       const validationResult = await validateAutomation(config);
       if (!validationResult.valid) {
         setValidation(validationResult);
@@ -414,17 +436,21 @@ export function AutomationBuilder({
   });
 
   const disableMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => {
+    mutationFn: ({ id, cancelQueued }: { id: string; cancelQueued: boolean }): Promise<void> => {
       setSavedStatus(AutomationStatusValues.DISABLED);
       setErrorMessage(null);
-      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now() }));
-      toast.success('Automation disabled');
+      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now(), cancelQueued }));
+      toast.success(
+        cancelQueued ? 'Automation disabled, queued runs will not fire' : 'Automation disabled',
+      );
       return Promise.resolve();
     },
     onError: err => {
       setErrorMessage(err instanceof Error ? err.message : 'Disable failed');
     },
   });
+
+  const [disableDialogOpen, setDisableDialogOpen] = useState(false);
 
   const archiveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -562,10 +588,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, cond);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(cond),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(cond),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -579,10 +611,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, sw);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(sw),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(sw),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -597,10 +635,16 @@ export function AutomationBuilder({
       };
       setConfig(prev => {
         const next = insertInto(prev.steps, action);
-        console.info('[automations] step added', {
-          type,
-          insertAt,
-          finalIndex: next.indexOf(action),
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_info',
+          message: String('[automations] step added'),
+          context: [
+            {
+              type,
+              insertAt,
+              finalIndex: next.indexOf(action),
+            },
+          ],
         });
         return { ...prev, steps: next };
       });
@@ -637,9 +681,15 @@ export function AutomationBuilder({
   const handleDeleteStep = useCallback((index: number): void => {
     setConfig(prev => {
       const removed = prev.steps[index];
-      console.info('[automations] step removed', {
-        type: removed?.type,
-        index,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step removed'),
+        context: [
+          {
+            type: removed?.type,
+            index,
+          },
+        ],
       });
       return { ...prev, steps: prev.steps.filter((_, i) => i !== index) };
     });
@@ -648,10 +698,16 @@ export function AutomationBuilder({
   const handleMoveStep = useCallback((index: number, direction: -1 | 1): void => {
     setConfig(prev => {
       const moved = prev.steps[index];
-      console.info('[automations] step reordered', {
-        type: moved?.type,
-        from: index,
-        to: index + direction,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step reordered'),
+        context: [
+          {
+            type: moved?.type,
+            from: index,
+            to: index + direction,
+          },
+        ],
       });
       return { ...prev, steps: moveStep(prev.steps, index, direction) };
     });
@@ -684,8 +740,8 @@ export function AutomationBuilder({
 
   const handleDisable = useCallback((): void => {
     if (!savedId) return;
-    disableMutation.mutate(savedId);
-  }, [disableMutation, savedId]);
+    setDisableDialogOpen(true);
+  }, [savedId]);
 
   const handleArchive = useCallback((): void => {
     if (!savedId) return;
@@ -795,6 +851,18 @@ export function AutomationBuilder({
                   Runs
                 </Button>
               ) : null}
+              {savedId ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
+                  data-track-category='automation-builder'
+                  data-track-name='header-clone'
+                >
+                  <Copy className='size-4' />
+                  Clone
+                </Button>
+              ) : null}
               {/* Activate is open to anyone for any LIVE row. Disable is
                   admin-only — pulling a running automation can have
                   wide-reaching effects, so it's gated. */}
@@ -827,8 +895,9 @@ export function AutomationBuilder({
                   </Button>
                 )
               ) : null}
-              {/* Admin-only: permanently retire a live automation. */}
-              {isLiveRow && savedId && isAutomationsAdmin ? (
+              {/* Admin-only: permanently retire an automation. Only offered once it is
+                  DISABLED, so it has to be switched off first. */}
+              {savedId && isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED ? (
                 <Button
                   variant='outline'
                   size='sm'
@@ -1264,6 +1333,58 @@ export function AutomationBuilder({
               data-track-name='reject-confirm'
             >
               Reject
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={disableDialogOpen}
+        onOpenChange={setDisableDialogOpen}
+        title='Disable automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-2 px-5 py-4 text-sm'>
+          <p className='text-base font-semibold text-foreground'>
+            Disable {name || 'this automation'}?
+          </p>
+          <p className='text-muted-foreground'>What should happen to the runs already queued?</p>
+          <div className='flex flex-wrap items-center justify-end gap-2 pt-4'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDisableDialogOpen(false)}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: false });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-keep-queued'
+            >
+              Let them finish
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={disableMutation.isPending}
+              loading={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: true });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel-queued'
+            >
+              Stop them
             </Button>
           </div>
         </div>

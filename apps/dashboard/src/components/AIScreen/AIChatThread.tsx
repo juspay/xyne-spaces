@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
   useEffect,
@@ -113,6 +114,12 @@ interface AIChatThreadProps {
   /** Bubbled up from the composer so the parent can preserve the user's
    *  selections when switching to a recent chat. */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** Fired once the landing query has actually been submitted, so the parent can
+   *  drop it. The in-component guard is a `useRef`, which resets on remount — if
+   *  the parent keeps handing the same `initialQuery` back, ANY remount re-sends
+   *  it and opens yet another conversation. Clearing it at the source is the
+   *  guard that survives a remount. */
+  onInitialQueryConsumed?: (() => void) | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -1309,6 +1316,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     onConversationChange,
     onAgentChange,
     onContextChange,
+    onInitialQueryConsumed,
   },
   ref,
 ): ReactElement {
@@ -1743,7 +1751,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           return;
         }
       } catch (error) {
-        console.error('[AIChatThread] Failed to load session:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to load session:'),
+          error: error,
+        });
       } finally {
         isLoadingSession.current = false;
       }
@@ -1760,8 +1772,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     };
   }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
 
-  // Auto-submit initialQuery once on mount, applying the landing composer's
-  // chosen context/toggles to this first turn.
+  // Auto-submit initialQuery once, applying the landing composer's chosen
+  // context/toggles to this first turn. The ref guard resets on remount, so the
+  // parent is told to drop the query too — see `onInitialQueryConsumed`.
   useEffect(() => {
     if (initialQuery && !hasAutoSubmitted.current) {
       hasAutoSubmitted.current = true;
@@ -1778,8 +1791,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         initialExtras ? toStreamOverrides(initialExtras) : undefined,
       );
+      // After the call, so "consumed" means "actually submitted" and the
+      // attachments above are read before the parent drops them.
+      onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery]);
+  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -1984,7 +2000,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         });
         if (!res.ok) throw new Error(`Feedback request failed: ${res.status}`);
       } catch (error) {
-        console.error('[AIChatThread] Failed to submit feedback:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to submit feedback:'),
+          error: error,
+        });
         // Revert to the previous feedback on failure
         setMessages(prevMessages =>
           prevMessages.map(msg =>

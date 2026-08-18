@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo } from 'react';
 import { RenderMessageWithHTML } from './RenderMessageWithHTML'; // Adjust import path as needed
 
@@ -115,7 +116,11 @@ export const getSmartSnippet = (html: string, limit: number): string => {
 
     return resultHtml;
   } catch (e) {
-    console.error('Smart truncation failed', e);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Smart truncation failed'),
+      error: e,
+    });
     const plainText = body.textContent || '';
     const wordsArray = plainText.split(/\s+/).filter(Boolean);
 

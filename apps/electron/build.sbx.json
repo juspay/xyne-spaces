@@ -61,7 +61,7 @@
   },
   "win": {
     "icon": "assets/images/xyne.png",
-    "signAndEditExecutable": false
+    "signExecutable": false
   },
   "linux": {
     "icon": "assets/images/xyne.png",

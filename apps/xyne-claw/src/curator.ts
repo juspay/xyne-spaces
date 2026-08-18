@@ -29,8 +29,19 @@ import { createLogger } from "./logger.js";
 const log = createLogger("curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
-const CURATOR_MODEL = process.env["MEMORY_CURATOR_MODEL"] ?? "claude-haiku-4-5-20251001";
+// Background job: prefer the low-priority automation key so curator bursts
+// can't queue interactive agent turns on the main key's parallel-slot pool.
+const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
+// MEMORY_CURATOR_MODEL is the explicit per-job override and still wins. Absent
+// it, resolve from the same source as the key above — LiteLLM keys are
+// team-scoped with DISJOINT allowed-model lists, so the automation key paired
+// with a model that team can't reach is a hard 403 (prod 2026-08-14). The bare
+// haiku default is only correct when the automation team allows haiku, which it
+// does not today, so it stays last.
+const CURATOR_MODEL = process.env["MEMORY_CURATOR_MODEL"]?.trim()
+  || process.env["LITELLM_AUTOMATION_MODEL"]?.trim()
+  || process.env["LITELLM_MODEL"]
+  || "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 
 const MAX_TRANSCRIPT_CHARS = 12_000;

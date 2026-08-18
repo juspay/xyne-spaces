@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { decrypt } from '@/services/encryptionService';
+import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -49,6 +53,13 @@ export class FlowController {
       return;
     }
 
+    // 2b. Amazon SNS confirmation is owned by the incoming-webhook controller,
+    // not proxied: an incoming webhook has no outbound webhookUrl to proxy to.
+    if (actionId === SNS_CONFIRM_ACTION_ID) {
+      res.status(200).json(await incomingWebhookController.confirmSnsSubscription(values));
+      return;
+    }
+
     try {
       // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
       const message = await repositories.messages.findById(messageId);
@@ -85,6 +96,17 @@ export class FlowController {
         return;
       }
 
+      // Flow actions are sent to the same app webhook as ordinary Spaces
+      // events, so they must carry the same app-level HMAC. claw-auth treats
+      // fields such as context.userId as authoritative; never forward the
+      // action unsigned when signing material is missing.
+      const app = await repositories.apps.findById(appId);
+      if (!app?.signingSecret) {
+        logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
+        res.status(502).json({ error: `No signing secret configured for app: ${appId}` });
+        return;
+      }
+
       // 5. Build the payload sent to the app backend
       const appPayload = {
         actionId,
@@ -97,6 +119,9 @@ export class FlowController {
           userId: userId ?? null,
         },
       };
+      // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
+      const body = JSON.stringify(appPayload);
+      const signature = signWebhookPayload(body, decrypt(app.signingSecret));
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 
@@ -118,8 +143,10 @@ export class FlowController {
         headers: {
           'Content-Type': 'application/json',
           'X-Xyne-Event': 'flow_action',
+          'X-Xyne-Signature': signature,
+          'X-Source': 'XyneSpaces',
         },
-        body: JSON.stringify(appPayload),
+        body,
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
       });
@@ -181,4 +208,3 @@ export class FlowController {
     }
   };
 }
-

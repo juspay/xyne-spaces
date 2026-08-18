@@ -97,6 +97,9 @@ export interface ElectronAPI {
     html: string,
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
+  onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingResumeRequest?: (callback: () => void) => () => void;
+  onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;
   getErrorReportScreenSources?: () => Promise<{
@@ -136,15 +139,34 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
   };
   recordingPill?: {
-    onShow: (callback: (startTime: number) => void) => () => void;
+    onShow: (
+      callback: (state: {
+        startTime: number;
+        paused: boolean;
+        pauseStartedAt: number | null;
+        accumulatedPausedMs: number;
+      }) => void,
+    ) => () => void;
     onHide: (callback: () => void) => () => void;
     onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
     onMinimizedChanged: (callback: (minimized: boolean) => void) => () => void;
     stopRecording: () => void;
+    resumeRecording: () => void;
     openApp: () => void;
     setIgnoreMouse: (ignore: boolean) => void;
     dragStart: () => void;
     dragEnd: () => void;
+  };
+  platform?: string;
+  tray?: {
+    getVisible: () => Promise<boolean>;
+    setVisible: (visible: boolean) => void;
+    onVisibleChanged: (callback: (visible: boolean) => void) => () => void;
+  };
+  recordingPillSettings?: {
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => void;
+    onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;

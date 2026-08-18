@@ -58,7 +58,6 @@ type MigrationMode = 'all-to-one' | 'per-board';
 type JiraMigrationUseCase =
   | 'issues'
   | 'channel-only'
-  | 'ticket-created-by'
   | 'purge-project'
   | 'move-jira-project-board'
   | 'move-jira-project-channel';
@@ -209,12 +208,6 @@ const JiraMigrationScreen = (): ReactElement => {
   const [channelMoveUpdatedAt, setChannelMoveUpdatedAt] = useState('');
   const [isChannelMoveLoading, setIsChannelMoveLoading] = useState(false);
   const channelMoveChannels = useChannelsByProjectId(channelMoveSourceProjectId || undefined);
-  const [creatorChangeTicketId, setCreatorChangeTicketId] = useState('');
-  const [creatorChangeNewUserId, setCreatorChangeNewUserId] = useState('');
-  const [creatorChangeUpdatedAt, setCreatorChangeUpdatedAt] = useState('');
-  const [creatorChangeCascade, setCreatorChangeCascade] = useState(false);
-  const [isCreatorChangeLoading, setIsCreatorChangeLoading] = useState(false);
-  const [creatorChangeSearch, setCreatorChangeSearch] = useState('');
   const [purgeProjectId, setPurgeProjectId] = useState('');
   const [purgeExternalSourceId, setPurgeExternalSourceId] = useState('');
   const [purgeConfirmText, setPurgeConfirmText] = useState('');
@@ -305,50 +298,6 @@ const JiraMigrationScreen = (): ReactElement => {
     [channels, targetChannelId],
   );
 
-  const creatorChangeOptions = useMemo(() => {
-    const users = (workspaceUsers || []).filter(u => Boolean(u?.id));
-    const query = creatorChangeSearch.trim().toLowerCase();
-
-    const results: Array<{
-      value: string;
-      label: string;
-      subtitle?: string;
-      icon: ReactElement;
-    }> = [];
-
-    if (!query) {
-      for (const user of users) {
-        if (!user?.id) continue;
-        const subtitle = user.email ? user.email : undefined;
-        results.push({
-          value: user.id,
-          label: user.name || user.email || user.id,
-          ...(subtitle ? { subtitle } : {}),
-          icon: <User className='w-4 h-4 text-muted-foreground' />,
-        });
-        if (results.length >= 50) break;
-      }
-      return results;
-    }
-
-    for (const user of users) {
-      if (!user?.id) continue;
-      const email = (user.email || '').toLowerCase();
-      const name = (user.name || '').toLowerCase();
-      if (email.includes(query) || name.includes(query) || user.id.toLowerCase().includes(query)) {
-        const subtitle = user.email ? user.email : undefined;
-        results.push({
-          value: user.id,
-          label: user.name || user.email || user.id,
-          ...(subtitle ? { subtitle } : {}),
-          icon: <User className='w-4 h-4 text-muted-foreground' />,
-        });
-        if (results.length >= 50) break;
-      }
-    }
-    return results;
-  }, [workspaceUsers, creatorChangeSearch]);
-
   const handleMoveChannelProject = async (): Promise<void> => {
     if (!channelMoveSourceProjectId.trim()) {
       toast.error('Select a source project');
@@ -386,38 +335,6 @@ const JiraMigrationScreen = (): ReactElement => {
       toast.error('Channel move failed', { description: message });
     } finally {
       setIsChannelMoveLoading(false);
-    }
-  };
-
-  const handleChangeTicketCreatedBy = async (): Promise<void> => {
-    if (!creatorChangeTicketId.trim()) {
-      toast.error('Enter a ticketId');
-      return;
-    }
-    if (!creatorChangeNewUserId.trim()) {
-      toast.error('Select a new creator');
-      return;
-    }
-
-    setIsCreatorChangeLoading(true);
-    try {
-      const payload = {
-        ticketId: creatorChangeTicketId.trim(),
-        newCreatedByUserId: creatorChangeNewUserId.trim(),
-        ...(creatorChangeUpdatedAt.trim() ? { updatedAt: creatorChangeUpdatedAt.trim() } : {}),
-        ...(creatorChangeCascade ? { cascadeConversationAndMessages: true } : {}),
-      };
-      const result = await jiraMigrationService.changeTicketCreatedBy(payload);
-      toast.success('Ticket updated', {
-        description: result.ticket
-          ? `${result.ticket.xyneId}: ${result.ticket.title}${creatorChangeCascade ? ` • convo:${result.conversationUpdatedCount ?? 0} msgs:${result.messageUpdatedCount ?? 0}` : ''}`
-          : `Updated: ${result.updatedCount}`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to change ticket creator';
-      toast.error('Update failed', { description: message });
-    } finally {
-      setIsCreatorChangeLoading(false);
     }
   };
 
@@ -1591,19 +1508,6 @@ const JiraMigrationScreen = (): ReactElement => {
                 <button
                   type='button'
                   data-track-category='jira_migration'
-                  data-track-name='use_case_ticket_created_by'
-                  onClick={() => setUseCase('ticket-created-by')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                    useCase === 'ticket-created-by'
-                      ? 'bg-foreground text-background'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Change Ticket Creator
-                </button>
-                <button
-                  type='button'
-                  data-track-category='jira_migration'
                   data-track-name='use_case_purge_project'
                   onClick={() => setUseCase('purge-project')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
@@ -1774,107 +1678,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       {isChannelMoveLoading ? 'Moving…' : 'Move Channel'}
                     </Button>
                   </div>
-                </div>
-              </div>
-            </section>
-          ) : useCase === 'ticket-created-by' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
-              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
-                <div className='flex flex-col gap-1'>
-                  <h3 className='text-sm font-semibold text-foreground'>Change Ticket Creator</h3>
-                  <p className='text-xs text-muted-foreground'>
-                    Updates `Ticket.createdBy` (and sets `updatedBy` to you). Does not modify Jira.
-                  </p>
-                </div>
-              </div>
-
-              <div className='p-5'>
-                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-change-ticket-id'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Ticket ID
-                    </label>
-                    <Input
-                      id='jira-change-ticket-id'
-                      value={creatorChangeTicketId}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setCreatorChangeTicketId(e.target.value)
-                      }
-                      placeholder='cxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-                    />
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Xyne `Ticket.id` or `Ticket.xyneId` (example: `LP-268`).
-                    </p>
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                      New Creator
-                    </p>
-                    <EntitySelector
-                      options={creatorChangeOptions}
-                      selectedValue={creatorChangeNewUserId || null}
-                      onSelect={value => setCreatorChangeNewUserId(value ?? '')}
-                      onSearchChange={setCreatorChangeSearch}
-                      disableClientFiltering={true}
-                      placeholder='Select user'
-                      searchPlaceholder='Search users...'
-                      width='100%'
-                      testId='jira-change-ticket-creator'
-                    />
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-change-ticket-updated-at'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      updatedAt (optional)
-                    </label>
-                    <Input
-                      id='jira-change-ticket-updated-at'
-                      value={creatorChangeUpdatedAt}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setCreatorChangeUpdatedAt(e.target.value)
-                      }
-                      placeholder='2026-05-19T13:23:47.000Z'
-                    />
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Leave empty to use current time.
-                    </p>
-                  </div>
-                </div>
-
-                <div className='mt-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                  <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                    Cascade (optional)
-                  </p>
-                  <label className='flex items-start gap-3 text-sm text-foreground'>
-                    <input
-                      type='checkbox'
-                      className='mt-0.5 h-4 w-4 rounded border-border'
-                      checked={creatorChangeCascade}
-                      onChange={e => setCreatorChangeCascade(e.target.checked)}
-                      data-track-category='jira_migration'
-                      data-track-name='cascade_conversation_messages'
-                    />
-                    <span>
-                      Also update `Conversation.createdBy`, `Message.senderId`, and attachments in
-                      this ticket’s conversation (only where they match old creator).
-                    </span>
-                  </label>
-                </div>
-
-                <div className='mt-4 flex justify-end'>
-                  <Button
-                    onClick={() => void handleChangeTicketCreatedBy()}
-                    disabled={isCreatorChangeLoading}
-                  >
-                    {isCreatorChangeLoading ? 'Updating…' : 'Update Ticket'}
-                  </Button>
                 </div>
               </div>
             </section>

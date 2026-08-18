@@ -157,6 +157,12 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // "Run autonomously" button (the `pendingGoalSuggestion` payload). Default
   // false so existing agents are unchanged.
   const [draftSuggestGoal, setDraftSuggestGoal] = useState(false);
+  // Per-agent opt-OUT: post the live plan/TODO card (from the todo-write tool)
+  // into the Spaces thread. Default true (post) so existing agents are
+  // unchanged; turning it off sets agent.config.postTodos=false, which
+  // suppresses the card at claw-auth's doRenderPlanCard choke point. The agent
+  // still tracks TODOs internally for loop discipline — only the render is hidden.
+  const [draftPostTodos, setDraftPostTodos] = useState(true);
   // Per-agent opt-in: when true, claw-auth's webhook wraps every user message
   // as `/goal <text>` before parsing, so every interaction with this agent
   // runs as an autonomous /goal loop. User-typed `/stop` and `/goal status`
@@ -282,6 +288,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
         setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
+        setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
         {
@@ -384,6 +391,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
     const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
+    const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
@@ -425,6 +433,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
       draftSuggestGoal !== baseSuggestGoal ||
+      draftPostTodos !== basePostTodos ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
@@ -441,7 +450,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -513,6 +522,15 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         nextConfig.suggestGoal = true;
       } else {
         delete nextConfig.suggestGoal;
+      }
+      // Post TODOs to the Spaces thread (agent.config.postTodos). Opt-OUT: the
+      // default is to post the live plan card, so we only persist the flag when
+      // it's turned OFF (postTodos:false). Turning it back on removes the key,
+      // restoring the default. Enforced at claw-auth's doRenderPlanCard.
+      if (draftPostTodos) {
+        delete nextConfig.postTodos;
+      } else {
+        nextConfig.postTodos = false;
       }
       if (draftVerifyResponses) {
         nextConfig.verifyResponses = true;
@@ -640,7 +658,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1022,6 +1040,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             researchAgentRepositoryOptions={researchAgentRepositoryOptions}
             draftSuggestGoal={draftSuggestGoal}
             onDraftSuggestGoalChange={setDraftSuggestGoal}
+            draftPostTodos={draftPostTodos}
+            onDraftPostTodosChange={setDraftPostTodos}
             draftVerifyResponses={draftVerifyResponses}
             onDraftVerifyResponsesChange={setDraftVerifyResponses}
             draftCitationReflection={draftCitationReflection}

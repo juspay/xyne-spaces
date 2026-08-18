@@ -15,6 +15,7 @@ const MAX_PASSWORD_LENGTH = 128;
 const PASSWORD_UPPERCASE_REGEX = /[A-Z]/;
 const PASSWORD_DIGIT_REGEX = /\d/;
 const PASSWORD_SPECIAL_CHARACTER_REGEX = /[^A-Za-z0-9]/;
+const CLIENT_PASSWORD_HASH_REGEX = /^[a-f0-9]{64}$/i;
 
 export const PASSWORD_COMPLEXITY_MESSAGE = `Password must be ${MIN_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} characters and include at least one uppercase letter, one number, and one special character`;
 
@@ -50,6 +51,33 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   if (!salt || !key) return false;
   const derivedKey = (await scrypt(password, salt, KEY_LENGTH, { N, r, p })) as Buffer;
   return crypto.timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
+}
+
+export function generateSixDigitCode(): string {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
+export function isClientPasswordHash(value: unknown): value is string {
+  return typeof value === 'string' && CLIENT_PASSWORD_HASH_REGEX.test(value);
+}
+
+export function normalizeClientPasswordHash(value: string): string {
+  return value.toLowerCase();
+}
+
+export function hashPasswordForAuth(password: string): string {
+  return crypto.createHash('sha256').update(password, 'utf8').digest('hex');
+}
+
+export async function verifyEmailPassword(password: string, storedHash: string): Promise<boolean> {
+  if (isClientPasswordHash(storedHash)) {
+    return crypto.timingSafeEqual(
+      Buffer.from(hashPasswordForAuth(password), 'hex'),
+      Buffer.from(normalizeClientPasswordHash(storedHash), 'hex'),
+    );
+  }
+
+  return verifyPassword(password, storedHash);
 }
 
 export function validatePasswordComplexity(password: string): string | null {

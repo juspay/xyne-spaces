@@ -72,11 +72,15 @@ dominant act.
 
 ## Second task — the thread as a whole
 
-Also classify the ENTIRE thread by what "done" would mean for it. Usually ONE value; return
-more only when the thread genuinely is several things at once (a bug report that also
-requests a feature). Never more than three.
+Also classify the ENTIRE thread, on TWO independent axes.
 
 ${numbered(THREAD_TYPE_CHOICES)}
+
+### Axis 1 — outcome (one, rarely two)
+
+Pick ONE of ISSUE, ALERT, QUESTION, REQUEST, FEATURE_REQUEST, DISCUSSION, ANNOUNCEMENT by
+what "done" would mean for the thread. Return a second one only when the thread genuinely
+is two things at once (a bug report that also requests a feature) — never more than two.
 
 Decide by what would have to happen for this thread to be finished:
 - fixed AND verified → ISSUE
@@ -91,10 +95,28 @@ tools that already exist? Yes → REQUEST. Needs something built → FEATURE_REQ
 
 When no other type fits, DISCUSSION.
 
+### Axis 2 — answer types (usually NONE)
+
+Then add any of HOW_TO, WHAT_HAPPENED, WHY_DECISION, WHAT_IS, KNOWN_ISSUE, REFERENCE,
+EXAMPLE, POLICY_LIMIT that apply. These are independent of the outcome — an ISSUE whose
+resolution spells out the fix is both ISSUE and HOW_TO.
+
+The bar is high and most threads clear none of it: add one ONLY if someone who was never in
+this thread could get their question answered by THIS THREAD ALONE. Tag what the thread
+ANSWERS, not what it discusses. A thread full of debugging that never lands on an answer
+gets none of these. Returning no answer types is the normal, correct outcome — do not reach
+for one to look thorough.
+
+Read each definition's "NOT" clauses before tagging: asking how to do something is not
+HOW_TO, mid-incident chatter is not WHAT_HAPPENED, a choice with no reasoning is not
+WHY_DECISION, and a value someone is unsure about is not POLICY_LIMIT.
+
+ANNOUNCEMENT is an outcome, not an answer type — a release note is ANNOUNCEMENT alone.
+
 ## Output
 
 {
-  "threadTypes": [one or more of ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
+  "threadTypes": [the outcome type first, then any answer types — from ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
   "classifications": [
     { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}, or exactly ["${NO_ACT}"]] }
   ]

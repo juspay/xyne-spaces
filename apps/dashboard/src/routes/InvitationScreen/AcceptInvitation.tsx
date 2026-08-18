@@ -291,8 +291,12 @@ export const AcceptInvitation = (): ReactElement => {
   // state.status === 'accepted'
   if (state.status === 'accepted') {
     const isInElectron = typeof window.electronAPI?.openExternal === 'function';
+    // New users must land on the workspace index so HomeScreen can redirect them
+    // to the onboarding questionnaire; deep-link redirectPath is only for
+    // returning users who have already completed onboarding.
+    const isNewUser = Cookies.get('is_new_user') === 'true';
     let targetPath = state.redirectPath || `/${state.workspaceId}`;
-    if (!targetPath.startsWith('/') || targetPath.startsWith('//')) {
+    if (isNewUser || !targetPath.startsWith('/') || targetPath.startsWith('//')) {
       targetPath = `/${state.workspaceId}`;
     }
 
@@ -302,9 +306,7 @@ export const AcceptInvitation = (): ReactElement => {
       window.location.href = targetPath;
     } else {
       // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.
-      const launchPath = state.redirectPath
-        ? state.redirectPath.replace(/^\//, '')
-        : state.workspaceId;
+      const launchPath = targetPath.replace(/^\//, '');
       window.location.href = `/launch?path=${encodeURIComponent(launchPath)}`;
     }
     return <></>;

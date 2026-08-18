@@ -745,109 +745,6 @@ export class JiraMigrationController {
     }
   };
 
-  changeTicketCreatedBy = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const actorUserId = req.user?.id;
-      if (!actorUserId) {
-        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
-        return;
-      }
-
-      const { ticketId, newCreatedByUserId, updatedAt } = req.body as {
-        ticketId?: string; // accepts Ticket.id or Ticket.xyneId
-        newCreatedByUserId?: string;
-        updatedAt?: string;
-        cascadeConversationAndMessages?: boolean;
-      };
-
-      if (!ticketId || !newCreatedByUserId) {
-        res.status(400).json({ error: 'ticketId and newCreatedByUserId are required' });
-        return;
-      }
-
-      const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
-      if (Number.isNaN(resolvedUpdatedAt.getTime())) {
-        res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
-        return;
-      }
-
-      const userExists = await db.user.findUnique({ where: { id: newCreatedByUserId }, select: { id: true } });
-      if (!userExists) {
-        res.status(404).json({ error: 'newCreatedByUserId user not found' });
-        return;
-      }
-
-      const cascade = Boolean((req.body as { cascadeConversationAndMessages?: boolean })?.cascadeConversationAndMessages);
-
-      const existingTicket = await db.ticket.findFirst({
-        where: { OR: [{ id: ticketId }, { xyneId: ticketId }] },
-        select: { id: true, xyneId: true, conversationId: true, createdBy: true },
-      });
-      if (!existingTicket) {
-        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
-        return;
-      }
-
-      const result = await db.$transaction(async tx => {
-        const ticketUpdate = await tx.ticket.updateMany({
-          where: { id: existingTicket.id },
-          data: { createdBy: newCreatedByUserId, updatedBy: actorUserId, updatedAt: resolvedUpdatedAt },
-        });
-
-        let conversationUpdatedCount = 0;
-        let messageUpdatedCount = 0;
-        let attachmentUpdatedCount = 0;
-
-        if (cascade) {
-          const convUpdate = await tx.conversation.updateMany({
-            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
-            data: { createdBy: newCreatedByUserId },
-          });
-          conversationUpdatedCount = convUpdate.count;
-
-          const msgUpdate = await tx.message.updateMany({
-            where: { conversationId: existingTicket.conversationId, senderId: existingTicket.createdBy },
-            data: { senderId: newCreatedByUserId },
-          });
-          messageUpdatedCount = msgUpdate.count;
-
-          const attachUpdate = await tx.messageAttachment.updateMany({
-            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
-            data: { createdBy: newCreatedByUserId, uploadedByUserId: newCreatedByUserId },
-          });
-          attachmentUpdatedCount = attachUpdate.count;
-        }
-
-        return { ticketUpdate, conversationUpdatedCount, messageUpdatedCount, attachmentUpdatedCount };
-      });
-
-      if (result.ticketUpdate.count === 0) {
-        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
-        return;
-      }
-
-      const updatedTicket = await db.ticket.findFirst({
-        where: { id: existingTicket.id },
-        select: { id: true, createdBy: true, updatedBy: true, updatedAt: true, xyneId: true, title: true, projectId: true, channelId: true },
-      });
-
-      res.json({
-        success: true,
-        data: {
-          updatedCount: result.ticketUpdate.count,
-          ticket: updatedTicket,
-          cascadeConversationAndMessages: cascade,
-          conversationUpdatedCount: result.conversationUpdatedCount,
-          messageUpdatedCount: result.messageUpdatedCount,
-          attachmentUpdatedCount: result.attachmentUpdatedCount,
-        },
-      });
-    } catch (error) {
-      logger.error('Jira migration change ticket createdBy failed', error);
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to change ticket createdBy' });
-    }
-  };
-
   purgeProjectMigration = async (req: Request, res: Response): Promise<void> => {
     try {
       const actorUserId = req.user?.id;
@@ -1053,10 +950,9 @@ export class JiraMigrationController {
         const chunks = chunkArray(messageIds, phase1MessageChunkSize);
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          const [, , , attachmentResult, messageResult] = await db.$transaction([
+          const [, , attachmentResult, messageResult] = await db.$transaction([
             db.reactionCount.deleteMany({ where: { messageId: { in: chunk } } }),
             db.reaction.deleteMany({ where: { messageId: { in: chunk } } }),
-            db.messageSearch.deleteMany({ where: { messageId: { in: chunk } } }),
             db.messageAttachment.deleteMany({ where: { entityId: { in: chunk } } }),
             db.message.deleteMany({ where: { messageId: { in: chunk } } }),
           ]);

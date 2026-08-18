@@ -2,16 +2,24 @@ import express, { type Request, type Response } from 'express';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config as appConfig } from '@/config/env';
+import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
+import { ExternalSourcePlatform } from '../core/types';
 import { SOCIAL_MEDIA_SOURCE_TYPES } from '../social-media/constants';
 import { socialMediaService } from '../social-media/socialMediaService';
-import { canAccessSocialMediaChannel, authorizeSocialMediaManager } from './social-media/access';
+import {
+  authorizeSocialMediaManager,
+  canAccessSocialMediaChannel,
+} from './social-media/access';
+import googlePlayRoutes from './social-media/google-play';
 import instagramRoutes from './social-media/instagram';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
 router.use(express.json());
+router.use(googlePlayRoutes);
 router.use(instagramRoutes);
 
 // POST /:conversationId/reply
@@ -77,7 +85,6 @@ router.get(
         return;
       }
 
-      // Find the source for this channel
       const source = await db.externalSource.findFirst({
         where: {
           channelId,
@@ -92,8 +99,6 @@ router.get(
         return;
       }
 
-      // ExternalMessage.entityId = email ID when entityType = EMAIL.
-      // Find emails in this conversation first, then look up their ExternalMessage rows.
       const emails = await db.email.findMany({
         where: { conversationId },
         select: { id: true },
@@ -117,14 +122,12 @@ router.get(
         return;
       }
 
-      // externalThreadId is either "igsid" or "igsid:timestamp" — extract the IGSID prefix
       const igsid = extMsg.externalThreadId.split(':')[0];
       if (!igsid) {
         res.json({ igsid: null, tickets: [] });
         return;
       }
 
-      // Find all ExternalMessages for this source with the same IGSID prefix (any thread window)
       const relatedExtMsgs = await db.externalMessage.findMany({
         where: {
           externalSourceId: source.id,
@@ -183,33 +186,60 @@ router.get(
   },
 );
 
-// POST /:channelId/sync — manual sync trigger (no-op for webhook-push sources, useful for testing)
+// POST /:channelId/sync — manual sync trigger for polling sources (e.g. Google Play)
 router.post(
   '/:channelId/sync',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
-      if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))) {
+      if (
+        !(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))
+      ) {
         return;
       }
+
       const sources = await db.externalSource.findMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: { in: Object.values(SOCIAL_MEDIA_SOURCE_TYPES) },
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
           isActive: true,
         },
         select: { id: true },
       });
       if (sources.length === 0) {
-        res.status(404).json({ error: 'No active social media source found' });
+        res.status(404).json({ error: 'Active social media source not found' });
         return;
       }
-      res.json({ message: 'Webhook-driven sources do not require manual sync', sourceCount: sources.length });
+
+      if (appConfig.enableEmailFetchWorker) {
+        if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+        const job = await emailFetchQueue.getQueue().add('social-media-refetch', {
+          sourceIds: sources.map((source) => source.id),
+          channelId: req.params.channelId,
+          requesterUserId: req.user!.id,
+          workspaceId,
+        });
+        res.status(202).json({
+          success: true,
+          queued: true,
+          jobId: String(job.id),
+        });
+        return;
+      }
+
+      let synced = 0;
+      for (const source of sources) {
+        const result = await socialMediaService.syncSource(source.id, {
+          ignoreSyncCursor: true,
+        });
+        synced += result.synced;
+      }
+      res.json({ synced, sourceCount: sources.length });
     } catch (error) {
-      logger.error(`${TAG} Manual sync failed`, { error });
-      res.status(500).json({ error: 'Sync failed' });
+      logger.error(`${TAG} Manual source sync failed`, { error });
+      res.status(500).json({ error: 'Failed to synchronize review source' });
     }
   },
 );
@@ -221,14 +251,19 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
-      if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))) {
+      if (
+        !(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))
+      ) {
         return;
       }
+
       const result = await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: { in: Object.values(SOCIAL_MEDIA_SOURCE_TYPES) },
+          sourceType: {
+            in: [ExternalSourcePlatform.GOOGLE_PLAY, SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM],
+          },
         },
         data: { isActive: false },
       });
@@ -236,9 +271,13 @@ router.post(
         res.status(404).json({ error: 'Social media source not found' });
         return;
       }
-      res.json({ message: 'Social media desk disconnected', sourceCount: result.count });
+
+      res.json({
+        message: 'Social media desk disconnected',
+        sourceCount: result.count,
+      });
     } catch (error) {
-      logger.error(`${TAG} Failed to disconnect`, { error });
+      logger.error(`${TAG} Failed to disconnect source`, { error });
       res.status(500).json({ error: 'Failed to disconnect social media source' });
     }
   },

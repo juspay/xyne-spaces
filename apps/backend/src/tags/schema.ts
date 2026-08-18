@@ -114,6 +114,10 @@ export const DeleteTagBodySchema = z.object({
   configKey: z.string().min(1).nullable().optional(),
 });
 
+export const ConfirmTagBodySchema = z.object({
+  tagId: z.string().min(1),
+});
+
 export const SetManualTagsBodySchema = z.object({
   sourceId: z.string().min(1),
   sourceType: z.string().min(1),
@@ -138,4 +142,5 @@ export type UpdateTagsConfigBody = z.infer<typeof UpdateTagsConfigBodySchema>;
 export type CreateTagBody = z.infer<typeof CreateTagBodySchema>;
 export type UpdateTagBody = z.infer<typeof UpdateTagBodySchema>;
 export type DeleteTagBody = z.infer<typeof DeleteTagBodySchema>;
+export type ConfirmTagBody = z.infer<typeof ConfirmTagBodySchema>;
 export type SetManualTagsBody = z.infer<typeof SetManualTagsBodySchema>;

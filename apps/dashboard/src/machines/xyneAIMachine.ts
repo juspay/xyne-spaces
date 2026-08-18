@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 
@@ -8,6 +9,11 @@ export type XyneAIState = 'closed' | 'open';
 export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'canvas' | 'general';
 
 // Thread info interface
+export interface DeskAutoDraftContext {
+  conversationId: string;
+  channelId: string;
+}
+
 export interface ThreadInfo {
   conversationId: string;
   // The channel the context was captured from. Pinned here rather than read off
@@ -95,6 +101,11 @@ export interface XyneAIContext {
   contextOpenNonce: number;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
+  /** Set when Ask AI is opened on a Xyne Desk auto-draft. That claw conversation
+   *  belongs to the desk persona, so the viewer has no turns of their own in it:
+   *  history must be hydrated through the Spaces proxy, and the first message the
+   *  viewer sends has to fork the conversation into one they own. */
+  deskAutoDraft: DeskAutoDraftContext | null;
   // Knowledge Base context
   kbCollectionId: string | null;
   kbChannelId: string | null;
@@ -121,6 +132,7 @@ export type XyneAIEvent =
       selectionInfos?: SelectionInfo[];
       /** When set, selects this Ask AI session after OPEN (e.g. toast View) */
       focusSessionId?: string | null;
+      deskAutoDraft?: DeskAutoDraftContext | null;
       kbCollectionId?: string | null;
       kbChannelId?: string | null;
       kbDocId?: string | null;
@@ -272,7 +284,11 @@ const saveContextToIndexedDB = async (context: Partial<XyneAIContext>): Promise<
     const store = transaction.objectStore(STORE_NAME);
     store.put(context, 'xyneai-context');
   } catch (error) {
-    console.error('Failed to save XyneAI context to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save XyneAI context to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -289,7 +305,11 @@ export const loadContextFromIndexedDB = async (): Promise<Partial<XyneAIContext>
         reject(new Error(request.error?.message || 'Failed to get context from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load XyneAI context from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -302,7 +322,11 @@ const clearContextFromIndexedDB = async (): Promise<void> => {
     const store = transaction.objectStore(STORE_NAME);
     store.delete('xyneai-context');
   } catch (error) {
-    console.error('Failed to clear XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear XyneAI context from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -334,7 +358,11 @@ export const saveMermaidDiagram = async (
 
     store.put(mermaidData, messageId);
   } catch (error) {
-    console.error('Failed to save mermaid diagram to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save mermaid diagram to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -352,7 +380,11 @@ export const loadMermaidDiagram = async (messageId: string): Promise<MermaidDiag
         reject(new Error(request.error?.message || 'Failed to get mermaid diagram from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load mermaid diagram from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -365,7 +397,11 @@ export const deleteMermaidDiagram = async (messageId: string): Promise<void> => 
     const store = transaction.objectStore(MERMAID_STORE_NAME);
     store.delete(messageId);
   } catch (error) {
-    console.error('Failed to delete mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to delete mermaid diagram from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -390,7 +426,11 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
       }
     };
   } catch (error) {
-    console.error('Failed to clear old mermaid diagrams from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear old mermaid diagrams from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -457,6 +497,7 @@ export const xyneAIMachine = setup({
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
               : null,
+          deskAutoDraft: event.deskAutoDraft ?? null,
           kbCollectionId: event.kbCollectionId ?? null,
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
@@ -582,6 +623,7 @@ export const xyneAIMachine = setup({
         initialContextSelections: null,
         contextOpenNonce: context.contextOpenNonce,
         focusSessionId: null,
+        deskAutoDraft: null,
         kbCollectionId: null,
         kbChannelId: null,
         kbDocId: null,
@@ -726,6 +768,7 @@ export const xyneAIMachine = setup({
     initialContextSelections: null,
     contextOpenNonce: 0,
     focusSessionId: null,
+    deskAutoDraft: null,
     kbCollectionId: null,
     kbChannelId: null,
     kbDocId: null,
@@ -832,7 +875,11 @@ const initializeActor = async (): Promise<void> => {
     // Clean up old mermaid diagrams on app startup
     void clearOldMermaidDiagrams();
   } catch (error) {
-    console.error('Failed to initialize XyneAI actor with persisted state:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to initialize XyneAI actor with persisted state:'),
+      error: error,
+    });
   }
 };
 

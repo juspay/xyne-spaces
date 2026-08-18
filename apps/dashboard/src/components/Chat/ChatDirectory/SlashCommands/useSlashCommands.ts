@@ -22,7 +22,7 @@ import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { sendRecordingEvent, getRecordingStatus } from '../../../../hooks/useRecordingStore';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
-import { getDMSearchableNames } from '../ChatDirectory.utils';
+import { getDMSearchableNames, isOneToOneDMChannel } from '../ChatDirectory.utils';
 import type { CommandTarget } from './QuickDmComposer';
 
 /**
@@ -51,6 +51,8 @@ export interface SlashCommandClickInfo {
   terminal: boolean;
   targetType?: 'user' | 'channel';
   destination?: string;
+  /** How a chat/call target was reached: typing the `/`-prefix vs the ⌥↵ Actions menu. */
+  source?: 'slash' | 'actions_menu';
 }
 
 interface UseSlashCommandsParams {
@@ -116,11 +118,13 @@ export interface UseSlashCommandsReturn {
   resetCommand: () => void;
   exitCommandMode: () => void;
   clearTarget: () => void;
-  applyCommand: (word: string) => void;
+  applyCommand: (word: string, options?: { silent?: boolean }) => void;
   runActionCommand: (kind: SearchCommandKind) => void;
   runNavSection: (item: NavigationItem) => void;
   runGotoExtra: (extra: GotoExtra) => void;
   runCommandTarget: (target: CommandTarget) => void;
+  /** Run chat/call on a highlighted Cmd+K result (⌥↵ Actions menu), bypassing the `/`-command step. */
+  invokeActionOnTarget: (kind: 'chat' | 'call', target: CommandTarget) => void;
   startChannelCall: (channelId: string, displayName: string) => void;
   isInCommandMode: () => boolean;
   onSetTextReady: (setText: (text: string) => void) => void;
@@ -399,7 +403,7 @@ export function useSlashCommands({
 
   // Seed the editor with `/call `/`/chat ` when a command is picked from the `/` list.
   const applyCommand = useCallback(
-    (word: string): void => {
+    (word: string, options?: { silent?: boolean }): void => {
       const text = `/${word} `;
       // Mirror the command text into the ref/state synchronously so isInCommandMode() is correct
       // before Lexical's onChange fires — otherwise the mention-trigger guards briefly treat the
@@ -407,8 +411,10 @@ export function useSlashCommands({
       commandTextRef.current = text;
       setCommandText(text);
       setTextRef.current?.(text);
-      // Metrics: command row applied (not terminal — the picker/target step follows).
-      if ((COMMAND_KINDS as string[]).includes(word)) {
+      // Metrics: command row applied (not terminal — the picker/target step follows). Skipped when
+      // `silent`: the ⌥↵ Actions menu seeds `/chat ` here only to reach the composer — the user
+      // never applied a `/chat` command, so a command-stage click would be a phantom event.
+      if (!options?.silent && (COMMAND_KINDS as string[]).includes(word)) {
         onCommandClick?.({ stage: 'command', command: word as SearchCommandKind, terminal: false });
       }
     },
@@ -484,6 +490,45 @@ export function useSlashCommands({
     [exitCommandMode, onOpenChange, onCommandClick],
   );
 
+  // Fire or confirm a call for the picked target. Shared by `/call` (runCommandTarget) and the
+  // Cmd+K result Actions menu (invokeActionOnTarget) so both take the same guarded path: a 1:1 call
+  // fires instantly; a live channel call is joined; a new channel-wide call asks for confirmation.
+  const dispatchCall = useCallback(
+    (target: CommandTarget): void => {
+      if (target.type === 'user') {
+        // A 1:1 call fires instantly, matching the rest of the app.
+        startCall(target.user.id, getUserDisplayName(target.user));
+      } else if (
+        hasActiveChannelCall(target.channel.id) ||
+        isOneToOneDMChannel(target.channel.scopeType)
+      ) {
+        // Start the call directly (no "Start a call in this channel?" confirm) when either: a call
+        // is already live on the channel (you're joining, not broadcasting), OR it's a 1:1 DM —
+        // structurally a channel but really a direct call to one person (e.g. a starred user). Group
+        // DMs pass their friendly label (channel.name is an id list).
+        startChannelCall(target.channel.id, target.displayName ?? target.channel.name);
+      } else if (ensureRoomIdle()) {
+        // No call yet — confirm before starting a new channel-wide call. The modal renders as a
+        // sibling of the Cmd+K dialog, so closing Cmd+K here doesn't tear it down.
+        setPendingChannelCall({
+          id: target.channel.id,
+          name: target.displayName ?? target.channel.name,
+        });
+      }
+      exitCommandMode();
+      onOpenChange(false);
+    },
+    [
+      startCall,
+      startChannelCall,
+      hasActiveChannelCall,
+      ensureRoomIdle,
+      setPendingChannelCall,
+      exitCommandMode,
+      onOpenChange,
+    ],
+  );
+
   const runCommandTarget = useCallback(
     (target: CommandTarget): void => {
       const def = commandKind ? getCommand(commandKind) : null;
@@ -497,42 +542,43 @@ export function useSlashCommands({
         command: commandKind,
         terminal: def.pickerAction === 'call',
         targetType: target.type,
+        source: 'slash',
       });
       if (def.pickerAction === 'call') {
-        if (target.type === 'user') {
-          // A 1:1 call fires instantly, matching the rest of the app.
-          startCall(target.user.id, getUserDisplayName(target.user));
-        } else if (hasActiveChannelCall(target.channel.id)) {
-          // A call is already live on the channel — join it directly, no "start a call?" confirm
-          // (you're joining an existing call, not starting a new channel-wide one). Group DMs pass
-          // their friendly label (channel.name is an id list).
-          startChannelCall(target.channel.id, target.displayName ?? target.channel.name);
-        } else if (ensureRoomIdle()) {
-          // No call yet — confirm before starting a new channel-wide call. The modal renders as a
-          // sibling of the Cmd+K dialog, so closing Cmd+K here doesn't tear it down.
-          setPendingChannelCall({
-            id: target.channel.id,
-            name: target.displayName ?? target.channel.name,
-          });
-        }
-        exitCommandMode();
-        onOpenChange(false);
+        dispatchCall(target);
         return;
       }
       // `compose` (`/chat`): open the composer for the picked user/channel.
       selectTarget(target);
     },
-    [
-      commandKind,
-      startCall,
-      startChannelCall,
-      hasActiveChannelCall,
-      ensureRoomIdle,
-      exitCommandMode,
-      onOpenChange,
-      selectTarget,
-      onCommandClick,
-    ],
+    [commandKind, dispatchCall, selectTarget, onCommandClick],
+  );
+
+  // Cmd+K result Actions menu (⌥↵): run chat/call on a highlighted user/channel result *without*
+  // first typing `/chat`|`/call`. `commandKind` is derived from the editor text, so we can't set it
+  // and reuse runCommandTarget — instead dispatch the call directly, or (for chat) seed the hidden
+  // `/chat ` text via applyCommand then open the composer with selectTarget. The seeded text is what
+  // the composer's "back" button reads, so this path needs no special-casing there.
+  const invokeActionOnTarget = useCallback(
+    (kind: 'chat' | 'call', target: CommandTarget): void => {
+      // Metrics: target picked. `/call` is terminal; `/chat` opens the composer (invoked on send).
+      onCommandClick?.({
+        stage: 'target',
+        command: kind,
+        terminal: kind === 'call',
+        targetType: target.type,
+        source: 'actions_menu',
+      });
+      if (kind === 'call') {
+        dispatchCall(target);
+        return;
+      }
+      // Seed `/chat ` only to open the composer — silent so it doesn't log a phantom command-apply
+      // click (the `stage:'target'` click above already recorded this pick, with `source`).
+      applyCommand('chat', { silent: true });
+      selectTarget(target);
+    },
+    [dispatchCall, applyCommand, selectTarget, onCommandClick],
   );
 
   // Clear command state whenever the menu closes.
@@ -646,6 +692,7 @@ export function useSlashCommands({
     runNavSection,
     runGotoExtra,
     runCommandTarget,
+    invokeActionOnTarget,
     startChannelCall,
     isInCommandMode,
     onSetTextReady,

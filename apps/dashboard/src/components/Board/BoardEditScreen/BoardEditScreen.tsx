@@ -1124,9 +1124,6 @@ const BoardEditScreen = ({
             case 'status':
               configKey = 'todo';
               break;
-            case 'workflowType':
-              configKey = 'workflows';
-              break;
             case 'tags':
               configKey = 'labels';
               break;
@@ -1279,9 +1276,6 @@ const BoardEditScreen = ({
             break;
           case 'status':
             configKey = 'todo';
-            break;
-          case 'workflowType':
-            configKey = 'workflows';
             break;
           case 'tags':
             configKey = 'labels';
@@ -1845,7 +1839,6 @@ const BoardEditScreen = ({
                                 {[
                                   'dueDate',
                                   'assignedTo',
-                                  'workflowType',
                                   'merchantId',
                                   'tags',
                                   'ticketType',

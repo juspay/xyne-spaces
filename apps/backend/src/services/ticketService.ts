@@ -74,6 +74,32 @@ export class TicketService {
 
       const { boardId } = ticket;
 
+      if (ticket.board?.boardType === BoardType.FLOW) {
+        const [currentStage, targetStage] = await Promise.all([
+          prisma.stage.findFirst({ where: { boardId, name: ticket.stageName } }),
+          prisma.stage.findFirst({ where: { boardId, name: stage } }),
+        ]);
+        if (!currentStage || !targetStage) {
+          logger.warn(`[TicketService] FLOW stage not found for ${ticketId} → "${stage}"`);
+          return;
+        }
+        const transition = await prisma.stageTransition.findUnique({
+          where: {
+            boardId_fromStageId_toStageId: {
+              boardId,
+              fromStageId: currentStage.id,
+              toStageId: targetStage.id,
+            },
+          },
+        });
+        if (!transition) {
+          logger.warn(`[TicketService] FLOW transition rejected for ${ticketId} → "${stage}"`);
+          return;
+        }
+        await this.ticketRepository.updateTicketStage(ticketId, stage, userId, source, prActivityData);
+        return;
+      }
+
       // NON_LINEAR boards require the dedicated transition service (handles forms, approvals, SLA).
       if (ticket.board?.boardType === BoardType.NON_LINEAR) {
         const result = await ticketStageTransitionService.transitionTicket(ticketId, userId, stage, {
@@ -108,12 +134,12 @@ export class TicketService {
         // For WEBHOOK source with PR data, we still need to call repository to create PR activity
         // even if the stage hasn't changed
         if (source === ActivitySource.WEBHOOK && prActivityData) {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Creating PR activity only.`
           );
           // Proceed to create PR activity without stage change
         } else {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Skipping update.`
           );
           return;
@@ -184,15 +210,50 @@ export class TicketService {
     const updates: string[] = [];
     const data: Record<string, unknown> = { updatedBy: userId, updatedAt: new Date() };
 
+    const existingTicket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { board: true },
+    });
+    if (!existingTicket) throw new Error('Ticket not found');
+    const flowStageChange =
+      existingTicket.board.boardType === BoardType.FLOW && (params.stage || params.status);
+    if (flowStageChange) {
+      const targetStageName = params.stage ?? params.status;
+      if (!targetStageName || (params.status && params.status !== targetStageName)) {
+        throw new Error('Flow status must match its target stage');
+      }
+      const [currentStage, targetStage] = await Promise.all([
+        prisma.stage.findFirst({
+          where: { boardId: existingTicket.boardId, name: existingTicket.stageName },
+        }),
+        prisma.stage.findFirst({
+          where: { boardId: existingTicket.boardId, name: targetStageName },
+        }),
+      ]);
+      if (!currentStage || !targetStage) throw new Error('Flow stage not found');
+      const allowed = await prisma.stageTransition.findUnique({
+        where: {
+          boardId_fromStageId_toStageId: {
+            boardId: existingTicket.boardId,
+            fromStageId: currentStage.id,
+            toStageId: targetStage.id,
+          },
+        },
+      });
+      if (!allowed) throw new Error('This Flow stage transition is not allowed');
+      await this.ticketRepository.updateTicketStage(ticketId, targetStageName, userId);
+      updates.push('stage', 'status');
+    }
+
     if (params.assigneeId) { data['assignedTo'] = params.assigneeId; updates.push('assignee'); }
-    if (params.stage) {
+    if (params.stage && !flowStageChange) {
       data['stageName'] = params.stage; updates.push('stage');
     }
     if (params.groupId) { data['userGroupId'] = params.groupId; updates.push('group'); }
     if (params.title) { data['title'] = params.title; updates.push('title'); }
     if (params.description) { data['description'] = params.description; updates.push('description'); }
     if (params.priority) { data['priority'] = params.priority; updates.push('priority'); }
-    if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
+    if (params.status && !flowStageChange) { data['statusV2'] = params.status; updates.push('status'); }
     if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
 
     // Snapshot the fields that can change so we can emit TicketActivity
@@ -213,10 +274,10 @@ export class TicketService {
     });
 
     const previousCountsSnapshot = await buildKanbanCountsSnapshot(ticketId);
-    const updatedTicket = await prisma.ticket.update({
-      where: { id: ticketId },
-      data,
-    });
+    const hasDirectUpdates = Object.keys(data).some(key => key !== 'updatedBy' && key !== 'updatedAt');
+    const updatedTicket = hasDirectUpdates
+      ? await prisma.ticket.update({ where: { id: ticketId }, data })
+      : await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
