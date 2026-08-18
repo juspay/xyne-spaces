@@ -27,7 +27,8 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
-  | 'agent';
+  | 'agent'
+  | 'mcpConfigure';
 
 export interface FlowComponent {
   id: string;

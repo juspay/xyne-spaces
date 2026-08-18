@@ -1,3 +1,5 @@
+import { logger, Event as LogEvent } from '../utils/logger';
+
 const DB_NAME = 'xyne-encryption-keys';
 const STORE_NAME = 'session-keys';
 const DB_VERSION = 1;
@@ -13,8 +15,9 @@ function getErrorMessage(error: unknown): string {
 }
 
 function logSessionKeyStoreError(message: string, error: unknown): void {
-  console.error('[SessionKeyStore]', {
-    message,
+  logger.error(LogEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_error',
+    message: String('[SessionKeyStore] ' + message),
     error: getErrorMessage(error),
   });
 }

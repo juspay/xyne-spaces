@@ -8,6 +8,7 @@ export const LogLevel = {
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
 export const Event = {
+  INFO: "info",
   API_CALL_SUCCESSFUL: 'api_call_successful',
   API_CALL_FAILED: 'api_call_failed',
   WEBSOCKET_CONNECTED: 'websocket_connection_successful',

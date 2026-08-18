@@ -14,6 +14,7 @@ import {
   type SkillDiff,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
+  authorizeSkillFileUpdate,
   buildSkillUpdateApprovalFlow,
 } from "xyne-claw-shared";
 
@@ -394,16 +395,15 @@ router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
-    // ACL: owner of a personal skill, OR admin (for any skill).
-    const admin = await isClawAdmin(requesterId);
-    if (!admin) {
-      if (skill.scope !== "personal" || skill.ownerUserId !== requesterId) {
-        res.status(403).json({
-          success: false,
-          error: "Only the skill owner or a CLAW_ADMIN can update files",
-        });
-        return;
-      }
+    // ACL: the skill's own owner (personal OR global), OR a CLAW_ADMIN.
+    const authz = authorizeSkillFileUpdate({
+      ownerUserId: skill.ownerUserId,
+      callerUserId: requesterId,
+      callerIsAdmin: await isClawAdmin(requesterId),
+    });
+    if (!authz.ok) {
+      res.status(authz.code).json({ success: false, error: authz.reason });
+      return;
     }
 
     const body = req.body as { files?: Array<{ relativePath?: string; content?: string; contentType?: string }> };

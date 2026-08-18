@@ -213,7 +213,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       appsService
         .getChannelShortcuts(channelId, { type: 'GLOBAL' })
         .then(setGlobalShortcuts)
-        .catch(() => {});
+        .catch(() => undefined);
     }, [channelId, conversation?.conversationId]);
 
     const handleCommandSelect = useCallback(
@@ -536,9 +536,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           throw new Error('offline');
         }
 
-        console.info(
-          `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
-        );
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_info',
+          message: String(
+            `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
+          ),
+        });
 
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
@@ -1025,7 +1028,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                               'Your support request has been submitted and picked up by AI.',
                           });
                         } catch (error) {
-                          console.error('Failed to create support ticket:', error);
+                          logger.error(Event.FRONTEND_ERROR, {
+                            type: 'migrated_console_error',
+                            message: String('Failed to create support ticket:'),
+                            error: error,
+                          });
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });

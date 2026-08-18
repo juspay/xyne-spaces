@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -54,8 +55,11 @@ const BrowseChannels = (): ReactElement => {
         if (!cancelled) setMemberCounts(counts);
       })
       .catch((err: unknown) => {
-        // eslint-disable-next-line no-console
-        console.error('Failed to fetch channel member counts:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to fetch channel member counts:'),
+          error: err,
+        });
       });
     return (): void => {
       cancelled = true;

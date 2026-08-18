@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { shortcutsActor } from '../machines/shortcutsMachine';
 
 declare global {
@@ -236,16 +237,21 @@ export const resolveShortcut = (
 
       if (!tieWarnings.has(signature)) {
         tieWarnings.add(signature);
-        console.warn(
-          `[Shortcuts] Ambiguous shortcut resolution for "${key}" at priority ${bestPriority}. ` +
-            'Adjust scope/priority to disambiguate.',
-          tiedCandidates.map(entry => ({
-            id: entry.id,
-            scope: entry.scope,
-            description: entry.description,
-            category: entry.category,
-          })),
-        );
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String(
+            `[Shortcuts] Ambiguous shortcut resolution for "${key}" at priority ${bestPriority}. ` +
+              'Adjust scope/priority to disambiguate.',
+          ),
+          context: [
+            tiedCandidates.map(entry => ({
+              id: entry.id,
+              scope: entry.scope,
+              description: entry.description,
+              category: entry.category,
+            })),
+          ],
+        });
       }
     }
   }
@@ -321,7 +327,11 @@ export const invokeShortcut = (key: string): boolean => {
     entry.handler(syntheticEvent);
     return true;
   } catch (error) {
-    console.warn('Failed to invoke shortcut:', key, error);
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('Failed to invoke shortcut:'),
+      context: [key, error],
+    });
     return false;
   }
 };
