@@ -48,9 +48,14 @@ function normalize(raw: unknown[]): Todo[] {
     const status = VALID_STATUS.includes(o['status'] as TodoStatus)
       ? (o['status'] as TodoStatus)
       : 'pending';
+    // Both fields must come out non-empty: publishUiWidget validates the plan
+    // widget before dispatch, and a blank title would fail the whole todo-write
+    // rather than render one blank row. A numbered placeholder is a better
+    // outcome than an errored plan update on a tool this hot.
+    const title = String(o['title'] ?? '').trim().slice(0, 300);
     return {
-      id: String(o['id'] ?? i),
-      title: String(o['title'] ?? '').slice(0, 300),
+      id: String(o['id'] ?? i).trim() || String(i),
+      title: title || `Step ${i + 1}`,
       status,
     };
   });

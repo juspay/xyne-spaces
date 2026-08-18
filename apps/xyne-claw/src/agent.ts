@@ -27,7 +27,8 @@ import type {
   Todo,
   UiWidget,
 } from "xyne-claw-shared";
-import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { type ThinkingLevel } from "@earendil-works/pi-ai";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
@@ -715,8 +716,8 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   const map = new Map<string, number>();
   try {
-    for (const provider of getProviders()) {
-      for (const model of getModels(provider)) {
+    for (const provider of getBuiltinProviders()) {
+      for (const model of getBuiltinModels(provider)) {
         const m = model as { id?: string; contextWindow?: number };
         if (m.id && typeof m.contextWindow === "number" && m.contextWindow > 0) {
           map.set(m.id.toLowerCase(), m.contextWindow);
@@ -1864,13 +1865,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   const fastCatalogNameSet = new Set(fastToolCatalogNames ?? []);
   const fastActiveToolBudget = Math.max(0, fastMaxActiveTools ?? fastCatalogNameSet.size);
+  // A non-empty catalog is the trigger — not fast mode. Fast mode always has a
+  // catalog, so its behavior is unchanged; a non-fast run now gets the same
+  // lazy machinery whenever run.ts hands it catalogued tools (presentation
+  // cards today). An agent with no catalogued tools takes neither branch and is
+  // byte-identical to before.
   const restoredFastActiveToolSet =
-    fastMode && fastCatalogNameSet.size > 0
+    fastCatalogNameSet.size > 0
       ? latestFastModeActiveToolSet(sessionManager)
           .filter((name) => fastCatalogNameSet.has(name))
       : [];
-  if (fastMode && restoredFastActiveToolSet.length > fastActiveToolBudget) {
-    log.warn(`[agent] fast mode restored activeToolSet=${restoredFastActiveToolSet.length} exceeds current budget=${fastActiveToolBudget}; grandfathering restored tools and capping only new loads`);
+  if (restoredFastActiveToolSet.length > fastActiveToolBudget) {
+    log.warn(`[agent] tool catalog: restored activeToolSet=${restoredFastActiveToolSet.length} exceeds current budget=${fastActiveToolBudget}; grandfathering restored tools and capping only new loads`);
   }
 
   // When the caller supplies a persona prompt, hand it to pi as `systemPrompt`
@@ -2060,7 +2066,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   const { session } = await createAgentSession(options);
 
-  if (fastMode && fastToolController && fastCatalogNameSet.size > 0) {
+  if (fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);
     const baseActiveToolNames = [
       ...builtinAllow,
@@ -2106,7 +2112,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         maxActiveTools,
       };
     };
-    log.info(`[agent] fast mode activeToolSet restored=${activeSet.size} catalog=${fastCatalogNameSet.size}`);
+    log.info(`[agent] tool catalog: activeToolSet restored=${activeSet.size} catalog=${fastCatalogNameSet.size}`);
   }
 
   // Per-agent temperature: CreateAgentSessionOptions has no temperature knob,

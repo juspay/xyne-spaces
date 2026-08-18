@@ -7,6 +7,7 @@ export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, type SubagentDefinition, type AgentToolsConfig } from "./tools/subagents/index.js";
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
+export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";

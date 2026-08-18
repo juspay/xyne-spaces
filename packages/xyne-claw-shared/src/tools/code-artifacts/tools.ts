@@ -111,10 +111,12 @@ export const postChart: ToolDefinition = {
   inputSchema: {
     type: "object",
     properties: {
-      type: { type: "string", description: "bar, line, area, pie, or donut" },
+      type: { type: "string", enum: ["bar", "line", "area", "pie", "donut"], description: "bar, line, area, pie, or donut" },
       points: {
         type: "array",
         description: "bar/pie/donut only. 1-24 points, in display order.",
+        minItems: 1,
+        maxItems: 24,
         items: {
           type: "object",
           properties: { label: { type: "string" }, value: { type: "number" } },
@@ -124,6 +126,8 @@ export const postChart: ToolDefinition = {
       series: {
         type: "array",
         description: "line/area only. Points along an x axis; repeat `series` to draw multiple lines.",
+        minItems: 1,
+        maxItems: 200,
         items: {
           type: "object",
           properties: { x: { type: "string" }, y: { type: "number" }, series: { type: "string" } },
