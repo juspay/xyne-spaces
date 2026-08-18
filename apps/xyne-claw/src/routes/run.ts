@@ -1252,6 +1252,33 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
+/**
+ * Liveness probe for claw-auth's run-recovery watchdog.
+ *
+ * The watchdog previously inferred death from heartbeat age alone, but a
+ * heartbeat only lands on progress events — so a run sitting inside ONE long
+ * tool call (a /design browser QA pass, a big sandbox build) looks dead while
+ * it is working perfectly. It would then re-dispatch the whole request, and
+ * the retry raced the original: two agents, two sandboxes, duplicate
+ * deliverables (2026-08-18 /design thread — one request produced four runs and
+ * shipped the same HTML twice).
+ *
+ * `activeRuns` is the authoritative answer to "is this still executing"; it is
+ * in-process, which is sound while xyne-claw runs a single replica. If that
+ * ever scales out this must move to Redis, otherwise a run on another replica
+ * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
+ * one boolean about a session id the caller already holds, and it must keep
+ * working for recovery paths that have no user context.
+ */
+router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
+  const { sessionId } = req.params as { sessionId?: string };
+  if (!sessionId) {
+    res.status(400).json({ success: false, error: "sessionId is required" });
+    return;
+  }
+  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
+});
+
 router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {

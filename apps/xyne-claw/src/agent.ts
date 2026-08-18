@@ -423,6 +423,30 @@ export class ProviderStallError extends Error {
 }
 
 /**
+ * Thrown when a provider returns a TERMINAL error turn (stopReason "error" with
+ * no usable content) AFTER the model-SDK's own auto-retries were exhausted — the
+ * upstream is returning e.g. an OpenAI `server_error` 5xx on every attempt. The
+ * SDK surfaces this as an errored-but-non-throwing turn, so without this the run
+ * ends as a "successful" empty completion and dead-ends on the failing provider
+ * instead of advancing to the configured fallback. Classified as a transient
+ * provider error (like a stall) so the fallback chain tries the next provider.
+ * (Prod 2026-08-18: euler-doctor on codex/gpt-5.5 hit repeated OpenAI
+ * server_error 5xx, exhausted its 3 SDK auto-retries per turn, and terminated
+ * empty without ever trying its glm-private-claw fallback.)
+ */
+export class ProviderTerminalError extends Error {
+  constructor(
+    public readonly provider: string,
+    public readonly detail: string,
+  ) {
+    super(
+      `Provider ${provider} returned a terminal error after exhausting auto-retries: ${detail}`,
+    );
+    this.name = "ProviderTerminalError";
+  }
+}
+
+/**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
  * blips, fetch failures, socket hangups, request timeouts/aborts, 5xx gateways,
@@ -436,6 +460,7 @@ export class ProviderStallError extends Error {
  */
 export function isTransientProviderError(err: unknown): boolean {
   if (err instanceof ProviderStallError) return true;
+  if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
   if (!msg) return false;
   return (
@@ -453,11 +478,15 @@ export function isTransientProviderError(err: unknown): boolean {
     msg.includes("aborted") ||
     msg.includes("timeout") ||
     msg.includes("timed out") ||
-    /\b50[234]\b/.test(msg) ||
+    /\b50[0234]\b/.test(msg) ||
     msg.includes("bad gateway") ||
     msg.includes("service unavailable") ||
     msg.includes("gateway timeout") ||
-    msg.includes("overloaded")
+    msg.includes("overloaded") ||
+    // OpenAI/Codex 5xx: `{"error":{"type":"server_error",...}}` — an upstream
+    // outage that survived the SDK's own retries. Must fall back, not dead-end.
+    msg.includes("server_error") ||
+    msg.includes("internal server error")
   );
 }
 
@@ -2161,6 +2190,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let streamedText = "";
   let streamedReasoning = "";
+  // Detail of the most recent assistant turn that ended in a provider error
+  // (stopReason "error") with the SDK's own auto-retries already exhausted.
+  // Reset to null whenever a later turn ends cleanly, so a mid-run blip the
+  // model recovered from is ignored. Consulted once, just before the success
+  // return: a run that produced NOTHING usable and ended here is re-surfaced as
+  // a ProviderTerminalError (fallback-eligible) rather than swallowed as a
+  // "successful" empty completion — otherwise it dead-ends on this provider
+  // instead of advancing to the configured fallback. See ProviderTerminalError.
+  let lastTurnErrorDetail: string | null = null;
   const debugEvents: DebugEventRecord[] = [];
   let debugSeq = 0;
   // Set once the success-path debug write (near the end of the agent loop) has
@@ -2687,6 +2725,17 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         // + single-flight) and keep the conversation lock alive, so a pod death
         // mid-run loses ≈one turn, not the whole conversation.
         const stopReason = (msg as { stopReason?: string }).stopReason;
+        // Track a terminal provider-error turn (the SDK already exhausted its own
+        // auto-retries, so this is what it hands back). A clean turn (tool_use or
+        // a normal end) means the model recovered → clear it. "aborted" is a stop
+        // (user/handoff), neither recovery nor a provider error → leave as-is.
+        if (stopReason === "error") {
+          lastTurnErrorDetail =
+            (msg as { errorMessage?: string }).errorMessage ??
+            "model returned stopReason=error";
+        } else if (stopReason !== "aborted") {
+          lastTurnErrorDetail = null;
+        }
         if (conversationId) {
           scheduleSessionCheckpoint(conversationId);
           void refreshSessionLock(conversationId);
@@ -3464,6 +3513,24 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const sessionClfTokens = extractSessionClfTokens(
     (session as unknown as { messages?: unknown }).messages,
   );
+  // A run that produced NOTHING usable and ended on a terminal provider error
+  // (SDK auto-retries exhausted) must fall back to the next provider, exactly
+  // like a stall — throw a fallback-eligible ProviderTerminalError instead of
+  // returning an empty "success" that dead-ends here. Guard on empty text AND no
+  // structured/twin delivery so real output is never discarded. See
+  // lastTurnErrorDetail / ProviderTerminalError.
+  if (
+    lastTurnErrorDetail &&
+    !text.trim() &&
+    structuredOutputRef?.value === undefined &&
+    twinDeliverRef?.value === undefined
+  ) {
+    metric.count("agent_terminal_provider_error", {
+      provider: provider ?? "spaces",
+      agentSlug: progressMeta?.agentSlug ?? "unknown",
+    });
+    throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
+  }
   return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
