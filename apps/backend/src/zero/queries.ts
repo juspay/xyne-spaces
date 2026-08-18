@@ -560,7 +560,11 @@ export const queries: AnyQueryRegistry = defineQueries({
                 )
             )
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('participants', (participantQuery) =>
           participantQuery
             .where('participationType', ConversationParticipation.AUTHOR)
@@ -582,7 +586,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             )
             .related('attachments')
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('participants', (participantQuery) =>
           participantQuery
             .where('participationType', ConversationParticipation.AUTHOR)
@@ -656,7 +664,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
           )
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('participants')
         .related('ticket')
         .one();
@@ -675,7 +687,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
           )
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('participants')
         .related('ticket')
         .one();
@@ -3492,7 +3508,11 @@ export const queries: AnyQueryRegistry = defineQueries({
                 )
             )
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('participants', (participantQuery) =>
           participantQuery
             .where(helpers =>
@@ -3550,7 +3570,11 @@ export const queries: AnyQueryRegistry = defineQueries({
               ),
             ),
         )
-        .related('parentMessage');
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        );
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -3625,7 +3649,11 @@ export const queries: AnyQueryRegistry = defineQueries({
                 )
             ),
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('ticket')
         .orderBy('createdAt', 'desc')
         .limit(limit);
@@ -3654,7 +3682,11 @@ export const queries: AnyQueryRegistry = defineQueries({
               ),
             ),
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('ticket')
         .orderBy('createdAt', 'desc')
         .limit(limit);
@@ -3790,7 +3822,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             .related('reactionCounts')
             .related('attachments')
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('ticket')
         .related('participants', (participantQuery) =>
           participantQuery
@@ -3812,7 +3848,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             )
             .related('attachments')
         )
-        .related('parentMessage')
+        .related('parentMessage', (parentQuery) =>
+          parentQuery.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+          ),
+        )
         .related('ticket')
         .related('participants', (participantQuery) =>
           participantQuery
