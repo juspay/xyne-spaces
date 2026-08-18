@@ -1,3 +1,10 @@
+## [1.190.2](https://github.com/juspay/xyne-spaces/compare/v1.190.1...v1.190.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* pass caller as rank-only terms for personalized message ranking ([#679](https://github.com/juspay/xyne-spaces/issues/679)) ([6a2852d](https://github.com/juspay/xyne-spaces/commit/6a2852df2cdc152f8467e4c41cf3836dc258b38d))
+
 ## [1.190.1](https://github.com/juspay/xyne-spaces/compare/v1.190.0...v1.190.1) (2026-08-18)
 
 
