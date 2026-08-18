@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { Spinner } from '@xyne/icons';
+import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PanelsTopLeft } from 'lucide-react';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
@@ -373,7 +372,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   data-track-category='RecordingsV2'
                   data-track-name='open_summary_templates'
                 >
-                  <PanelsTopLeft className='size-4' />
+                  <LayersTo className='size-4' strokeWidth={2} />
                   Templates
                 </Button>
                 <Button

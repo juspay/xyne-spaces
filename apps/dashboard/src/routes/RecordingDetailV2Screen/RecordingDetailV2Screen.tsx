@@ -873,6 +873,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   visibleTab={visibleTab}
                   secondTab={secondTab}
                   onSelect={handleTabSelect}
+                  hasSummary={hasDetailedSummary}
                   selectedTemplate={selectedSummaryTemplate}
                   {...(isLive || !isOwner
                     ? {}

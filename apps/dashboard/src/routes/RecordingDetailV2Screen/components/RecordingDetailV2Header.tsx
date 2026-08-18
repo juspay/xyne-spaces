@@ -299,73 +299,75 @@ export const RecordingDetailV2Header = ({
       </div>
 
       {/* Actions row */}
-      <div className='flex flex-wrap items-center gap-2'>
-        {!isLive && recording.detailedSummaryCanvasId && (
-          <RecordingTicketLink
-            linkedTicketId={recording.linkedTicketId ?? null}
-            canEdit={isOwner}
-            isUpdating={isUpdatingTicketLink}
-            onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
-          />
-        )}
-        <RecordingLabelPicker
-          labels={recording.labels ?? []}
-          canEdit={recording.createdByUserId === currentUser?.id}
-          onChange={labels => void handleLabelsChange(labels)}
-        />
-        {isOwner && !isLive && recording.detailedSummaryCanvasId && (
-          <>
-            <RecordingSharedWithAvatars
-              recordingExternalId={recording.externalId}
-              onOpen={() => setShowShareModal(true)}
+      <div className='flex items-start'>
+        <div className='flex flex-wrap items-center gap-2'>
+          {!isLive && recording.detailedSummaryCanvasId && (
+            <RecordingTicketLink
+              linkedTicketId={recording.linkedTicketId ?? null}
+              canEdit={isOwner}
+              isUpdating={isUpdatingTicketLink}
+              onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
-            <Tooltip content='Share' side='top'>
+          )}
+          <RecordingLabelPicker
+            labels={recording.labels ?? []}
+            canEdit={recording.createdByUserId === currentUser?.id}
+            onChange={labels => void handleLabelsChange(labels)}
+          />
+          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
+            <>
+              <RecordingSharedWithAvatars
+                recordingExternalId={recording.externalId}
+                onOpen={() => setShowShareModal(true)}
+              />
+              <Tooltip content='Share' side='top'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='iconSm'
+                  onClick={() => setShowShareModal(true)}
+                  className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  aria-label='Share recording'
+                  data-track-category='RecordingDetailV2'
+                  data-track-name='share_recording'
+                >
+                  <Share02 className='size-3.5' />
+                </Button>
+              </Tooltip>
+            </>
+          )}
+          {onMinimize && (
+            <Tooltip content='Minimize to overlay' side='top'>
               <Button
                 type='button'
                 variant='outline'
                 size='iconSm'
-                onClick={() => setShowShareModal(true)}
-                className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                aria-label='Share recording'
+                onClick={onMinimize}
+                className='size-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                aria-label='Minimize to floating overlay'
                 data-track-category='RecordingDetailV2'
-                data-track-name='share_recording'
+                data-track-name='minimize_to_overlay'
               >
-                <Share02 className='size-3.5' />
+                <MinimizeLineArrow className='size-3.5' />
               </Button>
             </Tooltip>
-          </>
-        )}
-        {onMinimize && (
-          <Tooltip content='Minimize to overlay' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='iconSm'
-              onClick={onMinimize}
-              className='size-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-              aria-label='Minimize to floating overlay'
-              data-track-category='RecordingDetailV2'
-              data-track-name='minimize_to_overlay'
-            >
-              <MinimizeLineArrow className='size-3.5' />
-            </Button>
-          </Tooltip>
-        )}
+          )}
 
-        {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
-          <Dialog
-            open={showShareModal}
-            onOpenChange={open => !open && setShowShareModal(false)}
-            title='Share recording'
-            data-testid='recording-share-modal'
-          >
-            <RecordingShareModal
-              recording={recording}
-              onClose={() => setShowShareModal(false)}
-              onTicketLinkUpdated={onTicketLinkUpdated}
-            />
-          </Dialog>
-        )}
+          {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
+            <Dialog
+              open={showShareModal}
+              onOpenChange={open => !open && setShowShareModal(false)}
+              title='Share recording'
+              data-testid='recording-share-modal'
+            >
+              <RecordingShareModal
+                recording={recording}
+                onClose={() => setShowShareModal(false)}
+                onTicketLinkUpdated={onTicketLinkUpdated}
+              />
+            </Dialog>
+          )}
+        </div>
         {!isLive && (
           <Tooltip content='Ask AI about this recording' side='top'>
             <Button
