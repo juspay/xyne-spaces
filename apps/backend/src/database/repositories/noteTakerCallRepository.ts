@@ -84,6 +84,7 @@ export class NoteTakerCallRepository {
           isHeadlessRecording: true,
           callId: call.externalId,
           operation: 'recording_ended',
+          createdBy: call.createdByUserId,
           ...(durationMs !== null ? { durationMs } : {}),
         },
       },
@@ -136,20 +137,8 @@ export class NoteTakerCallRepository {
   }
 
   /**
-   * Create the thread's single anchor message for a thread-linked recording,
-   * once the recording is actually live (called right after `createCall`
-   * succeeds). Validates the conversation still belongs to the given channel,
-   * inserts the SYSTEM message, and bumps the conversation's reply count the
-   * same way a normal reply into the thread would.
-   *
-   * Returns false (no throw) if the conversation/channel no longer match, if
-   * they don't belong to the call's own workspace, or if the call's creator
-   * is no longer a member of that channel — the caller treats that as a soft
-   * failure, since the recording itself still works even if it can't be
-   * anchored to a thread message. These checks are the authoritative gate
-   * (callController's own pre-check is only a fail-fast UX optimization —
-   * conversationId/channelId are client-supplied, so re-validating workspace
-   * + membership here matters even if that earlier check already passed).
+   * Create the thread's single anchor message for a thread-linked recording.
+   * Returns false (no throw) if the conversation/channel/membership checks fail.
    */
   async createThreadAnchorMessage(params: {
     callId: string;
@@ -179,61 +168,53 @@ export class NoteTakerCallRepository {
     });
 
     const now = new Date();
-    await this.db.message.create({
-      data: {
-        messageId,
-        conversationId,
-        workspaceId,
-        senderId: 'system',
-        content: `${initiator?.displayName || initiator?.name || 'Someone'} started recording notes`,
-        msgType: MessageType.SYSTEM,
-        showInChannel: false,
-        createdAt: now,
-        metadata: {
-          isRecordingMessage: true,
-          isHeadlessRecording: true,
-          callId: callExternalId,
-          callType: CallType.HEADLESS,
-          operation: 'recording_active',
-          notesCanvasId,
-        },
-      },
-    });
-
-    // Bumps conversation.replyCount (so the "N replies" pill in the channel
-    // view updates), touches lastActivityAt, and refreshes participants'
-    // lastReplyAt — the same bookkeeping any normal reply into this thread gets.
-    await repositories.conversations.incrementReplyCount(conversationId, now);
-
-    // Mirrors what a regular in-thread call does (callRepository sets
-    // conversation.callId while ACTIVE, clears it on end): lets the channel
-    // row's reply-count line detect "this thread has something live" via the
-    // same field the call flow already uses (hasActiveCallForConversation).
-    // isHeadlessRecording on conversation.metadata (merge-safe) is the extra
-    // bit that disambiguates "it's a recording, not a real call" — read
-    // directly off this already-subscribed conversation row, no separate
-    // per-thread-row query needed.
     const existingMetadata: Record<string, unknown> =
       conversation.metadata && typeof conversation.metadata === 'object' && !Array.isArray(conversation.metadata)
         ? (conversation.metadata as Record<string, unknown>)
         : {};
-    await this.db.conversation.update({
-      where: { conversationId },
-      data: {
-        callId: callExternalId,
-        metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
-      },
+
+    // Anchor message, conversation stamp, and call metadata must land atomically.
+    await this.db.$transaction(async (tx) => {
+      await tx.message.create({
+        data: {
+          messageId,
+          conversationId,
+          workspaceId,
+          senderId: 'system',
+          content: `${initiator?.displayName || initiator?.name || 'Someone'} started recording notes`,
+          msgType: MessageType.SYSTEM,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {
+            isRecordingMessage: true,
+            isHeadlessRecording: true,
+            callId: callExternalId,
+            callType: CallType.HEADLESS,
+            operation: 'recording_active',
+            notesCanvasId,
+            createdBy,
+          },
+        },
+      });
+
+      // Marks the conversation as having a live recording attached.
+      await tx.conversation.update({
+        where: { conversationId },
+        data: {
+          callId: callExternalId,
+          metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
+        },
+      });
+
+      // Persist the thread linkage onto the Call row itself.
+      await tx.call.update({
+        where: { id: callId },
+        data: { metadata: { notesCanvasId, conversationId, messageId, channelId } as Prisma.InputJsonValue },
+      });
     });
 
-    // Only now — after every validation above passed — persist the thread
-    // linkage onto the Call row itself. shareThreadRecordingIfLinked and
-    // updateThreadMessageOnEnd both key off call.metadata.channelId /
-    // .conversationId, so this is the single point where a call becomes
-    // "thread-linked" from their point of view.
-    await this.db.call.update({
-      where: { id: callId },
-      data: { metadata: { notesCanvasId, conversationId, messageId, channelId } as Prisma.InputJsonValue },
-    });
+    // Bumps reply count only after the transaction above has committed.
+    await repositories.conversations.incrementReplyCount(conversationId, now);
 
     return true;
   }

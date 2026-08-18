@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AudioLines } from 'lucide-react';
+import { useAuth } from '../../../hooks/useAuth';
 import { useCallDuration } from '../../../hooks/useCalls';
 import { RecordingSharePill } from './RecordingSharePill';
 import { MessageMetadata } from './MessageBubble.utils';
@@ -36,14 +37,20 @@ interface RecordingBubbleProps {
  */
 export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callId }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const metadata = message.metadata;
   const isEnded = metadata?.['operation'] === 'recording_ended';
   const isActive = !isEnded;
   const startedAt = message.createdAt ? Number(message.createdAt) : undefined;
   const duration = useCallDuration(startedAt, isActive);
+  // Only the recording's creator has view access (see callShareService.canView)
+  // until it's explicitly shared — other thread participants would just land
+  // on a not-found/access-denied screen, so don't offer them the click at all.
+  const canView = !!user?.id && metadata?.createdBy === user.id;
 
   const goToRecording = (): void => {
+    if (!canView) return;
     void navigate(`/recordings/${callId}`);
   };
 
@@ -55,14 +62,15 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
     // a channel (RecordingShareContent/RecordingSharePill) — keeps "a
     // recording card in a message" looking identical everywhere instead of
     // maintaining a second, slightly-different design here.
-    return <RecordingSharePill title={title} durationMs={durationMs} onOpen={goToRecording} />;
+    return <RecordingSharePill title={title} durationMs={durationMs} onOpen={canView ? goToRecording : undefined} />;
   }
 
   return (
     <button
       type='button'
       onClick={goToRecording}
-      className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-status-success/30 bg-status-success/5 hover:bg-status-success/10 transition-colors px-3 py-1.5 text-left'
+      disabled={!canView}
+      className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-status-success/30 bg-status-success/5 enabled:hover:bg-status-success/10 transition-colors px-3 py-1.5 text-left disabled:cursor-default'
       data-testid='recording-active-card'
       data-track-category='RECORDING'
       data-track-name='OPEN_LIVE_RECORDING_FROM_THREAD'
@@ -76,9 +84,15 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
           {duration ? `${duration} elapsed` : 'Just started'}
         </span>
       </span>
-      <span className='text-xs font-medium text-status-success shrink-0 rounded-full border border-status-success/30 px-2 py-0.5'>
-        View
+      <span className='relative flex size-2 shrink-0' aria-hidden='true'>
+        <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-status-success opacity-75' />
+        <span className='relative inline-flex size-2 rounded-full bg-status-success' />
       </span>
+      {canView && (
+        <span className='text-xs font-medium text-status-success shrink-0 rounded-full border border-status-success/30 px-2 py-0.5'>
+          View
+        </span>
+      )}
     </button>
   );
 };
