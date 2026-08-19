@@ -17,7 +17,6 @@ import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
-import { useShortcutById } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
 import { RecordingDateFilter } from './components/RecordingDateFilter';
@@ -112,10 +111,6 @@ const RecordingsV2Screen = (): ReactElement => {
       defaultLayout: getRecordingDefaultLayout(),
     });
   }, [recordingStatus]);
-
-  useShortcutById('recording.start', handleStartRecording, {
-    enabled: recordingStatus === 'idle' || recordingStatus === 'error',
-  });
 
   useEffect(() => {
     if (pendingAutoStart && (recordingStatus === 'idle' || recordingStatus === 'error')) {
