@@ -1385,6 +1385,23 @@ export const messageTable = table("messages")
   })
   .primaryKey("messageId");
 
+export const messageArtifactTable = table("message_artifacts")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    messageCreatedAt: number(),
+    command: string(),
+    status: string(),
+    callExternalId: string().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const messageAttachmentTable = table("message_attachments")
   .columns({
     id: string(),
@@ -1495,7 +1512,7 @@ export const externalSourceTable = table("external_sources")
     displayName: string(),
     channelId: string().optional(),
     externalIdentifier: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     boardId: string().optional(),
     ownerUserId: string().optional(),
     credentials: string(),
@@ -4808,6 +4825,7 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
+      messageArtifactTable,
       messageAttachmentTable,
       reactionTable,
       reactionCountTable,
@@ -5095,6 +5113,7 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
+export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;

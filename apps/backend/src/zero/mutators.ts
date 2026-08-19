@@ -5797,7 +5797,7 @@ export function createMutators(
                     }
                   }
                 } catch (error) {
-                  console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
+                  logger.error('Failed to retrigger autoassignment for board change', error);
                 }
               });
             }
@@ -11695,23 +11695,6 @@ export function createMutators(
           if (existing) {
             await tx.mutate.conversation_label_mappings.delete({ id: existing.id });
           }
-        },
-      ),
-      // Only the owner (createdBy) may delete their label.
-      deleteLabel: defineMutator(
-        z.object({ labelId: z.string() }),
-        async ({ tx, ctx, args: { labelId } }) => {
-          const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-          if (!label) throw new Error('Label not found');
-          if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-          const mappings = await tx.run(
-            zql.conversation_label_mappings.where('labelId', labelId),
-          );
-          for (const mapping of mappings) {
-            await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-          }
-          await tx.mutate.conversation_labels.delete({ id: labelId });
         },
       ),
     },

@@ -156,6 +156,8 @@ export default function RecordingsScreen(): ReactElement {
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const autoStartRequestedAt = useRecordingStore(ctx => ctx.autoStartRequestedAt);
+  const pendingConversationId = useRecordingStore(ctx => ctx.pendingConversationId);
+  const pendingChannelId = useRecordingStore(ctx => ctx.pendingChannelId);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
@@ -204,7 +206,13 @@ export default function RecordingsScreen(): ReactElement {
   const handleStartRecording = (): void => {
     const defaultLayout = getRecordingDefaultLayout();
     sendRecordingEvent({ type: 'clearTranscripts' });
-    sendRecordingEvent({ type: 'startRecording', sttModel, defaultLayout });
+    sendRecordingEvent({
+      type: 'startRecording',
+      sttModel,
+      defaultLayout,
+      ...(pendingConversationId && { conversationId: pendingConversationId }),
+      ...(pendingChannelId && { channelId: pendingChannelId }),
+    });
   };
 
   // Auto-start recording when triggered from the meeting popup, tray or shortcut

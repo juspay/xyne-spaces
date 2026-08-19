@@ -71,6 +71,8 @@ import { NotificationHandler } from '../components/NotificationHandler/Notificat
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
 import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
+import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
+import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { CloudAgentFloatingHost } from '../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { usePlatform } from '../hooks/usePlatform';
@@ -189,6 +191,7 @@ import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -313,7 +316,6 @@ const AppRoot = (): ReactElement => {
   const rightPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Create panel refs for XyneAI
-  const xyneAILeftPanelRef = useRef<PanelImperativeHandle>(null);
   const xyneAIRightPanelRef = useRef<PanelImperativeHandle>(null);
 
   const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
@@ -368,7 +370,7 @@ const AppRoot = (): ReactElement => {
       right: rightPanelRef,
     });
     setXyneAIPanelRefs({
-      left: xyneAILeftPanelRef,
+      left: browserPanelLeftRef,
       right: xyneAIRightPanelRef,
     });
     setBrowserPanelRefs({
@@ -380,7 +382,9 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     if (isXyneDebuggerOpen) return;
     const rafId = window.requestAnimationFrame(() => {
-      globalXyneAIPanelRefs.right.current?.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
+      const right = globalXyneAIPanelRefs.right.current;
+      if (!right) return;
+      right.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
       globalXyneAIPanelRefs.left.current?.resize(`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`);
     });
     return () => window.cancelAnimationFrame(rafId);
@@ -455,6 +459,9 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
+  const showXyneAIPanel = isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
+  const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
+
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
   // Enable swipe back gesture on mobile
@@ -567,269 +574,256 @@ const AppRoot = (): ReactElement => {
               <AIOnboardingProvider>
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
                 <AIOnboardingOverlay />
-                <EditProvider>
-                  {shouldShowMobileHeader && externalId && (
-                    <MobileCallHeader
-                      participants={participants}
-                      activeCalls={activeCalls}
-                      externalId={externalId}
-                      isMicEnabled={isMicEnabled}
-                      onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
-                      onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
-                      onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-                    />
-                  )}
-                  {isInPanelWebview ? (
-                    // Inside the browser-panel webview — render only the route
-                    // content. No GlobalTopBar / AppSidebar / right panels /
-                    // ChatDirectory; see useIsInPanelWebview and the doc there.
-                    <main className='flex-1 h-screen'>
-                      <EditWarningModal />
-                      <Outlet />
-                    </main>
-                  ) : isOnboarding ? (
-                    // Onboarding screen - full width without sidebar
-                    <main
-                      className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                    >
-                      <EditWarningModal />
-                      <Outlet />
-                    </main>
-                  ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
-                    // XyneAI is open on desktop - show panel layout with XyneAI
-                    <div className='flex flex-col h-screen'>
-                      <ResizableGroup
-                        orientation='horizontal'
-                        className='flex-1 no-scrollbar overflow-auto'
-                        autoSaveId='app-root-xyneai'
+                <SlashCommandArtifactSideEffectProvider>
+                  {!isInPanelWebview && <SlashCommandArtifactBanner />}
+                  <EditProvider>
+                    {shouldShowMobileHeader && externalId && (
+                      <MobileCallHeader
+                        participants={participants}
+                        activeCalls={activeCalls}
+                        externalId={externalId}
+                        isMicEnabled={isMicEnabled}
+                        onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
+                        onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
+                        onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+                      />
+                    )}
+                    {isInPanelWebview ? (
+                      // Inside the browser-panel webview — render only the route
+                      // content. No GlobalTopBar / AppSidebar / right panels /
+                      // ChatDirectory; see useIsInPanelWebview and the doc there.
+                      <main className='flex-1 h-screen'>
+                        <EditWarningModal />
+                        <Outlet />
+                      </main>
+                    ) : isOnboarding ? (
+                      // Onboarding screen - full width without sidebar
+                      <main
+                        className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                       >
-                        <Panel
-                          id='app-root-content'
-                          panelRef={xyneAILeftPanelRef}
-                          defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                        >
-                          <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          >
-                            <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
-                              <EditWarningModal />
-                              <Outlet />
-                            </main>
-                          </div>
-                        </Panel>
-                        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                          <div
-                            id='panel-resize-divider'
-                            className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                          ></div>
-                        </Separator>
-                        <Panel
-                          id='app-root-xyneai'
-                          panelRef={xyneAIRightPanelRef}
-                          defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                          maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                          minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                        >
-                          <XyneAISidebarZIndexShell>
-                            <XyneAISidebar
-                              channelId={xyneAIChannelId}
-                              threadInfo={xyneAIThreadInfo}
-                              startFreshChat={xyneAIStartFreshChat}
-                              canvasInfo={xyneAICanvasInfo}
-                              initialContextSelections={xyneAIInitialContextSelections}
-                              contextOpenNonce={xyneAIContextOpenNonce}
-                              kbCollectionId={xyneAIKbCollectionId ?? ''}
-                              kbChannelId={xyneAIKbChannelId ?? ''}
-                              kbDocId={xyneAIKbDocId ?? ''}
-                              kbDocName={xyneAIKbDocName ?? ''}
-                              kbOpenNonce={xyneAIKbOpenNonce}
-                              onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                            />
-                          </XyneAISidebarZIndexShell>
-                        </Panel>
-                      </ResizableGroup>
-                    </div>
-                  ) : browserPanelState === 'open' ||
-                    webviewState === 'closed' ||
-                    webviewState === 'idle' ? (
-                    // Unified branch: browser panel open OR no side panel active.
-                    // Keeping both cases in one branch prevents the <Outlet /> from
-                    // remounting (and losing scroll position) when the browser panel
-                    // opens or closes.
-                    <div className='flex flex-col h-screen'>
-                      <ResizableGroup
-                        orientation='horizontal'
-                        className='flex-1 no-scrollbar overflow-auto'
-                        autoSaveId='app-root-browser'
-                        panelIds={
-                          browserPanelState === 'open' && !location.pathname.endsWith('/browser')
-                            ? ['app-root-left', 'app-root-browser']
-                            : ['app-root-left']
-                        }
-                      >
-                        <Panel
-                          id='app-root-left'
-                          panelRef={browserPanelLeftRef}
-                          defaultSize={
-                            browserPanelState === 'open' && !location.pathname.endsWith('/browser')
-                              ? '65%'
-                              : '100%'
+                        <EditWarningModal />
+                        <Outlet />
+                      </main>
+                    ) : showXyneAIPanel ||
+                      browserPanelState === 'open' ||
+                      webviewState === 'closed' ||
+                      webviewState === 'idle' ? (
+                      <div className='flex flex-col h-screen'>
+                        <ResizableGroup
+                          orientation='horizontal'
+                          className='flex-1 no-scrollbar overflow-auto'
+                          autoSaveId='app-root-browser'
+                          panelIds={
+                            showXyneAIPanel
+                              ? ['app-root-left', 'app-root-xyneai']
+                              : showBrowserPanel
+                                ? ['app-root-left', 'app-root-browser']
+                                : ['app-root-left']
                           }
                         >
-                          <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                          <Panel
+                            id='app-root-left'
+                            panelRef={browserPanelLeftRef}
+                            defaultSize={
+                              showXyneAIPanel
+                                ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
+                                : showBrowserPanel
+                                  ? '65%'
+                                  : '100%'
+                            }
                           >
-                            <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
-                              <EditWarningModal />
-                              <Outlet />
-                            </main>
-                          </div>
-                        </Panel>
-                        {browserPanelState === 'open' &&
-                          !location.pathname.endsWith('/browser') && (
+                            <div
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
+                              <AppSidebar />
+                              <main className='flex-1 no-scrollbar overflow-auto'>
+                                <EditWarningModal />
+                                <Outlet />
+                              </main>
+                            </div>
+                          </Panel>
+                          {showXyneAIPanel ? (
                             <>
-                              <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                              <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                <div
+                                  id='panel-resize-divider'
+                                  className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                ></div>
                               </Separator>
                               <Panel
-                                id='app-root-browser'
-                                panelRef={browserPanelRightRef}
-                                defaultSize='35%'
-                                maxSize='50%'
+                                id='app-root-xyneai'
+                                panelRef={xyneAIRightPanelRef}
+                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
                               >
-                                <div className='h-full'>
-                                  <BrowserPanel />
-                                </div>
+                                <XyneAISidebarZIndexShell>
+                                  <XyneAISidebar
+                                    channelId={xyneAIChannelId}
+                                    threadInfo={xyneAIThreadInfo}
+                                    startFreshChat={xyneAIStartFreshChat}
+                                    canvasInfo={xyneAICanvasInfo}
+                                    initialContextSelections={xyneAIInitialContextSelections}
+                                    contextOpenNonce={xyneAIContextOpenNonce}
+                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                    kbChannelId={xyneAIKbChannelId ?? ''}
+                                    kbDocId={xyneAIKbDocId ?? ''}
+                                    kbDocName={xyneAIKbDocName ?? ''}
+                                    kbOpenNonce={xyneAIKbOpenNonce}
+                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                  />
+                                </XyneAISidebarZIndexShell>
                               </Panel>
                             </>
+                          ) : (
+                            showBrowserPanel && (
+                              <>
+                                <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                </Separator>
+                                <Panel
+                                  id='app-root-browser'
+                                  panelRef={browserPanelRightRef}
+                                  defaultSize='35%'
+                                  maxSize='50%'
+                                >
+                                  <div className='h-full'>
+                                    <BrowserPanel />
+                                  </div>
+                                </Panel>
+                              </>
+                            )
                           )}
-                      </ResizableGroup>
-                    </div>
-                  ) : (
-                    // WebView is open - show panel layout with WebView
-                    <div className='flex flex-col h-screen'>
-                      <ResizableGroup
-                        orientation='horizontal'
-                        className='flex-1 overflow-hidden'
-                        autoSaveId='app-root'
-                      >
-                        <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                          <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          >
-                            <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
-                              <EditWarningModal />
-                              <Outlet />
-                            </main>
-                          </div>
-                        </Panel>
-                        <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                          <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                        </Separator>
-                        <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
-                          <WebView />
-                        </Panel>
-                      </ResizableGroup>
-                    </div>
-                  )}
-                  {/* Global overlays and IPC handlers — skipped in the panel
+                        </ResizableGroup>
+                      </div>
+                    ) : (
+                      // WebView is open - show panel layout with WebView
+                      <div className='flex flex-col h-screen'>
+                        <ResizableGroup
+                          orientation='horizontal'
+                          className='flex-1 overflow-hidden'
+                          autoSaveId='app-root'
+                        >
+                          <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
+                            <div
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
+                              <AppSidebar />
+                              <main className='flex-1 no-scrollbar overflow-auto'>
+                                <EditWarningModal />
+                                <Outlet />
+                              </main>
+                            </div>
+                          </Panel>
+                          <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                            <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                          </Separator>
+                          <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
+                            <WebView />
+                          </Panel>
+                        </ResizableGroup>
+                      </div>
+                    )}
+                    {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
                     duplicated call UIs, etc. inside the embedded view).
                     AttachmentGalleryModal stays because it's triggered by
                     attachments inside the conversation itself. */}
-                  {!isInPanelWebview && (
-                    <>
-                      <IncomingCallModal />
-                      <GlobalCallOverlay />
-                      {recordingVersion === 'v2' ? <NoteTakerOverlayHost /> : <RecordingOverlay />}
-                      <GlobalUploadProgress />
-                      <NotificationHandler />
-                      <ElectronBadgeSync />
-                      <ElectronUpdateNudge />
-                      <SosAlertBanner />
-                      <CallFromRecentsHandler />
-                      <CloudAgentFloatingHost />
-                      <BrowserPanelHandler />
-                      <GlobalCommandMenu />
-                      <ShortcutsHelpModal
-                        isOpen={isShortcutsModalOpen}
-                        onClose={() => setIsShortcutsModalOpen(false)}
-                      />
-                    </>
-                  )}
-                  <AttachmentGalleryModal />
-                  <ThreadCitationModal />
-                  <TranscriptCitationModal />
-                  <AttachmentCitationPreview />
-                  <ErrorReportModal
-                    isOpen={isErrorReportOpen}
-                    onClose={() => setIsErrorReportOpen(false)}
-                    pendingRecording={pendingRecording}
-                    pendingRecordingFilePath={pendingRecordingFilePath}
-                    onSourceSelected={(source: ScreenSource, withMic: boolean) =>
-                      void startRecording(source, withMic)
-                    }
-                    onSubmitSuccess={() => {
-                      setPendingRecording(null);
-                      setPendingRecordingFilePath(null);
-                    }}
-                    onDiscard={() => {
-                      setPendingRecording(null);
-                      setPendingRecordingFilePath(null);
-                    }}
-                  />
-
-                  {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
-                    <div className='hidden' aria-hidden='true'>
-                      <XyneAISidebar
-                        channelId={xyneAIChannelId}
-                        threadInfo={xyneAIThreadInfo}
-                        startFreshChat={xyneAIStartFreshChat}
-                        canvasInfo={xyneAICanvasInfo}
-                        initialContextSelections={xyneAIInitialContextSelections}
-                        contextOpenNonce={xyneAIContextOpenNonce}
-                        kbCollectionId={xyneAIKbCollectionId ?? ''}
-                        kbChannelId={xyneAIKbChannelId ?? ''}
-                        kbDocId={xyneAIKbDocId ?? ''}
-                        kbDocName={xyneAIKbDocName ?? ''}
-                        kbOpenNonce={xyneAIKbOpenNonce}
-                        onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                        visible={false}
-                      />
-                    </div>
-                  )}
-                  {/* XyneAI Mobile Drawer */}
-                  {isMobile && !isInPanelWebview && !isOnAIPage && (
-                    <Drawer
-                      open={isXyneAIDrawerOpen}
-                      onOpenChange={open => {
-                        // Don't allow closing during AI onboarding
-                        if (!open && isAIOnboardingActive()) return;
-                        xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                    {!isInPanelWebview && (
+                      <>
+                        <IncomingCallModal />
+                        <GlobalCallOverlay />
+                        {recordingVersion === 'v2' ? (
+                          <NoteTakerOverlayHost />
+                        ) : (
+                          <RecordingOverlay />
+                        )}
+                        <GlobalUploadProgress />
+                        <NotificationHandler />
+                        <ElectronBadgeSync />
+                        <ElectronUpdateNudge />
+                        <SosAlertBanner />
+                        <CallFromRecentsHandler />
+                        <CloudAgentFloatingHost />
+                        <BrowserPanelHandler />
+                        <GlobalCommandMenu />
+                        <ShortcutsHelpModal
+                          isOpen={isShortcutsModalOpen}
+                          onClose={() => setIsShortcutsModalOpen(false)}
+                        />
+                      </>
+                    )}
+                    <AttachmentGalleryModal />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
+                    <AttachmentCitationPreview />
+                    <ErrorReportModal
+                      isOpen={isErrorReportOpen}
+                      onClose={() => setIsErrorReportOpen(false)}
+                      pendingRecording={pendingRecording}
+                      pendingRecordingFilePath={pendingRecordingFilePath}
+                      onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                        void startRecording(source, withMic)
+                      }
+                      onSubmitSuccess={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
                       }}
-                      title='Xyne AI'
-                      description='Ask questions about your channel'
-                    >
-                      <XyneAISidebar
-                        channelId={xyneAIChannelId}
-                        threadInfo={xyneAIThreadInfo}
-                        startFreshChat={xyneAIStartFreshChat}
-                        canvasInfo={xyneAICanvasInfo}
-                        initialContextSelections={xyneAIInitialContextSelections}
-                        contextOpenNonce={xyneAIContextOpenNonce}
-                        kbCollectionId={xyneAIKbCollectionId ?? ''}
-                        kbChannelId={xyneAIKbChannelId ?? ''}
-                        kbDocId={xyneAIKbDocId ?? ''}
-                        kbDocName={xyneAIKbDocName ?? ''}
-                        kbOpenNonce={xyneAIKbOpenNonce}
-                        onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                      />
-                    </Drawer>
-                  )}
-                </EditProvider>
+                      onDiscard={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
+                      }}
+                    />
+
+                    {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                      <div className='hidden' aria-hidden='true'>
+                        <XyneAISidebar
+                          channelId={xyneAIChannelId}
+                          threadInfo={xyneAIThreadInfo}
+                          startFreshChat={xyneAIStartFreshChat}
+                          canvasInfo={xyneAICanvasInfo}
+                          initialContextSelections={xyneAIInitialContextSelections}
+                          contextOpenNonce={xyneAIContextOpenNonce}
+                          kbCollectionId={xyneAIKbCollectionId ?? ''}
+                          kbChannelId={xyneAIKbChannelId ?? ''}
+                          kbDocId={xyneAIKbDocId ?? ''}
+                          kbDocName={xyneAIKbDocName ?? ''}
+                          kbOpenNonce={xyneAIKbOpenNonce}
+                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                          visible={false}
+                        />
+                      </div>
+                    )}
+                    {/* XyneAI Mobile Drawer */}
+                    {isMobile && !isInPanelWebview && !isOnAIPage && (
+                      <Drawer
+                        open={isXyneAIDrawerOpen}
+                        onOpenChange={open => {
+                          // Don't allow closing during AI onboarding
+                          if (!open && isAIOnboardingActive()) return;
+                          xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                        }}
+                        title='Xyne AI'
+                        description='Ask questions about your channel'
+                      >
+                        <XyneAISidebar
+                          channelId={xyneAIChannelId}
+                          threadInfo={xyneAIThreadInfo}
+                          startFreshChat={xyneAIStartFreshChat}
+                          canvasInfo={xyneAICanvasInfo}
+                          initialContextSelections={xyneAIInitialContextSelections}
+                          contextOpenNonce={xyneAIContextOpenNonce}
+                          kbCollectionId={xyneAIKbCollectionId ?? ''}
+                          kbChannelId={xyneAIKbChannelId ?? ''}
+                          kbDocId={xyneAIKbDocId ?? ''}
+                          kbDocName={xyneAIKbDocName ?? ''}
+                          kbOpenNonce={xyneAIKbOpenNonce}
+                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                        />
+                      </Drawer>
+                    )}
+                  </EditProvider>
+                </SlashCommandArtifactSideEffectProvider>
               </AIOnboardingProvider>
             </InitialStateLoader>
           </ZeroFallbackProvider>
@@ -1162,7 +1156,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'claw-agents',
-                element: <ClawAgentsScreen />,
+                element: (
+                  <GuestBlockedRoute>
+                    <ClawAgentsScreen />
+                  </GuestBlockedRoute>
+                ),
                 children: [
                   { index: true, element: <AgentsTab /> },
                   { path: 'create', element: <ClawAgentCreateScreen /> },

@@ -1,3 +1,4 @@
+import { logger } from '@/utils/logger';
 /**
  * Slack BlockKit → FlowDefinition (v2) converter
  *
@@ -159,8 +160,9 @@ export async function convertBlockKitToFlowJSON(
   botToken?: string,
   workspaceId?: string,
 ): Promise<FlowDefinition | null> {
-  if(!botToken) 
-    {console.warn('No bot token provided, skipping Slack user ID resolution. User mentions may not render correctly.');}
+  if (!botToken) {
+    logger.warn('No bot token provided, skipping Slack user ID resolution. User mentions may not render correctly.');
+  }
   const rawText = input.text;
   let resolvedAttachments = input.attachments ? [...input.attachments] : undefined;
 

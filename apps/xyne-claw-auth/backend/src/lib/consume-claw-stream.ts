@@ -213,7 +213,7 @@ function logHandlerError(eventName: string, err: unknown): void {
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
 //
 // Used by the /internal/run proxy when the caller did NOT request SSE itself
-// (i.e. it's webhook.ts / agent-chat.ts / app-callback.ts / chain-workflows.ts /
+// (i.e. it's webhook.ts / agent-chat.ts / flow-action.ts / chain-workflows.ts /
 // flow-action.ts / scheduled-jobs-worker / run-recovery-worker). The proxy
 // still opens SSE to claw (so the wire from claw-auth → claw is unified) and
 // this helper translates each SSE frame back into the JSON POST body the

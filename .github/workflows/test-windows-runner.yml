@@ -1,0 +1,20 @@
+name: Test Windows Self-Hosted Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - name: Print hostname
+        shell: pwsh
+        run: hostname
+
+      - name: Print current user
+        shell: pwsh
+        run: whoami
+
+      - name: Success message
+        shell: pwsh
+        run: Write-Host "Windows self-hosted runner is working successfully!"

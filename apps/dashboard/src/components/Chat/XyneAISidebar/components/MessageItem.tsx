@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -326,7 +327,11 @@ const ImageWithDownload = ({
         setDownloaded(true);
         setTimeout(() => setDownloaded(false), 2000);
       } catch (error) {
-        console.error('Failed to download image:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to download image:'),
+          error: error,
+        });
         // Fallback: try direct download
         const link = document.createElement('a');
         link.href = src;
@@ -723,7 +728,11 @@ const AttachmentImagePreview = ({
           setImageUrl(blobUrl);
           setIsLoading(false);
         } catch (err) {
-          console.error('[AttachmentImagePreview] Failed to load image:', err);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[AttachmentImagePreview] Failed to load image:'),
+            error: err,
+          });
           if (isMounted) {
             setError('Failed to load image');
             setIsLoading(false);
@@ -851,7 +860,11 @@ export const AttachmentPreview = ({
 
       URL.revokeObjectURL(blobUrl);
     } catch (error) {
-      console.error('[AttachmentPreview] Download failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AttachmentPreview] Download failed:'),
+        error: error,
+      });
       const { toast } = await import('sonner');
       toast.error('Download failed', {
         description: error instanceof Error ? error.message : 'Failed to download file',
@@ -2387,7 +2400,11 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 }: {
   participants: Participant[];
 }) => {
-  console.log('[ParticipantsAvatars] Rendering:', { participants, count: participants?.length });
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Rendering:'),
+    context: [{ participants, count: participants?.length }],
+  });
 
   // Deduplicate participants by ID
   const uniqueParticipants = React.useMemo(() => {
@@ -2399,9 +2416,15 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
     });
   }, [participants]);
 
-  console.log('[ParticipantsAvatars] Unique participants:', {
-    uniqueParticipants,
-    count: uniqueParticipants.length,
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Unique participants:'),
+    context: [
+      {
+        uniqueParticipants,
+        count: uniqueParticipants.length,
+      },
+    ],
   });
 
   // Get top 3 unique participants

@@ -2,14 +2,16 @@ interface SwitchProps {
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  ariaLabel?: string;
 }
 
-export function Switch({ checked, onChange, disabled }: SwitchProps) {
+export function Switch({ checked, onChange, disabled, ariaLabel }: SwitchProps) {
   return (
     <button
       data-id="agent-switch"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
       className={`relative inline-flex h-5 w-8 shrink-0 cursor-pointer items-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-xyne-border-focus focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${

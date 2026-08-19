@@ -9,7 +9,7 @@ import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import {
-  AUTOMATION_WORKFLOW_TYPE,
+  isExecutableAutomationWorkflowType,
   mayDrainInFlight,
   parseAutomationConfig,
   readAutomationMeta,
@@ -51,7 +51,7 @@ class AutomationWorker {
     logger.info(`[AUTOMATION-WORKER] Job ${job.id} starting — execution=${executionId}`);
 
     const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
-    if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    if (!execution || !isExecutableAutomationWorkflowType(execution.workflowType)) {
       logger.warn(
         `[AUTOMATION-WORKER] execution=${executionId} missing or wrong workflowType — dropping`,
       );
@@ -103,7 +103,7 @@ class AutomationWorker {
     }
 
     const workflow = await repositories.workflows.findById(execution.workflowId);
-    if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    if (!workflow || !isExecutableAutomationWorkflowType(workflow.workflowType)) {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }

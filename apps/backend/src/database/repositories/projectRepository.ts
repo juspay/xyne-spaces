@@ -183,7 +183,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // try {
     //   await queueProjectIngestion({ id: result.id }, 'delete');
     // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project deletion for Vespa: ${result.id}`, error);
     //   // Don't throw - project is still deleted in DB
     // }
 

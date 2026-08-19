@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -26,7 +27,11 @@ export const playSosSiren = (): void => {
       });
     }
   } catch (error) {
-    console.error('[SosAlert] Error playing siren:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[SosAlert] Error playing siren:'),
+      error: error,
+    });
   }
 };
 
@@ -38,7 +43,11 @@ export const stopSosSiren = (): void => {
       sirenAudio.currentTime = 0;
     }
   } catch (error) {
-    console.error('[SosAlert] Error stopping siren:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[SosAlert] Error stopping siren:'),
+      error: error,
+    });
   }
 };
 
@@ -85,10 +94,13 @@ export const SosAlertBanner: React.FC = () => {
         websocketService.on('sos_alert_acknowledged', handler);
       })
       .catch((err: unknown) => {
-        console.warn(
-          '[SosAlert] WebSocket connect failed — cross-device SOS ack sync unavailable',
-          err,
-        );
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String(
+            '[SosAlert] WebSocket connect failed — cross-device SOS ack sync unavailable',
+          ),
+          context: [err],
+        });
       });
     return () => {
       mounted = false;
@@ -110,7 +122,7 @@ export const SosAlertBanner: React.FC = () => {
         syncedRef.current = true;
         socket.emit('sos_alerts_sync', { alertIds });
       })
-      .catch(() => {}); // connect failure logged by the ack-listener effect
+      .catch(() => undefined); // connect failure logged by the ack-listener effect
   }, [alerts]);
 
   const acknowledge = useCallback((id: string): void => {
@@ -140,7 +152,11 @@ export const SosAlertBanner: React.FC = () => {
           window.location.href = resolvedUrl;
           return;
         } catch (error) {
-          console.error('[SosAlert] Workspace switch failed:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[SosAlert] Workspace switch failed:'),
+            error: error,
+          });
           toast.error('Failed to switch workspace. Please try again.');
           return;
         }
