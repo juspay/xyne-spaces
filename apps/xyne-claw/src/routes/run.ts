@@ -2131,7 +2131,7 @@ async function processTask(
       // twin speaks AS the user with ZERO tool calls. Injected via
       // activeInjections (not systemPrompt) so it applies on BOTH the @mention
       // flow (which sends no systemPrompt) and interactive chat. Files are the
-      // user's own, ≤3, each ≤10k chars — enforced in claw-auth.
+      // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
       if (isDigitalTwin) {
         const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
         if (promptFiles.length > 0) {

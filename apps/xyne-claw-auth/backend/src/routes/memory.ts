@@ -35,6 +35,7 @@ import {
   upsertFile as upsertAgentFile,
   MAX_FILE_CHARS,
 } from "../services/agentMemoryFiles.js";
+import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/userMemoryCuratorClient.js";
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -686,6 +687,16 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
           sessionId: sessionTag ? sessionTag.slice(8) : null,
           factType: m.factType ?? null,
           tags,
+          // Needed by the archive export: entity links are the majority of the
+          // constellation's edges, and a verbatim restore can only rebuild them
+          // if the export carried the entities.
+          entities: m.entities ?? [],
+          // Source-fact count. An observation starts at 1 and is incremented by
+          // the same consolidation pass that writes a history row, so >1 is a
+          // free "this has history" signal — the list response carries no
+          // dedicated flag, and probing the history endpoint per memory would
+          // cost one request each.
+          proofCount: m.proofCount ?? null,
           createdAt: m.createdAt ?? null,
           recallHits7d: hitMap.get(m.id)?.count ?? 0,
           lastRecalledAt: hitMap.get(m.id)?.lastHit ?? null,
@@ -1351,6 +1362,50 @@ memoryRouter.post("/banks/:agentSlug/recall", requireUserAuth, async (req, res) 
  * PendingMemoryReview rows as rejected so they don't show in the All list.
  * MemoryRecallHit rows are retained for historical hit-count fidelity.
  */
+/**
+ * GET /memory/banks/:agentSlug/memories/:hindsightMemoryId/history
+ *
+ * Prior versions of one memory, newest first.
+ *
+ * Ownership is checked with the SAME object-level gate as delete: the twin bank
+ * is shared across every user in the org, so proxying an id straight through
+ * would let anyone read another user's memory history. `checkTwinAccess` in
+ * "delete" mode is exactly the check we want — it verifies the memory carries
+ * the requester's `user:<id>` tag — even though this is a read.
+ *
+ * Returns [] rather than 404 for a memory with no history: Hindsight only keeps
+ * history for derived observations, so "no history" is the normal case and not
+ * an error the UI should have to special-case.
+ */
+memoryRouter.get(
+  "/banks/:agentSlug/memories/:hindsightMemoryId/history",
+  requireUserAuth,
+  async (req, res) => {
+    try {
+      const agentSlug = req.params["agentSlug"] as string;
+      const hindsightMemoryId = req.params["hindsightMemoryId"] as string;
+
+      if (!(await checkTwinAccess(req, res, agentSlug, "delete", { hindsightMemoryId }))) return;
+
+      const getHistory = memory.getMemoryHistory?.bind(memory);
+      if (!getHistory) {
+        // Provider has no version history at all — an empty list is the honest
+        // answer, and keeps the UI identical to "this memory has none".
+        res.json({ success: true, data: [] });
+        return;
+      }
+
+      const history = await getHistory(bankIdForAgent(agentSlug), hindsightMemoryId);
+      res.json({ success: true, data: history });
+    } catch (err) {
+      logger.error("[memory] GET /banks/:agentSlug/memories/:id/history failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ success: false, error: "Internal error" });
+    }
+  },
+);
+
 memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
@@ -1403,6 +1458,279 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUser
       });
       return;
     }
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * POST /memory/banks/:agentSlug/consolidate
+ *
+ * Queue a consolidation run — the pass that derives and updates observations
+ * (and, with them, the version history the dashboard shows) from raw facts.
+ *
+ * Hindsight already schedules this after every retain, but only when the bank
+ * has enable_observations + enable_auto_consolidation. Facts retained while
+ * either was off stay unconsolidated indefinitely, and facts stranded by a
+ * terminal failure are excluded from selection permanently. This endpoint is
+ * how you drain those, and how you exercise consolidation deterministically
+ * instead of waiting for organic retain traffic.
+ *
+ * SCOPING IS THE POINT: the twin bank is SHARED across every user in the org.
+ * An unscoped run would consolidate everyone's facts and bill everyone's LLM
+ * work to whoever pressed the button, so the twin path always forces
+ * `[["user:<requester>"]]` and ignores any caller-supplied scope. Scoped runs
+ * also bypass Hindsight's bank-level dedupe, so one user's request is never
+ * swallowed by another's pending sweep.
+ *
+ * Async: 202 means QUEUED, not done. `deduplicated: true` means an equivalent
+ * job was already pending and this call joined it.
+ */
+memoryRouter.post("/banks/:agentSlug/consolidate", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    const isTwin = isDigitalTwinAgent(agentSlug);
+    if (!isTwin) {
+      // Non-twin banks are shared per-agent, so restrict to owner/admin.
+      const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+      if (!agent) {
+        res.status(404).json({ success: false, error: "Agent not found" });
+        return;
+      }
+      const admin = await isClawAdmin(requesterId);
+      if (!admin && agent.ownerUserId !== requesterId) {
+        res.status(403).json({ success: false, error: "Only the agent owner or an admin can trigger consolidation." });
+        return;
+      }
+    }
+
+    const consolidate = memory.consolidate?.bind(memory);
+    if (!consolidate) {
+      res.status(501).json({
+        success: false,
+        error: `Provider "${memory.name}" does not support consolidation.`,
+      });
+      return;
+    }
+
+    // Twin: always the requester's own facts, never the whole shared bank.
+    const result = await consolidate(bankIdForAgent(agentSlug), {
+      ...(isTwin ? { observationScopes: [[`user:${requesterId}`]] } : {}),
+    });
+
+    logger.info("[memory] consolidation queued", {
+      agentSlug,
+      scoped: isTwin,
+      operationId: result.operationId,
+      deduplicated: result.deduplicated,
+      by: requesterId,
+    });
+    res.status(202).json({ success: true, data: result });
+  } catch (err) {
+    logger.error("[memory] POST /banks/:agentSlug/consolidate failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/** Curator subsystems a memory may be filed under. An archive carrying anything
+ *  else is filed under `context` rather than rejected — an unknown subsystem is
+ *  a labelling problem, not a reason to lose the fact. */
+const IMPORT_SUBSYSTEMS = new Set([
+  "style", "triage", "expertise", "projects", "relationships",
+  "preferences", "decisions", "context", "docs",
+]);
+
+/**
+ * Import pacing. Retain posts with `async: true` — Hindsight queues the LLM
+ * fact-extraction and returns an operation id straight away — so awaiting each
+ * call gives NO back-pressure: an unpaced loop submits the whole archive in
+ * about a second and Hindsight then fans `retain_extract_facts` out across
+ * every item at once. Its LLM key is capped (`max_parallel_requests`), so that
+ * burst produces a wall of 429s and LiteLLM puts the deployments in cooldown
+ * ("No deployments available"). Those failures happen INSIDE Hindsight, after
+ * we already returned 200 — we never see them and cannot retry them, so
+ * spacing submission out is the only lever this service has.
+ *
+ * Defaults are deliberately conservative and env-tunable, because the right
+ * numbers depend on the key's parallel budget and how fast extraction drains.
+ * Raise MEMORY_IMPORT_CHUNK / lower the delay once the key allows more.
+ */
+const IMPORT_CHUNK = Math.max(1, Number(process.env["MEMORY_IMPORT_CHUNK"] ?? 5));
+const IMPORT_CHUNK_DELAY_MS = Math.max(0, Number(process.env["MEMORY_IMPORT_CHUNK_DELAY_MS"] ?? 3_000));
+/** Per REQUEST, not per archive — the dashboard sends larger archives as
+ *  successive batches so no single request runs long enough to be timed out by
+ *  a proxy. At the defaults this is ~10 chunks ≈ 30s worst case. */
+const IMPORT_MAX_RECORDS = Math.max(1, Number(process.env["MEMORY_IMPORT_MAX_RECORDS"] ?? 50));
+const IMPORT_MAX_CONTENT_CHARS = 4_000;
+/** Per record. Hindsight's own extraction rarely exceeds a handful. */
+const IMPORT_MAX_ENTITIES = 32;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * POST /memory/banks/:agentSlug/memories/import
+ *
+ * Restore memories from an archive produced by the dashboard's export. Retains
+ * each record into the bank as a fresh memory.
+ *
+ * SECURITY — the archive is user-supplied data, so every tag is DISCARDED and
+ * re-derived from the authenticated requester. Tags decide a memory's scope
+ * (see the `user:` / `scope:` handling in the list route), so honouring
+ * `tags` from the file would let a crafted archive plant memories in another
+ * user's twin, or promote them to `shared`. Only `content`, `subsystem` and
+ * `timestamp` are read from the file, and `subsystem` is vocabulary-checked.
+ *
+ * NOT idempotent: Hindsight's retain re-runs fact extraction, so re-importing
+ * the same archive creates new memories. Duplicate detection happens in the
+ * dashboard, which already holds the full memory set and can diff before
+ * sending. The response counts records SUBMITTED, not memories created —
+ * extraction is async and one record may yield several facts or merge into one.
+ */
+memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    // Twin bank is per-user: writes are always scoped to the caller. Any other
+    // bank is shared, so restrict restores to the owner/admin.
+    const isTwin = isDigitalTwinAgent(agentSlug);
+    if (!isTwin) {
+      const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+      if (!agent) {
+        res.status(404).json({ success: false, error: "Agent not found" });
+        return;
+      }
+      const admin = await isClawAdmin(requesterId);
+      if (!admin && agent.ownerUserId !== requesterId) {
+        res.status(403).json({ success: false, error: "Only the agent owner or an admin can import memories." });
+        return;
+      }
+    }
+
+    const body = (req.body ?? {}) as { records?: unknown; mode?: unknown };
+    // "verbatim" (default): the records ARE extracted facts — a Xyne archive —
+    // so Hindsight stores them as-is with no LLM. "extract": the records are
+    // raw prose, so run them through normal fact extraction.
+    const verbatim = body.mode !== "extract";
+    if (!Array.isArray(body.records)) {
+      res.status(400).json({ success: false, error: "records must be an array" });
+      return;
+    }
+    if (body.records.length === 0) {
+      res.status(400).json({ success: false, error: "records is empty" });
+      return;
+    }
+    if (body.records.length > IMPORT_MAX_RECORDS) {
+      res.status(413).json({
+        success: false,
+        error: `Too many records in one request (${body.records.length}); send at most ${IMPORT_MAX_RECORDS} per batch.`,
+        code: "IMPORT_BATCH_TOO_LARGE",
+        maxPerBatch: IMPORT_MAX_RECORDS,
+      });
+      return;
+    }
+
+    const items = [];
+    for (const raw of body.records) {
+      const rec = (raw ?? {}) as {
+        content?: unknown;
+        subsystem?: unknown;
+        timestamp?: unknown;
+        entities?: unknown;
+      };
+      const content = typeof rec.content === "string" ? rec.content.trim() : "";
+      if (!content) continue;
+
+      const sub = typeof rec.subsystem === "string" ? rec.subsystem.trim().toLowerCase() : "";
+      const subsystem = IMPORT_SUBSYSTEMS.has(sub) ? sub : "context";
+
+      // Keep the original event time so restored facts rank by when they
+      // happened, not when they were restored. Rejected if unparseable or in
+      // the future — a bad clock would outrank every real memory forever.
+      let timestamp: string | undefined;
+      if (typeof rec.timestamp === "string") {
+        const ms = Date.parse(rec.timestamp);
+        if (Number.isFinite(ms) && ms <= Date.now()) timestamp = new Date(ms).toISOString();
+      }
+
+      // Entities are what rebuild the constellation's entity edges. Verbatim
+      // retains run no LLM, so anything not supplied here is simply absent.
+      const entities = Array.isArray(rec.entities)
+        ? rec.entities
+            .map((e) => (typeof e === "string" ? e.trim() : ""))
+            .filter((e) => e.length > 0 && e.length <= 200)
+            .slice(0, IMPORT_MAX_ENTITIES)
+            .map((text) => ({ text }))
+        : [];
+
+      items.push({
+        content: content.slice(0, IMPORT_MAX_CONTENT_CHARS),
+        tags: [`user:${requesterId}`, `subsystem:${subsystem}`, "scope:user", "source:import"],
+        ...(timestamp ? { timestamp } : {}),
+        observationScopes: twinObservationScopes(requesterId),
+        ...(verbatim ? { strategy: VERBATIM_IMPORT_STRATEGY } : {}),
+        ...(entities.length ? { entities } : {}),
+      });
+    }
+
+    if (items.length === 0) {
+      res.status(400).json({ success: false, error: "No record carried usable content." });
+      return;
+    }
+
+    if (isTwin) await ensureTwinBank();
+    const bankId = bankIdForAgent(agentSlug);
+
+    // Chunk-level isolation: one bad chunk must not lose the rest of the
+    // archive. Failures are counted and reported, never silently dropped.
+    let submitted = 0;
+    let failed = 0;
+    // Verbatim has no LLM step, so it only needs a sane HTTP payload size.
+    const chunkSize = verbatim ? Math.max(IMPORT_CHUNK, 25) : IMPORT_CHUNK;
+    for (let i = 0; i < items.length; i += chunkSize) {
+      // Space submissions out so Hindsight's extraction queue stays inside its
+      // LLM key's parallel budget (see IMPORT_CHUNK_DELAY_MS above). Sleeping
+      // BEFORE each chunk but the first keeps a single-chunk import instant.
+      // Verbatim retains make no LLM call at all, so there is nothing to pace.
+      if (!verbatim && i > 0 && IMPORT_CHUNK_DELAY_MS > 0) await sleep(IMPORT_CHUNK_DELAY_MS);
+      const chunk = items.slice(i, i + chunkSize);
+      try {
+        await memory.retain(bankId, chunk);
+        submitted += chunk.length;
+      } catch (err) {
+        failed += chunk.length;
+        logger.warn("[memory] import chunk failed", {
+          agentSlug,
+          offset: i,
+          size: chunk.length,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    logger.info("[memory] memories imported", {
+      agentSlug, mode: verbatim ? "verbatim" : "extract",
+      submitted, failed, skipped: body.records.length - items.length, by: requesterId,
+    });
+    res.json({
+      success: true,
+      data: { submitted, failed, skipped: body.records.length - items.length, verbatim },
+    });
+  } catch (err) {
+    logger.error("[memory] POST /banks/:agentSlug/memories/import failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });

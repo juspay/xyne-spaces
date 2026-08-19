@@ -71,12 +71,37 @@ interface SourceRef {
   ts: string;
 }
 
+/**
+ * Named retain strategy for restoring an archive of ALREADY-EXTRACTED facts.
+ *
+ * `retain_extraction_mode: "chunks"` makes Hindsight skip the LLM entirely and
+ * store each chunk as-is (hindsight `_extract_facts_chunks`) — no fact
+ * extraction, no entity extraction. That is exactly right for re-importing
+ * memories Hindsight itself produced: re-extracting them would both burn the
+ * rate-limited extraction LLM and let the wording drift from what the user
+ * already reviewed and approved.
+ *
+ * `retain_chunk_size` is pinned above the import route's per-record character
+ * cap so one archived record stays ONE memory instead of being split.
+ */
+export const VERBATIM_IMPORT_STRATEGY = "xyne-verbatim-import";
+const TWIN_RETAIN_STRATEGIES: Record<string, Record<string, unknown>> = {
+  [VERBATIM_IMPORT_STRATEGY]: {
+    retain_extraction_mode: "chunks",
+    retain_chunk_size: 8_000,
+  },
+};
+
 /** Ensure the twin bank exists AND has observations enabled (Hindsight's
- *  evolution/temporal tracking). Cached per-pod in the provider, so calling
- *  before each retain is cheap. Best-effort — retain still works if it fails. */
+ *  evolution/temporal tracking) plus the verbatim-import strategy registered.
+ *  Cached per-pod in the provider, so calling before each retain is cheap.
+ *  Best-effort — retain still works if it fails. */
 export async function ensureTwinBank(): Promise<void> {
   try {
-    await memory.ensureBank(TWIN_BANK_ID, { enableObservations: true });
+    await memory.ensureBank(TWIN_BANK_ID, {
+      enableObservations: true,
+      retainStrategies: TWIN_RETAIN_STRATEGIES,
+    });
   } catch {
     /* non-fatal */
   }

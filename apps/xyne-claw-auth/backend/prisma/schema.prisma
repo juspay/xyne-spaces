@@ -89,7 +89,7 @@ model User {
 /// memories (semantic recall), these are named documents fetched deterministically
 /// by key — e.g. the Digital Twin's `soul.md` (always-loaded persona), `people.md`,
 /// `projects.md`. Up to 3 per (agent,user) may be flagged loadInPrompt, each
-/// ≤ 10k chars, and are injected verbatim into the agent's system prompt so it
+/// ≤ 20k chars, and are injected verbatim into the agent's system prompt so it
 /// works well with zero tool calls. For the twin these are compiled by the soul
 /// synthesizer from approved facts, editable by the user, and writable by the
 /// agent mid-chat. userId NULL = shared across all users of that agent.
@@ -103,7 +103,7 @@ model AgentMemoryFile {
   user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
   name         String
-  /// Verbatim document content (≤ 10k chars, enforced in the app layer).
+  /// Verbatim document content (≤ 20k chars, enforced in the app layer).
   content      String   @default("")
   /// User-toggleable: inject this file into the agent's system prompt. At most
   /// 3 per (agent, user) may be true (enforced in the app layer).
