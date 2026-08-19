@@ -8,6 +8,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
+import { config } from '@/config/env';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -121,6 +122,27 @@ export class VespaWorker {
 	}
 
 	/**
+	 * Summarize a mapped document for logging purposes
+	 */
+	private summarizeMappedDoc(data: Record<string, unknown>): Record<string, unknown> {
+		const summary: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(data ?? {})) {
+			if (value === null || value === undefined) {
+				summary[key] = null;
+			} else if (Array.isArray(value)) {
+				summary[key] = `[${value.length} items]`;
+			} else if (typeof value === 'string') {
+				summary[key] = value.length > 120 ? `<${value.length} chars>` : value;
+			} else if (typeof value === 'object') {
+				summary[key] = `{${Object.keys(value).length} keys}`;
+			} else {
+				summary[key] = value;
+			}
+		}
+		return summary;
+	}
+
+	/**
 	 * Record a failed job in the database
 	 */
 	private async recordFailedJob(job: Bull.Job<VespaJob>, error: Error): Promise<void> {
@@ -207,6 +229,18 @@ export class VespaWorker {
 			} else {
 				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
 				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);
+			}
+
+			// What we are about to send to Vespa, so an indexed document can be compared
+			// against what the mapper actually produced.
+			if (config.deskTicketDebug && jobType !== 'delete') {
+				logger.info('[VESPA_WORKER] mapped document', {
+					jobId: job.id,
+					schema,
+					docId,
+					workspaceId: job.data.workspaceId ?? null,
+					mapped: this.summarizeMappedDoc(mappedData as Record<string, unknown>),
+				});
 			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {

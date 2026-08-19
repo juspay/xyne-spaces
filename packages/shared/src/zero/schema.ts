@@ -59,6 +59,7 @@ import {
   LinkVisibility,
   LookupType,
   MailboxState,
+  MessageArtifactStatus,
   MeetingStatus,
   MessageType,
   NotificationLevel,
@@ -784,6 +785,19 @@ export const channelTable = table('channels')
   })
   .primaryKey('id');
 
+export const channelBoardMappingTable = table('channel_board_mappings' /* ChannelBoardMapping */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const channelStatsTable = table('channel_stats')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -919,6 +933,33 @@ export const messageTable = table('messages')
     messageActs: string().optional(),
   })
   .primaryKey('messageId');
+
+// Deliberately self-contained: the global artifact subscription must not relate
+// to `messages`, or every message delta in the workspace would flow through its
+// IVM pipeline. Each column below is either lifecycle state or the minimum
+// needed to route to the artifact without that join.
+export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    // Whether the artifact is the conversation's initial message decides
+    // between the channel route and the thread route. It cannot be derived
+    // without joining messages/conversations, so it is projected here.
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    // The source message's createdAt — drives the banner's age label and the
+    // channel-list load anchor. Equal to the conversation's createdAt when the
+    // artifact is the initial message, which is the case the anchor is used for.
+    messageCreatedAt: number(),
+    command: string(),
+    status: enumeration<MessageArtifactStatus>(),
+    callExternalId: string().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
 
 export const messageAttachmentTable = table('message_attachments')
   .columns({
@@ -1152,6 +1193,7 @@ export const callTable = table('calls')
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
   })
   .primaryKey('id');
 
@@ -1272,6 +1314,7 @@ export const canvasTable = table('canvases')
     editAccessId: string().optional(),
     visibility: enumeration<CanvasVisibility>(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     isCollaborative: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
@@ -2632,6 +2675,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     destField: ['boardId'],
     destSchema: boardSlaPolicyTable,
   }),
+  channelMappings: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: channelBoardMappingTable,
+  }),
 }));
 
 export const stageTableRelationships = relationships(stageTable, ({ one, many }) => ({
@@ -3221,7 +3269,28 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
   }),
+  boardMappings: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelBoardMappingTable,
+  }),
 }));
+
+export const channelBoardMappingTableRelationships = relationships(
+  channelBoardMappingTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    board: one({
+      sourceField: ['boardId'],
+      destField: ['id'],
+      destSchema: boardTable,
+    }),
+  }),
+);
 
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
@@ -3277,6 +3346,23 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destSchema: surfaceNudgeCountTable,
   }),
 }));
+
+export const messageArtifactTableRelationships = relationships(
+  messageArtifactTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    // Used by the artifact subscription to keep banner delivery participant-only.
+    channelParticipants: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+  }),
+);
 
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({
@@ -4541,6 +4627,7 @@ export const schema = createSchema({
     invitationTable,
     guestAccessTable,
     channelTable,
+    channelBoardMappingTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -4548,6 +4635,7 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
     delayedMessageTable,
@@ -4669,8 +4757,10 @@ export const schema = createSchema({
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
+    channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
     messageTableRelationships,
+    messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
     channelParticipantTableRelationships,
@@ -4802,6 +4892,7 @@ export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizat
 export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

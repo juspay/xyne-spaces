@@ -16,6 +16,7 @@ import {
   InfoIcon,
 } from "@phosphor-icons/react";
 import {
+  ApiError,
   listDigitalTwinMemories,
   deleteDigitalTwinMemory,
   getDigitalTwinStats,
@@ -33,7 +34,7 @@ import { useSnackbar } from "../ui/Snackbar";
 import { Search } from "../ui/Search";
 import { Skeleton } from "../ui/Skeleton";
 import { Button } from "../ui/Button";
-import { Tooltip } from "../ui/Tooltip";
+import { Tooltip, InfoIcon as InfoHint } from "../ui/Tooltip";
 import { EnableModal } from "./EnableModal";
 import { DeleteMemoriesModal } from "./DeleteMemoriesModal";
 import { DigitalTwinReviewTab } from "./DigitalTwinReviewTab";
@@ -125,6 +126,23 @@ function fmtRelative(iso: string | null): string {
  */
 function cleanMemoryText(s: string): string {
   return s.replace(/\s*\|\s*(Involving|When|Where|Who|Related|Context)\s*:.*$/i, "").trim();
+}
+
+function memoryDeleteNotice(error: unknown): { title: string; description?: string } {
+  if (error instanceof ApiError && error.code === "HINDSIGHT_DERIVED_OBSERVATION") {
+    return {
+      title: "Derived observation cannot be deleted directly",
+      description: error.message,
+    };
+  }
+  return {
+    title: "Failed to delete memory",
+    ...(error instanceof Error ? { description: error.message } : {}),
+  };
+}
+
+function isObservationType(factType?: string | null): boolean {
+  return factType?.toLowerCase() === "observation";
 }
 
 /** The curator subsystem label of a memory, from its `subsystem:<x>` tag. */
@@ -267,30 +285,42 @@ export function DigitalTwinMemoriesTab({ userId, onCandidateApproved, onViewReas
       {/* Sub-tab nav + actions — pinned at top */}
       <div className="shrink-0 border-b border-xyne-border px-[20px] py-[12px]">
         <div className="flex flex-wrap items-center gap-[6px]">
-          <SubTabBtn active={sub === "all"} onClick={() => setSub("all")} icon={<BrainIcon size={13} />}>
-            Memories
-          </SubTabBtn>
-          <SubTabBtn active={sub === "hot"} onClick={() => setSub("hot")} icon={<FireIcon size={13} />}>
-            Hot
-          </SubTabBtn>
-          <SubTabBtn
-            active={sub === "proposals"}
-            onClick={() => setSub("proposals")}
-            icon={<ClipboardTextIcon size={13} />}
-          >
-            Proposals
-          </SubTabBtn>
-          <SubTabBtn
-            active={sub === "tester"}
-            onClick={() => setSub("tester")}
-            icon={<MagnifyingGlassIcon size={13} />}
-          >
-            Recall
-          </SubTabBtn>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn active={sub === "all"} onClick={() => setSub("all")} icon={<BrainIcon size={13} />}>
+              Memories
+            </SubTabBtn>
+            <InfoHint text="Facts your Twin has learned about you and draws on when it acts on your behalf." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn active={sub === "hot"} onClick={() => setSub("hot")} icon={<FireIcon size={13} />}>
+              Hot
+            </SubTabBtn>
+            <InfoHint text="Your most-recalled memories — the ones your Twin leaned on most over the last 7–90 days." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn
+              active={sub === "proposals"}
+              onClick={() => setSub("proposals")}
+              icon={<ClipboardTextIcon size={13} />}
+            >
+              Proposals
+            </SubTabBtn>
+            <InfoHint text="Candidate memories your Twin drafted from your activity, waiting for your approval. Approve one and it becomes a saved Memory. New candidates arrive nightly." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn
+              active={sub === "tester"}
+              onClick={() => setSub("tester")}
+              icon={<MagnifyingGlassIcon size={13} />}
+            >
+              Recall
+            </SubTabBtn>
+            <InfoHint text="Test what your Twin would remember — type a question and preview the memories it surfaces." />
+          </span>
 
           {/* Right-side action buttons */}
           <div className="ml-auto flex items-center gap-[4px]">
-            <Tooltip content="Backfill history" side="bottom">
+            <Tooltip content="Backfill: learn from your past Spaces history (3–24 months). Adds candidate memories to your Proposals queue for review." side="bottom">
               <button
                 onClick={() => setShowBackfill(true)}
                 aria-label="Backfill history"
@@ -538,16 +568,19 @@ function AllSubtab({
   const timelineLabel = new Date(timeCutoff ?? tMax).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   const handleDelete = useCallback(
-    async (hindsightMemoryId: string) => {
-      if (!window.confirm("Delete this memory? This removes it from Hindsight and marks all related review rows as rejected. Recall-hit history is retained.")) {
+    async (hindsightMemoryId: string, factType?: string | null) => {
+      // Let the backend return its explicit derived-observation signal so the
+      // user sees why this type cannot be deleted. Raw facts still get the
+      // destructive-action confirmation.
+      if (!isObservationType(factType) && !window.confirm("Delete this memory? This removes it from Hindsight and marks all related review rows as rejected. Recall-hit history is retained.")) {
         return;
       }
       try {
         await deleteDigitalTwinMemory(userId, hindsightMemoryId);
         onRemove(hindsightMemoryId);
         showSnackbar({ variant: "success", title: "Memory deleted" });
-      } catch {
-        showSnackbar({ variant: "error", title: "Failed to delete memory" });
+      } catch (error) {
+        showSnackbar({ variant: "error", ...memoryDeleteNotice(error), duration: 8_000 });
       }
     },
     [userId, onRemove, showSnackbar],
@@ -815,7 +848,7 @@ function MemoryCard({
   onViewReasoning,
 }: {
   memory: MemoryBankMemory;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, factType?: string | null) => void;
   userId?: string;
   onViewReasoning?: (pipelineEventId: string) => void;
 }) {
@@ -823,6 +856,7 @@ function MemoryCard({
   const [showReasoning, setShowReasoning] = useState(false);
   const cleanText = cleanMemoryText(memory.content);
   const sub = subsystemOf(memory);
+  const isObservation = isObservationType(memory.factType);
   const isLong = cleanText.length > MEMORY_TRUNCATE_AT;
   const visibleText =
     expanded || !isLong
@@ -892,6 +926,13 @@ function MemoryCard({
                 <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2.5 8h11M9 3.5 13.5 8 9 12.5" /></svg>
                 reasoning
               </button>
+            ) : isObservation ? (
+              <span
+                title="Derived by Hindsight from supporting world/experience facts; it has no single curator trace."
+                className="inline-flex items-center rounded-md border border-dashed border-xyne-warning-border px-[8px] py-[3px] font-mono text-[10.5px] text-xyne-warning-fg"
+              >
+                derived
+              </span>
             ) : (
               <span
                 title="No pipeline trace — this memory predates the reasoning link."
@@ -902,9 +943,9 @@ function MemoryCard({
             )
           )}
           <button
-            onClick={() => onDelete(memory.hindsightMemoryId)}
+            onClick={() => onDelete(memory.hindsightMemoryId, memory.factType)}
             className="text-xyne-fg-tertiary hover:text-xyne-error-fg"
-            title="Delete memory"
+            title={isObservation ? "Why can't I delete this derived observation?" : "Delete memory"}
           >
             <TrashIcon size={14} />
           </button>
@@ -935,8 +976,9 @@ function HotSubtab({ userId }: { userId: string }) {
   }, [userId, range, showSnackbar]);
 
   const handleDelete = useCallback(
-    async (hindsightMemoryId: string) => {
+    async (hindsightMemoryId: string, factType?: string | null) => {
       if (
+        !isObservationType(factType) &&
         !window.confirm(
           "Delete this memory? This removes it from Hindsight and marks related review rows as rejected. Recall-hit history is retained.",
         )
@@ -948,8 +990,8 @@ function HotSubtab({ userId }: { userId: string }) {
         // Optimistic — Hot is re-fetched on range change or manual refresh
         setDeletedIds((prev) => new Set(prev).add(hindsightMemoryId));
         showSnackbar({ variant: "success", title: "Memory deleted" });
-      } catch {
-        showSnackbar({ variant: "error", title: "Failed to delete memory" });
+      } catch (error) {
+        showSnackbar({ variant: "error", ...memoryDeleteNotice(error), duration: 8_000 });
       }
     },
     [userId, showSnackbar],
@@ -1029,9 +1071,9 @@ function HotSubtab({ userId }: { userId: string }) {
               </div>
               {!isRejected && (
                 <button
-                  onClick={() => handleDelete(m.hindsightMemoryId)}
+                  onClick={() => handleDelete(m.hindsightMemoryId, m.factType)}
                   className="shrink-0 text-xyne-fg-tertiary hover:text-xyne-error-fg"
-                  title="Delete memory"
+                  title={isObservationType(m.factType) ? "Why can't I delete this derived observation?" : "Delete memory"}
                   aria-label="Delete memory"
                 >
                   <TrashIcon size={14} />

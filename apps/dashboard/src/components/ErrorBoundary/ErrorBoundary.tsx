@@ -118,12 +118,17 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    // eslint-disable-next-line no-console
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error(Event.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('ErrorBoundary caught an error:'),
+      error: error,
+      context: [errorInfo],
+    });
     //TODO : Add to report errors to sentry
 
     logger.error(Event.FRONTEND_ERROR, {
       type: 'react_error_boundary',
+      error,
       message: error.message,
       errorName: error.name,
       stack: error.stack,

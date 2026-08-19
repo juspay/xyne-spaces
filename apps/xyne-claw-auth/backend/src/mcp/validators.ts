@@ -1,5 +1,5 @@
 import { createLogger } from "../logger.js";
-import { spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { interact, spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -61,31 +61,90 @@ async function validateTargetConversationId(
     }
   }
 
-  if (!conversationId) return null;
+  const auth: SpacesAuthContext = {};
+  const token = stringField(credentials["token"]);
+  const sessionId = stringField(credentials["sessionId"]);
+  const workspaceId = stringField(credentials["workspaceId"]);
+  const baseUrl = stringField(credentials["url"]);
+  if (token) auth.token = token;
+  if (sessionId) auth.sessionId = sessionId;
+  if (workspaceId) auth.workspaceId = workspaceId;
+  if (baseUrl) auth.baseUrl = baseUrl;
 
+  if (conversationId) {
+    try {
+      await spacesFetch(
+        `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
+        { method: "GET" },
+        auth,
+      );
+      return null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+        return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
+      }
+      log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+      return null;
+    }
+  }
+
+  if (!channelId) return null;
+
+  // Reject a hallucinated channelId AT QUEUE TIME, while the model can still
+  // self-correct in the same run. Without this, the action queues ("Action
+  // queued for approval: ..."), and the card-time target validation in
+  // webhook.ts then skips the approval card with only a server log — the user
+  // was promised an approval that never arrives, and retrying repeats the
+  // identical dead end (prod 2026-08-07, fe-autocoder spaces-create-ticket).
+  //
+  // This is an EXACT-id findMany, not the paginated workspace list whose
+  // `.includes` false-negatives got pre-checks removed here before (see the
+  // create-ticket note below): only a definitive empty result rejects; any
+  // lookup failure fails open so the authoritative Spaces API stays the
+  // final judge.
   try {
-    const auth: SpacesAuthContext = {};
-    const token = stringField(credentials["token"]);
-    const sessionId = stringField(credentials["sessionId"]);
-    const workspaceId = stringField(credentials["workspaceId"]);
-    const baseUrl = stringField(credentials["url"]);
-    if (token) auth.token = token;
-    if (sessionId) auth.sessionId = sessionId;
-    if (workspaceId) auth.workspaceId = workspaceId;
-    if (baseUrl) auth.baseUrl = baseUrl;
-
-    await spacesFetch(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
-      { method: "GET" },
+    const rows = (await interact(
+      { model: "channel", operation: "findMany", where: { id: { equals: channelId } }, take: 1 },
       auth,
-    );
+    )) as unknown[];
+    if (Array.isArray(rows) && rows.length === 0) {
+      // Did-you-mean recovery: ids that reach us corrupted are almost always
+      // near-misses of a real id the model re-typed from its own prose
+      // (prod 2026-08-10: fe-autocoder dropped 2 chars mid-cuid). Cuids share
+      // long time-ordered prefixes, so a prefix lookup names the intended
+      // channel and lets the agent self-correct in ONE step instead of
+      // guessing. Suggestions only — never silently substitute a write target.
+      let suggestion = "";
+      try {
+        const prefix = channelId.slice(0, 12);
+        if (prefix.length >= 8) {
+          const near = (await interact(
+            {
+              model: "channel",
+              operation: "findMany",
+              where: { id: { startsWith: prefix } },
+              select: { id: true, name: true },
+              take: 3,
+            },
+            auth,
+          )) as Array<{ id?: string; name?: string }>;
+          if (Array.isArray(near) && near.length > 0) {
+            suggestion =
+              " Close id matches: " +
+              near.map((c) => `${c.name ?? "(unnamed)"} = ${c.id}`).join("; ") +
+              ". If one of these is the intended channel, retry with that EXACT id (copy it verbatim).";
+          }
+        }
+      } catch {
+        // best-effort — the not-found error below stands on its own
+      }
+      return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
+    }
     return null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
-      return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
-    }
-    log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+    log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
     return null;
   }
 }
@@ -208,5 +267,32 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
     return "content exceeds the 5MB limit";
   }
 
+  return null;
+});
+
+register("xyne-spaces", "spaces-sdlc-update-baseline", async (params) => {
+  const action = String(params["action"] ?? "");
+  if (!["begin", "upsert_section", "finalize"].includes(action)) {
+    return "action must be begin, upsert_section, or finalize";
+  }
+  for (const key of ["repoId", "baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (action === "upsert_section") {
+    for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
+    }
+  }
+  return null;
+});
+
+register("xyne-spaces", "spaces-sdlc-create-pull-request", async (params) => {
+  for (const key of ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
+    return "commitHash must be a full 40-character Git commit SHA";
+  }
+  if (params["head"] === params["base"]) return "head must differ from base";
   return null;
 });

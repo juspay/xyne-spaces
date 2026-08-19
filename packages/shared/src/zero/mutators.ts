@@ -1290,6 +1290,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           sectionId,
           sectionPosition: sectionId ? position : null,
+          ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
       },
@@ -5596,6 +5597,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           visibility: visibility || CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isArchived: false,
           isCollaborative: false,
           docType: DocType.Canvas,
           lastEditedBy: ctx.userID,
@@ -5735,6 +5737,46 @@ export const mutators = defineMutators({
 
       await tx.mutate.canvases.delete({ id });
     }),
+    archiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can archive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can unarchive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: false,
+        });
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         canvasId: z.string(),
@@ -8877,24 +8919,6 @@ export const mutators = defineMutators({
         if (existing) {
           await tx.mutate.conversation_label_mappings.delete({ id: existing.id });
         }
-      },
-    ),
-    // Delete a label from the catalog and cascade-remove all its conversation mappings.
-    // Only the owner (createdBy) may delete their label.
-    deleteLabel: defineMutator(
-      z.object({ labelId: z.string() }),
-      async ({ tx, ctx, args: { labelId } }) => {
-        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-        if (!label) throw new Error('Label not found');
-        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-        const mappings = await tx.run(
-          zql.conversation_label_mappings.where('labelId', labelId),
-        );
-        for (const mapping of mappings) {
-          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-        }
-        await tx.mutate.conversation_labels.delete({ id: labelId });
       },
     ),
   },

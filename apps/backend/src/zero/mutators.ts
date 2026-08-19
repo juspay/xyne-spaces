@@ -164,6 +164,7 @@ import {
   onFlowTicketStatusChanged,
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
+import { getEncryptionProvider } from '@/services/encryption';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -246,6 +247,7 @@ export type AuthData = {
   name: string;
   displayName?: string | null;
   workspaceId: string;
+  orgId: string;
   role: string;
   orgRole: string;
   memberId: string;
@@ -1086,7 +1088,7 @@ export function createMutators(
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -2241,6 +2243,7 @@ export function createMutators(
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
+            ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
         },
@@ -4316,6 +4319,7 @@ export function createMutators(
             updatedAt: now,
             labels: [],
             markedItems: [],
+            xyneManaged: false,
             metadata: {
               systemMessageId,
               conversationId,
@@ -5793,7 +5797,7 @@ export function createMutators(
                     }
                   }
                 } catch (error) {
-                  console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
+                  logger.error('Failed to retrigger autoassignment for board change', error);
                 }
               });
             }
@@ -8464,6 +8468,7 @@ export function createMutators(
             createdBy: authData.sub,
             visibility: visibility || CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: false,
             docType: DocType.Canvas,
             lastEditedBy: authData.sub,
@@ -9199,6 +9204,46 @@ export function createMutators(
           }
 
           await tx.mutate.canvases.delete({ id });
+        },
+      ),
+      archiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can archive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: true,
+          });
+        },
+      ),
+      unarchiveCanvas: defineMutator(
+        z.object({
+          canvasId: z.string(),
+        }),
+        async ({ tx, args: { canvasId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          if (canvas.createdBy !== authData.sub) {
+            throw new Error('Only the creator can unarchive the canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvasId,
+            isArchived: false,
+          });
         },
       ),
     },
@@ -11650,23 +11695,6 @@ export function createMutators(
           if (existing) {
             await tx.mutate.conversation_label_mappings.delete({ id: existing.id });
           }
-        },
-      ),
-      // Only the owner (createdBy) may delete their label.
-      deleteLabel: defineMutator(
-        z.object({ labelId: z.string() }),
-        async ({ tx, ctx, args: { labelId } }) => {
-          const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-          if (!label) throw new Error('Label not found');
-          if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-          const mappings = await tx.run(
-            zql.conversation_label_mappings.where('labelId', labelId),
-          );
-          for (const mapping of mappings) {
-            await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-          }
-          await tx.mutate.conversation_labels.delete({ id: labelId });
         },
       ),
     },
@@ -14167,6 +14195,8 @@ export function createMutators(
           );
           if (existing) throw new Error('Organization name already exists');
 
+          await getEncryptionProvider().initializeOrg(orgId);
+
           await tx.mutate.organizations.insert({
             orgId,
             name: orgName,
@@ -16206,6 +16236,14 @@ export function createMutators(
           }
 
           const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+
+          logger.info(`[MUTATOR-NON-LINEAR] stage transitions for board ${boardId} updated by ${authData.sub}`, {
+            boardId,
+            userId: authData.sub,
+            oldTransitionIds: existing.map(t => t.id),
+            newTransitionIds: transitions.map(t => t.id),
+          });
+
           for (const t of existing) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', t.id),

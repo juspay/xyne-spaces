@@ -76,7 +76,13 @@ import {
   DEFAULT_CONTAINER,
   DM_CONTAINER,
 } from './useChannelSectionDnd';
-import { ChannelSection, ChannelType, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
+import {
+  ChannelSection,
+  ChannelType,
+  ChannelScopeType,
+  isDeskChannelType,
+  NotificationLevel,
+} from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
@@ -394,6 +400,7 @@ const ChatDirectory = ({
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
       let isUnread = hasUnreadCount;
       if (!isDM) {
@@ -536,6 +543,9 @@ const ChatDirectory = ({
   // sidebar); Enter navigates without the param so normal auto-focus kicks in.
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
+      // Only bare j/k/Enter navigate; ignore ⌘/⌃/⌥ combos so browser and
+      // app shortcuts (e.g. ⌘K search) still work while the sidebar is focused.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k' && e.key !== 'Enter') return;
       const active = document.activeElement;
       if (!listContainerRef.current || !active || !listContainerRef.current.contains(active)) {

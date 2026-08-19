@@ -15,6 +15,8 @@ import {
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -22,6 +24,7 @@ import type {
   PartialBlock,
   StyleSchema,
 } from '@blocknote/core';
+import { withCollaboration } from '@blocknote/core/yjs';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
@@ -71,6 +74,8 @@ import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasRole } from '@xyne/shared';
 import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { AnimatePresence } from 'framer-motion';
+
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
@@ -184,16 +189,21 @@ export const CollaborativeCanvasEditor = forwardRef<
     }
 
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
+    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
-    const editorOptions = {
+    const baseEditorOptions = {
       schema: canvasSchema,
       dictionary: canvasDictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
       _tiptapOptions: canvasTiptapOptions,
-      ...(shouldUseCollaboration
-        ? {
+    };
+
+    const editorOptions =
+      shouldUseCollaboration && provider && fragment
+        ? withCollaboration({
+            ...baseEditorOptions,
             collaboration: {
               fragment,
               user: {
@@ -203,13 +213,14 @@ export const CollaborativeCanvasEditor = forwardRef<
               },
               provider,
             },
-          }
-        : {}),
-    };
+          })
+        : baseEditorOptions;
 
     const editor = useCreateBlockNote(editorOptions as Parameters<typeof useCreateBlockNote>[0], [
       canvasId,
       awareness,
+      fragment,
+      provider,
       shouldUseCollaboration,
     ]);
 
@@ -264,8 +275,14 @@ export const CollaborativeCanvasEditor = forwardRef<
       const whiteboardItems = getWhiteboardSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
+      const mathItems = getMathSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      const diagramItems = getDiagramSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
 
-      return [...whiteboardItems];
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
     // Get slash menu items with custom blocks
@@ -642,7 +659,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
-        <div className='flex min-h-0 flex-1 overflow-hidden'>
+        <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
             style={{
@@ -658,7 +675,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 overflowWrap: 'break-word',
               }}
             >
-              {editor && (
+              {editor && canMountEditor && (
                 <CanvasMentionContext.Provider value={mentionContextValue}>
                   <BlockNoteView
                     editor={
@@ -684,22 +701,24 @@ export const CollaborativeCanvasEditor = forwardRef<
             </div>
           </div>
 
-          {isCommentsOpen && (
-            <CanvasCommentsPanel
-              canvasId={canvasId}
-              canvasTitle={title}
-              channelId={channelId}
-              activeBlockId={activeCommentBlockId}
-              activeThreadId={activeCommentThreadId}
-              activeAnchor={activeCommentAnchor}
-              editable={editable && !isReadOnly}
-              onClose={() => setIsCommentsOpen(false)}
-              onSelectBlock={focusCommentBlock}
-              onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
-              onCreateThreadFailed={removeCommentAnchorStyle}
-            />
-          )}
+          <AnimatePresence>
+            {isCommentsOpen && (
+              <CanvasCommentsPanel
+                canvasId={canvasId}
+                canvasTitle={title}
+                channelId={channelId}
+                activeBlockId={activeCommentBlockId}
+                activeThreadId={activeCommentThreadId}
+                activeAnchor={activeCommentAnchor}
+                editable={editable && !isReadOnly}
+                onClose={() => setIsCommentsOpen(false)}
+                onSelectBlock={focusCommentBlock}
+                onBeforeCreateThread={applyCommentAnchorStyle}
+                onCreateThreadCreated={clearActiveCommentAnchor}
+                onCreateThreadFailed={removeCommentAnchorStyle}
+              />
+            )}
+          </AnimatePresence>
 
           {inlineCommentThread && (
             <CanvasInlineCommentThread

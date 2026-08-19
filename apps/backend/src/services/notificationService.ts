@@ -1,7 +1,6 @@
 import { logger } from '@/utils/logger';
 import { runAsSystem } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
-import webpush from 'web-push';
 import { websocketService } from './websocketService';
 import {
   createFlowJson,
@@ -171,9 +170,6 @@ interface UserPreferences {
 }
 
 class NotificationService {
-  constructor() {
-    this.initializeWebPush();
-  }
   /**
    * Helper to create a granular notification entry for a specific session (Mobile or Web)
    */
@@ -201,17 +197,6 @@ class NotificationService {
     });
   }
 
-  private initializeWebPush(): void {
-    const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
-    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-    const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@xyne.ai';
-
-    if (vapidPublicKey && vapidPrivateKey) {
-      webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
-    } else {
-      logger.warn('VAPID keys not configured. Push notifications will not work.');
-    }
-  }
   async sendWorkflowCompletionNotification(workflowId: string, status: string, executionId: string): Promise<void> {
     logger.info(
       `[TicketBot] sendWorkflowCompletionNotification called for workflow ${workflowId} with status ${status}`
@@ -867,8 +852,6 @@ class NotificationService {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
-        title: data.title,
-        message: data.message,
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
         actionUrl: data.actionUrl,
@@ -880,7 +863,7 @@ class NotificationService {
         const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
 
         if (hasActiveTokens) {
-          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type}`);
 
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
@@ -939,7 +922,7 @@ class NotificationService {
 
       // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
       if (sendDesktop) {
-        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type}`);
 
         await realTimeNotificationService.sendNotification(
           userId,

@@ -148,7 +148,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
         } catch (error) {
-          console.error('Failed to forward message via mutator:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to forward message via mutator:'),
+            error: error,
+          });
           logger.error(Event.MESSAGE_FORWARD_FAILED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
@@ -209,7 +213,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         // Navigate to the DM channel
         void navigate(`/chat/dir/${response.id}`);
       } catch (error) {
-        console.error('Failed to create DM with forwarded message:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to create DM with forwarded message:'),
+          error: error,
+        });
         logger.error(Event.MESSAGE_FORWARD_FAILED, {
           originalMessageId: message.messageId,
           targetType: 'users',

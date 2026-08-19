@@ -37,14 +37,18 @@ const AppNavigator = (): ReactElement => {
   };
 
   return (
-    <div className='h-full w-full flex items-center justify-end gap-2 px-4' style={APP_DRAG_STYLE}>
+    <div
+      className='h-full w-full flex items-center justify-between gap-2 px-4'
+      style={APP_DRAG_STYLE}
+    >
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
         {workspaceId && (
           <button
             type='button'
             aria-label='Share workspace link'
             onClick={() => void handleShareWorkspace()}
-            className={buttonClass}
+            // Temporarily hidden — drop the `hidden` class to bring it back.
+            className={cn(buttonClass, 'hidden')}
             data-track-category='APP_NAVIGATOR'
             data-track-name='SHARE_WORKSPACE'
           >
@@ -71,6 +75,8 @@ const AppNavigator = (): ReactElement => {
         >
           <ArrowRight size={16} />
         </button>
+      </div>
+      <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
         <button
           type='button'
           aria-label='Search'

@@ -23,8 +23,8 @@
  * rendered unit is prefixed to tell the curator to extract facts about the user
  * only. Nothing co-participant is stored verbatim as the user's memory.
  *
- * Flag-gated: only runs when TWIN_CONTEXT_ASSEMBLER=1 (else the legacy flat
- * `fetchUserMessages` path is used), so the two can be A/B'd safely.
+ * Enabled by default. Set TWIN_CONTEXT_ASSEMBLER=0/false/off/no to use the
+ * legacy flat `fetchUserMessages` path for rollback or comparison.
  */
 
 import type { UserMemoryChannelType, UserMemoryRecord, UserMemoryThreadContext } from "xyne-claw-shared";
@@ -119,8 +119,8 @@ const MENTION_ACTIONS = ["mentioned_user", "group_mention"];
 
 // ─── Flag ────────────────────────────────────────────────────────────────
 export function isContextAssemblerEnabled(): boolean {
-  const v = process.env["TWIN_CONTEXT_ASSEMBLER"];
-  return v === "1" || v === "true";
+  const value = process.env["TWIN_CONTEXT_ASSEMBLER"]?.trim().toLowerCase();
+  return !value || !["0", "false", "off", "no"].includes(value);
 }
 
 // ─── Loose Spaces row shapes (flat scalar rows from /api/query/claw) ───────

@@ -773,8 +773,14 @@ const WEBHOOK_NAME_MAX_LENGTH = 84;
 const WEBHOOK_TYPE_OPTIONS = [
   { value: 'SLACK', label: 'Slack' },
   { value: 'SENTINELONE', label: 'SentinelOne' },
+  { value: 'AMAZON_SNS', label: 'Amazon SNS' },
+  { value: 'PINGDOM', label: 'Pingdom' },
+  { value: 'GCP', label: 'GCP Monitoring' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
+const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
+  WEBHOOK_TYPE_OPTIONS.map(option => [option.value, option.label]),
+) as Record<IncomingWebhookType, string>;
 const WEBHOOK_ACTION_OPTIONS = [
   { value: AppIncomingWebhookAction.MESSAGE, label: 'Message' },
   { value: AppIncomingWebhookAction.TICKET, label: 'Ticket' },
@@ -1412,7 +1418,7 @@ export const EditAppForm = ({
               <div>
                 <SectionHeading
                   title='Incoming Webhooks'
-                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack and SentinelOne webhook URL formats.'
+                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack, SentinelOne, Amazon SNS, Pingdom and GCP Monitoring webhook URL formats.'
                 />
                 {botChannels.length > 0 && !showCreateForm && (
                   <Button
@@ -1668,7 +1674,7 @@ export const EditAppForm = ({
                           {webhook.name}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
+                          {WEBHOOK_TYPE_LABELS[webhook.type] ?? webhook.type}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
                           {webhook.action === AppIncomingWebhookAction.TICKET

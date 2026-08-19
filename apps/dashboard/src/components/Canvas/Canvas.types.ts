@@ -109,6 +109,7 @@ export interface Canvas {
   createdBy: string;
   visibility: CanvasVisibility;
   isTemplate: boolean;
+  isArchived?: boolean;
   isCollaborative?: boolean;
   isStarred?: boolean;
   lastEditedBy?: string;
@@ -148,6 +149,7 @@ export interface CanvasListProps {
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: (canvasId: string) => void;
   onDuplicate?: (canvasId: string, canvas?: Canvas) => void;
+  onArchiveToggle?: (canvas: Canvas) => void;
   currentUserId?: string | undefined;
   activeFilter?: 'all' | 'created_by_me' | 'shared';
   onFilterChange?: (filter: 'all' | 'created_by_me' | 'shared') => void;
@@ -157,5 +159,7 @@ export interface CanvasListProps {
   excludeCallGeneratedCanvases?: boolean;
   onlyCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
+  includeArchived?: boolean;
+  onlyArchived?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
 }

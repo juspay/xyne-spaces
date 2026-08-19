@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -55,13 +56,12 @@ import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
 import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
-import socialMediaRoutes from '@/integrations/routes/social-media';
+import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -79,6 +79,7 @@ import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
+import encryptionRoutes from '@/routes/encryption';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
@@ -90,6 +91,8 @@ import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
+import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -155,6 +158,8 @@ import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
+import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
+import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
@@ -176,6 +181,7 @@ import { ReactionController } from '@/controllers/reactionController';
 import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
 import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
+import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
 
@@ -310,6 +316,8 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    this.app.use(decryptRequestBodyMiddleware);
+    this.app.use(encryptResponseBodyMiddleware);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -376,6 +384,11 @@ export class App {
     // Ticket migration route (admin-only)
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
+    this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -394,7 +407,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
@@ -436,6 +448,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -443,6 +456,7 @@ export class App {
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
+    this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
@@ -572,8 +586,10 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes (auth required)
-    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
+    // Y-Sweet collaboration routes. Auth already runs for every /api request via
+    // the /api attachment mounts above; applying it here again cost two more DB
+    // round-trips per canvas open.
+    this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 
@@ -751,6 +767,11 @@ export class App {
           await stageEtaDeadlineQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing board config copy queue...');
+          await boardConfigCopyQueue.initialize();
+          boardConfigCopyWorker.start();
+        })(),
+        (async () => {
           logger.info('Initializing assignment reactivation queue...');
           await assignmentReactivationQueue.initialize();
         })(),
@@ -797,6 +818,10 @@ export class App {
 
       logger.info('Initializing stage ETA deadline queue...');
       await stageEtaDeadlineQueue.initialize();
+
+      logger.info('Initializing board config copy queue...');
+      await boardConfigCopyQueue.initialize();
+      boardConfigCopyWorker.start();
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
@@ -997,6 +1022,9 @@ export class App {
 
       // Close stage ETA deadline queue
       await stageEtaDeadlineQueue.close();
+
+      // Close board config copy queue
+      await boardConfigCopyQueue.close();
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();

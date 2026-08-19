@@ -13,6 +13,7 @@ import { CanvasesACL } from '../tables/canvases-acl';
 import { ChannelParticipantsACL } from '../tables/channel-participants-acl';
 import { ChannelStatsACL } from '../tables/channel-stats-acl';
 import { ChannelsACL } from '../tables/channels-acl';
+import { ChannelBoardMappingsACL } from '../tables/channel-board-mappings-acl';
 import { ConversationParticipantsACL } from '../tables/conversation-participants-acl';
 import { ConversationsACL } from '../tables/conversations-acl';
 import { MessageAttachmentsACL } from '../tables/message-attachments-acl';
@@ -170,10 +171,7 @@ export class ACLFactory {
    * @param ctx - Query context with user information
    * @returns ACL instance for the table, or NoOpACL if no specific ACL exists
    */
-  static async getACL(
-    table: TableName,
-    ctx: QueryContext
-  ): Promise<BaseACL<any>> {
+  static async getACL(table: TableName, ctx: QueryContext): Promise<BaseACL<any>> {
     // Guest users are denied mutations on all tables except those in the allowlist.
     // This is a safety net: new tables are blocked for guests by default.
     if (ctx.role === 'GUEST' && !GUEST_MUTATION_ALLOWLIST.includes(table)) {
@@ -223,6 +221,8 @@ export class ACLFactory {
         return new ChannelStatsACL(ctx);
       case 'channels':
         return new ChannelsACL(ctx);
+      case 'channel_board_mappings':
+        return new ChannelBoardMappingsACL(ctx);
       case 'conversation_participants':
         return new ConversationParticipantsACL(ctx);
       case 'conversations':
@@ -231,6 +231,8 @@ export class ACLFactory {
         return new MessageAttachmentsACL(ctx);
       case 'messages':
         return new MessagesACL(ctx);
+      case 'message_artifacts':
+        return new BaseACL(ctx, table);
       case 'models':
         return new ModelsACL(ctx);
       case 'notification_preferences':

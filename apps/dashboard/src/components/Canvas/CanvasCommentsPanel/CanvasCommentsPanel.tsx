@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
+import { motion } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
@@ -30,7 +31,6 @@ import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
-import { Badge } from '../../ui/Badge';
 import { Tooltip } from '../../ui/Tooltip';
 import {
   DropdownMenu,
@@ -365,151 +365,173 @@ function CanvasCommentThreadSection({
   );
   const expandedComments = [initialComment, ...replies].filter(Boolean) as CanvasComment[];
 
+  const isResolved = thread.status === CanvasCommentThreadStatus.RESOLVED;
+
   return (
     <section
       className={cn(
-        'relative rounded-[14px] border border-border bg-background shadow-sm transition-colors',
-        thread.status === CanvasCommentThreadStatus.RESOLVED && 'bg-muted/50 opacity-85',
+        'flex flex-col gap-2 rounded-xl border border-border p-3 transition-colors',
+        isResolved ? 'bg-muted/40' : 'bg-background',
       )}
     >
-      <span className='absolute right-3 top-3 z-10 flex shrink-0 items-center gap-1'>
-        <Badge
-          variant={thread.status === CanvasCommentThreadStatus.OPEN ? 'outline' : 'secondary'}
-          className={cn(
-            'rounded-full px-3',
-            thread.status === CanvasCommentThreadStatus.OPEN &&
-              'border-amber-100 bg-amber-50 text-amber-700',
-          )}
-        >
-          {thread.status === CanvasCommentThreadStatus.OPEN ? 'Open' : 'Resolved'}
-        </Badge>
-      </span>
+      {expandedComments.map((comment, index) => {
+        const isOwnComment = comment.createdBy === currentUserId;
+        const isDeleted = Boolean(comment.deletedAt);
+        const isEditing = editingCommentId === comment.id;
+        const isInitialComment = comment.id === initialComment?.id;
+        const isReply = index > 0;
+        const commentAuthor =
+          allUsers.find(candidate => candidate.id === comment.createdBy) ?? comment.createdByUser;
+        const authorName =
+          currentUserId === comment.createdBy ? 'You' : getDisplayName(commentAuthor);
 
-      <div className='space-y-4 p-4 pr-24'>
-        {expandedComments.map(comment => {
-          const isOwnComment = comment.createdBy === currentUserId;
-          const isDeleted = Boolean(comment.deletedAt);
-          const isEditing = editingCommentId === comment.id;
-          const isInitialComment = comment.id === initialComment?.id;
-          const commentAuthor =
-            allUsers.find(candidate => candidate.id === comment.createdBy) ?? comment.createdByUser;
-
-          return (
-            <div key={comment.id} className='group flex gap-3'>
-              <Avatar userId={comment.createdBy} size='sm' rounded showActiveStatus={false} />
-              <div className='min-w-0 flex-1'>
-                <div className='mb-1 flex items-center justify-between gap-2'>
-                  <div className='min-w-0'>
-                    <p className='flex min-w-0 items-center gap-2 text-sm'>
-                      <span className='truncate font-semibold text-foreground'>
-                        {currentUserId === comment.createdBy
-                          ? 'You'
-                          : getDisplayName(commentAuthor)}
-                      </span>
-                      <span className='shrink-0 text-muted-foreground'>
-                        {formatRelativeCommentTime(comment.createdAt)}
-                      </span>
-                      {comment.editedAt && !isDeleted ? ' · edited' : ''}
-                    </p>
-                  </div>
-                  {editable && isOwnComment && !isDeleted && !isEditing && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant='ghost'
-                          size='iconSm'
-                          className='opacity-0 group-hover:opacity-100'
-                          aria-label='Comment actions'
-                        >
-                          <MoreVertical className='size-4' />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='end'>
-                        <DropdownMenuItem onClick={() => onSetEditingCommentId(comment.id)}>
-                          <Pencil className='size-4' />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className='text-destructive focus:text-destructive'
-                          onClick={() => onDeleteComment(comment.id)}
-                        >
-                          <Trash2 className='size-4' />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+        return (
+          <div key={comment.id} className={cn('group flex flex-col gap-2', isReply && 'gap-1')}>
+            <div className='flex min-w-0 items-center gap-2'>
+              <Avatar
+                userId={comment.createdBy}
+                size='sm'
+                rounded
+                showActiveStatus={false}
+                className={isReply ? 'size-5' : 'size-[22px]'}
+              />
+              <span
+                className={cn(
+                  'truncate font-semibold leading-none text-foreground',
+                  isReply ? 'text-xs' : 'text-[13px]',
+                )}
+              >
+                {authorName}
+              </span>
+              <span className='shrink-0 text-[11.5px] leading-none text-muted-foreground'>
+                {formatRelativeCommentTime(comment.createdAt)}
+                {comment.editedAt && !isDeleted ? ' · edited' : ''}
+              </span>
+              <span className='flex-1' />
+              {editable && isOwnComment && !isDeleted && !isEditing && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant='ghost'
+                      size='iconSm'
+                      className='size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100'
+                      aria-label='Comment actions'
+                    >
+                      <MoreVertical className='size-[15px]' />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='end'>
+                    <DropdownMenuItem onClick={() => onSetEditingCommentId(comment.id)}>
+                      <Pencil className='size-4' />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className='text-destructive focus:text-destructive'
+                      onClick={() => onDeleteComment(comment.id)}
+                    >
+                      <Trash2 className='size-4' />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {index === 0 && (
+                <span
+                  className={cn(
+                    'flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold',
+                    isResolved
+                      ? 'bg-muted text-muted-foreground'
+                      : 'bg-amber-50 text-amber-800 [[data-theme=midnight]_&]:bg-amber-400/15 [[data-theme=midnight]_&]:text-amber-300',
                   )}
-                </div>
-                {isInitialComment && thread.anchorText && (
-                  <blockquote className='mb-2 border-l-2 border-amber-400 pl-3 text-sm text-muted-foreground'>
-                    {thread.anchorText}
-                  </blockquote>
-                )}
-                {isEditing ? (
-                  <CanvasCommentComposer
-                    id={`canvas-comment-edit-${comment.id}`}
-                    channelId={channelId}
-                    currentUserId={currentUserId}
-                    placeholder='Edit comment'
-                    value={comment.body}
-                    fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
-                    minHeightClassName='min-h-[38px]'
-                    onSubmit={payload => onUpdateComment(thread, comment, payload)}
-                    actions={
-                      <Button variant='ghost' size='sm' onClick={() => onSetEditingCommentId(null)}>
-                        Cancel
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <p
+                >
+                  <span
                     className={cn(
-                      'whitespace-pre-wrap break-words text-sm leading-5 text-foreground',
-                      isDeleted && 'italic text-muted-foreground',
+                      'size-[5px] rounded-full',
+                      isResolved ? 'bg-muted-foreground/60' : 'bg-amber-500',
                     )}
-                  >
-                    {isDeleted
-                      ? 'Comment deleted'
-                      : renderCommentBody(
-                          comment.body,
-                          parseMentionedUserIds(comment.mentionedUserIds),
-                          allUsers,
-                        )}
-                  </p>
-                )}
-              </div>
+                    aria-hidden='true'
+                  />
+                  {isResolved ? 'Resolved' : 'Open'}
+                </span>
+              )}
             </div>
-          );
-        })}
-      </div>
 
-      <div className='flex items-center justify-between gap-3 px-4 py-3'>
+            {isInitialComment && thread.anchorText && (
+              <div className='flex min-w-0 gap-2'>
+                <span className='w-[2px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
+                <span className='min-w-0 flex-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.5] text-muted-foreground'>
+                  {thread.anchorText}
+                </span>
+              </div>
+            )}
+
+            {isEditing ? (
+              <CanvasCommentComposer
+                id={`canvas-comment-edit-${comment.id}`}
+                channelId={channelId}
+                currentUserId={currentUserId}
+                placeholder='Edit comment'
+                value={comment.body}
+                fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
+                minHeightClassName='min-h-[38px]'
+                onSubmit={payload => onUpdateComment(thread, comment, payload)}
+                actions={
+                  <Button variant='ghost' size='sm' onClick={() => onSetEditingCommentId(null)}>
+                    Cancel
+                  </Button>
+                }
+              />
+            ) : (
+              <p
+                className={cn(
+                  'whitespace-pre-wrap break-words [text-wrap:pretty]',
+                  isReply
+                    ? 'pl-7 text-[13px] leading-[1.55] text-muted-foreground'
+                    : 'text-[13.5px] leading-[1.6] text-foreground',
+                  isDeleted && 'italic text-muted-foreground',
+                )}
+              >
+                {isDeleted
+                  ? 'Comment deleted'
+                  : renderCommentBody(
+                      comment.body,
+                      parseMentionedUserIds(comment.mentionedUserIds),
+                      allUsers,
+                    )}
+              </p>
+            )}
+          </div>
+        );
+      })}
+
+      <div className='flex items-center gap-1.5 pt-0.5'>
         <Button
           variant='outline'
           size='sm'
           onClick={() => onSelectBlock(thread.blockId)}
-          className='h-7 gap-1.5 rounded-md px-2.5 text-xs'
+          className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium'
         >
           <ArrowRight className='size-3.5' />
           Go to text
         </Button>
-        {editable && thread.status === CanvasCommentThreadStatus.OPEN && (
+        <span className='flex-1' />
+        {editable && !isResolved && (
           <Button
             variant='outline'
             size='sm'
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.RESOLVED)}
-            className='h-7 gap-1.5 rounded-md px-2.5 text-xs'
+            className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <Check className='size-3.5' />
             Resolve
           </Button>
         )}
-        {editable && thread.status === CanvasCommentThreadStatus.RESOLVED && (
+        {editable && isResolved && (
           <Button
             variant='outline'
             size='sm'
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.OPEN)}
-            className='h-7 gap-1.5 rounded-md px-2.5 text-xs'
+            className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <RotateCcw className='size-3.5' />
             Reopen
@@ -563,6 +585,17 @@ export function CanvasCommentsPanel({
   const resolvedCount = orderedThreads.filter(
     thread => thread.status === CanvasCommentThreadStatus.RESOLVED,
   ).length;
+
+  const threadCountLabel =
+    orderedThreads.length === 0
+      ? 'No comments on this canvas yet'
+      : `${openCount} open · ${resolvedCount} resolved`;
+
+  const filterTabs: { value: CanvasCommentThreadFilter; label: string; count: number }[] = [
+    { value: 'ALL', label: 'All', count: orderedThreads.length },
+    { value: CanvasCommentThreadStatus.OPEN, label: 'Open', count: openCount },
+    { value: CanvasCommentThreadStatus.RESOLVED, label: 'Resolved', count: resolvedCount },
+  ];
 
   const sendMentionNotifications = useCallback(
     (blockId: string, mentionedUserIds: string[], commentThreadId?: string): void => {
@@ -707,48 +740,24 @@ export function CanvasCommentsPanel({
   };
 
   return (
-    <aside className='flex h-full w-[390px] shrink-0 flex-col rounded-tl-[18px] border border-r-0 border-input bg-background shadow-[0_0_20px_rgba(15,23,42,0.04)]'>
-      <div className='flex items-start justify-between px-4 py-4'>
+    <motion.aside
+      className='relative z-40 flex h-full w-[390px] max-w-[86%] shrink-0 flex-col rounded-tl-[18px] border-l border-t border-input bg-background shadow-[-16px_0_44px_hsl(var(--foreground)/0.09)]'
+      initial={{ x: 14, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: 12, opacity: 0, transition: { duration: 0.15, ease: 'easeIn' } }}
+      transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+    >
+      <motion.div
+        className='flex items-start justify-between gap-2 px-4 pb-3 pt-4'
+        initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
+        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        transition={{ duration: 0.3, delay: 0.05, ease: [0.4, 0, 0.2, 1] }}
+      >
         <div className='min-w-0 flex-1'>
-          <h2 className='truncate text-base font-semibold leading-5 text-foreground'>
+          <h2 className='truncate text-[14.5px] font-bold leading-5 text-foreground'>
             Comment activity
           </h2>
-          <p className='mt-1 text-xs text-muted-foreground'>
-            {openCount} open · {resolvedCount} resolved
-          </p>
-          <div className='mt-3 flex items-center gap-2'>
-            <Button
-              variant={threadStatusFilter === 'ALL' ? 'default' : 'outline'}
-              size='sm'
-              onClick={() => setThreadStatusFilter('ALL')}
-              aria-pressed={threadStatusFilter === 'ALL'}
-              className='h-8 rounded-full px-3 text-xs'
-            >
-              All {orderedThreads.length}
-            </Button>
-            <Button
-              variant={
-                threadStatusFilter === CanvasCommentThreadStatus.OPEN ? 'default' : 'outline'
-              }
-              size='sm'
-              onClick={() => setThreadStatusFilter(CanvasCommentThreadStatus.OPEN)}
-              aria-pressed={threadStatusFilter === CanvasCommentThreadStatus.OPEN}
-              className='h-8 rounded-full px-3 text-xs'
-            >
-              Open {openCount}
-            </Button>
-            <Button
-              variant={
-                threadStatusFilter === CanvasCommentThreadStatus.RESOLVED ? 'default' : 'outline'
-              }
-              size='sm'
-              onClick={() => setThreadStatusFilter(CanvasCommentThreadStatus.RESOLVED)}
-              aria-pressed={threadStatusFilter === CanvasCommentThreadStatus.RESOLVED}
-              className='h-8 rounded-full px-3 text-xs'
-            >
-              Resolved {resolvedCount}
-            </Button>
-          </div>
+          <p className='mt-1 text-xs text-muted-foreground'>{threadCountLabel}</p>
         </div>
         <Tooltip content='Close comments'>
           <Button
@@ -756,24 +765,56 @@ export function CanvasCommentsPanel({
             size='iconSm'
             onClick={onClose}
             aria-label='Close comments'
-            className='mt-0.5'
+            className='size-7 shrink-0 text-muted-foreground'
           >
             <X className='size-4' />
           </Button>
         </Tooltip>
-      </div>
+      </motion.div>
 
-      <div className='flex-1 overflow-y-auto px-4 py-4'>
+      <motion.div
+        className='flex items-center gap-1 px-4 pb-3'
+        initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
+        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        transition={{ duration: 0.3, delay: 0.11, ease: [0.4, 0, 0.2, 1] }}
+      >
+        {filterTabs.map(tab => (
+          <button
+            key={tab.value}
+            type='button'
+            data-track-category='CANVAS'
+            data-track-name='comment_panel_status_filter'
+            onClick={() => setThreadStatusFilter(tab.value)}
+            aria-pressed={threadStatusFilter === tab.value}
+            className={cn(
+              'h-7 shrink-0 rounded-full border px-[11px] text-[12.5px] tabular-nums transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]',
+              threadStatusFilter === tab.value
+                ? 'border-foreground bg-foreground font-semibold text-background'
+                : 'border-border bg-background font-medium text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground',
+            )}
+          >
+            {tab.label} {tab.count}
+          </button>
+        ))}
+      </motion.div>
+
+      <motion.div
+        className='thin-scrollbar flex-1 overflow-y-auto px-4 pb-5'
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.17, ease: [0.4, 0, 0.2, 1] }}
+      >
         {editable && selectedTextAnchor && (
-          <div className='mb-4 rounded-md border border-input bg-background p-3 shadow-sm'>
-            <div className='mb-2 flex items-center justify-between gap-2'>
-              <p className='truncate text-xs font-medium text-muted-foreground'>
-                New comment on selected text
-              </p>
+          <div className='mb-3 rounded-xl border border-border bg-background p-3'>
+            <p className='mb-2 truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+              New comment on selected text
+            </p>
+            <div className='mb-2 flex min-w-0 gap-2'>
+              <span className='w-[2px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
+              <span className='line-clamp-3 min-w-0 flex-1 text-[12.5px] leading-[1.5] text-muted-foreground'>
+                {selectedTextAnchor.anchorText}
+              </span>
             </div>
-            <blockquote className='mb-2 line-clamp-3 rounded-md border-l-2 border-primary bg-background px-2 py-1 text-xs text-muted-foreground'>
-              {selectedTextAnchor.anchorText}
-            </blockquote>
             <CanvasCommentComposer
               id={`canvas-comment-new-${canvasId}`}
               channelId={channelId}
@@ -786,16 +827,16 @@ export function CanvasCommentsPanel({
         )}
 
         {visibleThreads.length === 0 ? (
-          <div className='flex h-40 flex-col items-center justify-center rounded-md border border-dashed border-border text-center'>
-            <MessageSquare className='mb-2 size-5 text-muted-foreground' />
-            <p className='text-sm font-medium text-foreground'>
+          <div className='flex flex-col items-center justify-center gap-2 px-3 py-10 text-center'>
+            <MessageSquare className='size-[26px] stroke-[1.5] text-muted-foreground/50' />
+            <p className='text-[13px] font-medium text-foreground'>
               {threadStatusFilter === 'ALL'
                 ? 'No comments'
                 : threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
                   ? 'No resolved comments'
                   : 'No open comments'}
             </p>
-            <p className='mt-1 text-xs text-muted-foreground'>
+            <p className='text-xs text-muted-foreground'>
               {threadStatusFilter === 'ALL'
                 ? 'Select text and start a thread.'
                 : threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
@@ -804,7 +845,7 @@ export function CanvasCommentsPanel({
             </p>
           </div>
         ) : (
-          <div className='space-y-3'>
+          <div className='space-y-2'>
             {visibleThreads.map(thread => (
               <CanvasCommentThreadSection
                 key={thread.id}
@@ -823,7 +864,7 @@ export function CanvasCommentsPanel({
             ))}
           </div>
         )}
-      </div>
-    </aside>
+      </motion.div>
+    </motion.aside>
   );
 }

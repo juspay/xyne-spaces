@@ -16,6 +16,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
+import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -104,19 +105,6 @@ export class AuthV2Controller {
       return this.googleClientNew;
     }
     return this.googleClient;
-  }
-
-  private clearAuthCookies(req: Request, res: Response): void {
-    res.clearCookie('google_access_token', { path: '/' });
-    res.clearCookie('user_session_id', { path: '/' });
-
-    for (const cookieName of Object.keys(req.cookies || {})) {
-      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
-        res.clearCookie(cookieName, { path: '/' });
-      }
-    }
-
-    res.clearCookie('xyne_last_workspace', { path: '/' });
   }
 
   private async ensureSelfDmForUser(
@@ -638,7 +626,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         // Legacy cookie for backward compatibility with older dashboards
@@ -709,7 +697,6 @@ export class AuthV2Controller {
 
       if (!sessionId) {
         logger.warn(`[${requestId}] No session ID cookie found`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'No session found',
           message: 'Session ID cookie is missing',
@@ -723,7 +710,6 @@ export class AuthV2Controller {
 
       if (!session || !session.user) {
         logger.warn(`[${requestId}] Session not found in database`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
@@ -735,7 +721,6 @@ export class AuthV2Controller {
 
       if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
         logger.warn(`[${requestId}] Session expired or inactive`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
@@ -994,7 +979,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         res.cookie('user_session_id', sessionId, {
@@ -1085,10 +1070,6 @@ export class AuthV2Controller {
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
-      if (statusCode === 401) {
-        this.clearAuthCookies(req, res);
-      }
-
       if (isMobileNative) {
         res.status(statusCode).json({
           success: false,
@@ -1281,7 +1262,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         if (sessionId) {
@@ -1365,6 +1346,10 @@ export class AuthV2Controller {
         await this.userSessionService.revokeSession(sessionId);
       }
 
+      if (req.user && sessionId) {
+        await getEncryptionProvider().revokeSessionKey(sessionId);
+      }
+
       // Clear global session cookie
       res.clearCookie('user_session_id', { path: '/' });
       
@@ -1436,7 +1421,6 @@ export class AuthV2Controller {
       if (pendingAuthCookie) {
         const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
         if (!parsed) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is corrupted or expired'
@@ -1453,7 +1437,6 @@ export class AuthV2Controller {
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
           pendingTokenKey = parsed.pendingTokenKey;
         } else {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is missing provider identity'
@@ -1469,7 +1452,6 @@ export class AuthV2Controller {
         
         const session = await this.userSessionService.getSessionById(existingSessionId);
         if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid session',
             message: 'Session not found or expired'
@@ -1488,7 +1470,6 @@ export class AuthV2Controller {
         pendingAccessToken = session.accessToken || undefined;
         pendingAccessTokenExpiry = session.accessTokenExpiry || undefined;
       } else {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1497,7 +1478,6 @@ export class AuthV2Controller {
       }
 
       if (!oauthUserData?.email) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -1676,7 +1656,6 @@ export class AuthV2Controller {
       // Get pending auth data from cookie
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1686,7 +1665,6 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -1696,7 +1674,6 @@ export class AuthV2Controller {
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
 
       if (!oauthUserData?.email) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -2005,7 +1982,6 @@ export class AuthV2Controller {
     try {
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -2015,7 +1991,6 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -2024,7 +1999,6 @@ export class AuthV2Controller {
       }
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
         if (!oauthUserData?.email) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'User data missing from pending auth'

@@ -1,5 +1,5 @@
 import type { TableName } from './types';
-import type {Context} from './../../schema'
+import type { Context } from './../../schema';
 import { BaseQueryACL } from './base-acl';
 
 import {
@@ -24,6 +24,7 @@ import {
   ChannelRecapsACL,
   RecapsACL,
   ChannelParticipantsACL,
+  ChannelBoardMappingsACL,
   ChannelsACL,
   ChannelSectionsACL,
   ChannelStatsACL,
@@ -31,6 +32,7 @@ import {
   ConversationsACL,
   MessageAttachmentsACL,
   MessagesACL,
+  MessageArtifactsACL,
   NotificationPreferencesACL,
   OrgMembersACL,
   OrganizationsACL,
@@ -127,10 +129,7 @@ import {
   SummaryTemplatesACL,
 } from '../tables';
 export class QueryACLFactory {
-  static getACL<TTable extends TableName>(
-    table: TTable,
-    ctx: Context
-  ): BaseQueryACL<TTable> {
+  static getACL<TTable extends TableName>(table: TTable, ctx: Context): BaseQueryACL<TTable> {
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx) as BaseQueryACL<TTable>;
@@ -180,6 +179,8 @@ export class QueryACLFactory {
         return new ChannelRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channels':
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_board_mappings':
+        return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':
@@ -192,6 +193,8 @@ export class QueryACLFactory {
         return new ModelsACL(ctx) as BaseQueryACL<TTable>;
       case 'messages':
         return new MessagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'message_artifacts':
+        return new MessageArtifactsACL(ctx) as BaseQueryACL<TTable>;
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx) as BaseQueryACL<TTable>;
       case 'org_members':

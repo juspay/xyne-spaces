@@ -281,6 +281,18 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async hasEmailAttachment(emailId: string): Promise<boolean> {
+    const attachment = await this.db.messageAttachment.findFirst({
+      where: {
+        entityId: emailId,
+        entityType: AttachmentEntityType.EMAIL,
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+    return attachment !== null;
+  }
+
   async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any
     // Increment version in metadata
     const currentVersion = (metadata.version as number) || 0;

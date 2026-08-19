@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -93,7 +94,11 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
       setIsUpdating(false);
       setCreationQueue(queue => queue.slice(1));
     } catch (error) {
-      console.error('Error creating ticket:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error creating ticket:'),
+        error: error,
+      });
       toast.error('Ticket created but failed to save status');
       setCreationQueue([]);
       setIsUpdating(false);
