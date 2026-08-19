@@ -59,19 +59,6 @@ export class EmailAuthController {
     this.userService = new UserService();
   }
 
-  private clearAuthCookies(req: Request, res: Response): void {
-    res.clearCookie('google_access_token', { path: '/' });
-    res.clearCookie('user_session_id', { path: '/' });
-
-    for (const cookieName of Object.keys(req.cookies || {})) {
-      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
-        res.clearCookie(cookieName, { path: '/' });
-      }
-    }
-
-    res.clearCookie('xyne_last_workspace', { path: '/' });
-  }
-
   /**
    * Login with email + password
    * POST /v2/auth/email/login
@@ -124,7 +111,6 @@ export class EmailAuthController {
 
       if (!orgMember || orgMember.leftAt) {
         // Keep this response identical to the wrong-password response below.
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -133,7 +119,6 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -163,7 +148,6 @@ export class EmailAuthController {
           return;
         }
 
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -511,7 +495,6 @@ export class EmailAuthController {
     try {
       const userId = req.user?.id;
       if (!userId) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({ error: 'Authentication required' });
         return;
       }
