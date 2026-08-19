@@ -123,6 +123,15 @@ export interface SessionContext {
    */
   resolveMentions?: boolean;
   /**
+   * True when this session was dispatched by the Spaces automation webhook
+   * (app-user run, no human in the thread). This is the EXPLICIT gate the
+   * MCP layer uses to serve Spaces tools in app mode (routes/mcp.ts injects
+   * `xyne-spaces-app-tools` instead of the user `xyne-spaces` server).
+   * Older in-flight sessions predate this flag; mcp.ts falls back to the
+   * resolveMentions/externalResultCallback proxy for those.
+   */
+  isAutomation?: boolean;
+  /**
    * Workspace ID of the mentioned user for Digital Twin (USER_MENTIONED)
    * flows. Captured at webhook-receive time via getSpacesAuthForUser and
    * threaded all the way to the Flow UI data context so flow-action.ts can

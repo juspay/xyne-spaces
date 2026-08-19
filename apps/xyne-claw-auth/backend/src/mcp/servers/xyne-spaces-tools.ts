@@ -13,6 +13,7 @@ import {
   spacesFetchBuffer,
   spacesFetchText,
   appFetch,
+  appFetchBuffer,
 } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
@@ -96,12 +97,24 @@ export interface ToolDef {
   /** Default (user-session) implementation, hits `/api/query` etc. */
   handler: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
   /**
-   * Optional app-token implementation, hits the `/api/apps/*` routes. A tool is
-   * only available in APP MODE if it defines this. As Spaces adds app routes for
-   * search / ticket-filter / user-search, give those tools an `appHandler` here
-   * — no duplicate `apps-*` tool is created; it's the SAME tool, app backend.
+   * Optional app-token implementation, hits the `/api/apps/*` routes. As
+   * Spaces adds app routes for search / ticket-filter / user-search, give
+   * those tools an `appHandler` here — no duplicate `apps-*` tool is created;
+   * it's the SAME tool, app backend. Tools WITHOUT one still run in app mode
+   * through `handler` when that handler only hits dual-auth `/claw` routes
+   * (interact / search / memorySearch — authenticateUserOrApp on the Spaces
+   * side), which is most of the read tools.
    */
   appHandler?: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
+  /**
+   * True when the tool is meaningless or broken without a human user token:
+   * either it acts AS the human (user-send-message) or its handler hits
+   * user-session-only routes with no app equivalent and no appHandler. The
+   * app-tools server (which always runs in app mode) hides these from its
+   * listing and rejects calls to them — otherwise they surface to automation
+   * runs and can only 401.
+   */
+  userOnly?: boolean;
 }
 
 function ok(text: string): ToolResult {
@@ -4270,6 +4283,10 @@ const spacesCreateBulkTickets: ToolDef = {
 
 const spacesUpdateTicket: ToolDef = {
   name: "spaces-update-ticket",
+  // PATCH /api/tickets/:id is user-session-only (unlike create, which has the
+  // dual-auth /api/tickets/claw route). Until Spaces grows an app-capable
+  // update route (or this gains an appHandler), app-mode calls can only 401.
+  userOnly: true,
   description:
     "Update an existing ticket in Spaces. At least one update field must be provided. " +
     "Use spaces-tickets to find the ticket ID (use the Internal ID, not the Xyne ID), spaces-users for user IDs, and spaces-boards for valid stage names. " +
@@ -5459,6 +5476,80 @@ const spacesThreadAttachments: ToolDef = {
   },
 };
 
+/**
+ * Shared render tail for spaces-fetch-attachment. Given resolved bytes (as a
+ * signed URL or base64 `data`) + metadata, ingest readable docs to markdown or
+ * return small raw files inline. Both the user-session `handler` and the
+ * app-token `appHandler` funnel through here so the two auth surfaces produce
+ * identical output — only the byte-fetch step differs.
+ */
+async function renderFetchedAttachment(params: {
+  source: AttachmentSource;
+  resolvedName: string;
+  resolvedMime: string;
+  declaredSize: number;
+  sourceLabel: string;
+  inlineBuffer?: Buffer | undefined;
+}): Promise<ToolResult> {
+  const { source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer } = params;
+      // Sanitise filename to keep it within .context/ — strip path separators
+      // and leading dots so the agent can't be tricked into reading outside.
+      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+
+      if (isReadableAttachment(safeName, resolvedMime)) {
+        try {
+          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
+          if (files.length === 0) {
+            return ok(
+              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
+              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
+            );
+          }
+          const rendered = files
+            .map((f) => `# ${f.path}\n\n${f.content}`)
+            .join("\n\n---\n\n");
+          return ok(
+            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
+            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
+          );
+        } catch (ingestErr) {
+          return err(
+            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
+            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
+          );
+        }
+      }
+
+      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+        return err(
+          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
+          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
+          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
+          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+        );
+      }
+
+      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
+      // already pulled for the /download fallback; otherwise fetch them from the
+      // signed URL now.
+      const buffer = inlineBuffer ?? (
+        "url" in source
+          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
+              .catch((downloadErr) => {
+                throw new Error(
+                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+                );
+              })
+          : Buffer.from(source.data, "base64")
+      );
+
+      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
+      // base64 and writes the buffer to .context/<fileName> in the workspace.
+      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
+}
+
 const spacesFetchAttachment: ToolDef = {
   name: "spaces-fetch-attachment",
   description:
@@ -5542,62 +5633,60 @@ const spacesFetchAttachment: ToolDef = {
         }
       }
 
-      // Sanitise filename to keep it within .context/ — strip path separators
-      // and leading dots so the agent can't be tricked into reading outside.
-      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+      return renderFetchedAttachment({ source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer });
+    } catch (e) {
+      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+  /**
+   * App-token download. Headless/automation runs (no user session) cannot use
+   * the user-only `/api/attachments/:id/{signed-url,download}` routes — they
+   * 401. This path pulls the bytes through the app surface
+   * `/api/apps/files/download/:attachmentId` (authenticateApp + files:read,
+   * workspace-scoped) using the agent's app token, then funnels through the
+   * SAME renderFetchedAttachment tail so output matches the user path exactly.
+   */
+  async appHandler(args) {
+    try {
+      const attachmentId = String(args["attachmentId"] ?? "");
+      if (!attachmentId) return err("attachmentId is required");
 
-      if (isReadableAttachment(safeName, resolvedMime)) {
-        try {
-          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
-          if (files.length === 0) {
-            return ok(
-              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
-              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
-            );
-          }
-          const rendered = files
-            .map((f) => `# ${f.path}\n\n${f.content}`)
-            .join("\n\n---\n\n");
-          return ok(
-            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
-            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
-          );
-        } catch (ingestErr) {
-          return err(
-            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
-            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
-          );
-        }
+      // Metadata via /api/query/claw (dual-auth — accepts the app token).
+      const meta = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
+        take: 1,
+      })) as MessageAttachmentRow[];
+      if (!meta || meta.length === 0) {
+        return err(`Attachment ${attachmentId} not found or deleted`);
       }
+      const m = meta[0]!;
 
-      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+      let dl: { buffer: Buffer; contentType: string };
+      try {
+        dl = await appFetchBuffer(`/files/download/${encodeURIComponent(attachmentId)}`);
+      } catch (e) {
+        // The app download route runs the real workspace/ACL check, so a
+        // failure here is the honest signal — the file is gone, or the agent's
+        // installed app is missing the `files:read` scope (403). Surface that
+        // plainly rather than masquerading as a storage outage.
         return err(
-          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
-          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
-          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
-          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+          `Could not fetch attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(m.size)}) ` +
+          `via the app download route: ${e instanceof Error ? e.message : String(e)}. ` +
+          "If this is a 403, grant the agent's app the `files:read` scope; if 404, the file was deleted.",
         );
       }
 
-      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
-      // already pulled for the /download fallback; otherwise fetch them from the
-      // signed URL now.
-      const buffer = inlineBuffer ?? (
-        "url" in source
-          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
-              .catch((downloadErr) => {
-                throw new Error(
-                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-                );
-              })
-          : Buffer.from(source.data, "base64")
-      );
-
-      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
-      // base64 and writes the buffer to .context/<fileName> in the workspace.
-      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
+      const resolvedMime = m.mimetype || dl.contentType || "application/octet-stream";
+      return renderFetchedAttachment({
+        source: { data: dl.buffer.toString("base64") },
+        resolvedName: m.originalFilename,
+        resolvedMime,
+        declaredSize: dl.buffer.length,
+        sourceLabel: "an app-token direct download",
+        inlineBuffer: dl.buffer,
+      });
     } catch (e) {
       return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -5630,6 +5719,9 @@ interface AccessibleKbCollection {
 
 const spacesUploadToKb: ToolDef = {
   name: "spaces-upload-to-kb",
+  // Depends on /api/collections/accessible and the user attachment download —
+  // both user-session-only routes with no app equivalents wired here yet.
+  userOnly: true,
   description:
     "Save one or more files into a channel's Knowledge Base collection. TWO input sources — provide EXACTLY ONE: " +
     "(1) attachments — EXISTING Spaces thread attachments (get ids from spaces-thread-attachments). Pass a SINGLE id " +
@@ -6176,6 +6268,9 @@ const spacesWorkflowStats: ToolDef = {
 //   - POST /api/channels/:channelId/conversations to start a new top-level thread
 const userSendMessage: ToolDef = {
   name: "user-send-message",
+  // Posts AS the human via their session token — inherently meaningless for an
+  // app-user run (and its channel-conversations lookup is a user-only route).
+  userOnly: true,
   description:
     "Post a message to a DIFFERENT thread or channel — NOT the one the user is talking to you in — AS THE LOGGED-IN USER. " +
     "The message appears in Spaces with the user's name + avatar, not the bot's. " +
@@ -6332,7 +6427,10 @@ const spacesVespaSchema: ToolDef = {
     try {
       const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
 
-      const text = await spacesFetchText(`/api/vespaSearch/schema${qs}`);
+      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
+      // both user and app tokens (the bare /api/vespaSearch mount is
+      // user-session-only and 401s app-mode runs).
+      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
       if (!text || !text.trim())
         return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
       return ok(text);
