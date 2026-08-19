@@ -29,6 +29,7 @@ import { all, createLowlight } from 'lowlight';
 import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
 import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
+import { ShortcutHint } from '../ShortcutHint';
 import Avatar from '../Avatar/Avatar';
 import {
   DropdownMenu,
@@ -1764,16 +1765,27 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <div className='flex min-w-0 items-center gap-1'>
                   {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type='button'
-                          className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                          aria-label='Add content'
-                          disabled={disabled || isSending}
-                        >
-                          <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
-                        </button>
-                      </DropdownMenuTrigger>
+                      <Tooltip
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Attach files
+                            <ShortcutHint keys='mod+o' />
+                          </span>
+                        }
+                        side='top'
+                        delayDuration={300}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            aria-label='Add content'
+                            disabled={disabled || isSending}
+                          >
+                            <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
                       <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
                         <DropdownMenuItem
                           onClick={() => {
@@ -1782,6 +1794,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }}
                         >
                           <Plus className='h-4 w-4' /> Upload Files
+                          <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => {
