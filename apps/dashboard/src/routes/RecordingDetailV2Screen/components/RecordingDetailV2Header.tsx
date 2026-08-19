@@ -190,7 +190,7 @@ export const RecordingDetailV2Header = ({
   };
 
   const handleStartEdit = (): void => {
-    if (isEditingTitle || isSavingTitle) return;
+    if (isEditingTitle || isSavingTitle || isGeneratingTitle) return;
     setEditedTitle(recording.title);
     setIsEditingTitle(true);
   };
@@ -255,7 +255,7 @@ export const RecordingDetailV2Header = ({
                 />
               </div>
             </div>
-          ) : isOwner ? (
+          ) : isOwner && !isGeneratingTitle ? (
             <div
               role='button'
               tabIndex={0}
@@ -276,8 +276,9 @@ export const RecordingDetailV2Header = ({
               </h1>
             </div>
           ) : (
-            /* Shared-with-me: the title is someone else's to change, so it isn't
-               focusable or clickable — no affordance to discover and be refused. */
+            /* Shared-with-me, or the AI title is still generating: not this
+               user's to change right now, so it isn't focusable or clickable
+               — no affordance to discover and be refused. */
             <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
               {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
               <HeaderTitle isGenerating={isGeneratingTitle} title={displayTitle} />

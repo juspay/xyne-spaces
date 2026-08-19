@@ -93,9 +93,6 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
-/** How long after the call ends a title still counts as on its way. */
-export const TITLE_SHIMMER_WINDOW_MS = 90 * 1000;
-
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
 
@@ -126,7 +123,7 @@ export const getRecordingTitleState = (
 
   const sinceEndedMs = now - endedAtMs;
 
-  if (recording.hasTranscript && !recording.hasSummary && sinceEndedMs < TITLE_SHIMMER_WINDOW_MS) {
+  if (recording.hasTranscript && !recording.hasSummary) {
     return { kind: 'generating' };
   }
   if (!recording.hasTranscript && sinceEndedMs >= NO_TRANSCRIPT_AFTER_MS) {
