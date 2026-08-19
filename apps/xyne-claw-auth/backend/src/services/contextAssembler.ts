@@ -214,6 +214,56 @@ function channelTypeOf(scopeType?: string | null, visibility?: string | null): U
   return (visibility ?? "").toUpperCase() === "PRIVATE" ? "private" : "public";
 }
 
+/**
+ * A DM / group-DM has no human-authored channel name, so Spaces stores the
+ * participant id list as the name — e.g. "cmsr…,cmsr…". Detect that shape so
+ * the curator prompt can show people instead of opaque ids.
+ *
+ * Gated on channel TYPE as well as the pattern: a public channel legitimately
+ * named like an id must keep its real name.
+ */
+const ID_LIST_RE = /^[A-Za-z0-9_-]{16,40}(?:,[A-Za-z0-9_-]{16,40})*$/;
+
+function dmParticipantIds(
+  channelName: string | undefined,
+  channelType: UserMemoryChannelType,
+): string[] {
+  if (!channelName) return [];
+  if (channelType !== "dm" && channelType !== "group_dm") return [];
+  if (!ID_LIST_RE.test(channelName)) return [];
+  return channelName.split(",");
+}
+
+/** Names listed in a DM label before it collapses to "+N more". */
+const DM_NAME_CAP = 4;
+
+/**
+ * The channel label the curator sees. For DMs this turns the stored id list
+ * into the other participants' display names ("#Mei Tanaka"); every other
+ * channel keeps its real name untouched.
+ *
+ * Ids that didn't resolve are COUNTED but not named — rendering them via
+ * `nameOf` would print "someone, someone", which reads as real people to the
+ * LLM. If nothing resolves we return the raw name rather than inventing one.
+ * Resolution is pure map lookup against the names already fetched for message
+ * authors, so this costs no additional query.
+ */
+function channelLabel(
+  rawName: string | undefined,
+  channelType: UserMemoryChannelType,
+  userId: string,
+  nameById: Map<string, string>,
+): string | undefined {
+  const ids = dmParticipantIds(rawName, channelType);
+  if (ids.length === 0) return rawName;
+  const others = ids.filter((id) => id !== userId);
+  const names = others.map((id) => nameById.get(id)).filter((n): n is string => !!n);
+  if (names.length === 0) return rawName;
+  const shown = names.slice(0, DM_NAME_CAP);
+  const hidden = others.length - shown.length;
+  return shown.join(", ") + (hidden > 0 ? ` +${hidden} more` : "");
+}
+
 /** Strip mention tokens / HTML to a plain readable line. */
 function cleanContent(raw: string | undefined | null, nameOf: (id: string) => string): string {
   if (!raw) return "";
@@ -692,6 +742,16 @@ export async function assembleConversationUnits(
   for (const list of threadByConv.values()) for (const m of list) senderIds.add(m.senderId);
   for (const a of mentions) if (a.actorId) senderIds.add(a.actorId);
   for (const m of parentMsgs) senderIds.add(m.senderId);
+  // DM participants who never spoke in the window aren't message authors, so
+  // fold them in here — this WIDENS the single fetchUsers call below rather
+  // than adding a second one, and it's what lets channelLabel() name everyone
+  // in the conversation instead of only the people with a line in it.
+  for (const cid of convIds) {
+    const c = convById.get(cid);
+    const ch = c?.channelId ? chanById.get(c.channelId) : undefined;
+    const ids = dmParticipantIds(ch?.name ?? undefined, channelTypeOf(ch?.scopeType, ch?.visibility));
+    for (const id of ids) senderIds.add(id);
+  }
   const userRows = await fetchUsers(auth, Array.from(senderIds)).catch(() => [] as UserRow[]);
   const nameById = new Map(userRows.map((u) => [u.id, u.name || u.email || u.id]));
   const nameOf = (id: string): string => (id === userId ? "you" : nameById.get(id) ?? "someone");
@@ -704,8 +764,8 @@ export async function assembleConversationUnits(
   for (const cid of convIds) {
     const conv = convById.get(cid);
     const chan = conv?.channelId ? chanById.get(conv.channelId) : undefined;
-    const channelName = chan?.name ?? undefined;
     const channelType = channelTypeOf(chan?.scopeType, chan?.visibility);
+    const channelName = channelLabel(chan?.name ?? undefined, channelType, userId, nameById);
 
     // Thread messages: fetched for interesting convs; else the user's own
     // messages in this conv (lightweight).

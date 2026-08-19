@@ -4948,6 +4948,42 @@ export interface MemoryBankMemory {
   /** Raw Hindsight tags (user:… / subsystem:… / scope:… / pipeline:…). Present
    *  on the digital-twin list response; used by the constellation view. */
   tags?: string[];
+  /** Canonical entity names for this memory. Entity edges are the majority of
+   *  the constellation graph, so these must survive an export/restore round
+   *  trip or restored memories render unconnected. */
+  entities?: string[];
+  /** Source-fact count. `> 1` on an observation means it has version history —
+   *  used to show the History affordance without probing the API per memory. */
+  proofCount?: number | null;
+}
+
+/** One prior version of an observation, newest first. */
+export interface MemoryHistoryEntry {
+  previousText: string;
+  previousTags?: string[];
+  previousMentionedAt?: string;
+  changedAt: string;
+  sourceFacts?: Array<{ id: string; text: string }>;
+}
+
+/**
+ * Prior versions of one memory. Only derived observations have any; everything
+ * else returns []. Fetched on demand — there is no batch endpoint, so this is
+ * called when a memory is opened, not for the list.
+ */
+export async function getDigitalTwinMemoryHistory(
+  userId: string,
+  hindsightMemoryId: string,
+): Promise<MemoryHistoryEntry[]> {
+  const res = await fetch(
+    `${MEMORY_BASE}/banks/digital-twin/memories/${encodeURIComponent(hindsightMemoryId)}/history` +
+      `?userTag=${encodeURIComponent(`user:${userId}`)}`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw new Error(`Failed to load history: ${res.status}`);
+  const body = (await res.json()) as { success: boolean; data: MemoryHistoryEntry[] };
+  if (!body.success) throw new Error("Failed to load history");
+  return body.data ?? [];
 }
 
 export interface MemoryBankStats {
@@ -4996,6 +5032,128 @@ export async function listDigitalTwinMemories(
   const body = await res.json() as { success: boolean; data: MemoryBankMemory[]; total?: number };
   if (!body.success) throw new Error("Failed to list memories");
   return { memories: body.data ?? [], total: body.total ?? body.data?.length ?? 0 };
+}
+
+/** One memory in an exported archive. Only these three fields are read back on
+ *  import — everything else an archive carries is for humans and diffing. */
+export interface TwinArchiveRecord {
+  content: string;
+  subsystem?: string | null;
+  /** Original event time, so a restored fact keeps its place in the timeline. */
+  timestamp?: string | null;
+  category?: string | null;
+  factType?: string | null;
+  curatorReasoning?: string | null;
+  curatorConfidence?: number | null;
+  /** Source ids, kept for audit. Hindsight assigns new ids on import. */
+  hindsightMemoryId?: string;
+  tags?: string[];
+  /** Entities to re-attach on import — without them a verbatim restore has no
+   *  entity data at all, since it runs no extraction. */
+  entities?: string[];
+}
+
+export interface TwinMemoryArchive {
+  format: "xyne.digital-twin.memories";
+  version: 1;
+  exportedAt: string;
+  /** Whose twin this came from. Advisory — import always re-scopes to the
+   *  authenticated caller, so an archive cannot write into another account. */
+  userId: string;
+  count: number;
+  records: TwinArchiveRecord[];
+}
+
+/**
+ * Records per request. The server paces its own submission to stay inside
+ * Hindsight's LLM rate limit, so a request costs roughly (batch / chunk) ×
+ * delay — keep this small enough that no single request approaches a proxy
+ * timeout. Must not exceed the server's own per-request cap.
+ */
+const IMPORT_BATCH = 50;
+
+/**
+ * Queue a consolidation run for your own memories.
+ *
+ * Consolidation is what derives observations from raw facts — and what writes
+ * their version history. Hindsight schedules it after every retain, but only
+ * once the bank has observations enabled, so facts stored before that stay
+ * unconsolidated until something asks. This is that ask.
+ *
+ * Always scoped server-side to the caller: the twin bank is shared, and an
+ * unscoped run would consolidate everyone's memories. Returns once the job is
+ * QUEUED, not once it has finished; `deduplicated` means an equivalent job was
+ * already pending and this one joined it.
+ */
+export async function triggerDigitalTwinConsolidation(): Promise<{
+  operationId: string;
+  deduplicated: boolean;
+}> {
+  const res = await fetch(`${MEMORY_BASE}/banks/digital-twin/consolidate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = (await res.json().catch(() => null)) as
+    | { success?: boolean; error?: string; data?: { operationId: string; deduplicated: boolean } }
+    | null;
+  if (!res.ok || !body?.success || !body.data) {
+    throw new Error(body?.error ?? `Failed to start consolidation: ${res.status}`);
+  }
+  return body.data;
+}
+
+/**
+ * Restore memories from an exported archive.
+ *
+ * Sends in sequential batches: the server deliberately throttles submission to
+ * Hindsight (whose fact-extraction LLM has a small parallel-request budget),
+ * so one giant request would just sit open. Sequential batches also mean a
+ * failure part-way through still leaves everything before it imported, and
+ * `onProgress` can drive a real progress bar.
+ *
+ * The server discards any tags in the payload and re-derives scope from the
+ * session, so this cannot write into another user's twin. Retain re-runs fact
+ * extraction, so `submitted` counts RECORDS SENT, not memories created — one
+ * record may become several facts, or merge into an existing one, and they
+ * surface asynchronously (typically under a couple of minutes).
+ */
+export async function importDigitalTwinMemories(
+  records: TwinArchiveRecord[],
+  /** "verbatim" stores the records as-is (no LLM) — correct for a Xyne archive,
+   *  whose records are already-extracted facts. "extract" re-runs fact
+   *  extraction, for files whose records are raw prose. */
+  mode: "verbatim" | "extract" = "verbatim",
+  onProgress?: (sent: number, total: number) => void,
+): Promise<{ submitted: number; failed: number; skipped: number }> {
+  const totals = { submitted: 0, failed: 0, skipped: 0 };
+  for (let i = 0; i < records.length; i += IMPORT_BATCH) {
+    const batch = records.slice(i, i + IMPORT_BATCH);
+    const res = await fetch(`${MEMORY_BASE}/banks/digital-twin/memories/import`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records: batch, mode }),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | { success?: boolean; error?: string; data?: { submitted: number; failed: number; skipped: number } }
+      | null;
+    if (!res.ok || !body?.success || !body.data) {
+      // Report what already landed — the caller must not tell the user nothing
+      // was imported when earlier batches succeeded.
+      const sent = totals.submitted;
+      throw new Error(
+        `${body?.error ?? `Failed to import memories: ${res.status}`}` +
+          (sent > 0 ? ` (${sent} memor${sent === 1 ? "y" : "ies"} imported before this)` : ""),
+      );
+    }
+    totals.submitted += body.data.submitted;
+    totals.failed += body.data.failed;
+    totals.skipped += body.data.skipped;
+    onProgress?.(Math.min(i + batch.length, records.length), records.length);
+  }
+  return totals;
 }
 
 /**
