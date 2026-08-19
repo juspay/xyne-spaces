@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config';
 
@@ -50,7 +51,10 @@ class SudoQueryService {
       void this.flushEvents();
     }, this.FLUSH_INTERVAL);
 
-    console.log('[SudoQuery] Flush interval started (10s)');
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[SudoQuery] Flush interval started (10s)'),
+    });
   }
 
   private stopFlushInterval(): void {
@@ -69,7 +73,11 @@ class SudoQueryService {
     const eventsToSend = [...this.eventQueue];
     this.eventQueue = [];
 
-    console.log('[SudoQuery] Flushing', eventsToSend.length, 'events to backend');
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[SudoQuery] Flushing'),
+      context: [eventsToSend.length, 'events to backend'],
+    });
 
     try {
       const response = await axios.post<FlushResponse>(
@@ -84,16 +92,27 @@ class SudoQueryService {
       );
 
       if (response.data.success) {
-        console.log('[SudoQuery] Events flushed successfully:', response.data.data);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[SudoQuery] Events flushed successfully:'),
+          context: [response.data.data],
+        });
       } else {
         // If request fails, put events back in queue (but limit size to prevent memory leak)
         this.eventQueue = [...eventsToSend, ...this.eventQueue].slice(0, 1000);
-        console.error('[SudoQuery] Failed to flush events');
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[SudoQuery] Failed to flush events'),
+        });
       }
     } catch (error) {
       // If request fails, put events back in queue (but limit size to prevent memory leak)
       this.eventQueue = [...eventsToSend, ...this.eventQueue].slice(0, 1000);
-      console.error('[SudoQuery] Network error flushing events:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[SudoQuery] Network error flushing events:'),
+        error: error,
+      });
     }
   }
 
@@ -107,7 +126,11 @@ class SudoQueryService {
 
       const success = navigator.sendBeacon(this.API_ENDPOINT, blob);
       if (success) {
-        console.log('[SudoQuery] Sent', eventsToSend.length, 'events via beacon');
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[SudoQuery] Sent'),
+          context: [eventsToSend.length, 'events via beacon'],
+        });
         this.eventQueue = [];
       }
     }
@@ -117,7 +140,11 @@ class SudoQueryService {
    * Queue an event to be sent to the backend (batched every 10 seconds)
    */
   track(eventName: string, properties?: EventProperties): void {
-    console.log('[SudoQuery] Track called:', eventName);
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[SudoQuery] Track called:'),
+      context: [eventName],
+    });
 
     const event: QueuedEvent = {
       eventName,
@@ -126,20 +153,21 @@ class SudoQueryService {
     };
 
     this.eventQueue.push(event);
-    console.log(
-      '[SudoQuery] Event queued:',
-      eventName,
-      '(queue size:',
-      this.eventQueue.length,
-      ')',
-    );
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[SudoQuery] Event queued:'),
+      context: [eventName, '(queue size:', this.eventQueue.length, ')'],
+    });
   }
 
   /**
    * Manually flush queued events immediately
    */
   async flush(): Promise<void> {
-    console.log('[SudoQuery] Manual flush called');
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[SudoQuery] Manual flush called'),
+    });
     await this.flushEvents();
   }
 

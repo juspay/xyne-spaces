@@ -35,6 +35,7 @@ import {
   TicketPriority,
   TicketStageRequestStatus,
   MailboxState,
+  MessageArtifactStatus,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -540,6 +541,17 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 
 export const queries = defineQueries({
+  activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
+    zql.message_artifacts
+      .where('workspaceId', ctx.workspaceId)
+      .where('status', MessageArtifactStatus.ACTIVE)
+      // Banner delivery is participant-only even when public channel messages are readable.
+      .whereExists('channelParticipants', participant =>
+        participant.where('userId', ctx.userID),
+      )
+      .orderBy('messageCreatedAt', 'desc'),
+  ),
+
   userChannelSections: defineQuery(z.object({}), () => {
     return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
   }),
@@ -3509,6 +3521,13 @@ export const queries = defineQueries({
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
       return zql.board_complexity_scores.where('userGroupId', userGroupId).related('board');
+    },
+  ),
+  // Query for user workload mappings (activeTasks/totalTasks per user per board)
+  getUserWorkloadMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_workload_mappings.where('userGroupId', userGroupId);
     },
   ),
   // Query for user expertise mappings for a board

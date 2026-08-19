@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -768,13 +769,12 @@ const XyneAISidebar = ({
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
-    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    // `block: 'nearest'` ALWAYS — not just for forced/embedded instances.
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth',
-      ...(isAgentForced && { block: 'nearest' }),
+      block: 'nearest',
     });
-  }, [isAgentForced]);
+  }, []);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -936,8 +936,11 @@ const XyneAISidebar = ({
           scrollToBottom();
         }, 100);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[XyneAISidebar] Failed to load most recent conversation:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAISidebar] Failed to load most recent conversation:'),
+          error: error,
+        });
       } finally {
         setIsLoadingConversation(false);
       }
@@ -1072,7 +1075,11 @@ const XyneAISidebar = ({
         }, 100);
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to load conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to load conversation:'),
+        error: error,
+      });
     } finally {
       setLoadingHistorySessionId(null);
     }
@@ -1102,7 +1109,11 @@ const XyneAISidebar = ({
         usesDraftStreamKeyRef.current = true;
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to delete conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to delete conversation:'),
+        error: error,
+      });
     }
   };
 
@@ -1355,7 +1366,11 @@ const XyneAISidebar = ({
             }),
           });
         } catch (error) {
-          console.error('[XyneAISidebar] Failed to submit feedback:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[XyneAISidebar] Failed to submit feedback:'),
+            error: error,
+          });
           // Revert UI state on error
           setFeedbackMap(prev => ({
             ...prev,
@@ -1462,7 +1477,11 @@ const XyneAISidebar = ({
       const url = buildCitationUrl(citation);
 
       if (!url) {
-        console.warn('[XyneAI] Cannot build URL for citation:', citation);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAI] Cannot build URL for citation:'),
+          context: [citation],
+        });
         return;
       }
 

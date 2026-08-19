@@ -36,6 +36,7 @@ import {
   TicketPriority,
   TicketStageRequestStatus,
   MailboxState,
+  MessageArtifactStatus,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -535,6 +536,17 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 export const queries: AnyQueryRegistry = defineQueries({
+  activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
+    zql.message_artifacts
+      .where('workspaceId', ctx.workspaceId)
+      .where('status', MessageArtifactStatus.ACTIVE)
+      // Banner delivery is participant-only even when public channel messages are readable.
+      .whereExists('channelParticipants', participant =>
+        participant.where('userId', ctx.userID),
+      )
+      .orderBy('messageCreatedAt', 'desc'),
+  ),
+
   // Conversation and Message Queries
   channelConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),
@@ -632,6 +644,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         );
     }
   ),
+
   messagesByIds: defineQuery(
     z.object({ messageIds: z.array(z.string()) }),
     ({ ctx, args: { messageIds } }) => {
@@ -4008,6 +4021,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
       return zql.board_complexity_scores.where('userGroupId', userGroupId).related('board');
+    }
+  ),
+
+  getUserWorkloadMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_workload_mappings.where('userGroupId', userGroupId);
     }
   ),
 

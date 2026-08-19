@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
@@ -45,6 +46,7 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   MentionType,
+  type MentionData,
   ChannelCommandMenuProps,
   TYPE_SUGGESTIONS,
   SearchableTypes,
@@ -88,7 +90,7 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { LexicalSearchInput } from './LexicalSearchInput';
+import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
@@ -96,6 +98,8 @@ import {
   rankUsersWithMfu,
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
+import { searchMetricsService } from '../../../services/searchMetricsService';
+import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -332,18 +336,60 @@ const ChannelCommandMenu = ({
 
   const { searchMode } = useSearchMode();
 
+  // The top-bar palette (screen mode, tabs hidden) always routes to the results page;
+  // the default cmd+K popup renders results inline. Both show the "Show results for"
+  // row, but only the screen palette lets it own the default Enter target.
+  const isScreenPalette = hideTabs && searchMode === 'screen';
+
+  // The row's onSelect fires for both a click and an Enter press, and cmdk hands it no
+  // event — so the pointer path stamps this ref and Enter falls through to the default.
+  const showResultsTriggerRef = useRef<'click' | 'keyboard'>('keyboard');
+
+  // Guards the jump to the results page against a double activation (onClick + onSelect).
+  // Reset whenever the palette opens again.
+  const navigatingToResultsRef = useRef(false);
+  useEffect(() => {
+    if (open) navigatingToResultsRef.current = false;
+  }, [open]);
+
   // When opened via the `mod+/` shortcut, seed the search box with `/` so it lands in command mode.
   // The popup path flips this on in the shortcut handler; the screen overlay is mounted fresh with a
   // `/` initialQuery, so seed from that here to render the palette on frame 1 (no normal-search flash).
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
-  // caller's query straight through. Memoized so the reference stays stable across renders.
+  // The search the user left behind when the palette sent them to the results page, handed
+  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+
+  // While seeding, feed the editor a `/` through the existing initial-query path; a restored
+  // search goes down the same path. Otherwise pass the caller's query straight through.
+  // Memoized so the reference stays stable across renders.
   const effectiveInitialQuery = useMemo(
-    () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
-    [seedCommandMode, initialQuery],
+    () =>
+      seedCommandMode ? { mentions: [], text: '/' } : restoredQuery ? restoredQuery : initialQuery,
+    [seedCommandMode, restoredQuery, initialQuery],
   );
+
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
+  // (and the browser back gesture) closes the palette instead of leaving the page. When a
+  // row sends the user to the results page, that entry keeps the search — so back from the
+  // results page reopens the palette with it rather than landing on a bare page.
+  const { markNavigating, setPayload } = useHistoryBackedOverlay<InitialQueryData>({
+    open,
+    onClose: () => onOpenChange(false),
+    onRestore: restored => {
+      setRestoredQuery(restored ?? null);
+      onOpenChange(true);
+    },
+    id: 'command-menu',
+    enabled: !inline && !contextSelectionMode,
+  });
+
+  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
+  useEffect(() => {
+    if (!open) setRestoredQuery(null);
+  }, [open]);
 
   useShortcutById(
     'global.search',
@@ -1007,6 +1053,55 @@ const ChannelCommandMenu = ({
 
     return params;
   }
+
+  // Keep the palette's history entry carrying the current search. The palette can be left
+  // in many ways — opening a DM, a channel, a message, a ticket, the results page — and
+  // each goes through its own handler, so recording it here is what makes ANY of them
+  // restorable when the user comes back.
+  useEffect(() => {
+    if (!open) return;
+    setPayload({
+      text: searchText,
+      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
+      // same values at runtime, they're only ever set from that union.
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+    });
+  }, [open, searchText, selectedMentions, setPayload]);
+
+  // Leave the palette for the full-screen results page via the "Show results for" row.
+  // Logged as its own event so the jump-out rate is readable per palette and trigger.
+  const goToSearchResults = (trigger: 'click' | 'keyboard'): void => {
+    // The row fires both onClick and cmdk's onSelect for one activation — first one wins.
+    if (navigatingToResultsRef.current) return;
+    navigatingToResultsRef.current = true;
+    showResultsTriggerRef.current = 'keyboard';
+
+    // Mark the close as a navigation so the palette's entry isn't popped out from under
+    // us. The search itself is already on that entry, kept current by the effect above.
+    markNavigating();
+
+    // Metrics must never be able to swallow the navigation.
+    try {
+      if (searchSessionId && currentUserID) {
+        searchMetricsService.trackShowResults({
+          searchSessionId,
+          userId: currentUserID,
+          queryText: searchText.trim(),
+          tab: activeTab,
+          trigger,
+          searchMode,
+          filtersUsed: selectedMentions.length,
+        });
+      }
+    } catch {
+      // Swallowed on purpose — a broken log line must not block the results page.
+    }
+
+    onOpenChange(false);
+    void navigate(
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+    );
+  };
 
   // Navigate to the full results page with a specific section's tab pre-selected
   // (from the screen-mode "See N more" links).
@@ -1844,7 +1939,11 @@ const ChannelCommandMenu = ({
       }
       onOpenChange(false);
     } catch (err) {
-      console.error('Navigation failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Navigation failed:'),
+        error: err,
+      });
     }
   };
 
@@ -2145,7 +2244,12 @@ const ChannelCommandMenu = ({
   // log the raw backend error to the console so devs can still triage from
   // DevTools without exposing implementation details in the UI.
   useEffect(() => {
-    if (error) console.warn('[Cmd+K search]', error);
+    if (error)
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[Cmd+K search]'),
+        context: [error],
+      });
   }, [error]);
 
   // Signature of the backend result ORDER, not just count: a re-rank that keeps the same row
@@ -2177,8 +2281,17 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
+        // The popup pins "Show results for" first in the DOM, but it must not become the
+        // resting Enter target — highlight the first real result instead, falling back to
+        // the row only when it is the sole item. The screen palette keeps first-row.
+        const firstReal = isScreenPalette
+          ? -1
+          : Array.from(items).findIndex(
+              item => item.getAttribute('data-show-results-item') !== 'true',
+            );
+        const selectedIndex = firstReal === -1 ? 0 : firstReal;
         items.forEach((item, i) => {
-          item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
       }
       // No sync here: the results-list observer recomputes actionability whenever rows change
@@ -3256,22 +3369,35 @@ const ChannelCommandMenu = ({
     const enterTarget =
       activeItem ??
       (commandRef.current?.querySelector(
-        '[cmdk-item]:not([aria-disabled="true"])',
+        // In the popup the pinned "Show results for" row is the first item in the DOM,
+        // so exclude it here — the resting Enter target is still the first real result.
+        isScreenPalette
+          ? '[cmdk-item]:not([aria-disabled="true"])'
+          : '[cmdk-item]:not([aria-disabled="true"]):not([data-show-results-item])',
+      ) as HTMLElement | null) ??
+      // Zero results leave the pinned row as the only item — then it IS the Enter target,
+      // or Enter would go dead with an actionable row on screen.
+      (commandRef.current?.querySelector(
+        '[cmdk-item][data-show-results-item]',
       ) as HTMLElement | null);
 
     // Screen-mode popup: Enter navigates to search screen only when no result item is selected
     // (or when the "show results for" item is selected). If a regular result is selected, click it.
-    if (hideTabs && searchMode === 'screen') {
+    if (isScreenPalette) {
       const isShowResultsItem = enterTarget?.getAttribute('data-show-results-item') === 'true';
       if (enterTarget && !isShowResultsItem) {
         lastModifierRef.current = e.metaKey || e.ctrlKey;
         enterTarget.click();
         return;
       }
-      onOpenChange(false);
-      void navigate(
-        `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
-      );
+      goToSearchResults('keyboard');
+      return;
+    }
+
+    // The row is invoked directly, not via a synthetic .click() — that path would fire its
+    // onClick and log this keyboard activation as a click.
+    if (enterTarget?.getAttribute('data-show-results-item') === 'true') {
+      goToSearchResults('keyboard');
       return;
     }
 
@@ -3281,6 +3407,77 @@ const ChannelCommandMenu = ({
     lastModifierRef.current = e.metaKey || e.ctrlKey;
     enterTarget?.click();
   };
+
+  // "Show results for: <chips> <query>" — the row that leaves the palette for the
+  // full-screen results page. Rendered in both palettes; where it sits in the list is
+  // decided at the call sites below. Never in the inline/context-selection palettes
+  // (Ask AI context picker, thread-panel context) — navigating away would hijack the
+  // picking flow. The old screen-only gate excluded those implicitly.
+  const showResultsForRow =
+    !inline &&
+    !contextSelectionMode &&
+    !mentionSearchType &&
+    (searchText.trim() || selectedMentions.length > 0) ? (
+      <Command.Item
+        value='__show-results-for__'
+        data-show-results-item='true'
+        onPointerDown={() => {
+          showResultsTriggerRef.current = 'click';
+        }}
+        // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
+        // and the plain onClick covers the mouse without depending on cmdk's selection
+        // state. goToSearchResults de-dupes when a click fires both.
+        onClick={() => goToSearchResults('click')}
+        onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
+        className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
+        data-track-category='SEARCH'
+        data-track-name='SHOW_RESULTS_FOR'
+      >
+        <SearchDefault size={14} className='text-muted-foreground shrink-0' />
+        <span className='flex items-center flex-wrap gap-1'>
+          <span className='text-sm'>Show detailed results for:</span>
+          {selectedMentions.map(m => {
+            const isPriority = m.type === MentionType.PRIORITY;
+            const isUser = m.type === MentionType.USER;
+            const name = isPriority
+              ? m.id.toLowerCase()
+              : isUser
+                ? getUserDisplayName(usersById.get(m.id) ?? { displayName: m.id, email: '' })
+                : (() => {
+                    const ch = allChannels.find(c => c.channel.id === m.id);
+                    if (!ch) return m.id;
+                    return formatChannelLabel(ch);
+                  })();
+            const prefix = m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
+            return (
+              <span
+                key={`${m.prefix}-${m.id}`}
+                className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
+              >
+                {isPriority ? (
+                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                    <SignalHigh
+                      size={12}
+                      className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
+                    />
+                  </div>
+                ) : isUser ? (
+                  <Avatar userId={m.id} size='sm' className='rounded-none flex-shrink-0 size-3' />
+                ) : (
+                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                    <Hashtag size={12} className='text-foreground' />
+                  </div>
+                )}
+                <span className='leading-tight'>
+                  {prefix} {name}
+                </span>
+              </span>
+            );
+          })}
+          {searchText.trim() && <span className='font-semibold text-sm'>{searchText.trim()}</span>}
+        </span>
+      </Command.Item>
+    ) : null;
 
   const commandBody = (
     <>
@@ -3659,7 +3856,10 @@ const ChannelCommandMenu = ({
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
               '[&_[cmdk-item]]:scroll-mb-[30px]',
-              suppressHover && '[&_[cmdk-item]]:pointer-events-none',
+              // The pinned "Show results for" row is exempt: it sits where the cursor
+              // rests when the palette opens, and its first click must land even before
+              // any mousemove clears suppressHover. Result rows keep the guard.
+              suppressHover && '[&_[cmdk-item]:not([data-show-results-item])]:pointer-events-none',
             )}
             ref={el => {
               if (el) {
@@ -3671,6 +3871,11 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* Popup palette: the row is pinned here, directly under the tabs, so it
+                    sits in the same place no matter what matched. It is skipped by the
+                    first-row auto-select, so the top result keeps the Enter target. */}
+                {!isScreenPalette && showResultsForRow}
+
                 {/* Best local matches pinned to the top of the list — both popup and
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
@@ -3679,78 +3884,9 @@ const ChannelCommandMenu = ({
                 {hoistUser && renderSearchUsersSection()}
                 {hoistChannel && renderSearchChannelsSection()}
 
-                {/* Show results for: [query] — screen mode only */}
-                {hideTabs &&
-                  searchMode === 'screen' &&
-                  !mentionSearchType &&
-                  (searchText.trim() || selectedMentions.length > 0) && (
-                    <Command.Item
-                      value='__show-results-for__'
-                      data-show-results-item='true'
-                      onSelect={() => {
-                        onOpenChange(false);
-                        void navigate(
-                          `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
-                        );
-                      }}
-                      className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
-                      data-track-category='SEARCH'
-                      data-track-name='SHOW_RESULTS_FOR'
-                    >
-                      <SearchDefault size={14} className='text-muted-foreground shrink-0' />
-                      <span className='flex items-center flex-wrap gap-1'>
-                        <span className='text-sm'>Show results for:</span>
-                        {selectedMentions.map(m => {
-                          const isPriority = m.type === MentionType.PRIORITY;
-                          const isUser = m.type === MentionType.USER;
-                          const name = isPriority
-                            ? m.id.toLowerCase()
-                            : isUser
-                              ? getUserDisplayName(
-                                  usersById.get(m.id) ?? { displayName: m.id, email: '' },
-                                )
-                              : (() => {
-                                  const ch = allChannels.find(c => c.channel.id === m.id);
-                                  if (!ch) return m.id;
-                                  return formatChannelLabel(ch);
-                                })();
-                          const prefix =
-                            m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
-                          return (
-                            <span
-                              key={`${m.prefix}-${m.id}`}
-                              className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
-                            >
-                              {isPriority ? (
-                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                                  <SignalHigh
-                                    size={12}
-                                    className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
-                                  />
-                                </div>
-                              ) : isUser ? (
-                                <Avatar
-                                  userId={m.id}
-                                  size='sm'
-                                  className='rounded-none flex-shrink-0 size-3'
-                                />
-                              ) : (
-                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                                  <Hashtag size={12} className='text-foreground' />
-                                </div>
-                              )}
-                              <span className='leading-tight'>
-                                {prefix} {name}
-                              </span>
-                            </span>
-                          );
-                        })}
-                        {searchText.trim() && (
-                          <span className='font-semibold text-sm'>{searchText.trim()}</span>
-                        )}
-                      </span>
-                    </Command.Item>
-                  )}
+                {/* Screen palette: the row stays below the hoisted best matches, which
+                    own the Enter target there. */}
+                {isScreenPalette && showResultsForRow}
 
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
@@ -4556,7 +4692,11 @@ const ChannelCommandMenu = ({
 
             toast.success(`${ticketsToMerge.length + 1} tickets merged successfully`);
           } catch (err) {
-            console.error('Merge failed:', err);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Merge failed:'),
+              error: err,
+            });
             toast.error('Failed to merge tickets. Please try again.');
           }
         }}
@@ -4573,7 +4713,7 @@ const ChannelCommandMenu = ({
         // matches no item so it never marks one selected too — otherwise it latches a result row
         // and a SECOND highlight appears alongside the manually-selected one.
         value='__none__'
-        onValueChange={() => {}}
+        onValueChange={() => undefined}
         data-nav-active={hasNavigated ? 'true' : undefined}
         data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
@@ -4651,7 +4791,7 @@ const ChannelCommandMenu = ({
               // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
               // item so it never adds a second highlighted row next to the imperatively-managed one.
               value='__none__'
-              onValueChange={() => {}}
+              onValueChange={() => undefined}
               data-nav-active={hasNavigated ? 'true' : undefined}
               data-mention-active={mentionSearchType ? 'true' : undefined}
               shouldFilter={false}

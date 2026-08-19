@@ -204,8 +204,8 @@ export default tseslint.config(
     rules: {
       // Enforce strict equality (=== and !==)
       "eqeqeq": ["error", "always"],
-      // Disallow the use of console.log in production
-      "no-console": "warn",
+      // Disallow direct console use in production
+      "no-console": "error",
       // Enforce curly braces for all control statements
       "curly": ["error", "all"],
       // Prefer early returns over else blocks when possible

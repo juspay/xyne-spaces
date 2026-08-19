@@ -1,6 +1,8 @@
 import { BrowserWindow, screen, session, ipcMain } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
+import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 
 let popupWindow: BrowserWindow | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -21,6 +23,11 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
   const loggedIn = await isUserLoggedIn();
   if (!loggedIn) {
     log.info('[MeetingPopup] User not logged in, skipping popup');
+    Logger.info(
+      ElectronEvent.MEETING_POPUP_SKIPPED_LOGGED_OUT,
+      { app: meetingData.app },
+      'MeetingDetector',
+    );
     return;
   }
 
@@ -113,6 +120,11 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
   });
 
   log.info('[MeetingPopup] Showing popup for:', meetingData.app);
+  Logger.info(
+    ElectronEvent.MEETING_POPUP_SHOWN,
+    { app: meetingData.app, startedAt: meetingData.startedAt },
+    'MeetingDetector',
+  );
   resetAutoDismiss();
 }
 
@@ -144,6 +156,7 @@ export function hideMeetingPopup(): void {
   }, 300); // Match CSS transition duration
 
   log.info('[MeetingPopup] Hiding popup');
+  Logger.info(ElectronEvent.MEETING_POPUP_HIDDEN, {}, 'MeetingDetector');
 }
 
 function resetAutoDismiss(): void {

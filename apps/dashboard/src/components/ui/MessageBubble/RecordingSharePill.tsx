@@ -6,7 +6,7 @@ import { formatElapsedTime } from '../../../utils/recordingUtils';
 interface RecordingSharePillProps {
   title: string;
   durationMs: number | null;
-  onOpen: () => void;
+  onOpen?: (() => void) | undefined;
 }
 
 export const RecordingSharePill: React.FC<RecordingSharePillProps> = ({
@@ -18,9 +18,10 @@ export const RecordingSharePill: React.FC<RecordingSharePillProps> = ({
     type='button'
     onClick={event => {
       event.stopPropagation();
-      onOpen();
+      onOpen?.();
     }}
-    className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-1.5 text-left shadow-sm'
+    disabled={!onOpen}
+    className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-1.5 text-left shadow-sm disabled:cursor-default'
     aria-label={`Open recording ${title}`}
     data-track-category='MESSAGE'
     data-track-name='OPEN_SHARED_RECORDING'
@@ -40,11 +41,13 @@ export const RecordingSharePill: React.FC<RecordingSharePillProps> = ({
       </span>
     )}
 
-    <ChevronRight
-      size={16}
-      strokeWidth={2.5}
-      className='shrink-0 text-muted-foreground transition-transform'
-      aria-hidden='true'
-    />
+    {onOpen && (
+      <ChevronRight
+        size={16}
+        strokeWidth={2.5}
+        className='shrink-0 text-muted-foreground transition-transform'
+        aria-hidden='true'
+      />
+    )}
   </button>
 );

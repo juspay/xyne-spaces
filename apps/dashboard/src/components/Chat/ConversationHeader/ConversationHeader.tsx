@@ -285,7 +285,7 @@ const ConversationHeader = ({
                 setInfoDefaultTab('about');
                 setIsInfoOpen(true);
               }}
-              className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
+              className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 h-7 px-1.5 rounded-md hover:bg-muted transition-colors duration-100'
               style={APP_NO_DRAG_STYLE}
               data-testid='channel-info-trigger'
               data-track-category='CHANNELS'
@@ -295,9 +295,7 @@ const ConversationHeader = ({
               <span className='shrink-0 inline-flex items-center leading-none'>
                 <ChannelIcon channel={channel} />
               </span>
-              <span className={cn('visual-regression-hide truncate', isChannelDM && 'pt-1')}>
-                {displayName}
-              </span>
+              <span className='visual-regression-hide truncate'>{displayName}</span>
               {isDM && (
                 <StatusIndicator
                   statusEmoji={dmUser?.statusEmoji}

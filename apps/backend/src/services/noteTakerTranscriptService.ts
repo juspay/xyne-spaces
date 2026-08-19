@@ -1,16 +1,22 @@
 import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
-import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
+import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { recordingSharingService } from '@/services/recordingSharingService';
+import {
+  mergeRecordingSummaryMarkedItems,
+  type RecordingSummaryMarkedItem,
+} from '@/services/recordingSummaryMarkedItems';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
 // configKey is used, so tagService.createTag skips the "category must be
@@ -21,29 +27,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
-}
-
-/**
- * Moments the user flagged during the recording, read back off a Call row.
- * They share Call.markedItems with the decisions/actions generated here, and the
- * type filter is what keeps re-runs idempotent: a second pass drops the previous
- * run's generated items and keeps only the user's.
- */
-function userMarkedMoments(markedItems: Call['markedItems']): MarkedItem[] {
-  if (!Array.isArray(markedItems)) return [];
-
-  return markedItems.filter(
-    (item): item is MarkedItem & Prisma.JsonObject =>
-      !!item &&
-      typeof item === 'object' &&
-      !Array.isArray(item) &&
-      (item as Record<string, unknown>).type === 'moment',
-  );
-}
-
-/** Marked items come from JSON, so the timestamp can be anything at runtime. */
-function markedItemTimestamp(item: MarkedItem): number {
-  return typeof item.timestampSeconds === 'number' ? item.timestampSeconds : 0;
+  markedItems: RecordingSummaryMarkedItem[];
 }
 
 /**
@@ -143,13 +127,11 @@ class NoteTakerTranscriptService {
       if (!formattedTranscript) return;
 
       // These workloads are independent once the transcript is available, so
-      // start them together. generateDetailedSummaryCanvas preserves its own
-      // ordered dependency chain: template selection -> prompt generation when
-      // needed -> detailed-summary streaming.
+      // start them together. The detailed-summary result is also the sole source
+      // for generated decisions/actions and their transcript timestamps.
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -161,27 +143,30 @@ class NoteTakerTranscriptService {
         }
         return labelIds;
       });
-      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
-        if (markedItems.length > 0) {
-          await this.finalizeCallUpdates(call, { markedItems });
-        }
-        return markedItems;
-      });
-
       const [, detailedSummary] = await Promise.all([
         summaryPromise,
         detailedSummaryPromise,
         saveLabelsPromise,
-        saveMarkedItemsPromise,
       ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
+          detailedSummaryReady: detailedSummary ? true : undefined,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
+        ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
+
+      // Thread-linked recording: already auto-shared to the thread's channel
+      // immediately when the recording ended (see
+      // noteTakerWebhookController.handleParticipantLeft /
+      // handleRoomFinished). This call is now just an idempotent fallback in
+      // case that earlier attempt failed — recordingSharingService's grant
+      // is a safe upsert, so re-running it here is harmless even when the
+      // earlier share already succeeded.
+      await this.shareThreadRecordingIfLinked(call);
     } finally {
       await releaseLock(lockHandle);
     }
@@ -197,6 +182,7 @@ class NoteTakerTranscriptService {
   ): Promise<{
     summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
+    detailedSummaryReady: boolean;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
@@ -208,21 +194,31 @@ class NoteTakerTranscriptService {
     );
     if (!detailedSummary) return null;
 
+    const current = await repositories.calls.findByExternalId(call.externalId);
     const currentMetadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : {};
+      current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
+        ? (current.metadata as Record<string, unknown>)
+        : call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>)
+          : {};
+    const markedItems = mergeRecordingSummaryMarkedItems(
+      current?.markedItems ?? call.markedItems,
+      detailedSummary.markedItems,
+    ) as Prisma.InputJsonValue[];
     await repositories.calls.update(call.id, {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
+        detailedSummaryReady: true,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
+      markedItems,
     });
 
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
       detailedSummaryCanvasId: detailedSummary.canvasId,
+      detailedSummaryReady: true,
     };
   }
 
@@ -258,6 +254,45 @@ class NoteTakerTranscriptService {
   }
 
   /**
+   * Grants the thread's channel VIEW access to this recording (same
+   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses),
+   * so every thread/channel member can see the recording message card and
+   * open /recordings/:callId. No-op for recordings not started from a thread
+   * (no channelId on Call.metadata). Best-effort — a failure here must never
+   * block transcript/summary processing. Public so
+   * noteTakerWebhookController can call this immediately once the recording
+   * ends (handleParticipantLeft / handleRoomFinished) — both canvases
+   * already exist by then via eager creation, so there's no reason to wait
+   * for the detailed-summary pipeline anymore.
+   */
+  async shareThreadRecordingIfLinked(call: Call): Promise<void> {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    const channelId = typeof metadata.channelId === 'string' ? metadata.channelId : undefined;
+    if (!channelId) return;
+
+    try {
+      await recordingSharingService.execute(
+        call.externalId,
+        { userId: call.createdByUserId, workspaceId: call.workspaceId },
+        {
+          action: 'grant',
+          targets: [{ type: 'channel', id: channelId }],
+          access: EntityUserAccess.VIEW,
+        },
+      );
+    } catch (error) {
+      logger.error(`[${call.externalId}] thread_channel_share_failed`, {
+        channelId,
+        error,
+        path: 'note_taker',
+      });
+    }
+  }
+
+  /**
    * Single combined Call write for anything computed during this run
    * (metadata fields, labels, markedItems). Merging everything here — instead
    * of each step writing independently — avoids one step's write clobbering
@@ -277,13 +312,24 @@ class NoteTakerTranscriptService {
     updates: {
       metadata?: Record<string, unknown>;
       labels?: string[];
-      markedItems?: MarkedItem[];
+      markedItems?: RecordingSummaryMarkedItem[];
       summaryTemplateId?: string | null;
     },
   ): Promise<void> {
     const metadataChanges = updates.metadata
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
+
+    // Fetch the current DB row once (rather than trusting `call`, which is the
+    // in-memory snapshot from the top of processTranscript) whenever we're about
+    // to merge onto either JSON column. Generation can take minutes, during
+    // which another write — e.g. ensureStreamingCanvas's early publish of
+    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+    // the DB. Merging onto the stale snapshot would silently erase that write.
+    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+    const current = needsFreshRead
+      ? await repositories.calls.findByExternalId(call.externalId)
+      : undefined;
 
     const data: {
       metadata?: Record<string, unknown>;
@@ -292,23 +338,23 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      const currentMetadataSource = current?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        currentMetadataSource &&
+        typeof currentMetadataSource === 'object' &&
+        !Array.isArray(currentMetadataSource)
+          ? (currentMetadataSource as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
     if (updates.labels && updates.labels.length > 0) {
       data.labels = updates.labels;
     }
-    if (updates.markedItems && updates.markedItems.length > 0) {
-      
-      const current = await repositories.calls.findByExternalId(call.externalId);
-      const existingMoments = userMarkedMoments(current?.markedItems ?? call.markedItems);
-
-      const merged = [...existingMoments, ...updates.markedItems];
-      merged.sort((a, b) => markedItemTimestamp(a) - markedItemTimestamp(b));
-      data.markedItems = merged as unknown as Prisma.InputJsonValue[];
+    if (updates.markedItems !== undefined) {
+      data.markedItems = mergeRecordingSummaryMarkedItems(
+        current?.markedItems ?? call.markedItems,
+        updates.markedItems,
+      ) as Prisma.InputJsonValue[];
     }
     if (updates.summaryTemplateId !== undefined) {
       data.summaryTemplateId = updates.summaryTemplateId;
@@ -424,6 +470,19 @@ class NoteTakerTranscriptService {
       try {
         await repositories.calls.update(call.id, { title });
         logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        // Thread-linked recording: patch the anchor message's content with
+        // this title too (mirrors how a regular call's ended message shows its
+        // AI text as message.content) so RecordingBubble never needs its own
+        // live query on the Call row just to display the ended-state title.
+        // Best-effort — a failure here must not affect the saved Call.title.
+        try {
+          await noteTakerCallRepository.updateThreadMessageTitle(call.id, title);
+        } catch (messageError) {
+          logger.error(`[${callId}] thread_message_title_update_failed`, {
+            path: 'note_taker',
+            error: messageError,
+          });
+        }
         return true;
       } catch (error) {
         logger.error(`[${callId}] call_record_update_failed`, {
@@ -490,6 +549,8 @@ class NoteTakerTranscriptService {
           numberedTranscript,
           callId,
           templateId,
+          undefined,
+          citationCtx.segments,
         );
         if (!generated) {
           logger.error(`[${callId}] detailed_summary_skipped`, {
@@ -528,7 +589,11 @@ class NoteTakerTranscriptService {
           return null;
         }
 
-        return { canvasId, summaryTemplateId: generated.template.id };
+        return {
+          canvasId,
+          summaryTemplateId: generated.template.id,
+          markedItems: generated.markedItems,
+        };
       }
 
       const SYNC_INTERVAL_MS = 300;
@@ -645,6 +710,7 @@ class NoteTakerTranscriptService {
             latestMarkdown = accumulated;
             await ensureStreamingCanvas(accumulated);
           },
+          citationCtx.segments,
         );
       } finally {
         writerActive = false;
@@ -703,7 +769,11 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
+      return {
+        canvasId: newCanvasId,
+        summaryTemplateId: generated.template.id,
+        markedItems: generated.markedItems,
+      };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
@@ -793,22 +863,6 @@ class NoteTakerTranscriptService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Generate key decisions/action items, each anchored to a transcript
-   * timestamp. Returns [] on any failure or when nothing qualifies.
-   */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
-    const callId = call.externalId;
-    return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_marked_items_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as MarkedItem[];
-    });
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized

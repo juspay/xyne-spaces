@@ -32,9 +32,30 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { superpositionClient } from '@/services/superpositionClient';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
+
+const ZERO_DISABLED_QUERIES_KEY = 'zero_disabled_queries';
+
+const parseDisabledQueries = (raw: string): Set<string> =>
+  new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  );
+
+const isQueryDisabled = async (name: string): Promise<boolean> => {
+  try {
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
+    return parseDisabledQueries(raw).has(name);
+  } catch (error) {
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
+  }
+};
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -378,12 +399,20 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      (queryName, args) => {
-        capturedQueryName = queryName;
-        const query = mustGetBackendQuery(queryName);
-        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-        return query.fn({ args, ctx: context });
-      },
+      // zero's QueryRequestHandler type is sync-only but the runtime awaits the
+      // handler result, so returning a promise (typed as any) is safe.
+      (queryName, args): any =>
+        (async () => {
+          capturedQueryName = queryName;
+          if (await isQueryDisabled(queryName)) {
+            getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+            logger.warn('zero_query_disabled', { query: queryName });
+            throw new Error(`Query '${queryName}' is disabled`);
+          }
+          const query = mustGetBackendQuery(queryName);
+          const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
+          return query.fn({ args, ctx: context });
+        })(),
       schema,
       request
     );
@@ -515,7 +544,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
       queries: Array<{ name: string; args?: any }>;  
     };
 
-    console.log(`ZQL-to-SQL executing ${queryRequests.length} queries`);
+    logger.info(`ZQL-to-SQL executing ${queryRequests.length} queries`);
 
     const serverSchema = await fetchServerSchema();
     const prisma = DatabaseClient.getInstance();
@@ -533,7 +562,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           // @ts-ignore - asQueryInternals works with any Query type at runtime
           const { ast, format } = asQueryInternals(query);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
 
           // Use z2s to compile ZQL → SQL
           const compiledOutput = compile(serverSchema, schema, ast, format);
@@ -541,7 +570,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             compiledOutput
           );
 
-          console.log(`Executing SQL via Prisma:`, sqlQuery.text);
+          logger.info(`Executing SQL via Prisma:`, sqlQuery.text);
 
           // Execute via Prisma
           const pgResult = await prisma.$queryRawUnsafe(
@@ -561,17 +590,17 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           // Extract ZQL result from JSON-wrapped response
           const data = extractZqlResult(pgArrayResult);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
-          console.log('Full SQL query:', sqlQuery.text);
-          console.log('SQL length:', sqlQuery.text.length);
-          console.log('Values:', sqlQuery.values);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
+          logger.info('Full SQL query:', sqlQuery.text);
+          logger.info('SQL length:', sqlQuery.text.length);
+          logger.info('Values:', sqlQuery.values);
 
           return {
             name: req.name,
             data,
           };
         } catch (error) {
-          console.error(`ZQL-to-SQL query ${req.name} failed:`, error);
+          logger.error(`ZQL-to-SQL query ${req.name} failed`, error);
           throw error;
         }
       })
@@ -579,7 +608,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
 
     return { results };
   } catch (error) {
-    console.error('ZQL-to-SQL request failed:', error);
+    logger.error('ZQL-to-SQL request failed', error);
     throw error;
   }
 }
@@ -601,7 +630,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
       args: any;
     };
 
-    console.log(`Fallback executing mutation: ${mutation.name}`);
+    logger.info(`Fallback executing mutation: ${mutation.name}`);
 
     await dbProvider.transaction(async (tx) => {
       const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
@@ -649,8 +678,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
               },
             });
           } catch (dbError) {
-            console.error(`Failed to log insertion error to database:
-              ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+            logger.error('Failed to log insertion error to database', dbError);
           }
         }
       })
@@ -672,7 +700,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     );
     return { success: true };
   } catch (error) {
-    console.error('Fallback mutate request failed:', error);
+    logger.error('Fallback mutate request failed', error);
     return {
       success: false,
       error: "app",

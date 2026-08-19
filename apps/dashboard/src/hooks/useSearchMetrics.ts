@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
 import Fuse from 'fuse.js';
 import { searchMetricsService } from '../services/searchMetricsService';
@@ -1721,7 +1722,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         }));
       }
     } catch (searchError) {
-      console.error('Failed to load more results:', searchError);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load more results:'),
+        error: searchError,
+      });
     } finally {
       setIsLoadingMore(false);
     }

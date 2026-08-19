@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -10,6 +10,7 @@ import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
+import { checkHealth } from "../health.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
@@ -558,6 +559,93 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
+router.patch("/:slug/design-system", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const orgId = getOrgId(req);
+    const requesterId = getRequesterId(req);
+    if (!orgId) {
+      res.status(400).json({ success: false, error: "Organization context is required" });
+      return;
+    }
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authenticated user is required" });
+      return;
+    }
+
+    const existing = await agentRepository.findBySlug(req.params.slug, orgId);
+    if (!existing) {
+      logAgentScopedMiss(req, "agents/design-system", req.params.slug, orgId);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const admin = await isClawAdmin(requesterId);
+    const isOwner = existing.ownerUserId === requesterId;
+    const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
+    const isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
+    if (!admin && !isOwner && !isContributor) {
+      res.status(403).json({ success: false, error: "Only the agent owner, contributors, or admins can edit its design system" });
+      return;
+    }
+
+    const supplied = (req.body as { designSystem?: unknown }).designSystem;
+    if (supplied !== null && typeof supplied !== "string") {
+      res.status(400).json({ success: false, error: "designSystem must be a string or null" });
+      return;
+    }
+    const designSystem = typeof supplied === "string" ? supplied.trim() : "";
+    if (designSystem.length > 32_000) {
+      res.status(400).json({ success: false, error: "designSystem must be at most 32,000 characters" });
+      return;
+    }
+
+    // Optimistic retry prevents this narrow edit from replacing a concurrent
+    // provider/tools/sandbox config write with a stale snapshot.
+    let updated = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const fresh = await agentRepository.findById(existing.id);
+      if (!fresh) {
+        res.status(404).json({ success: false, error: "Agent not found" });
+        return;
+      }
+      const nextConfig = { ...(asRecord(fresh.config) ?? {}) };
+      if (designSystem) nextConfig["designSystem"] = designSystem;
+      else delete nextConfig["designSystem"];
+
+      const configCheck = validateAgentModelConfig(nextConfig);
+      if (!configCheck.ok) {
+        res.status(400).json({ success: false, error: configCheck.error });
+        return;
+      }
+      const result = await prisma.agent.updateMany({
+        where: { id: fresh.id, updatedAt: fresh.updatedAt },
+        data: { config: nextConfig as Prisma.InputJsonValue },
+      });
+      if (result.count === 1) {
+        logAgentConfigWriteDiff(fresh.slug, requesterId, fresh.config, nextConfig);
+        updated = await agentRepository.findById(fresh.id);
+        break;
+      }
+    }
+
+    if (!updated) {
+      res.status(409).json({ success: false, error: "Agent settings changed while saving; please retry" });
+      return;
+    }
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "AGENT_UPDATED",
+      targetId: existing.id,
+      description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
+      metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    });
+    res.json({ success: true, data: sanitizeAgent(updated as unknown as Record<string, unknown>) });
+  } catch (err) {
+    log.error("[agents] design-system update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const orgId = getOrgId(req);
@@ -976,7 +1064,7 @@ router.get("/delegation-requests/pending-for-me", async (req: Request, res: Resp
 router.get(
   "/:slug/delegation-grants",
   requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const caller = req.agentContext!.agent;
       const grants = await prisma.agentDelegationGrant.findMany({
@@ -2145,29 +2233,128 @@ function getCookieValue(req: Request, name: string): string | undefined {
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
-function extractUserToken(req: Request): string | undefined {
-  // Try body
-  const bodyToken = (req.body as { userToken?: string }).userToken;
-  if (bodyToken) return bodyToken;
+/** Claims we care about from a Spaces authV2 workspace JWT. Payload only —
+ *  this is never a trust decision, Spaces verifies the signature. We read it
+ *  solely to keep the token, the workspace and the session pointing at the
+ *  same identity before forwarding them. */
+interface WorkspaceTokenClaims {
+  sub?: string;
+  workspaceId?: string;
+}
 
-  // Try Authorization header
+function decodeWorkspaceToken(token: string): WorkspaceTokenClaims | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[1]) return null;
+  try {
+    const json = Buffer.from(parts[1], "base64url").toString("utf8");
+    const claims = JSON.parse(json) as WorkspaceTokenClaims;
+    return typeof claims === "object" && claims !== null ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every `xyne_ws_<workspaceId>_token` cookie on the request. */
+function workspaceTokenCookies(req: Request): Array<{ workspaceId: string; token: string }> {
+  const cookie = req.headers["cookie"] ?? "";
+  const out: Array<{ workspaceId: string; token: string }> = [];
+  for (const match of cookie.matchAll(/(?:^|;\s*)xyne_ws_([^=;]+)_token=([^;]*)/g)) {
+    const workspaceId = match[1];
+    const raw = match[2];
+    if (!workspaceId || !raw) continue;
+    out.push({ workspaceId, token: decodeURIComponent(raw) });
+  }
+  return out;
+}
+
+/**
+ * The Spaces credentials to forward, resolved as ONE consistent triple.
+ *
+ * Why this is not three independent lookups: a browser holds a SEPARATE
+ * `xyne_ws_<id>_token` per workspace but only ONE `user_session_id`. When the
+ * same human has two Spaces user rows (observed live: one email owning both
+ * `cmgjk5fcz…` and `cmqsf2vlq…`, in different orgs), picking the bearer by
+ * `xyne_last_workspace` while taking the session from its own cookie forwards a
+ * token for user A alongside a session for user B. Spaces then resolves an
+ * inconsistent principal and `req.user.workspaceId` comes back unusable —
+ * surfacing downstream as a misleading `ORG_REQUIRED`, with every workspace row
+ * involved perfectly healthy.
+ *
+ * So: the workspace is taken FROM the chosen token's own claims (falling back
+ * to the cookie name that carried it), never from an independent cookie read,
+ * and a token whose `sub` disagrees with the other workspace tokens is logged
+ * rather than silently forwarded.
+ */
+function resolveSpacesUserAuth(req: Request): {
+  token?: string | undefined;
+  workspaceId?: string | undefined;
+  sub?: string | undefined;
+} {
+  const explicitWorkspace = typeof req.headers["x-workspace-id"] === "string" && req.headers["x-workspace-id"]
+    ? (req.headers["x-workspace-id"] as string)
+    : undefined;
+
+  // An explicitly supplied token wins — the caller has already decided.
+  const bodyToken = (req.body as { userToken?: string } | undefined)?.userToken;
   const authHeader = req.headers["authorization"];
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+  const explicitToken = bodyToken
+    ?? (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined);
+  if (explicitToken) {
+    const claims = decodeWorkspaceToken(explicitToken);
+    return {
+      token: explicitToken,
+      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
+  }
 
-  // Prefer the Spaces authV2 workspace cookie: xyne_ws_<workspaceId>_token
-  const lastWorkspace = getCookieValue(req, "xyne_last_workspace");
-  if (lastWorkspace) {
-    const wsToken = getCookieValue(req, `xyne_ws_${lastWorkspace}_token`);
-    if (wsToken) return wsToken;
+  const wsTokens = workspaceTokenCookies(req);
+  if (wsTokens.length > 0) {
+    const preferred = explicitWorkspace ?? getCookieValue(req, "xyne_last_workspace");
+    const chosen = wsTokens.find((t) => t.workspaceId === preferred) ?? wsTokens[0]!;
+    const claims = decodeWorkspaceToken(chosen.token);
+
+    // Two workspace tokens for two DIFFERENT users is the ambiguity above. We
+    // cannot tell from here which one `user_session_id` belongs to, so forward
+    // the chosen one but make the situation visible instead of mysterious.
+    const subs = new Set(
+      wsTokens.map((t) => decodeWorkspaceToken(t.token)?.sub).filter((v): v is string => Boolean(v)),
+    );
+    if (subs.size > 1) {
+      log.warn(
+        `[agents] multiple Spaces identities on one request — forwarding sub=${claims?.sub ?? "unknown"} ` +
+        `for workspace=${claims?.workspaceId ?? chosen.workspaceId}; all subs=[${[...subs].join(", ")}]. ` +
+        `If Spaces rejects this (e.g. ORG_REQUIRED), the session cookie likely belongs to a different one.`,
+      );
+    }
+
+    // Workspace comes from the token we are actually sending, so the pair can
+    // never disagree — the cookie name is only a fallback for a malformed JWT.
+    return {
+      token: chosen.token,
+      workspaceId: claims?.workspaceId ?? chosen.workspaceId,
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
   }
 
   // Fall back to legacy google_access_token — but ONLY if it looks like a JWT.
   // During the authV2 pending-auth window this cookie holds a JSON blob, which
   // is not a valid bearer token.
   const legacy = getCookieValue(req, "google_access_token");
-  if (legacy && legacy.split(".").length === 3) return legacy;
+  if (legacy && legacy.split(".").length === 3) {
+    const claims = decodeWorkspaceToken(legacy);
+    return {
+      token: legacy,
+      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
+      ...(claims?.sub ? { sub: claims.sub } : {}),
+    };
+  }
 
-  return undefined;
+  return { ...(explicitWorkspace ? { workspaceId: explicitWorkspace } : {}) };
+}
+
+function extractUserToken(req: Request): string | undefined {
+  return resolveSpacesUserAuth(req).token;
 }
 
 function extractSessionId(req: Request): string | undefined {
@@ -2177,9 +2364,9 @@ function extractSessionId(req: Request): string | undefined {
 }
 
 function extractWorkspaceId(req: Request): string | undefined {
-  const header = req.headers["x-workspace-id"];
-  if (typeof header === "string" && header) return header;
-  return getCookieValue(req, "xyne_last_workspace");
+  // Derived from the SAME resolution as the bearer token, so the two can never
+  // point at different workspaces. See resolveSpacesUserAuth.
+  return resolveSpacesUserAuth(req).workspaceId ?? getCookieValue(req, "xyne_last_workspace");
 }
 
 // /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
@@ -2223,6 +2410,27 @@ router.post("/:slug/create-app", async (req: Request<{ slug: string }>, res: Res
 
     if (!createRes.ok) {
       const text = await createRes.text().catch(() => "");
+      // ORG_REQUIRED from Spaces means it could not resolve an org for
+      // `req.user.workspaceId` — which, when the workspace itself is healthy,
+      // means the principal it resolved is not the one we think we sent. Say so
+      // here: chasing this from the Spaces-side message alone leads through the
+      // workspace, its orgId and the org mapping, all of which look fine.
+      if (text.includes("ORG_REQUIRED")) {
+        const auth = resolveSpacesUserAuth(req);
+        log.warn(
+          `[agents] create-app ORG_REQUIRED slug=${req.params.slug} ` +
+          `forwardedSub=${auth.sub ?? "unknown"} forwardedWorkspace=${auth.workspaceId ?? "none"} ` +
+          `sessionId=${sessionId ? "present" : "MISSING"}`,
+        );
+        res.status(400).json({
+          success: false,
+          error:
+            `Spaces could not resolve an organization for workspace ${auth.workspaceId ?? "(none sent)"}. ` +
+            `This usually means the workspace token and the login session belong to different Spaces users. ` +
+            `Switch to the workspace you normally work in and retry.`,
+        });
+        return;
+      }
       res.status(createRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
       return;
     }
@@ -2323,8 +2531,8 @@ router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, r
     // HMAC-check inbound webhook bodies. Best-effort — if Spaces is reachable
     // for configureWebhook (just succeeded above) it's almost certainly
     // reachable for signing-secret too. On failure we log and leave the
-    // signature column null; verify middleware stays warn-only for this agent
-    // until a future call (or the backfill script) succeeds.
+    // signature column null; fail-closed verification rejects this agent's
+    // webhooks until a future call (or the backfill script) succeeds.
     await fetchAndStoreSigningSecretFromSpacesApi({
       agentId: agent.id,
       spacesAppId: agent.spacesAppId,
@@ -2467,7 +2675,7 @@ const pictureUpload = multer({
 
 router.post(
   "/:slug/upload-picture",
-  pictureUpload.single("picture"),
+  pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
       const userToken = extractUserToken(req);
@@ -3046,6 +3254,110 @@ router.delete(
       res.json({ success: true });
     } catch (err) {
       log.error("[agents] delete mcp connection error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// Health-check a single agent-pinned MCP instance. Mirrors the global
+// connection health route (routes/connections.ts) but loads credentials
+// from agentMcpConnection instead of userMcpConnection, so an agent owner
+// can see whether a pinned token (e.g. an expired Grafana token) is
+// actually reachable. The agent MCP tab previously showed a hardcoded
+// "connected" badge that never reflected reality.
+//
+// The first arg to checkHealth() is used purely as an MCP session-cache
+// key. We pass a synthetic `agent:<agentId>:<slug>` id (NEVER a real
+// userId) so probing an agent connection cannot evict or rebuild the
+// requesting user's own GLOBAL MCP session for the same server type.
+router.get(
+  "/:slug/mcp/connections/:mcpServerType/:instanceSlug/health",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string; mcpServerType: string; instanceSlug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const { mcpServerType, instanceSlug } = req.params;
+      if (!isValidSlug(instanceSlug)) {
+        res.status(400).json({ success: false, error: "Invalid instance slug" });
+        return;
+      }
+      const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+      if (!server) {
+        res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+        return;
+      }
+      const connection = await prisma.agentMcpConnection.findUnique({
+        where: { agentId_mcpServerId_slug: { agentId: agent.id, mcpServerId: server.id, slug: instanceSlug } },
+      });
+      if (!connection) {
+        res.status(404).json({ success: false, error: "Connection not found" });
+        return;
+      }
+
+      const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
+      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
+
+      // Isolated session key - never a real userId (see note above).
+      const healthSessionId = `agent:${agent.id}:${instanceSlug}`;
+
+      // Google / Microsoft are OAuth-token connectors, not MCP adapters -
+      // check them directly, mirroring the global connection health route.
+      if (server.type === "google") {
+        const start = Date.now();
+        const token = (credentials as { accessToken?: string }).accessToken;
+        if (!token) {
+          res.json({ success: true, data: { healthy: false, message: "No access token stored", latencyMs: 0 } });
+          return;
+        }
+        try {
+          const gRes = await fetch("https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" + encodeURIComponent(token));
+          const latencyMs = Date.now() - start;
+          if (gRes.ok) {
+            const info = (await gRes.json()) as { email?: string; expires_in?: number };
+            res.json({ success: true, data: { healthy: true, message: `Connected as ${info.email ?? "unknown"} (expires in ${info.expires_in ?? "?"}s)`, latencyMs } });
+          } else {
+            const refreshToken = (credentials as { refreshToken?: string }).refreshToken;
+            res.json({ success: true, data: refreshToken
+              ? { healthy: true, message: "Token expired but refresh token available - will auto-refresh on next use", latencyMs }
+              : { healthy: false, message: "Token expired and no refresh token", latencyMs } });
+          }
+        } catch (err) {
+          res.json({ success: true, data: { healthy: false, message: err instanceof Error ? err.message : "Health check failed", latencyMs: Date.now() - start } });
+        }
+        return;
+      }
+
+      if (server.type === "microsoft") {
+        const start = Date.now();
+        const token = (credentials as { accessToken?: string }).accessToken;
+        if (!token) {
+          res.json({ success: true, data: { healthy: false, message: "No access token stored", latencyMs: 0 } });
+          return;
+        }
+        try {
+          const msRes = await fetch("https://graph.microsoft.com/v1.0/me", { headers: { Authorization: `Bearer ${token}` } });
+          const latencyMs = Date.now() - start;
+          if (msRes.ok) {
+            const info = (await msRes.json()) as { displayName?: string; mail?: string };
+            res.json({ success: true, data: { healthy: true, message: `Connected as ${info.displayName ?? info.mail ?? "unknown"}`, latencyMs } });
+          } else if (msRes.status === 401) {
+            const refreshToken = (credentials as { refreshToken?: string }).refreshToken;
+            res.json({ success: true, data: refreshToken
+              ? { healthy: true, message: "Token expired but refresh token available - will auto-refresh on next use", latencyMs }
+              : { healthy: false, message: "Token expired and no refresh token", latencyMs } });
+          } else {
+            res.json({ success: true, data: { healthy: false, message: `Health check failed (HTTP ${msRes.status})`, latencyMs } });
+          }
+        } catch (err) {
+          res.json({ success: true, data: { healthy: false, message: err instanceof Error ? err.message : "Health check failed", latencyMs: Date.now() - start } });
+        }
+        return;
+      }
+
+      const result = await checkHealth(healthSessionId, server.type, server.name, credentials);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      log.error("[agents] agent mcp health check error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },

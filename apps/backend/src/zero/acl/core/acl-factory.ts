@@ -171,10 +171,7 @@ export class ACLFactory {
    * @param ctx - Query context with user information
    * @returns ACL instance for the table, or NoOpACL if no specific ACL exists
    */
-  static async getACL(
-    table: TableName,
-    ctx: QueryContext
-  ): Promise<BaseACL<any>> {
+  static async getACL(table: TableName, ctx: QueryContext): Promise<BaseACL<any>> {
     // Guest users are denied mutations on all tables except those in the allowlist.
     // This is a safety net: new tables are blocked for guests by default.
     if (ctx.role === 'GUEST' && !GUEST_MUTATION_ALLOWLIST.includes(table)) {
@@ -234,6 +231,8 @@ export class ACLFactory {
         return new MessageAttachmentsACL(ctx);
       case 'messages':
         return new MessagesACL(ctx);
+      case 'message_artifacts':
+        return new BaseACL(ctx, table);
       case 'models':
         return new ModelsACL(ctx);
       case 'notification_preferences':
