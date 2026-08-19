@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactElement } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import Avatar, { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { usePrefersReducedMotion } from '../../../hooks/usePrefersReducedMotion';
 import { cn } from '../../../utils/classNames';
 import type { IncomingCallIdentityVM, IncomingCallRosterEntry } from './IncomingCallCard.types';
 
@@ -55,7 +55,7 @@ function RosterAvatar({
  * other components share.
  */
 export function IncomingCallIdentity({ identity }: IncomingCallIdentityProps): ReactElement {
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const prefersReducedMotion = useReducedMotion();
 
   if (identity.mode === 'solo') {
     return (

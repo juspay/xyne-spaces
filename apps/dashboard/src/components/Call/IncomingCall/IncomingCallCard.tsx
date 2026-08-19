@@ -1,8 +1,8 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { AlertTriangle } from 'lucide-react';
 import type { ReactElement } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import { useOverlayEffect } from '../../../machines/stateMachine';
-import { usePrefersReducedMotion } from '../../../hooks/usePrefersReducedMotion';
 import { cn } from '../../../utils/classNames';
 import { IncomingCallActions } from './IncomingCallActions';
 import { IncomingCallContextLine } from './IncomingCallContextLine';
@@ -27,7 +27,7 @@ export interface IncomingCallCardProps {
  * is what lets `IncomingCallCard.dev.tsx` render every state from fixtures.
  */
 export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardProps): ReactElement {
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const prefersReducedMotion = useReducedMotion();
 
   // The shared Dialog does this for us; done by hand here because other
   // features read the global overlay stack to decide whether they are covered.
