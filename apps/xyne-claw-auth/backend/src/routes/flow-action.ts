@@ -1907,13 +1907,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       ]);
       // A plan action must target the exact outstanding server-created card.
       // This rejects stale/replayed cards and a flow body with substituted plan
-      // text even when the transport itself was validly signed.
+      // text even when the transport itself was validly signed. The todos the
+      // dispatch trusts come from activePlan (the server-stored card record),
+      // so ctx.pendingPlan is NOT required here — Turn-1 never writes it (it's
+      // only set when Turn 2 is dispatched), and requiring it 409'd EVERY
+      // non-trivial plan approval (prod 2026-08-19, "App backend error 409"
+      // on all Approve clicks since the 2026-08-18 sync deploy).
       if (
         !priorCtx ||
         !activePlan ||
+        !activePlan.todos.length ||
         activePlan.messageId !== messageId ||
-        priorCtx.planMessageId !== messageId ||
-        !priorCtx.pendingPlan?.todos?.length
+        priorCtx.planMessageId !== messageId
       ) {
         log.warn(`[flow-action] plan-approval: stale or missing server plan conv=${flowConversationId} agent=${flowAgentSlug}`);
         res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
