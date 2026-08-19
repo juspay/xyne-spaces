@@ -74,9 +74,6 @@ export const AssignmentConfigScreen = ({
   >(new Map());
   const [localExpertise, setLocalExpertise] = useState<Map<string, boolean>>(new Map());
   const [localIsNotified, setLocalIsNotified] = useState<Map<string, boolean>>(new Map());
-  // Bulk-enable-by-role picker for Notify: selecting roles here only turns
-  // matching members' local isNotified ON (never off) — no persisted state of
-  // its own, purely a shortcut into localIsNotified.
   const [selectedNotifyRoleIds, setSelectedNotifyRoleIds] = useState<string[]>([]);
   const [localPercentage, setLocalPercentage] = useState<Map<string, number>>(new Map());
   const [localMaxTickets, setLocalMaxTickets] = useState<Map<string, number>>(new Map());
@@ -86,8 +83,6 @@ export const AssignmentConfigScreen = ({
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
   const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
-  // Max workload cap: toggle drives whether a value is sent at all (off => null).
-  // `maxWorkloadInput` is the raw text so the field can be briefly empty while typing.
   const [localMaxWorkloadEnabled, setLocalMaxWorkloadEnabled] = useState<boolean>(false);
   const [maxWorkloadInput, setMaxWorkloadInput] = useState<string>('');
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
@@ -148,10 +143,6 @@ export const AssignmentConfigScreen = ({
     );
   }, [userGroupMembers, usersById]);
 
-  // Distinct roles actually present among this group's members (role comes nested
-  // via getUserGroupMembers' .related('role')). Members on the legacy
-  // `responsibility` enum (no roleId) don't have a role row and are excluded —
-  // only reachable via the manual per-user toggle.
   const availableNotifyRoles = useMemo(() => {
     const byId = new Map<string, string>();
     for (const mapping of userGroupMembers ?? []) {
@@ -515,8 +506,6 @@ export const AssignmentConfigScreen = ({
     currentMaxSet,
   ]);
 
-  // Same sanitising as board weight: digits only, no leading zeros, positive integer.
-  // Upper bound is left open — workload is weighted, so a legitimate cap can be large.
   const handleMaxWorkloadChange = (value: string): void => {
     const sanitizedValue = value.replace(/[^0-9]/g, '');
     if (sanitizedValue === '') {
@@ -963,7 +952,7 @@ export const AssignmentConfigScreen = ({
     <div className='flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'>
       {/* Header */}
       <div className='shrink-0'>
-        <div className='mx-auto flex w-full max-w-[1040px] items-center gap-5 px-4 pt-5'>
+        <div className='flex w-full items-center gap-5 px-6 pt-5'>
           <Button
             variant='ghost'
             size='iconSm'
@@ -998,7 +987,7 @@ export const AssignmentConfigScreen = ({
 
       {/* Main Content */}
       <div className='flex-1 overflow-y-auto'>
-        <div className='mx-auto w-full max-w-[1040px] space-y-4 px-4 pb-8 pt-8'>
+        <div className='w-full space-y-4 px-6 pb-8 pt-8'>
           {/* Tabs */}
           <div className='flex gap-1 rounded-xl border border-border bg-muted/40 p-1'>
             <button
