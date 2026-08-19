@@ -2324,6 +2324,105 @@ class NotificationService {
     }
   }
 
+  /**
+   * Desktop/mobile push for subscribers (user_group_mappings.isNotified) when a
+   * user pauses ticket assignment. The Activities-tab entry is created
+   * separately by userAssignmentStateService (activityService.createActivities),
+   * matching the pre-existing AssignmentPauseActivity renderer's shape — this
+   * method only handles the push side.
+   */
+  async sendAssignmentPauseNotification(
+    pausedUserId: string,
+    pausedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+    unavailableUntil: number,
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const availableAt = new Date(unavailableUntil).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      const title = 'Ticket assignment paused';
+      const message = `${pausedUserName} paused from ticket assignment until ${availableAt}.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_PAUSED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_PAUSED,
+            relatedEntityType: 'user',
+            relatedEntityId: pausedUserId,
+            workspaceId,
+            metadata: { pausedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment pause notification:', error);
+    }
+  }
+
+  /**
+   * Desktop/mobile push counterpart to sendAssignmentPauseNotification, fired
+   * when the user resumes. See that method's docstring for the activity-vs-push
+   * split.
+   */
+  async sendAssignmentResumeNotification(
+    resumedUserId: string,
+    resumedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const title = 'Ticket assignment resumed';
+      const message = `${resumedUserName} resumed ticket assignment.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_RESUMED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_RESUMED,
+            relatedEntityType: 'user',
+            relatedEntityId: resumedUserId,
+            workspaceId,
+            metadata: { resumedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment resume notification:', error);
+    }
+  }
+
   async sendTicketDueDateChangedNotification(
     ticketId: string,
     recipients: string[],
