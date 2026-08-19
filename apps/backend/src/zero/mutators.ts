@@ -50,6 +50,8 @@ import {
   AttributionConfidence,
   BaseTicketType,
   isReleaseTicket,
+  isManualSubTicketBoard,
+  linkedSubTicketId,
   getNudgeActionBehavior,
   LinkVisibility,
   CollectionRole,
@@ -154,6 +156,7 @@ import {
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
+import { accessibleTicketQuery } from './acl/core/ticket-access';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
@@ -6715,69 +6718,113 @@ export function createMutators(
           }
         },
       ),
-      // Link an EXISTING ticket as a sub-ticket of `ticketId`. Unlike `create`
-      // (which spins up a brand-new ticket), this points the sub-ticket at an
-      // already-existing ticket via `mappedTicketId`. Writes only to
-      // sub_tickets + ticket_sub_ticket_mappings, so the link never appears
-      // under "Related Tickets" (ticket_reference_mappings).
+      // Link an EXISTING ticket as a sub-ticket of `ticketId`, and unlink it again.
+      //
+      // Shape follows `ticketReference.create`/`delete` — the other add/remove-a-link
+      // pair in this file. Only sub_tickets + ticket_sub_ticket_mappings are written,
+      // so a linked ticket shows under Sub-Tickets and never under Related Tickets
+      // (ticket_reference_mappings).
+      //
+      // Both refuse FLOW boards. FLOW sub-tickets are materialised by the flow run
+      // through services/subTicketService.ts, which keys its sub_tickets row by
+      // (rootTicketId, mappedTicketId) so one ticket legitimately has several rows —
+      // hand-editing those mappings would corrupt a run.
       linkExisting: defineMutator(
         z.object({
-          subTicketId: z.string(),
+          // Random per click, NOT derived: see linkedSubTicketId's note — it is what
+          // makes a racing duplicate violate the mappings unique index and roll back,
+          // rather than no-op its way through to a duplicate activity and notification.
           mappingId: z.string(),
           timestamp: z.number(),
           ticketId: z.string(),
           mappedTicketId: z.string(),
+          // Denormalized display fallback for the sub_tickets row. Passed in rather
+          // than derived from a read so the optimistic client twin and the server
+          // write the same value — see docs/guidelines/zero/mutators.md.
+          subTicketTitle: z.string(),
         }),
-        async ({ tx, args: { subTicketId, mappingId, timestamp, ticketId, mappedTicketId } }) => {
+        async ({ tx, args: { mappingId, timestamp, ticketId, mappedTicketId, subTicketTitle } }) => {
           if (mappedTicketId === ticketId) {
             throw new Error('A ticket cannot be linked as its own sub-ticket');
           }
 
-          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
+          const subTicketId = linkedSubTicketId(ticketId, mappedTicketId);
+
+          const parentTicket = await tx.run(
+            zql.tickets.where('id', ticketId).where('workspaceId', authData.workspaceId).one(),
+          );
           if (!parentTicket) {
             throw new Error('Parent ticket not found');
           }
 
-          // Disallow nesting a sub-ticket under a sub-ticket (FLOW boards excepted),
-          // mirroring subTicket.create.
-          const parentAsSubTicket = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+          const parentBoard = await tx.run(zql.boards.where('id', parentTicket.boardId).one());
+          if (!isManualSubTicketBoard(parentBoard?.boardType)) {
+            throw new Error('Sub-tickets on this board are managed automatically');
+          }
+
+          // The ticket being linked must be one the caller can actually see. Reads
+          // inside a mutator are NOT filtered by the read ACLs — `zql` here is the
+          // bare builder — so without this, linking would be a way to pull a private
+          // ticket's title and xyneId into a channel the caller can read, via the
+          // activity and system message written below.
+          const mappedTicket = await tx.run(accessibleTicketQuery(mappedTicketId, authData).one());
+          if (!mappedTicket) {
+            throw new Error('Ticket to link not found');
+          }
+          // The picker only ever offers tickets from this ticket's project, so hold a
+          // hand-made call to the same rule rather than letting it build a sub-ticket
+          // tree that spans projects.
+          if (mappedTicket.projectId !== parentTicket.projectId) {
+            throw new Error('A sub-ticket must belong to the same project');
+          }
+
+          // Sub-ticket trees are one level deep. `create` only has to check the parent
+          // side because the row it makes has no children yet; linking an EXISTING
+          // ticket can break the invariant from either side, so check both.
+          // All rows, not `.one()`: a ticket can legitimately sit behind more than one
+          // sub_tickets row, and only the ones that still hold a mapping make it a child.
+          const parentAsSubTickets = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).related('ticketMappings'),
           );
-          if (parentAsSubTicket) {
-            const parentBoard = await tx.run(zql.boards.where('id', parentTicket.boardId).one());
-            if (parentBoard?.boardType !== BoardType.FLOW) {
-              throw new Error('Cannot add a sub-ticket under a sub-ticket');
+          if (parentAsSubTickets.some(row => (row.ticketMappings?.length ?? 0) > 0)) {
+            throw new Error('Cannot add a sub-ticket under a sub-ticket');
+          }
+
+          const targetHasSubTickets = await tx.run(
+            zql.ticket_sub_ticket_mappings.where('ticketId', mappedTicketId).one(),
+          );
+          if (targetHasSubTickets) {
+            throw new Error('Cannot link a ticket that already has sub-tickets');
+          }
+
+          // One parent per linked ticket, so a ticket is behind exactly one
+          // sub_tickets row and the `.one()`/`findFirst` lookups on mappedTicketId
+          // elsewhere (ticket.update, ticket.updateAssignment,
+          // vespa-injection/core/mapper.ts) stay unambiguous.
+          const existingSubTickets = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings'),
+          );
+          for (const existing of existingSubTickets) {
+            const mappings = existing.ticketMappings ?? [];
+            if (mappings.some(mapping => mapping.ticketId === ticketId)) {
+              throw new Error('This ticket is already linked as a sub-ticket');
+            }
+            if (mappings.length > 0) {
+              throw new Error('This ticket is already a sub-ticket of another ticket');
             }
           }
 
-          // The ticket being linked must exist and live in the same workspace.
-          const mappedTicket = await tx.run(zql.tickets.where('id', mappedTicketId).one());
-          if (!mappedTicket || mappedTicket.workspaceId !== authData.workspaceId) {
-            throw new Error('Ticket to link not found');
-          }
-
-          // Dedupe: refuse if this ticket is already a sub-ticket of this parent.
-          const existingMappings = await tx.run(
-            zql.ticket_sub_ticket_mappings.where('ticketId', ticketId).related('subTicket'),
-          );
-          const alreadyLinked = existingMappings.some(
-            (mapping) => mapping.subTicket?.mappedTicketId === mappedTicketId,
-          );
-          if (alreadyLinked) {
-            throw new Error('This ticket is already linked as a sub-ticket');
-          }
-
-          const title = mappedTicket.title || mappedTicket.xyneId || 'Subticket';
-
-          // Sub-ticket already pointing at the existing ticket.
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
-            title,
+            title: subTicketTitle,
             description: null,
             mappedTicketId,
             createdBy: authData.sub,
             updatedBy: authData.sub,
-            conversationId: mappedTicket.conversationId ?? null,
+            // The PARENT's conversation, matching what subTicket.create's callers pass
+            // and what createFlowSubTicketMappings stores — this is the conversation
+            // the sub-ticket is discussed in, not the child's own.
+            conversationId: parentTicket.conversationId ?? null,
             createdAt: timestamp,
             updatedAt: timestamp,
             stageProgression: null,
@@ -6785,7 +6832,6 @@ export function createMutators(
             workspaceId: authData.workspaceId,
           });
 
-          // Parent -> sub-ticket hierarchy mapping.
           await tx.mutate.ticket_sub_ticket_mappings.insert({
             workspaceId: authData.workspaceId,
             id: mappingId,
@@ -6793,7 +6839,6 @@ export function createMutators(
             subTicketId,
           });
 
-          // Timeline activity (reuses SUBTICKET_CREATED so existing renderers work).
           await tx.mutate.ticket_activities.insert({
             workspaceId: authData.workspaceId,
             id: uuidv4(),
@@ -6802,17 +6847,17 @@ export function createMutators(
             updatedBy: authData.sub,
             timestamp,
             value: {
+              subTicketAction: 'linked',
               subTicketId,
-              subTicketTitle: title,
+              subTicketTitle,
               subTicketXyneId: mappedTicket.xyneId,
             },
             channelId: parentTicket.channelId ?? null,
           });
 
-          // System message on the parent conversation.
           if (parentTicket.conversationId) {
             const user = await tx.run(zql.users.where('id', authData.sub).one());
-            const userName = user?.name || 'Someone';
+            const userName = user?.displayName || user?.name || 'Someone';
             const displayId = mappedTicket.xyneId || subTicketId.substring(0, 8).toUpperCase();
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
@@ -6820,6 +6865,102 @@ export function createMutators(
               workspaceId: authData.workspaceId,
               senderId: authData.sub,
               content: `${userName} linked ticket ${displayId} as a sub-ticket`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: true,
+              showInChannel: false,
+              createdAt: timestamp,
+              metadata: {
+                activityType: ActivityType.SUBTICKET_CREATED,
+                isTicketActivity: true,
+              },
+            });
+          }
+        },
+      ),
+      // Undo a `linkExisting`: drop the parent -> sub-ticket edge. The linked ticket
+      // itself is never touched. The sub_tickets row goes with the edge, so the child
+      // stops counting as somebody's sub-ticket (queries.subTicketsByMappedTicketId)
+      // and can be linked or given sub-tickets of its own again.
+      unlink: defineMutator(
+        z.object({
+          mappingId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { mappingId, timestamp } }) => {
+          const mapping = await tx.run(
+            zql.ticket_sub_ticket_mappings.where('id', mappingId).one(),
+          );
+          if (!mapping) {
+            throw new Error('Sub-ticket link not found');
+          }
+
+          const parentTicket = await tx.run(
+            zql.tickets
+              .where('id', mapping.ticketId)
+              .where('workspaceId', authData.workspaceId)
+              .one(),
+          );
+          if (!parentTicket) {
+            throw new Error('Parent ticket not found');
+          }
+
+          const parentBoard = await tx.run(zql.boards.where('id', parentTicket.boardId).one());
+          if (!isManualSubTicketBoard(parentBoard?.boardType)) {
+            throw new Error('Sub-tickets on this board are managed automatically');
+          }
+
+          const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
+          // Only a link to an existing ticket can be unlinked. A sub-ticket drafted
+          // here and never materialised (mappedTicketId === null) holds the only copy
+          // of its own title and description, so dropping it would destroy content.
+          if (!subTicket?.mappedTicketId) {
+            throw new Error('Only linked sub-tickets can be unlinked');
+          }
+
+          const mappedTicket = await tx.run(
+            zql.tickets.where('id', subTicket.mappedTicketId).one(),
+          );
+
+          await tx.mutate.ticket_sub_ticket_mappings.delete({ id: mappingId });
+
+          // Defensive: only drop the row once nothing points at it any more.
+          const remainingMappings = await tx.run(
+            zql.ticket_sub_ticket_mappings.where('subTicketId', mapping.subTicketId),
+          );
+          if (remainingMappings.length === 0) {
+            await tx.mutate.sub_tickets.delete({ id: mapping.subTicketId });
+          }
+
+          await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
+            id: uuidv4(),
+            ticketId: mapping.ticketId,
+            activityType: ActivityType.SUBTICKET_CREATED,
+            updatedBy: authData.sub,
+            timestamp,
+            value: {
+              subTicketAction: 'unlinked',
+              subTicketId: mapping.subTicketId,
+              subTicketTitle: subTicket.title || mappedTicket?.xyneId || '',
+              subTicketXyneId: mappedTicket?.xyneId,
+            },
+            channelId: parentTicket.channelId ?? null,
+          });
+
+          if (parentTicket.conversationId) {
+            const user = await tx.run(zql.users.where('id', authData.sub).one());
+            const userName = user?.displayName || user?.name || 'Someone';
+            const displayId =
+              mappedTicket?.xyneId || mapping.subTicketId.substring(0, 8).toUpperCase();
+            await tx.mutate.messages.insert({
+              messageId: uuidv4(),
+              conversationId: parentTicket.conversationId,
+              workspaceId: authData.workspaceId,
+              senderId: authData.sub,
+              content: `${userName} unlinked ticket ${displayId} from this ticket`,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,
               edited: false,

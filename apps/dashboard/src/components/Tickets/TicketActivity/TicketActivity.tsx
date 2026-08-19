@@ -451,8 +451,18 @@ export const getActivityDescription = (
     case ActivityType.SUBTICKET_CREATED: {
       const subTicketXyneId =
         value?.subTicketXyneId || value?.subTicketId?.substring(0, 8).toUpperCase();
+      // `action` distinguishes a sub-ticket that was created here from one that was
+      // linked or unlinked. Rows written before that field existed carry no action
+      // and stay on the original "created subticket" copy.
+      const subTicketAction = value?.subTicketAction;
+      const description =
+        subTicketAction === 'linked'
+          ? 'linked subticket'
+          : subTicketAction === 'unlinked'
+            ? 'unlinked subticket'
+            : 'created subticket';
       return {
-        description: 'created subticket',
+        description,
         details: <span className='font-semibold'>{subTicketXyneId}</span>,
       };
     }
