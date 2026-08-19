@@ -143,15 +143,6 @@ export const getDefaultCreateFields = (): CreateField[] => [
     visibleInCreate: true,
   },
   {
-    id: '5',
-    name: 'workflowType',
-    label: 'Workflow',
-    type: 'workflow',
-    required: false,
-    order: 5,
-    visibleInCreate: true,
-  },
-  {
     id: '6',
     name: 'tags',
     label: 'Labels',

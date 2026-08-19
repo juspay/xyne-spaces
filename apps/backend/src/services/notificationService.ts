@@ -1,7 +1,6 @@
 import { logger } from '@/utils/logger';
 import { runAsSystem } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
-import webpush from 'web-push';
 import { websocketService } from './websocketService';
 import {
   createFlowJson,
@@ -171,9 +170,6 @@ interface UserPreferences {
 }
 
 class NotificationService {
-  constructor() {
-    this.initializeWebPush();
-  }
   /**
    * Helper to create a granular notification entry for a specific session (Mobile or Web)
    */
@@ -201,17 +197,6 @@ class NotificationService {
     });
   }
 
-  private initializeWebPush(): void {
-    const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
-    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-    const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@xyne.ai';
-
-    if (vapidPublicKey && vapidPrivateKey) {
-      webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
-    } else {
-      logger.warn('VAPID keys not configured. Push notifications will not work.');
-    }
-  }
   async sendWorkflowCompletionNotification(workflowId: string, status: string, executionId: string): Promise<void> {
     logger.info(
       `[TicketBot] sendWorkflowCompletionNotification called for workflow ${workflowId} with status ${status}`
@@ -867,8 +852,6 @@ class NotificationService {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
-        title: data.title,
-        message: data.message,
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
         actionUrl: data.actionUrl,
@@ -880,7 +863,7 @@ class NotificationService {
         const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
 
         if (hasActiveTokens) {
-          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type}`);
 
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
@@ -939,7 +922,7 @@ class NotificationService {
 
       // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
       if (sendDesktop) {
-        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type}`);
 
         await realTimeNotificationService.sendNotification(
           userId,
@@ -1514,6 +1497,61 @@ class NotificationService {
       .map(result => result.value);
 
     return { deliveredUserIds };
+  }
+
+  async createSummaryTemplateSharedNotifications(
+    recipientUserIds: string[],
+    templateId: string,
+    templateName: string,
+    workspaceId: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'summary_template_shared' | 'summary_template_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+    if (recipientIds.length === 0) return { deliveredUserIds: [] };
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'summary_template',
+    });
+
+    const isRevoked = actorAction === 'summary_template_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a summary template`
+      : `${actorName} shared a summary template with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${templateName}"`
+      : `${actorName} shared "${templateName}" with you`;
+    const actionUrl = `/recordings?templates=1&summaryTemplateId=${encodeURIComponent(templateId)}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.SUMMARY_TEMPLATE_SHARED,
+          relatedEntityType: 'summary_template',
+          relatedEntityId: templateId,
+          actionUrl,
+          workspaceId,
+          metadata: {
+            summaryTemplateId: templateId,
+            templateName,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    return {
+      deliveredUserIds: results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value),
+    };
   }
 
   async createThreadReplyNotifications(

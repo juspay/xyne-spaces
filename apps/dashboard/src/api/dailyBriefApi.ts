@@ -11,16 +11,40 @@ import { apiInstance, BASE_URL } from '../services/clients/apiClient';
  * This is intentionally thin — a starting point for UI developers to build on.
  */
 
+/**
+ * The structured brief the agent emits (`emit_brief`). Mirrors
+ * `DailyBriefPayload` in xyne-claw/src/daily-brief.ts — snake_case keys match
+ * the persisted wire contract. Every section is an array of prose lines that
+ * may carry markdown and inline `[clf-…#N]` citation tokens.
+ */
+/* eslint-disable @typescript-eslint/naming-convention */
+export interface DailyBriefPayload {
+  generated_for: string;
+  date: string;
+  what_needs_you: string[];
+  overdue: string[];
+  waiting_on_others: string[];
+  assigned_to_you: string[];
+  todays_schedule: string[];
+  /** Slimmed toolInvocations baked in at write time, same shape as a bot
+   *  message's `metadata.clawCitations`. Absent on briefs generated before
+   *  citation baking, or when the brief cites nothing. */
+  clawCitations?: Array<{ toolCallId: string; citations: unknown[] }>;
+  /** De-duplicated `iconKey → data:URI` map for the citations above. */
+  clawCitationIcons?: Record<string, string>;
+}
+/* eslint-enable @typescript-eslint/naming-convention */
+
 /** A stored brief as returned by GET /daily-brief/latest. */
 export interface DailyBriefLatest {
   /** Lifecycle: 'none' (never generated) | 'generating' | 'ready' | 'failed'. */
   status: string;
   /** Calendar bucket the brief is for, e.g. "2026-07-29". Absent when status==='none'. */
   date?: string;
-  /** Rendered markdown for direct display. */
+  /** Rendered markdown — the fallback when `data` is missing. */
   content?: string;
   /** Structured payload (the emit_brief JSON) alongside the rendered content. */
-  data?: unknown;
+  data?: DailyBriefPayload | null;
   generatedAt?: string | null;
   /** True when `date` is today's bucket. */
   isToday?: boolean;
@@ -31,7 +55,7 @@ export interface DailyBriefHistoryItem {
   date: string;
   status: string;
   content: string;
-  data?: unknown;
+  data?: DailyBriefPayload | null;
   agentSlug?: string | null;
   generatedAt?: string | null;
 }
@@ -44,7 +68,46 @@ export interface RegenerateHandlers {
   onError?: (message: string) => void;
 }
 
+/** Per-user brief config: the enable flag + custom instructions (GET/PUT /config). */
+export interface DailyBriefConfig {
+  /** Master opt-in for the scheduled brief (users.dailyBriefEnabled). Not the instructions flag. */
+  enabled: boolean;
+  instructions: string;
+  /** Whether the stored instructions are applied to a run. */
+  instructionsEnabled: boolean;
+  updatedAt?: string | null;
+}
+
+/** Server-side cap on the instructions field (claw-auth MAX_INSTRUCTIONS). */
+export const DAILY_BRIEF_INSTRUCTIONS_LIMIT = 8000;
+
 export const dailyBriefApi = {
+  /** The user's brief enable flag + custom instructions. */
+  getConfig: async (): Promise<DailyBriefConfig> => {
+    const res = await apiInstance.get<DailyBriefConfig>('/daily-brief/config');
+    return {
+      enabled: Boolean(res.data?.enabled),
+      instructions: res.data?.instructions ?? '',
+      instructionsEnabled: res.data?.instructionsEnabled !== false,
+      updatedAt: res.data?.updatedAt ?? null,
+    };
+  },
+
+  /** Save the enable flag and/or the custom instructions. */
+  saveConfig: async (payload: {
+    enabled?: boolean;
+    instructions?: string;
+    instructionsEnabled?: boolean;
+  }): Promise<DailyBriefConfig> => {
+    const res = await apiInstance.put<DailyBriefConfig>('/daily-brief/config', payload);
+    return {
+      enabled: Boolean(res.data?.enabled),
+      instructions: res.data?.instructions ?? '',
+      instructionsEnabled: res.data?.instructionsEnabled !== false,
+      updatedAt: res.data?.updatedAt ?? null,
+    };
+  },
+
   /** Today's stored brief (falls back to the most recent one). */
   getLatest: async (): Promise<DailyBriefLatest> => {
     const res = await apiInstance.get<DailyBriefLatest>('/daily-brief/latest');

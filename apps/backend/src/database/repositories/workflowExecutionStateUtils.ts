@@ -82,6 +82,28 @@ export async function stitchExecutionStateMany<T extends WorkflowExecution>(
 }
 
 /**
+ * Like stitchExecutionStateMany, but reads only `context`. List views never use
+ * `output`, and both columns hold full JSON blobs — skipping one halves the read.
+ */
+export async function stitchExecutionContextMany<T extends { id: string }>(
+  executions: T[]
+): Promise<(T & { context: string | null })[]> {
+  if (executions.length === 0) return [];
+
+  const states = await prisma.workflowExecutionState.findMany({
+    where: { workflowExecutionId: { in: executions.map(e => e.id) } },
+    select: { workflowExecutionId: true, context: true },
+  });
+
+  const contextMap = new Map(states.map(s => [s.workflowExecutionId, s.context]));
+
+  return executions.map(execution => ({
+    ...execution,
+    context: contextMap.get(execution.id) ?? null,
+  }));
+}
+
+/**
  * Creates or updates the execution state
  */
 export async function upsertExecutionState(

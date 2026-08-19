@@ -40,8 +40,9 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
-import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import type { MentionResult } from '@xyne/shared';
+import { getSlashCommandArtifactDefinition } from '@xyne/shared';
+import { sendMessage, type ConversationRef } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
@@ -70,6 +71,13 @@ import { setThreadLastRead } from '../../../machines/stateMachine';
 import { BlockNoteEditor } from '@blocknote/core';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import type { TwinEditSession } from '../TwinReplyDraft/twinReplyDraftApi';
+import {
+  SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
+  buildSlashCommandArtifactMessage,
+  detectSlashCommandArtifact,
+  getSlashCommandArtifactBodyText,
+  stripSlashCommandFromHtml,
+} from '../SlashCommandArtifacts';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -190,7 +198,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const conversationId = conversation?.conversationId;
 
     // Slash commands for this channel — filtered by context (thread vs chat)
-    const [channelCommands, setChannelCommands] = useState<CommandItem[]>([]);
+    const [channelCommands, setChannelCommands] = useState<CommandItem[]>(
+      SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
+    );
+    // Registry command id of the artifact currently being drafted, if any.
+    const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     // Global shortcuts for this channel
     const [globalShortcuts, setGlobalShortcuts] = useState<AppShortcutWithApp[]>([]);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
@@ -202,22 +214,40 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       appsService
         .getChannelCommands(channelId, filter)
         .then(cmds =>
-          setChannelCommands(
-            cmds.map(c => ({ id: c.id, name: c.commandName, description: c.description })),
-          ),
+          setChannelCommands([
+            ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
+            ...cmds
+              .filter(
+                c =>
+                  !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
+                    artifact => artifact.name === c.commandName.toLowerCase(),
+                  ),
+              )
+              .map(c => ({
+                id: c.id,
+                name: c.commandName,
+                description: c.description,
+                kind: 'app' as const,
+              })),
+          ]),
         )
         .catch(() => {
-          // silently ignore — channel may simply have no apps
+          setChannelCommands(SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS);
         });
       // Fetch global shortcuts (not filtered by thread/chat)
       appsService
         .getChannelShortcuts(channelId, { type: 'GLOBAL' })
         .then(setGlobalShortcuts)
-        .catch(() => {});
+        .catch(() => undefined);
     }, [channelId, conversation?.conversationId]);
 
     const handleCommandSelect = useCallback(
       async (command: CommandItem, text?: string) => {
+        if (command.kind === 'slash-command-artifact' && command.slashCommandArtifactCommand) {
+          setActiveArtifactCommand(command.slashCommandArtifactCommand);
+          inputBoxRef.current?.focus();
+          return;
+        }
         try {
           await appsService.executeCommandAction(
             channelId,
@@ -242,6 +272,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
     useEffect(() => {
       setPendingConversationId(null);
+      setActiveArtifactCommand(null);
     }, [channelId, conversationId]);
     const agentProgressConversationId = conversationId ?? pendingConversationId ?? undefined;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
@@ -284,47 +315,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Whether the agent-progress pill currently has content — lets InputBox flip
     // between the typing indicator and the agent pill when both are active.
     const [agentActive, setAgentActive] = useState(false);
-    // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)
-    const handleTicketCreated = (ticket: {
-      id: string;
-      conversationId?: string;
-      createdBy?: string;
-      assignedTo?: string;
-      workflowType?: string;
-      xyneId?: string;
-    }): void => {
-      // Workflow selection
-      const workflowType: string | undefined = ticket.workflowType;
-
-      // Only trigger workflow if one is selected
-      if (workflowType) {
-        // Base workflow data
-        const workflowData: CreateWorkflowRequest = {
-          title: `Ticket: ${ticketDescription.slice(0, 50)}${ticketDescription.length > 50 ? '...' : ''}`,
-          workflowType,
-          description: ticketDescription,
-          ticketId: ticket.id,
-          ...(ticket.conversationId && { conversationId: ticket.conversationId }),
-          ...(ticket.xyneId && { xyneId: ticket.xyneId }),
-        };
-
-        // Add BUG_WORKFLOW specific required fields
-        if (workflowType === 'BUG_WORKFLOW') {
-          const bugWorkflowData = {
-            ...workflowData,
-            bugId: ticket.id,
-            severity: 'medium', // Default severity
-            reportedBy: ticket.createdBy || 'unknown',
-            assignedTo: ticket.assignedTo || ticket.createdBy || 'unknown',
-          };
-
-          void createWorkflow(bugWorkflowData);
-        } else {
-          void createWorkflow(workflowData);
-        }
-      }
-
-      // Close the modal after workflow is triggered
+    // Handle post-ticket creation cleanup (close modal, clear input)
+    const handleTicketCreated = (): void => {
       setIsCreateTicketModalOpen(false);
       setTicketDescription('');
 
@@ -563,27 +555,54 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           twinEdit.onApprove(edited);
           return;
         }
-        if (isOffline) {
+        // Edits and thread replies still require a live connection. New
+        // top-level channel messages are allowed offline: the pending-message
+        // framework queues them and auto-retries on reconnect.
+        if (isOffline && (messageId || conversationId)) {
           toast.warning("You're offline", {
             description: messageId
               ? "Edits can't be saved until you reconnect."
-              : 'Your message has been saved as a draft. It will be ready to send when you reconnect.',
+              : "Thread replies can't be sent until you reconnect.",
           });
           throw new Error('offline');
         }
 
-        console.info(
-          `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
-        );
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_info',
+          message: String(
+            `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
+          ),
+        });
 
-        const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
+        // Editing an existing message never re-wraps it as an artifact.
+        const artifactDraft = messageId
+          ? null
+          : detectSlashCommandArtifact(activeArtifactCommand, _plainText);
+        if (artifactDraft && !getSlashCommandArtifactBodyText(artifactDraft, _plainText)) {
+          toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before sending`);
+          throw new Error(`${artifactDraft.definition.command} body is required`);
+        }
+
+        const bodyHtml = processMessageForSending(
+          artifactDraft?.typedInline
+            ? stripSlashCommandFromHtml(artifactDraft.definition.command, html)
+            : html,
+          allUsersForMentionResolution,
+        );
+        const processedHtml = artifactDraft
+          ? buildSlashCommandArtifactMessage(
+              artifactDraft.definition.command,
+              bodyHtml,
+              `slash-command-${artifactDraft.definition.command}-${uuidv4()}`,
+            )
+          : bodyHtml;
         const hasFiles = files && files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
           !isDM &&
           !allowThreadBroadcastMentions &&
-          containsSpecialBroadcastMention(processedHtml);
+          containsSpecialBroadcastMention(artifactDraft ? bodyHtml : processedHtml);
 
         if (hasThreadBroadcastMention) {
           toast.warning('Not allowed in threads', {
@@ -677,9 +696,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
         // Restores draft content back to both the state machine and the editor
         const restoreDraft = () => {
-          saveDraft(lookupId, processedHtml, '');
+          const restoredHtml = artifactDraft ? bodyHtml : processedHtml;
+          saveDraft(lookupId, restoredHtml, '');
           inputBoxRef.current?.clearContent();
-          inputBoxRef.current?.insertContent(processedHtml);
+          inputBoxRef.current?.insertContent(restoredHtml);
+          if (artifactDraft) setActiveArtifactCommand(artifactDraft.definition.command);
           toast.error('Failed to send message', {
             description: 'Message restored as draft. Please try again.',
           });
@@ -732,6 +753,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
             saveDraft(lookupId, '', '');
+            if (artifactDraft) setActiveArtifactCommand(null);
             handleMutationResult(result, restoreDraft, undefined, undefined, {
               channelId,
               conversationId,
@@ -784,28 +806,24 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // Scope the agent-progress spinner to this new conversation right away,
             // before the `conversationId` prop catches up (see pendingConversationId).
             setPendingConversationId(newConversationId);
-            const result = zero.mutate(
-              mutators.conversations.send({
-                channelId,
-                content: processedHtml,
-                type: MessageType.USER,
-                conversationId: newConversationId,
-                messageId: newMessageId,
-                timestamp: messageCreatedAt,
-              }),
-            );
+            // Route top-level channel sends through the shared pending-message
+            // framework. sendMessage writes a durable pending entry, fires
+            // mutators.conversations.send when Zero is connected (and queues it
+            // for auto-retry when it is not), and clears the entry once the
+            // server confirms the write. Failed sends stay queued and surface a
+            // retry/delete affordance instead of being restored to the composer.
+            const channelRef: ConversationRef = { kind: 'channel', channelId };
+            sendMessage(zero as Parameters<typeof sendMessage>[0], channelRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              conversationId: newConversationId,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+            });
 
             saveDraft(lookupId, '', '');
-            handleMutationResult(
-              result,
-              restoreDraft,
-              () => dispatchChatMessageSentEvent(channelId),
-              undefined,
-              {
-                channelId,
-                isNewConversation: true,
-              },
-            );
+            if (artifactDraft) setActiveArtifactCommand(null);
+            dispatchChatMessageSentEvent(channelId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -859,6 +877,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         context.workspaceId,
         allowThreadBroadcastMentions,
         twinEdit,
+        activeArtifactCommand,
       ],
     );
 
@@ -872,14 +891,32 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           toast.error('You must be logged in to schedule messages');
           return;
         }
-        const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
+        const plainText = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
+        const artifactDraft = detectSlashCommandArtifact(activeArtifactCommand, plainText);
+        if (artifactDraft && !getSlashCommandArtifactBodyText(artifactDraft, plainText)) {
+          toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before scheduling`);
+          return;
+        }
+        const bodyHtml = processMessageForSending(
+          artifactDraft?.typedInline
+            ? stripSlashCommandFromHtml(artifactDraft.definition.command, html)
+            : html,
+          allUsersForMentionResolution,
+        );
+        const processedHtml = artifactDraft
+          ? buildSlashCommandArtifactMessage(
+              artifactDraft.definition.command,
+              bodyHtml,
+              `slash-command-${artifactDraft.definition.command}-${uuidv4()}`,
+            )
+          : bodyHtml;
         const hasFiles = files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
           !isDM &&
           !allowThreadBroadcastMentions &&
-          containsSpecialBroadcastMention(processedHtml);
+          containsSpecialBroadcastMention(artifactDraft ? bodyHtml : processedHtml);
         if (hasThreadBroadcastMention) {
           toast.warning('Not allowed in threads', {
             description: '@channel and @here are disabled in thread replies.',
@@ -904,6 +941,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           );
           // Clear draft after scheduling
           saveDraft(lookupId, '', '');
+          if (artifactDraft) setActiveArtifactCommand(null);
           toast.success('Message scheduled', {
             description: `Will be sent at ${new Date(scheduledFor).toLocaleString()}`,
           });
@@ -924,6 +962,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         lookupId,
         setRecentScheduledFor,
         allowThreadBroadcastMentions,
+        activeArtifactCommand,
       ],
     );
 
@@ -1007,7 +1046,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onSendMessage={handleSendMessage}
               onContentChange={handleContentChange}
               onTyping={handleTyping}
-              placeholder={placeholderText}
+              placeholder={
+                getSlashCommandArtifactDefinition(activeArtifactCommand)?.composerPlaceholder ??
+                placeholderText
+              }
               typingUsers={typingUsers}
               showTypingIndicator={showTypingIndicator}
               hasAgentActivity={agentActive}
@@ -1020,6 +1062,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
+              {...(activeArtifactCommand && {
+                slashCommandArtifactCommand: activeArtifactCommand,
+              })}
+              {...(dynamicName && {
+                slashCommandArtifactChannelLabel: isDM ? dynamicName : `#${dynamicName}`,
+              })}
+              onCancelSlashCommandArtifact={() => setActiveArtifactCommand(null)}
               {...(!twinEdit && editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}
@@ -1066,7 +1115,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                               'Your support request has been submitted and picked up by AI.',
                           });
                         } catch (error) {
-                          console.error('Failed to create support ticket:', error);
+                          logger.error(Event.FRONTEND_ERROR, {
+                            type: 'migrated_console_error',
+                            message: String('Failed to create support ticket:'),
+                            error: error,
+                          });
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });

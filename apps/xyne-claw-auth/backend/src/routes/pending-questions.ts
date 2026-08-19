@@ -43,6 +43,15 @@ export async function deleteQuestion(questionId: string): Promise<void> {
   await redis.del(`${PREFIX}${questionId}`);
 }
 
+/** Atomically fetch-and-remove a pending question (getdel). Used by the
+ *  answer path so a question can't be consumed twice. */
+export async function consumeQuestion(questionId: string): Promise<StoredQuestion | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.getdel(`${PREFIX}${questionId}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as StoredQuestion;
+}
+
 // POST / — store a pending question
 router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
   try {

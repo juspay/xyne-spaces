@@ -34,6 +34,9 @@ export interface WorkerStartStreamMessage {
       webSearchEnabled: boolean;
       deepResearchEnabled?: boolean;
       createCanvasEnabled?: boolean;
+      /** Single search + single answer pass instead of the full agentic tool
+       *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
+      instant?: boolean;
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
       messageAttachmentIds?: string[];
@@ -95,13 +98,44 @@ export interface WorkerStreamErrorMessage {
   };
 }
 
+export interface WorkerLogErrorMessage {
+  type: 'WORKER_LOG_ERROR';
+  payload: {
+    message: string;
+    error: {
+      name: string;
+      message: string;
+      stack?: string;
+    };
+  };
+}
+
 export type WorkerOutgoingMessage =
   | WorkerStreamChunkMessage
   | WorkerStreamCompleteMessage
-  | WorkerStreamErrorMessage;
+  | WorkerStreamErrorMessage
+  | WorkerLogErrorMessage;
 
 // Track active streams
 const activeStreams = new Map<string, AbortController>();
+
+const reportWorkerError = (message: string, value: unknown): void => {
+  const error = value instanceof Error ? value : new Error(String(value));
+  const serializedError: WorkerLogErrorMessage['payload']['error'] = {
+    name: error.name,
+    message: error.message,
+  };
+  if (error.stack) serializedError.stack = error.stack;
+
+  const logMessage: WorkerLogErrorMessage = {
+    type: 'WORKER_LOG_ERROR',
+    payload: {
+      message,
+      error: serializedError,
+    },
+  };
+  self.postMessage(logMessage);
+};
 
 /**
  * Execute a streaming request
@@ -149,6 +183,7 @@ async function executeStream(
         web_search_enabled: requestBody.webSearchEnabled,
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
+        instant: requestBody.instant ?? false,
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,
@@ -236,8 +271,7 @@ async function executeStream(
             };
             self.postMessage(message);
           } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[XyneAIWorker] Failed to parse SSE event:', err);
+            reportWorkerError('[XyneAIWorker] Failed to parse SSE event', err);
           }
         }
       }
@@ -295,8 +329,10 @@ self.addEventListener('message', (event: MessageEvent<WorkerIncomingMessage>) =>
       break;
 
     default:
-      // eslint-disable-next-line no-console
-      console.error('[XyneAIWorker] Unknown message type:', type);
+      reportWorkerError(
+        '[XyneAIWorker] Unknown message type',
+        new Error(`Unknown message type: ${String(type)}`),
+      );
   }
 });
 

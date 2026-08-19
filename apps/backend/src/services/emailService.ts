@@ -21,8 +21,8 @@ import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
 import { Prisma } from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
@@ -78,6 +78,10 @@ import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
+import {
+  hasExternalInteractionEmailChanged,
+  hasExternalInteractionTicketChanged,
+} from '@/services/externalInteractionUpdate';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 export function stripCitationBlock(text: string): string {
@@ -118,6 +122,9 @@ export interface CreateConversationWithEmailParams {
   emailType?: EmailType;
   // User who sent this email, for outbound-new flows. Null/undefined for inbound.
   sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
 }
 
 export interface AddEmailToConversationParams {
@@ -133,8 +140,28 @@ export interface AddEmailToConversationParams {
   externalMessageId: string;
   rfcMessageId?: string | null;
   emailType?: EmailType;
+  sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+}
+
+export interface UpdateExternalInteractionParams {
+  emailId: string;
+  subject: string;
+  body: string;
+  from: string;
+  externalThreadId: string;
+  externalMessageId: string;
+  type: EmailType;
+  sentByUserId?: string | null;
+  rating?: number | null;
+  clientVersionName?: string | null;
+  clientVersionCode?: string | null;
+  syncTicket?: boolean;
+  updatedBy?: string | null;
 }
 
 export interface CreateConversationFromEmailParams {
@@ -401,6 +428,127 @@ export class EmailService {
         logger.error('[EmailService] Failed to log Vespa insertion error to database:', dbError);
       }
     });
+  }
+
+  async updateExternalInteraction(
+    params: UpdateExternalInteractionParams,
+  ) {
+    const currentEmail = await this.prisma.email.findUnique({
+      where: { id: params.emailId },
+    });
+    if (!currentEmail) throw new Error(`Email ${params.emailId} not found`);
+
+    const currentTicket = params.syncTicket
+      ? await this.prisma.ticket.findFirst({
+          where: { conversationId: currentEmail.conversationId },
+        })
+      : null;
+
+    const emailChanged = hasExternalInteractionEmailChanged(currentEmail, {
+      subject: params.subject,
+      body: params.body,
+      from: params.from,
+      externalThreadId: params.externalThreadId,
+      externalMessageId: params.externalMessageId,
+      type: params.type,
+      sentByUserId: params.sentByUserId ?? null,
+      rating: params.rating ?? null,
+      clientVersionName: params.clientVersionName ?? null,
+      clientVersionCode: params.clientVersionCode ?? null,
+    });
+    const ticketChanged = hasExternalInteractionTicketChanged(currentTicket, {
+      title: params.subject,
+      description: params.body,
+    });
+
+    if (!emailChanged && !ticketChanged) return currentEmail;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const email = emailChanged
+        ? await tx.email.update({
+            where: { id: params.emailId },
+            data: {
+              subject: params.subject,
+              body: params.body,
+              from: params.from,
+              externalThreadId: params.externalThreadId,
+              externalMessageId: params.externalMessageId,
+              type: params.type,
+              sentByUserId: params.sentByUserId,
+              rating: params.rating,
+              clientVersionName: params.clientVersionName,
+              clientVersionCode: params.clientVersionCode,
+            },
+          })
+        : currentEmail;
+
+      if (!currentTicket || !ticketChanged) return { email, ticket: null };
+
+      const ticket = await tx.ticket.update({
+        where: { id: currentTicket.id },
+        data: {
+          title: params.subject,
+          description: params.body,
+          ...(params.updatedBy && { updatedBy: params.updatedBy }),
+        },
+      });
+      await syncConversationTicketMdFromPrismaTicket(tx, ticket);
+      return { email, ticket };
+    });
+
+    if (emailChanged) {
+      this.pushVespaJobForMail(
+        result.email.id,
+        params.updatedBy ?? currentTicket?.updatedBy ?? currentEmail.from,
+        currentEmail.workspaceId ?? undefined,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external interaction', {
+          emailId: result.email.id,
+          error,
+        });
+      });
+    }
+
+    if (result.ticket && currentTicket) {
+      this.pushVespaJobForTicket(
+        result.ticket.id,
+        params.updatedBy ?? currentTicket.updatedBy,
+        result.ticket.workspaceId,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external ticket', {
+          ticketId: result.ticket!.id,
+          error,
+        });
+      });
+      void messageMetadataService
+        .syncInitialMessageMd(result.ticket.conversationId)
+        .catch((error) => {
+          logger.warn('[EmailService] Failed to sync edited external ticket metadata', {
+            ticketId: result.ticket!.id,
+            error,
+          });
+        });
+      void emitTicketUpdated({
+        ticket: result.ticket as TicketLike,
+        changes: {
+          ...(currentTicket.title !== result.ticket.title && {
+            title: {
+              previousValue: currentTicket.title,
+              newValue: result.ticket.title,
+            },
+          }),
+          ...(currentTicket.description !== result.ticket.description && {
+            description: {
+              previousValue: currentTicket.description,
+              newValue: result.ticket.description,
+            },
+          }),
+        },
+        performedById: params.updatedBy ?? null,
+      });
+    }
+
+    return result.email;
   }
 
   /**
@@ -919,6 +1067,9 @@ export class EmailService {
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
+      rating,
+      clientVersionName,
+      clientVersionCode,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1084,6 +1235,9 @@ export class EmailService {
           externalMessageId,
           ...(sentByUserId && { sentByUserId }),
           ...(normalizedRfcMessageId && { rfcMessageId: normalizedRfcMessageId }),
+          ...(rating != null && { rating }),
+          ...(clientVersionName && { clientVersionName }),
+          ...(clientVersionCode && { clientVersionCode }),
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
@@ -1313,6 +1467,10 @@ export class EmailService {
         externalMessageId,
         rfcMessageId,
         emailType = EmailType.DEFAULT,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         uploadedFiles = [],
         receivedAt,
       } = params;
@@ -1346,6 +1504,10 @@ export class EmailService {
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
         rfcMessageId,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         ...(receivedAt && { createdAt: receivedAt }),
       };
 
@@ -1613,6 +1775,13 @@ export class EmailService {
               data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+
+            try {
+              await syncUserWorkload(primaryUserId, userGroupId, boardId, userId);
+              logger.info(`[EmailService] Synced workload for user ${primaryUserId}`);
+            } catch (workloadError) {
+              logger.error('[EmailService] Error syncing workload:', workloadError);
+            }
           }
         } else {
         const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId, channelId);
@@ -1777,7 +1946,9 @@ export class EmailService {
       logger.warn(`[emailService.sendReplyOnConversation] Email sending blocked for ticket ${ticket.id} - emailReplyEnabled is false`);
       throw new Error(`Email sending is temporarily disabled for this ticket. An automated process is in progress.`);
     }
-    const externalSource = await new ExternalSourceRepository().findByChannelId(conversation.channelId);
+    const externalSource = await new ChannelExternalSourceResolver().resolveForChannel(
+      conversation.channelId,
+    );
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
     const emails = await this.emailRepository.findByConversationId(params.conversationId);
     if (emails.length === 0) throw new Error(`No emails in conversation ${params.conversationId}`);

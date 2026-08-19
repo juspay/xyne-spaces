@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { Spinner } from '@xyne/icons';
 import { CallStatus } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { PanelsTopLeft } from 'lucide-react';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
-import { usePaginatedOatsRecordings } from '../../hooks/usePaginatedOatsRecordings';
+import { Dialog } from '../../components/ui/Dialog';
+import {
+  usePaginatedOatsRecordings,
+  type OatsRecordingEntry,
+} from '../../hooks/usePaginatedOatsRecordings';
+import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
@@ -19,6 +26,7 @@ import RecordingControlsOverlay from './components/RecordingControlsOverlay';
 import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
+import RecordingAskAIModal from './components/RecordingAskAIModal';
 import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
@@ -35,16 +43,28 @@ import {
 } from './utils/RecordingsV2.utils';
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE } from '@/utils/recordingUtils';
+import { getUserDisplayName } from '../../utils/userDisplayName';
+import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
+import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 const RecordingsV2Screen = (): ReactElement => {
+  const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
+  const requestedSummaryTemplateId = searchParams.get('summaryTemplateId');
+  const shouldOpenTemplatesFromUrl =
+    searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
+  const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
+  const showTemplatesModal = shouldOpenTemplatesFromUrl;
+  const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } =
+    useSummaryTemplates(showTemplatesModal);
   const {
     recordings,
     hasMoreRecordings,
@@ -64,6 +84,25 @@ const RecordingsV2Screen = (): ReactElement => {
   const recordingPauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const recordingAccumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const pendingAutoStart = useRecordingStore(context => context.pendingAutoStart);
+  const handleOpenTemplates = useCallback((): void => {
+    setSearchParams(current => {
+      const next = new URLSearchParams(current);
+      next.set('templates', '1');
+      return next;
+    });
+  }, [setSearchParams]);
+
+  const handleCloseTemplates = useCallback((): void => {
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('templates');
+        next.delete('summaryTemplateId');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleStartRecording = useCallback((): void => {
     if (recordingStatus !== 'idle' && recordingStatus !== 'error') return;
@@ -131,19 +170,21 @@ const RecordingsV2Screen = (): ReactElement => {
     activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
     isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
+  const hiddenLiveRecordingId =
+    recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
   const filteredRecordings = useMemo(
     () =>
       filterRecordingsByLabels(
         ownershipFilteredRecordings.filter(
-          // Hide only the recording currently shown in the live pill.
+          // Hide the local live row
           recording =>
-            recording.externalId !== recordingCallId &&
+            recording.externalId !== hiddenLiveRecordingId &&
             isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
         ),
         selectedLabels,
       ),
-    [ownershipFilteredRecordings, recordingCallId, selectedDatePreset, selectedLabels],
+    [ownershipFilteredRecordings, hiddenLiveRecordingId, selectedDatePreset, selectedLabels],
   );
   const recordingsCapturedThisWeek = useMemo(
     () =>
@@ -200,11 +241,24 @@ const RecordingsV2Screen = (): ReactElement => {
   );
 
   const handleOpenAskAI = useCallback((): void => {
+    setShowAskAIContextModal(true);
+  }, []);
+
+  const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
     xyneAIActor.send({
       type: 'OPEN',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
+      initialContextSelections: {
+        canvases: [],
+        recordings: selected.map(recording => ({
+          id: recording.id,
+          title: recording.title || DEFAULT_RECORDING_TITLE,
+          externalId: recording.externalId,
+          ...(recording.channelId ? { channelId: recording.channelId } : {}),
+        })),
+      },
     });
   }, []);
 
@@ -230,6 +284,15 @@ const RecordingsV2Screen = (): ReactElement => {
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
       aria-labelledby='xyne-scribe-heading'
     >
+      {/* Floated rather than in-flow so the list keeps the full viewport height.
+          `w-fit` gives the shrink-to-fit box a definite width for the navigator's
+          own `w-full`; z-30 keeps it above the sticky header (z-20), which
+          otherwise covers it once the centred column reaches the left edge. */}
+      {!isMobile && (
+        <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
+          <AppNavigator />
+        </div>
+      )}
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
           <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
@@ -291,17 +354,30 @@ const RecordingsV2Screen = (): ReactElement => {
                 />
               </div>
 
-              <Button
-                type='button'
-                variant='outline'
-                onClick={handleOpenAskAI}
-                className='col-start-2 row-start-1 h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70 sm:row-start-2'
-                data-track-category='RecordingsV2'
-                data-track-name='open_ask_ai'
-              >
-                <XyneAIStar size={15} />
-                Ask AI
-              </Button>
+              <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={handleOpenTemplates}
+                  className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
+                  data-track-category='RecordingsV2'
+                  data-track-name='open_summary_templates'
+                >
+                  <PanelsTopLeft className='size-4' />
+                  Templates
+                </Button>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={handleOpenAskAI}
+                  className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
+                  data-track-category='RecordingsV2'
+                  data-track-name='open_ask_ai'
+                >
+                  <XyneAIStar size={15} />
+                  Ask AI
+                </Button>
+              </div>
             </div>
           </header>
 
@@ -456,6 +532,38 @@ const RecordingsV2Screen = (): ReactElement => {
           />
         )}
       </AnimatePresence>
+
+      {currentUser && showTemplatesModal && (
+        <Dialog
+          open
+          onOpenChange={open => !open && handleCloseTemplates()}
+          title='Templates'
+          description='Create, edit, and share recording summary templates.'
+          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
+          testId='recordings-summary-templates-dialog'
+        >
+          <SummaryTemplatesModal
+            templates={summaryTemplates}
+            loading={summaryTemplatesLoading}
+            selectedTemplateId={requestedSummaryTemplateId}
+            currentUserId={currentUser.id}
+            currentUserName={getUserDisplayName(currentUser)}
+            onClose={handleCloseTemplates}
+          />
+        </Dialog>
+      )}
+
+      {showAskAIContextModal && (
+        <RecordingAskAIModal
+          open={showAskAIContextModal}
+          recordings={ownershipFilteredRecordings}
+          users={users}
+          currentUserId={currentUser?.id}
+          resolveLabel={resolveLabel}
+          onOpenChange={setShowAskAIContextModal}
+          onConfirm={handleConfirmAskAIContext}
+        />
+      )}
     </div>
   );
 };

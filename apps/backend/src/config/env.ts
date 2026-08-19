@@ -24,7 +24,12 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE_PATH: Joi.string().default('logs/app.log'),
+  // Streams error-level logs to Fluent Bit's forward input (see docker/fluent-bit/).
+  // Off by default so envs without a Fluent Bit endpoint (e.g. prod, until one
+  // is provisioned there) don't try to connect anywhere.
+  LOG_FLUENT_ENABLED: Joi.boolean().default(false),
+  LOG_FLUENT_HOST: Joi.string().default('localhost'),
+  LOG_FLUENT_PORT: Joi.number().default(24224),
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
@@ -90,6 +95,8 @@ const envSchema = Joi.object({
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+
+  DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
@@ -164,8 +171,13 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
+  // How long a thread's job sits delayed before it runs. This is the debounce
+  // window: every message on the thread inside it collapses into one job, so a
+  // busy thread costs one extraction per window, not one per message.
+  ENTITY_EXTRACTION_DEBOUNCE_MS: Joi.number().default(15 * 60 * 1000),
   // Org-level framing prepended to the mention-extraction prompt, so the model
   // knows whose data it is reading. Fixes identity-relative errors like listing
   // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
@@ -316,14 +328,20 @@ const envSchema = Joi.object({
   THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
   THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
   THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
-  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
+  ENC_ORG_PROVISION: Joi.boolean().default(false),
+  ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -358,9 +376,13 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  ENC_S2S_KEY: Joi.string().allow(''),
+  ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
+  ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(50),
   EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
@@ -498,7 +520,11 @@ export const config = {
   },
   logging: {
     level: envVars.LOG_LEVEL,
-    filePath: envVars.LOG_FILE_PATH,
+    fluent: {
+      enabled: envVars.LOG_FLUENT_ENABLED,
+      host: envVars.LOG_FLUENT_HOST,
+      port: envVars.LOG_FLUENT_PORT,
+    },
     logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
@@ -569,6 +595,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
@@ -670,10 +697,12 @@ export const config = {
     url: envVars.Y_SWEET_URL,
   },
   entityExtraction: {
+    enabled: envVars.ENABLE_ENTITY_EXTRACTION,
     model: envVars.ENTITY_EXTRACTION_MODEL,
     // A single extraction call takes 20-75s on this endpoint. Raising this
     // makes calls contend and time out rather than finish faster.
     concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
+    debounceMs: envVars.ENTITY_EXTRACTION_DEBOUNCE_MS,
     orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
   },
 
@@ -836,12 +865,6 @@ export const config = {
     maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
     transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
-  desk: {
-    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean),
-  },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
     eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
@@ -863,6 +886,13 @@ export const config = {
     migrationFallbackEmail: envVars.CONFLUENCE_MIGRATION_FALLBACK_EMAIL as string,
     importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
     importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
+  },
+  enc: {
+    clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
+    apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
+    enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
+    orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
+    workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {
@@ -891,9 +921,15 @@ export const config = {
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },
+  internal: {
+    encryptionS2sKey: envVars.ENC_S2S_KEY as string,
+    encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    encryptionRequestTimeoutMs: envVars.ENCRYPTION_REQUEST_TIMEOUT_MS as number,
+  },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
+    gmailWebhookMaxBatch: envVars.GMAIL_WEBHOOK_MAX_BATCH as number,
   },
   emailMergeModeDefault: envVars.EMAIL_MERGE_MODE_DEFAULT as 'DISABLED' | 'ENABLED',
   docling: {

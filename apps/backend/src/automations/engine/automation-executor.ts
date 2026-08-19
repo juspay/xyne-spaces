@@ -18,7 +18,8 @@ import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver'
 import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
 import {
-  AUTOMATION_WORKFLOW_TYPE,
+  isExecutableAutomationWorkflowType,
+  mayDrainInFlight,
   parseAutomationConfig,
   parseAutomationMetadata,
   readAutomationMeta,
@@ -76,7 +77,7 @@ export class AutomationExecutor {
       logger.warn(`[automations] runExecution: row ${executionId} not found, dropping`);
       return undefined;
     }
-    if (existing.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    if (!isExecutableAutomationWorkflowType(existing.workflowType)) {
       logger.warn(
         `[automations] runExecution: row ${executionId} workflowType=${existing.workflowType ?? '∅'} — not an automation, dropping`,
       );
@@ -94,10 +95,15 @@ export class AutomationExecutor {
       );
       return undefined;
     }
-    if (workflow.status !== AutomationStatus.ACTIVE) {
+    if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
       logger.info(
-        `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — running captured config for ${executionId}`,
+        `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — run ${executionId} CANCELLED`,
       );
+      return undefined;
     }
 
     const config = parseAutomationConfig(workflow.context);

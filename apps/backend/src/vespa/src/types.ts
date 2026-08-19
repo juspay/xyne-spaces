@@ -214,6 +214,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
 
 export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   text: string;
+  chunks: string[];
   userId: string;
   username: string;
   userEmail: string;
@@ -268,6 +269,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   workflowType: string;
   description: string;
   description_clean?: string;
+  chunks: string[];
   ticketType: string;
   priority: TicketPriority;
   stage: string;
@@ -291,6 +293,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   assignedToName: string;
   closedByName: string;
   projectName: string;
+  projectCode: string;
   ticketMentions: string[];
   threadMentions: string[];
   threadSenders: string[];

@@ -430,7 +430,7 @@ export async function curateAndPersistBatch(args: {
   for (const row of writable) {
     if (autoApproveEnabled && row.signalScore >= minScore) {
       try {
-        const content = row.text.slice(0, 1500);
+        const content = row.text;
         const tags = [
           `user:${userId}`,
           `subsystem:${row.subsystem}`,

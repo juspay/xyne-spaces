@@ -14,6 +14,12 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllDatabases } from '@rocicorp/zero';
 
 export interface User {
   id: string;
@@ -69,6 +75,7 @@ type AuthEvent =
   | { type: 'GOOGLE_SIGNIN' }
   | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'EMAIL_SIGNIN' }
+  | { type: 'EMAIL_REGISTER' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
@@ -86,6 +93,7 @@ export type AuthState =
   | 'authenticated'
   | 'unauthenticated'
   | 'authenticating'
+  | 'registering'
   | 'loggingOut'
   | 'validatingSession'
   | 'processingOAuthCallback'
@@ -786,6 +794,9 @@ export const authMachine = createMachine(
           EMAIL_SIGNIN: {
             target: 'authenticating',
           },
+          EMAIL_REGISTER: {
+            target: 'registering',
+          },
           SESSION_VALIDATED: {
             target: 'authenticated',
             actions: {
@@ -960,6 +971,90 @@ export const authMachine = createMachine(
           },
         },
       },
+      registering: {
+        on: {
+          OAUTH_CALLBACK_COMPLETE: [
+            {
+              guard: 'hasPendingWorkspace',
+              target: 'joiningWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasLastActiveWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasWorkspaces',
+              target: 'selectingWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+          ],
+          AUTH_ERROR: {
+            target: 'unauthenticated',
+            actions: {
+              type: 'setError',
+            },
+          },
+          CLEAR_ERROR: {
+            actions: {
+              type: 'clearError',
+            },
+          },
+          LOGOUT: {
+            target: 'unauthenticated',
+            actions: [
+              'clearSessionCookies',
+              { type: 'notifySignOut', params: { reason: 'User canceled registration' } },
+              assign(() => createClearedContext()),
+            ],
+          },
+        },
+      },
       testAuthenticating: {
         invoke: {
           src: 'performTestLogin',
@@ -1074,6 +1169,10 @@ export const authMachine = createMachine(
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1238,6 +1337,9 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        await dropAllDatabases();
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

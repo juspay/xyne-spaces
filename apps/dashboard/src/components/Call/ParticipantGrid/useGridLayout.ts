@@ -4,6 +4,7 @@ import { selectGridLayout, type GridLayout } from './gridLayouts';
 export function useGridLayout(
   participantCount: number,
   maxTiles?: number,
+  gap?: number,
 ): {
   containerRef: React.RefObject<HTMLDivElement | null>;
   layout: GridLayout;
@@ -13,8 +14,8 @@ export function useGridLayout(
     columns: 1,
     rows: 1,
     maxTiles: 1,
-    minWidth: 0,
-    minHeight: 0,
+    tileWidth: 0,
+    tileHeight: 0,
   });
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export function useGridLayout(
     const updateLayout = (): void => {
       if (!containerRef.current) return;
       const { width, height } = containerRef.current.getBoundingClientRect();
-      const newLayout = selectGridLayout(participantCount, width, height, maxTiles);
+      const newLayout = selectGridLayout(participantCount, width, height, maxTiles, gap);
       setLayout(newLayout);
     };
 
@@ -32,7 +33,7 @@ export function useGridLayout(
     updateLayout();
 
     return (): void => resizeObserver.disconnect();
-  }, [participantCount, maxTiles]);
+  }, [participantCount, maxTiles, gap]);
 
   return { containerRef, layout };
 }

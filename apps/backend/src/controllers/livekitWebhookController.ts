@@ -22,6 +22,7 @@ import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -389,6 +390,7 @@ class LiveKitWebhookController {
         const callType = roomMetadata.callType;
         const callOrigin = roomMetadata.callOrigin;
         const existingConversationId = roomMetadata.conversationId;
+        const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
 
         if (!channelId) {
@@ -452,7 +454,7 @@ class LiveKitWebhookController {
         const callId = uuidv4();
 
         // Construct room link
-        const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
+        const roomLink = buildCallInviteUrl(roomName);
 
         // Use repository method to create call with all related records atomically
         // If this transaction fails the LiveKit room is already live with no DB record — a
@@ -476,6 +478,7 @@ class LiveKitWebhookController {
           messageId,
           now,
           callOrigin,
+          ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',

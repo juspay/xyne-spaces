@@ -13,12 +13,13 @@ import {
   getDMParticipantIdsToFetch,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
+import { rankChannelsByAffinity } from '../../hooks/useSearchMetrics';
+import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
-import { useSearchMode } from '../../hooks/useSearchMode';
 import type { InitialQueryData } from '../Chat/ChatDirectory/LexicalSearchInput';
 import { useUsers } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -79,6 +80,9 @@ const GlobalCommandMenu = ({
   const channelData = useAllChannels();
   const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
+  // Re-render once when affinity weights finish loading so the ranking memo below re-reads them
+  // (they load async after mount and are otherwise invisible until an unrelated dep changes).
+  const affinityVersion = useAffinityCallback();
   const [internalOpen, setInternalOpen] = useState(false);
   const [internalInitialMention, setInternalInitialMention] = useState<MentionData | null>(null);
   const [internalContextualTab, setInternalContextualTab] = useState<TabType | undefined>(
@@ -96,7 +100,6 @@ const GlobalCommandMenu = ({
   const effectiveHideTabs = hideTabs !== undefined ? hideTabs : internalHideTabs;
   const effectiveEnabledTabs = enabledTabs !== undefined ? enabledTabs : internalEnabledTabs;
   const location = useLocation();
-  const { searchMode } = useSearchMode();
   const allUsers = useUsers();
 
   const unreadCounts = useAllUnreadCount();
@@ -134,20 +137,7 @@ const GlobalCommandMenu = ({
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
 
-    // Screen mode: open the same full-page search bar that Cmd+K screen mode opens
-    // (GlobalTopBar listens for this event), pre-scoped with the in:<channel> chip
-    // so the cursor lands ready to type. No mention → just opens the empty bar.
-    const openSearchBar = (mention: MentionData | null): void => {
-      window.dispatchEvent(
-        new CustomEvent('xyne:activate-search-bar', mention ? { detail: { mention } } : undefined),
-      );
-    };
-
     if (pathParts.includes('tickets') || pathParts.includes('projects')) {
-      if (searchMode === 'screen') {
-        openSearchBar(null);
-        return;
-      }
       setInternalInitialMention(null);
       setInternalContextualTab(TabType.TICKETS);
       setInternalHideTabs(false);
@@ -186,10 +176,6 @@ const GlobalCommandMenu = ({
       if (channel) {
         // Desk (support) channel → open with Desk tab + in:<channel> scope
         if (channel.type === ChannelType.SUPPORT) {
-          if (searchMode === 'screen') {
-            openSearchBar(buildChannelMention(channel));
-            return;
-          }
           setInternalInitialMention(buildChannelMention(channel));
           setInternalContextualTab(TabType.DESK);
           setInternalHideTabs(false);
@@ -201,19 +187,11 @@ const GlobalCommandMenu = ({
         // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
         const activeChannelTab = new URLSearchParams(location.search).get('tab');
         if (activeChannelTab === 'tickets') {
-          if (searchMode === 'screen') {
-            openSearchBar(buildChannelMention(channel));
-            return;
-          }
           setInternalContextualTab(TabType.TICKETS);
           setInternalInitialMention(buildChannelMention(channel));
           setInternalHideTabs(false);
           setInternalEnabledTabs(undefined);
           onOpenChange(true);
-          return;
-        }
-        if (searchMode === 'screen') {
-          openSearchBar(buildChannelMention(channel));
           return;
         }
         setInternalContextualTab(TabType.MESSAGES);
@@ -226,24 +204,12 @@ const GlobalCommandMenu = ({
     }
 
     // Fallback — open normally (ALL tab)
-    if (searchMode === 'screen') {
-      openSearchBar(null);
-      return;
-    }
     setInternalContextualTab(undefined);
     setInternalInitialMention(null);
     setInternalHideTabs(false);
     setInternalEnabledTabs(undefined);
     onOpenChange(true);
-  }, [
-    location.pathname,
-    location.search,
-    channelData,
-    allUsers,
-    onOpenChange,
-    context.userID,
-    searchMode,
-  ]);
+  }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
@@ -253,6 +219,9 @@ const GlobalCommandMenu = ({
 
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
+    // Referenced only so this memo re-runs when affinity weights finish loading (the weights
+    // themselves are read imperatively via getChannelWeight below); keeps exhaustive-deps active.
+    void affinityVersion;
     if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
     const visibleChannels = channelData.map(channel => {
@@ -270,19 +239,18 @@ const GlobalCommandMenu = ({
     // Re-include them so the search `in:` picker can scope to desk channels.
     const emailChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
-    const sortByActivity = (list: typeof visibleChannels) =>
-      [...list].sort(
-        (a, b) =>
-          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
-          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
-      );
+    // Rank each group by personalization weight (desc), tie-break on recency (shared with the
+    // `/chat`/`/call` pickers). No weights → 0 ties → pure recency, identical to the previous order.
+    const rankedStarred = rankChannelsByAffinity(grouped.starred);
+    const rankedChannels = rankChannelsByAffinity([...grouped.channels, ...emailChannels]);
+    const rankedDirectMessages = rankChannelsByAffinity(grouped.directMessages);
 
     return {
-      starred: sortByActivity(grouped.starred),
-      channels: sortByActivity([...grouped.channels, ...emailChannels]),
-      directMessages: sortByActivity(grouped.directMessages),
+      starred: rankedStarred,
+      channels: rankedChannels,
+      directMessages: rankedDirectMessages,
     };
-  }, [channelData, allChannelsUserStatus, visibleAllChannels]);
+  }, [channelData, allChannelsUserStatus, visibleAllChannels, affinityVersion]);
 
   // Reconstruct the previous search (mention chips + trailing text) from the
   // results-page URL params so reopening the overlay from the header restores it.

@@ -31,7 +31,11 @@ export {
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
 export { MessageRepository } from './messageRepository';
-export { MessageSearchRepository } from './messageSearchRepository';
+export {
+  syncMessageArtifact,
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';
@@ -101,7 +105,6 @@ import { RecurringCallSeriesRepository } from './recurringCallSeriesRepository';
 import { RecurringCallParticipantRepository } from './recurringCallParticipantRepository';
 import { MessageRepository } from './messageRepository';
 import { ProjectRepository } from './projectRepository';
-import { MessageSearchRepository } from './messageSearchRepository';
 import { ChannelRepository } from './channelRepository';
 import { ChannelParticipantRepository } from './channelParticipantRepository';
 import { ConversationParticipantRepository } from './conversationParticipantRepository';
@@ -165,7 +168,6 @@ export class RepositoryContainer {
   public recurringCallParticipants: RecurringCallParticipantRepository;
   public messages: MessageRepository;
   public projects: ProjectRepository;
-  public messageSearch: MessageSearchRepository;
   public channels: ChannelRepository;
   public channelParticipants: ChannelParticipantRepository;
   public conversations: ConversationRepository;
@@ -225,7 +227,6 @@ export class RepositoryContainer {
     this.recurringCallParticipants = new RecurringCallParticipantRepository();
     this.messages = new MessageRepository();
     this.projects = new ProjectRepository();
-    this.messageSearch = new MessageSearchRepository();
     this.channels = new ChannelRepository();
     this.channelParticipants = new ChannelParticipantRepository();
     this.conversations = new ConversationRepository();

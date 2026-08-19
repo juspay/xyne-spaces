@@ -27,6 +27,7 @@ import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableH
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
 
@@ -429,7 +430,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     }
 
     const assigneeDisplay = assignedUser ? (
-      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+      <Tooltip content={getUserDisplayName(assignedUser)}>
         <div className='relative group/assignee'>
           <Avatar
             userId={assignedUser.id}
@@ -542,7 +543,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   // views never pass `isConversation`, so they keep the full card.
   if (isConversation) {
     const conversationAssignee = assignedUser ? (
-      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+      <Tooltip content={getUserDisplayName(assignedUser)}>
         <Avatar
           userId={assignedUser.id}
           showActiveStatus={false}
@@ -558,11 +559,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         </div>
       </Tooltip>
     ) : (
-      <Tooltip content='Unassigned'>
-        <div className='w-5 h-5 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
-          <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
-        </div>
-      </Tooltip>
+      <div className='w-5 h-5 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+        <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
+      </div>
     );
 
     return (
@@ -736,7 +735,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   {!isCompact &&
                     showAssignee &&
                     (assignedUser ? (
-                      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+                      <Tooltip content={getUserDisplayName(assignedUser)}>
                         <div className='relative group/assignee'>
                           <Avatar
                             userId={assignedUser.id}

@@ -16,6 +16,8 @@ import {
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import {
   InlineContentSchema,
   PartialBlock,
@@ -39,7 +41,6 @@ import {
   knownCanvasBlockTypes,
 } from '../canvasSchema';
 import { createElement } from 'react';
-import { MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
 import { CanvasEditorProps, CanvasEditorRef } from '../Canvas.types';
@@ -57,7 +58,6 @@ import {
 import { toast } from 'sonner';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
-import { SelectionAskAI } from '../SelectionAskAI';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -73,9 +73,10 @@ import { logger, Event } from '../../../utils/logger';
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
-import Button from '../../ui/Button';
-import { Tooltip } from '../../ui/Tooltip';
 import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { AnimatePresence } from 'framer-motion';
+
+import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
@@ -129,6 +130,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       onMentionInsert,
       initialBlockIdToFocus,
       initialCommentThreadId,
+      onOpenCommentCountChange,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -212,39 +214,14 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       closePresentation,
     } = usePresentation({ editor });
 
-    // Expose presentation methods via ref
-    useImperativeHandle(
-      ref,
-      () => ({
-        handlePresent,
-        handleThemeChange,
-        getBlocks: () => deepCloneBlocks(editor.document as PartialBlock[]),
-        replaceContent: (blocks: PartialBlock[]) => {
-          const currentBlocks = editor.document;
-          const nextBlocks = deepCloneBlocks(
-            removeUnknownBlocks(blocks, knownCanvasBlockTypes),
-          ) as Parameters<typeof editor.replaceBlocks>[1];
-          editor.replaceBlocks(currentBlocks, nextBlocks);
-        },
-        exportMarkdown: (title: string) =>
-          exportCanvasAsMarkdown(
-            editor as unknown as CanvasExportEditor,
-            title,
-            containerRef.current,
-          ),
-        exportPDF: (title: string) =>
-          exportCanvasAsPDF(editor as unknown as CanvasExportEditor, title, containerRef.current),
-        selectedTheme,
-      }),
-      [editor, handlePresent, handleThemeChange, selectedTheme],
-    );
-
     // Get custom slash menu items (whiteboard and genius)
     const customSlashItems = useMemo(() => {
       if (!editor) return [];
       const editorTyped = asBlockNoteEditorForView(editor);
       const whiteboardItems = getWhiteboardSlashMenuItems(editorTyped);
-      return [...whiteboardItems];
+      const mathItems = getMathSlashMenuItems(editorTyped);
+      const diagramItems = getDiagramSlashMenuItems(editorTyped);
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
     // Get slash menu items with custom blocks
@@ -409,12 +386,15 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const {
       isCommentsOpen,
       setIsCommentsOpen,
+      inlineCommentThread,
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
       focusCommentBlock,
+      clearActiveCommentAnchor,
+      closeInlineCommentThread,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
     } = useCanvasCommentEditorBridge({
@@ -423,7 +403,36 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       getEditor: getCanvasCommentEditor,
       initialBlockIdToFocus,
       initialCommentThreadId,
+      onOpenCommentCountChange,
     });
+
+    // Expose presentation and comment drawer methods via ref
+    useImperativeHandle(
+      ref,
+      () => ({
+        handlePresent,
+        handleThemeChange,
+        getBlocks: () => deepCloneBlocks(editor.document as PartialBlock[]),
+        replaceContent: (blocks: PartialBlock[]) => {
+          const currentBlocks = editor.document;
+          const nextBlocks = deepCloneBlocks(
+            removeUnknownBlocks(blocks, knownCanvasBlockTypes),
+          ) as Parameters<typeof editor.replaceBlocks>[1];
+          editor.replaceBlocks(currentBlocks, nextBlocks);
+        },
+        exportMarkdown: (title: string) =>
+          exportCanvasAsMarkdown(
+            editor as unknown as CanvasExportEditor,
+            title,
+            containerRef.current,
+          ),
+        exportPDF: (title: string) =>
+          exportCanvasAsPDF(editor as unknown as CanvasExportEditor, title, containerRef.current),
+        toggleComments: () => setIsCommentsOpen(open => !open),
+        selectedTheme,
+      }),
+      [editor, handlePresent, handleThemeChange, selectedTheme, setIsCommentsOpen],
+    );
 
     useScope('canvas', isFocused);
 
@@ -522,8 +531,13 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     }, [editor, content, extractHeadings]);
 
     const canvasFormattingToolbar = useMemo(
-      () => createCanvasFormattingToolbar(openCommentsForCurrentBlock),
-      [openCommentsForCurrentBlock],
+      () =>
+        createCanvasFormattingToolbar(openCommentsForCurrentBlock, {
+          ...(canvasId && { canvasId }),
+          ...(_canvasTitle && { canvasTitle: _canvasTitle }),
+          canComment: editable,
+        }),
+      [_canvasTitle, canvasId, editable, openCommentsForCurrentBlock],
     );
 
     const handleSave = useCallback((): void => {
@@ -559,35 +573,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         onBlurCapture={handleBlurCapture}
         data-testid='canvas-editor'
       >
-        <div className='flex min-h-0 flex-1 overflow-hidden'>
+        <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
-            {canvasId && (
-              <div className='absolute right-4 top-3 z-10 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1 shadow-sm backdrop-blur'>
-                {editable && (
-                  <Tooltip content='Add comment'>
-                    <Button
-                      variant='ghost'
-                      size='iconSm'
-                      onClick={openCommentsForCurrentBlock}
-                      aria-label='Add comment'
-                    >
-                      <MessageSquarePlus className='size-4' />
-                    </Button>
-                  </Tooltip>
-                )}
-                <Tooltip content='Comments'>
-                  <Button
-                    variant={isCommentsOpen ? 'secondary' : 'ghost'}
-                    size='iconSm'
-                    onClick={() => setIsCommentsOpen(open => !open)}
-                    aria-label='Comments'
-                  >
-                    <MessageSquare className='size-4' />
-                  </Button>
-                </Tooltip>
-              </div>
-            )}
-
             <CanvasMentionContext.Provider value={mentionContextValue}>
               <BlockNoteView
                 editor={asBlockNoteEditorForView(editor)}
@@ -605,18 +592,41 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             </CanvasMentionContext.Provider>
           </div>
 
-          {canvasId && isCommentsOpen && (
-            <CanvasCommentsPanel
+          <AnimatePresence>
+            {canvasId && isCommentsOpen && (
+              <CanvasCommentsPanel
+                canvasId={canvasId}
+                canvasTitle={_canvasTitle}
+                channelId={channelId}
+                activeBlockId={activeCommentBlockId}
+                activeThreadId={activeCommentThreadId}
+                activeAnchor={activeCommentAnchor}
+                editable={editable}
+                onClose={() => setIsCommentsOpen(false)}
+                onSelectBlock={focusCommentBlock}
+                onBeforeCreateThread={applyCommentAnchorStyle}
+                onCreateThreadCreated={clearActiveCommentAnchor}
+                onCreateThreadFailed={removeCommentAnchorStyle}
+              />
+            )}
+          </AnimatePresence>
+
+          {canvasId && inlineCommentThread && (
+            <CanvasInlineCommentThread
               canvasId={canvasId}
               canvasTitle={_canvasTitle}
               channelId={channelId}
-              activeBlockId={activeCommentBlockId}
-              activeThreadId={activeCommentThreadId}
-              activeAnchor={activeCommentAnchor}
+              {...(inlineCommentThread.mode === 'thread' && {
+                thread: inlineCommentThread.thread,
+              })}
+              {...(inlineCommentThread.mode === 'create' && {
+                activeAnchor: inlineCommentThread.anchor,
+              })}
+              anchorRect={inlineCommentThread.rect}
               editable={editable}
-              onClose={() => setIsCommentsOpen(false)}
-              onSelectBlock={focusCommentBlock}
+              onClose={closeInlineCommentThread}
               onBeforeCreateThread={applyCommentAnchorStyle}
+              onCreateThreadCreated={clearActiveCommentAnchor}
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}
@@ -643,13 +653,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             onClose={() => setIsSearchOpen(false)}
           />
         )}
-
-        {/* Selection Ask AI Button */}
-        <SelectionAskAI
-          {...(_canvasTitle && { canvasTitle: _canvasTitle })}
-          {...(canvasId && { canvasId })}
-          containerRef={containerRef}
-        />
 
         {/* Copy button overlay for code blocks */}
         <CanvasCodeCopyButton containerRef={containerRef} />

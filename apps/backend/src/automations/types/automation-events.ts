@@ -14,6 +14,8 @@ import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;
+  formFieldChanges?: FormFieldChanges;
+  performedBy?: { id: string | null };
 }
 
 export interface TicketUpdatedEventPayload {
@@ -30,9 +32,10 @@ export interface TicketCommentedEventPayload {
   authorId: string;
 }
 
-/** EMAIL_RECEIVED + EMAIL_SENT share the same wire shape — only id. */
+/** EMAIL_RECEIVED + EMAIL_SENT share the same wire shape. */
 export interface EmailEventPayload {
   emailId: string;
+  channelId?: string;
 }
 
 export interface MessageReceivedEventPayload {

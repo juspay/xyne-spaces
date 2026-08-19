@@ -90,6 +90,7 @@ export const ticketTable = table("tickets")
     firstRespondedAt: number().optional(),
     priority: string(),
     metadata: json().optional(),
+    rootId: string().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
     referenceTicket: json<string[]>(),
@@ -201,6 +202,18 @@ export const ticketTagMappingTable = table("ticket_tag_mappings")
     tagId: string(),
     tagName: string(),
     createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const ticketExportTable = table("ticket_exports")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    requestedBy: string(),
+    status: string(),
+    filters: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -426,6 +439,7 @@ export const userGroupTable = table("user_groups")
     autoRotationEnabled: boolean(),
     rotationInterval: string().optional(),
     rotationStartDate: number().optional(),
+    reassignOnUnavailable: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -513,8 +527,14 @@ export const userPreferenceTable = table("user_preferences")
     userId: string(),
     askai_custom_instruction: string().optional(),
     channelSortOrder: string(),
+    channelFilterMode: string().optional(),
+    starredFilterMode: string().optional(),
+    starredSortOrder: string().optional(),
+    dmFilterMode: string().optional(),
+    dmSortOrder: string().optional(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
+    showThreadTags: boolean(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -969,6 +989,7 @@ export const boardTable = table("boards")
     updatedBy: string().optional(),
     description: string().optional(),
     metadata: json().optional(),
+    flowPlan: string().optional(),
     vcsProvider: string().optional(),
     releaseTrackingMode: string().optional(),
     createdAt: number(),
@@ -1047,6 +1068,19 @@ export const channelTable = table("channels")
   })
   .primaryKey("id");
 
+export const channelBoardMappingTable = table("channel_board_mappings")
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const channelStatsTable = table("channel_stats")
   .columns({
     workspaceId: string(),
@@ -1111,6 +1145,7 @@ export const channelSectionTable = table("channel_sections")
     isCollapsed: boolean(),
     isDeleted: boolean(),
     sortOrder: string().optional(),
+    filterMode: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1136,6 +1171,7 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -1172,6 +1208,9 @@ export const emailTable = table("emails")
     externalMessageId: string(),
     sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
+    rating: number().optional(),
+    clientVersionName: string().optional(),
+    clientVersionCode: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1341,18 +1380,26 @@ export const messageTable = table("messages")
     isSent: boolean(),
     reactions_md: string().optional(),
     link_preview_md: string().optional(),
+    messageActs: string().optional(),
   })
   .primaryKey("messageId");
 
-export const messageSearchTable = table("message_search")
+export const messageArtifactTable = table("message_artifacts")
   .columns({
+    id: string(),
     workspaceId: string(),
     messageId: string(),
-    plaintextContent: string(),
-    createdAt: number(),
+    channelId: string(),
+    conversationId: string(),
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    messageCreatedAt: number(),
+    command: string(),
+    status: string(),
+    callExternalId: string().optional(),
     updatedAt: number(),
   })
-  .primaryKey("messageId");
+  .primaryKey("id");
 
 export const messageAttachmentTable = table("message_attachments")
   .columns({
@@ -1464,7 +1511,7 @@ export const externalSourceTable = table("external_sources")
     displayName: string(),
     channelId: string().optional(),
     externalIdentifier: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     boardId: string().optional(),
     ownerUserId: string().optional(),
     credentials: string(),
@@ -1635,6 +1682,7 @@ export const callTable = table("calls")
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
   })
   .primaryKey("id");
 
@@ -1665,6 +1713,7 @@ export const summaryTemplateTable = table("summary_templates")
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey("id");
 
@@ -1775,6 +1824,7 @@ export const canvasTable = table("canvases")
     editAccessId: string().optional(),
     visibility: string(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
     createdAt: number(),
@@ -1812,6 +1862,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: string(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -2208,6 +2259,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -3037,6 +3089,19 @@ export const ticketTagTableRelationships = relationships(ticketTagTable, ({ one 
   })
 }));
 
+export const ticketExportTableRelationships = relationships(ticketExportTable, ({ one }) => ({
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
+  requester: one({
+    sourceField: ["requestedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
 export const ticketReferenceMappingTableRelationships = relationships(ticketReferenceMappingTable, ({ one }) => ({
   sourceTicket: one({
     sourceField: ["sourceTicketId"],
@@ -3441,6 +3506,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: collectionPermissionTable,
+  }),
+  requestedTicketExports: many({
+    sourceField: ["id"],
+    destField: ["requestedBy"],
+    destSchema: ticketExportTable,
   })
 }));
 
@@ -3715,6 +3785,11 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ["id"],
     destField: ["workspaceId"],
     destSchema: roleTable,
+  }),
+  ticketExports: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: ticketExportTable,
   })
 }));
 
@@ -3814,6 +3889,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: appIncomingWebhookTable,
+  }),
+  channelMappings: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: channelBoardMappingTable,
   })
 }));
 
@@ -3898,6 +3978,24 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: emailTable,
+  }),
+  boardMappings: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: channelBoardMappingTable,
+  })
+}));
+
+export const channelBoardMappingTableRelationships = relationships(channelBoardMappingTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   })
 }));
 
@@ -3990,11 +4088,6 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
 }));
 
 export const messageTableRelationships = relationships(messageTable, ({ one, many }) => ({
-  messageSearch: one({
-    sourceField: ["messageId"],
-    destField: ["messageId"],
-    destSchema: messageSearchTable,
-  }),
   conversation: one({
     sourceField: ["conversationId"],
     destField: ["conversationId"],
@@ -4019,14 +4112,6 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     sourceField: ["messageId"],
     destField: ["entityId"],
     destSchema: externalMessageTable,
-  })
-}));
-
-export const messageSearchTableRelationships = relationships(messageSearchTable, ({ one }) => ({
-  message: one({
-    sourceField: ["messageId"],
-    destField: ["messageId"],
-    destSchema: messageTable,
   })
 }));
 
@@ -4669,6 +4754,7 @@ export const schema = createSchema(
       ticketTagTable,
       projectTagTable,
       ticketTagMappingTable,
+      ticketExportTable,
       ticketReferenceMappingTable,
       ticketStageEtaTable,
       workflowTable,
@@ -4720,6 +4806,7 @@ export const schema = createSchema(
       stagePrStatusMappingTable,
       stageTransitionTable,
       channelTable,
+      channelBoardMappingTable,
       channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
@@ -4737,7 +4824,7 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
-      messageSearchTable,
+      messageArtifactTable,
       messageAttachmentTable,
       reactionTable,
       reactionCountTable,
@@ -4842,6 +4929,7 @@ export const schema = createSchema(
       ticketActivityTableRelationships,
       ticketEntityMappingTableRelationships,
       ticketTagTableRelationships,
+      ticketExportTableRelationships,
       ticketReferenceMappingTableRelationships,
       ticketStageEtaTableRelationships,
       workflowTableRelationships,
@@ -4880,6 +4968,7 @@ export const schema = createSchema(
       stageTableRelationships,
       stageTransitionTableRelationships,
       channelTableRelationships,
+      channelBoardMappingTableRelationships,
       channelStatsTableRelationships,
       channelParticipantTableRelationships,
       channelUserStatusTableRelationships,
@@ -4887,7 +4976,6 @@ export const schema = createSchema(
       conversationParticipantTableRelationships,
       emailTableRelationships,
       messageTableRelationships,
-      messageSearchTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
@@ -4954,6 +5042,7 @@ export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mapping
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type ProjectTag = Row<typeof schema.tables.project_tags>;
 export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
+export type TicketExport = Row<typeof schema.tables.ticket_exports>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
 export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;
 export type Workflow = Row<typeof schema.tables.workflows>;
@@ -5005,6 +5094,7 @@ export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
@@ -5022,7 +5112,7 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
-export type MessageSearch = Row<typeof schema.tables.message_search>;
+export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;

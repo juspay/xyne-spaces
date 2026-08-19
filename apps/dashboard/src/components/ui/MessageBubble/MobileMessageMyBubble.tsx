@@ -23,6 +23,8 @@ import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
+import { RecordingShareContent } from './RecordingShareContent';
+import type { ResolvedRecordingShareMessage } from './recordingShareMessage';
 
 export interface MobileMessageMyBubbleProps {
   message: MessageWithOptionalNudgeCounts;
@@ -45,6 +47,7 @@ export interface MobileMessageMyBubbleProps {
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
   workflowNumber?: number | undefined;
+  recordingShare?: ResolvedRecordingShareMessage | null;
   onClick?: ((e: React.MouseEvent<HTMLDivElement>) => void) | undefined;
 }
 
@@ -71,6 +74,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
+  recordingShare,
   onClick,
 }) => {
   const { toggleReaction } = useReactions();
@@ -196,7 +200,26 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                 {formatTimeAmPm(message.createdAt)}
               </span>
             </div>
-            {isActiveCall && channelId && metadata?.callId ? (
+            {recordingShare && !isForwardedMessage ? (
+              <RecordingShareContent
+                recordingShare={recordingShare}
+                showPill={false}
+                renderNote={noteHtml => (
+                  <div
+                    className={cn(
+                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground',
+                      getEmojiFontSizeClass(noteHtml),
+                    )}
+                  >
+                    <ExpandableMessage
+                      message={noteHtml}
+                      showEdited={message.edited}
+                      maxHeight={500}
+                    />
+                  </div>
+                )}
+              />
+            ) : isActiveCall && channelId && metadata?.callId ? (
               <CallMessageOverlay callId={metadata.callId} channelId={channelId} />
             ) : isForwardedMessage && forwardedMessageData ? (
               // Forwarded message display (parsed from XML)
@@ -235,18 +258,39 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                       </span>
                     )}
                   </div>
-                  <div
-                    className={cn(
-                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
-                      getEmojiFontSizeClass(forwardedMessageData.content),
-                    )}
-                  >
-                    <ExpandableMessage
-                      message={forwardedMessageData.content}
-                      showEdited={false}
-                      maxHeight={500}
+                  {recordingShare ? (
+                    <RecordingShareContent
+                      recordingShare={recordingShare}
+                      showPill={false}
+                      renderNote={noteHtml => (
+                        <div
+                          className={cn(
+                            'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
+                            getEmojiFontSizeClass(noteHtml),
+                          )}
+                        >
+                          <ExpandableMessage
+                            message={noteHtml}
+                            showEdited={false}
+                            maxHeight={500}
+                          />
+                        </div>
+                      )}
                     />
-                  </div>
+                  ) : (
+                    <div
+                      className={cn(
+                        'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
+                        getEmojiFontSizeClass(forwardedMessageData.content),
+                      )}
+                    >
+                      <ExpandableMessage
+                        message={forwardedMessageData.content}
+                        showEdited={false}
+                        maxHeight={500}
+                      />
+                    </div>
+                  )}
                   {/* Attachments inside the forwarded message border - vertical layout same as normal messages */}
                   {attachments.length > 0 && (
                     <div className='mt-2 min-w-[256px]'>
@@ -278,6 +322,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                     message={isWorkflowMessage ? 'Workflow created' : message.content}
                     showEdited={message.edited}
                     maxHeight={500}
+                    messageId={message.messageId}
+                    conversationId={message.conversationId}
+                    slashCommandArtifactContext={{
+                      ...(channelId && { channelId }),
+                      senderId: message.senderId,
+                      createdAt: message.createdAt,
+                      surface: context === 'thread' ? 'thread' : 'channel',
+                    }}
                   />
                 </div>
               )
@@ -290,6 +342,10 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               </div>
             )}
           </div>
+
+          {recordingShare && (
+            <RecordingShareContent recordingShare={recordingShare} className='w-full mt-2' />
+          )}
 
           {isTicketCardMessage && ticketAttachments && ticketAttachments.length > 0 && (
             <div className='mt-2 flex flex-wrap gap-2 self-stretch'>

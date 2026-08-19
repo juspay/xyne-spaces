@@ -95,10 +95,13 @@ import { useSelf, useUser } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
+import { ThreadRecordingButton } from '../Call/ThreadRecordingButton/ThreadRecordingButton';
+import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
-type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca';
+type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
   channelId?: string;
@@ -122,6 +125,10 @@ interface ThreadMessagesProps {
   /** Custom click handler for the channel name badge. Defaults to opening the thread in-channel. */
   onChannelLinkClick?: () => void;
   skipInputAutoFocus?: boolean;
+  /** Overrides what the header's Ask AI button does. Defaults to opening the
+   *  panel on this thread; hosts with their own agent session (e.g. Desk's
+   *  draft agent) pass their own opener. */
+  onAskAI?: () => void;
 }
 
 export const ThreadMessages = ({
@@ -142,6 +149,7 @@ export const ThreadMessages = ({
   showChannelLink = false,
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
+  onAskAI,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -182,7 +190,7 @@ export const ThreadMessages = ({
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'workflows', 'rca'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
   const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
     ? (selectedTabParam as TabType)
     : 'thread';
@@ -246,6 +254,10 @@ export const ThreadMessages = ({
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
+  const [threadTicket] = useCachedQuery(queries.ticketRowById({ ticketId: derivedTicketId }), {
+    enabled: !!derivedTicketId,
+  });
+  const isFlowStep = !!threadTicket?.rootId;
 
   // Update derived values when props/params change OR when conversation loads
   useEffect(() => {
@@ -362,6 +374,10 @@ export const ThreadMessages = ({
   };
   // Call participants modal state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
+
+  // Global recording status — used to guard the thread "Take notes" button
+  // against starting a second recording while one is already in progress.
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
 
   // Navigation for thread summary
   const navigate = useNavigate();
@@ -611,7 +627,7 @@ export const ThreadMessages = ({
 
   const conversationTabContextValue = useMemo(
     () => ({
-      setActiveTab: (): void => {},
+      setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
     }),
@@ -767,17 +783,17 @@ export const ThreadMessages = ({
   // Support URL-driven tab selection for the compact side panel mode as well.
   useEffect(() => {
     if (!underTicketView) return;
+    if (hideTabBar) {
+      setUnderTicketActiveTab('replies');
+      return;
+    }
 
     if (selectedTab === 'rca' && isFixTicket) {
       setUnderTicketActiveTab('rca');
       return;
     }
-    if (selectedTab === 'workflows') {
-      setUnderTicketActiveTab('workflows');
-      return;
-    }
     setUnderTicketActiveTab('replies');
-  }, [underTicketView, selectedTab, isFixTicket]);
+  }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
   const tabs = useMemo(() => {
     const allTabs = [
@@ -804,6 +820,29 @@ export const ThreadMessages = ({
 
   const handleInitiateCall = (): void => {
     setShowParticipantsModal(true);
+  };
+
+  // Starts a headless (note-taker) recording anchored to this thread: posts
+  // one anchor message into the thread now and connects the mic in the
+  // background via the recording store directly (no navigation) — the user
+  // stays in the thread and can open /recordings/:callId later from the
+  // message that appears, or from the sidebar, whenever they want.
+  const handleStartRecordingFromThread = (): void => {
+    if (!derivedConversationId || !derivedChannelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: derivedConversationId,
+      channelId: derivedChannelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
   };
 
   const handleTicketCreated = (): void => {
@@ -913,7 +952,10 @@ export const ThreadMessages = ({
       '_blank',
     );
     if (!newWindow) {
-      console.warn('Failed to open new window - popup may be blocked');
+      logger.warn(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to open new window - popup may be blocked'),
+      });
     } else {
       newWindow.focus();
     }
@@ -940,7 +982,7 @@ export const ThreadMessages = ({
     });
   };
 
-  // Early return for underTicketView mode - separate tab-based UI with Replies and Workflows
+  // Early return for underTicketView mode - separate tab-based UI with Messages and RCA
   if (underTicketView) {
     return (
       <div
@@ -1027,6 +1069,21 @@ export const ThreadMessages = ({
                         }}
                       />
                     )}
+                    {/* Start Recording (Take Notes) Button */}
+                    {derivedConversationId && (
+                      <ThreadRecordingButton
+                        onStartRecording={handleStartRecordingFromThread}
+                        hasActiveRecording={
+                          recordingStatus !== 'idle' && recordingStatus !== 'error'
+                        }
+                        trackCategory='THREAD_PANEL'
+                        trackName='START_RECORDING_FROM_THREAD'
+                        trackMetadata={{
+                          channelId: channel?.id,
+                          conversationId: derivedConversationId,
+                        }}
+                      />
+                    )}
                   </div>
                 </Tabs.List>
               </div>
@@ -1055,7 +1112,7 @@ export const ThreadMessages = ({
 
             {/* ChatInput at the bottom - only show if user is a member */}
             {isUserMember || channel?.isArchived ? (
-              <div className='pb-3 bg-background px-[var(--composer-px)] [--composer-px:0.75rem]'>
+              <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                 <ChatInput
                   ref={inputRef}
                   channelId={derivedChannelId}
@@ -1173,6 +1230,10 @@ export const ThreadMessages = ({
                     size='sm'
                     variant='ghost'
                     onClick={() => {
+                      if (onAskAI) {
+                        onAskAI();
+                        return;
+                      }
                       xyneAIActor.send({
                         type: 'OPEN',
                         channelId: derivedChannelId,
@@ -1193,6 +1254,16 @@ export const ThreadMessages = ({
                   hasActiveCall={hasActiveCallForConversation}
                   trackCategory='THREAD_PANEL'
                   trackName='INITIATE_CALL_FROM_THREAD'
+                  trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
+                />
+              )}
+              {/* Start Recording (Take Notes) Button */}
+              {derivedConversationId && (
+                <ThreadRecordingButton
+                  onStartRecording={handleStartRecordingFromThread}
+                  hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+                  trackCategory='THREAD_PANEL'
+                  trackName='START_RECORDING_FROM_THREAD'
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
@@ -1387,6 +1458,7 @@ export const ThreadMessages = ({
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
+                    isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
                     enableCollapsing={previewCardMode}
@@ -1398,7 +1470,7 @@ export const ThreadMessages = ({
 
                   {/* ChatInput at the bottom - only show if user is a member */}
                   {isUserMember || channel?.isArchived ? (
-                    <div className='pb-3 bg-background px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                    <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                       <ChatInput
                         ref={inputRef}
                         channelId={derivedChannelId}
@@ -1551,6 +1623,20 @@ export const ThreadMessages = ({
                     />
                   )}
 
+                  {/* Start Recording (Take Notes) Button */}
+                  {derivedConversationId && !channel?.isArchived && (
+                    <ThreadRecordingButton
+                      onStartRecording={handleStartRecordingFromThread}
+                      hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+                      trackCategory='THREAD_PANEL'
+                      trackName='START_RECORDING_FROM_THREAD'
+                      trackMetadata={{
+                        channelId: channel?.id,
+                        conversationId: derivedConversationId,
+                      }}
+                    />
+                  )}
+
                   {/* Overflow menu */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -1691,7 +1777,7 @@ export const ThreadMessages = ({
 
                 {/* ChatInput at the bottom - only show if user is a member */}
                 {isUserMember || channel?.isArchived ? (
-                  <div className='pb-3 bg-background px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                  <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}

@@ -25,7 +25,7 @@ import {
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
-import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
 
@@ -276,6 +276,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
     mode: 'workspace',
     workspaceId,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
@@ -306,6 +307,7 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
     workspaceId,
     returnPath,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
@@ -321,6 +323,7 @@ async function createGoogleRecordingEmailAuthUrl(
   userId: string,
   workspaceId: string,
   returnPath: string,
+  platform: ProviderPlatform,
   req: Request,
 ): Promise<string> {
   const user = await db.user.findFirst({
@@ -338,7 +341,7 @@ async function createGoogleRecordingEmailAuthUrl(
     workspaceId,
     expectedEmail: user.email.trim().toLowerCase(),
     returnPath,
-    platform: 'web',
+    platform,
     timestamp: Date.now(),
   });
 
@@ -581,6 +584,7 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
+    const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
     if (!returnPath) {
       res.status(400).json({ error: 'A valid return path is required' });
       return;
@@ -591,6 +595,7 @@ router.post(
         req.user!.id,
         req.user!.workspaceId,
         returnPath,
+        platform,
         req,
       );
       res.json({ authUrl });
@@ -893,6 +898,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         channelId: stateData.channelId,
         sourceId: sourceRow.id,
       });
+
+      await enqueueCursorCatchup({
+        sourceId: sourceRow.id,
+        watchHistoryId: reEncrypted.watchResult.historyId,
+        requesterUserId: stateData.userId,
+      });
+      
       const params = new URLSearchParams({
         emailReconnected: 'true',
         provider: 'google',
@@ -942,7 +954,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingForWorkspace.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueCursorCatchup({
+          sourceId: existingForWorkspace.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         try {
@@ -955,6 +976,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
               workspaceId,
               credentials: network.encryptedCredentials,
               isActive: true,
+              lastSyncCursor: network.watchResult.historyId,
             },
           });
         } catch (e: any) {
@@ -1137,7 +1159,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingSource.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueCursorCatchup({
+          sourceId: existingSource.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         await db.externalSource.create({
@@ -1149,6 +1180,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             workspaceId,
             credentials: network.encryptedCredentials,
             isActive: true,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
       }
@@ -1270,6 +1302,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             ownerUserId: cd.userId,
             isActive: true,
             workspaceId: cd.workspaceId,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
 

@@ -29,6 +29,7 @@ import {
   Atom,
   ChatChatting,
   Bot,
+  RocketShip,
   type PikaIconProps,
 } from '@xyne/icons';
 
@@ -76,6 +77,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/memory', label: 'Context', icon: Database },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01 },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault },
+  { path: '/releaseManager', label: 'Release Manager', icon: RocketShip },
   { path: '/jira-migration', label: 'Jira Migration', icon: SwapArrowHorizontal, iconSize: 18 },
   { path: '/migration/confluence', label: 'Confluence Migration', icon: Notebook, iconSize: 18 },
   {
@@ -99,6 +101,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/support',
   '/chat/activity',
   '/guide',
+  '/releaseManager',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).

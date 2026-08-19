@@ -1,4 +1,4 @@
-import rateLimit, { RateLimitRequestHandler } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, RateLimitRequestHandler } from 'express-rate-limit';
 
 /**
  * General rate limiter for all API endpoints
@@ -20,7 +20,7 @@ export const generalLimiter: RateLimitRequestHandler = rateLimit({
 export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 15,
-  keyGenerator: (req): string => req.user?.id ?? req.ip ?? 'unknown',
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
   message: {
     success: false,
     error: 'Too many title requests. Please slow down and try again shortly.',

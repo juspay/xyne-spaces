@@ -44,7 +44,8 @@ export default defineConfig({
     }),
   ],
   build: {
-    manifest: true
+    manifest: true,
+    reportCompressedSize: false,
   },
   optimizeDeps: {
     exclude: ['@terrastruct/d2'],
@@ -71,7 +72,7 @@ export default defineConfig({
               ws: true,
             },
             '/zero': {
-              target: process.env.VITE_ZERO_SERVER,
+              target: process.env.VITE_ZERO_SERVER || 'http://localhost:4848',
               changeOrigin: true,
               secure: false,
               ws: true,

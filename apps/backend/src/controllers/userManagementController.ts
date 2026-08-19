@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
 import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
+import { DatabaseClient } from '@/database/client';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
@@ -979,6 +981,70 @@ export class UserManagementController {
     } catch (error) {
       logger.error('Error updating group permissions:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Save the current user's questionnaire response.
+   */
+  saveQuestionnaireResponse = async (
+    req: Request & { user?: { id: string; workspaceId?: string } },
+    res: Response,
+  ): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { questionnaireType, payload } = req.body as {
+        questionnaireType?: unknown;
+        payload?: unknown;
+      };
+
+      if (typeof questionnaireType !== 'string' || !questionnaireType.trim()) {
+        res.status(400).json({ error: 'questionnaireType is required' });
+        return;
+      }
+
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        res.status(400).json({ error: 'payload must be an object' });
+        return;
+      }
+
+      const type = questionnaireType.trim();
+      const questionnairePayload = payload as Prisma.InputJsonValue;
+      const prisma = DatabaseClient.getInstance();
+      const saved = await prisma.questionnaireResponse.upsert({
+        where: {
+          workspaceId_questionnaireType_userId: {
+            workspaceId,
+            questionnaireType: type,
+            userId,
+          },
+        },
+        update: {
+          payload: questionnairePayload,
+          updatedAt: new Date(),
+        },
+        create: {
+          workspaceId,
+          userId,
+          questionnaireType: type,
+          payload: questionnairePayload,
+        },
+      });
+
+      res.status(200).json({
+        id: saved.id,
+        questionnaireType: saved.questionnaireType,
+        payload: saved.payload,
+      });
+    } catch (error) {
+      logger.error('Error saving questionnaire response:', error);
+      res.status(500).json({ error: 'Failed to save questionnaire response' });
     }
   };
 
