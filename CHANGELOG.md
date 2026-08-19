@@ -1,3 +1,23 @@
+## [1.197.1](https://github.com/juspay/xyne-spaces/compare/v1.197.0...v1.197.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* title generation length ([#728](https://github.com/juspay/xyne-spaces/issues/728)) ([535a714](https://github.com/juspay/xyne-spaces/commit/535a71442a5ab12a27a597282276b0f94a0b99fe))
+
+## [1.197.0](https://github.com/juspay/xyne-spaces/compare/v1.196.1...v1.197.0) (2026-08-19)
+
+
+### Features
+
+* red recording pill in the macOS menu bar ([#727](https://github.com/juspay/xyne-spaces/issues/727)) ([1021989](https://github.com/juspay/xyne-spaces/commit/102198931920f45aaa0bae1a645c77c5737132d3)), closes [#FF4F4](https://github.com/juspay/xyne-spaces/issues/FF4F4)
+
+
+### Bug Fixes
+
+* enhance owner selection logic in InboxTab component ([#349](https://github.com/juspay/xyne-spaces/issues/349)) ([a913641](https://github.com/juspay/xyne-spaces/commit/a913641a8531ea08bab4ef455bd84db6757c37a4))
+* ignore code-block URLs in link preview resolution ([#726](https://github.com/juspay/xyne-spaces/issues/726)) ([34a4510](https://github.com/juspay/xyne-spaces/commit/34a4510c95ed09b05dab9fc83dbe45a2d6bc3a09))
+
 ## [1.196.1](https://github.com/juspay/xyne-spaces/compare/v1.196.0...v1.196.1) (2026-08-19)
 
 

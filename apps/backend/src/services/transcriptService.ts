@@ -111,7 +111,7 @@ You are summarizing the topic of a call in exactly 1 line.
 
 CRITICAL RULES:
 - Output EXACTLY 1 line
-- One sentence summarizing the main topic (max 100 characters)
+- One sentence summarizing the main topic (max 50 characters)
 - No quotes, no labels, no bullet points, no explanations
 - Write in plain, natural language
 
@@ -1100,7 +1100,7 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate a short AI title from transcript
    * @param transcript - The formatted transcript text
-   * @returns AI-generated title (max 100 chars) or null if generation fails
+   * @returns AI-generated title (max 50 chars) or null if generation fails
    */
   /**
    * Generate a short AI title from transcript with explicit retry loop.
@@ -1119,7 +1119,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 100);
+    return extracted.content.substring(0, 50);
   }
 
   /**
