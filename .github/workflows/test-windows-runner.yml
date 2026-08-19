@@ -1,4 +1,4 @@
-name: Test Windows Self-Hosted Runner
+name: Test Self-Hosted Runner
 
 on:
   push:
@@ -8,16 +8,16 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted, Windows]
+    runs-on: self-hosted
     steps:
       - name: Print hostname
-        shell: pwsh
         run: hostname
 
       - name: Print current user
-        shell: pwsh
         run: whoami
 
+      - name: Print OS
+        run: uname -a
+
       - name: Success message
-        shell: pwsh
-        run: Write-Host "Windows self-hosted runner is working successfully!"
+        run: echo "Self-hosted runner is working successfully!"
