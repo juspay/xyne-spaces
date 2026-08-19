@@ -65,6 +65,7 @@ import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
 import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallModal';
+import { IncomingCallDevHarness } from '../components/Call/IncomingCall/IncomingCallCard.dev';
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
@@ -748,6 +749,10 @@ const AppRoot = (): ReactElement => {
                     {!isInPanelWebview && (
                       <>
                         <IncomingCallModal />
+                        {import.meta.env.DEV &&
+                          new URLSearchParams(window.location.search).has('devIncomingCall') && (
+                            <IncomingCallDevHarness />
+                          )}
                         <GlobalCallOverlay />
                         {recordingVersion === 'v2' ? (
                           <NoteTakerOverlayHost />
