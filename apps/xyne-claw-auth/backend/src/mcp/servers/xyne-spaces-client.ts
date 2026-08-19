@@ -305,7 +305,7 @@ export interface QueryAST {
 
 export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
-  console.error(`[spaces-client] POST /api/query/claw ${payload}`);
+  console.error(`[spaces-client] POST /api/query/claw model=${ast.model} op=${ast.operation} whereKeys=${ast.where ? Object.keys(ast.where).length : 0}`);
   const result = (await spacesFetch("/api/query/claw", {
     method: "POST",
     body: payload,
@@ -315,13 +315,13 @@ export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise
 
 export async function search(params: Record<string, string>, auth?: SpacesAuthContext): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
-  console.error(`[spaces-client] GET /api/vespaSearch/claw?${qs}`);
+  console.error(`[spaces-client] GET /api/vespaSearch/claw paramKeys=[${Object.keys(params).join(",")}]`);
   return spacesFetch(`/api/vespaSearch/claw?${qs}`, undefined, auth);
 }
 
 export async function memorySearch(body: Record<string, unknown>, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(body);
-  console.error(`[spaces-client] POST /api/memory/claw/search ${payload}`);
+  console.error(`[spaces-client] POST /api/memory/claw/search bodyKeys=[${Object.keys(body).join(",")}]`);
   return spacesFetch("/api/memory/claw/search", {
     method: "POST",
     body: payload,
