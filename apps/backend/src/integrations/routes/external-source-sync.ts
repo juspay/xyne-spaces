@@ -110,16 +110,18 @@ async function resolveMessageEditRecipient(req: Request, _res: Response, next: N
           const recipientId = fetched?.to?.data?.[0]?.id;
           if (recipientId === src.externalIdentifier) {
             entry._resolvedRecipientId = recipientId;
-            logger.info('[IG ingest] Resolved message_edit recipient via getMessage', { mid, recipientId });
+            logger.info('[IG ingest] Resolved message_edit recipient', { mid, recipientId });
             break;
           }
-        } catch { /* token invalid or wrong account — try next */ }
+        } catch (err) {
+          logger.error('[IG ingest] getMessage failed during recipient resolution', { mid, error: String(err) });
+        }
       }
       if (!entry._resolvedRecipientId) {
         logger.warn('[IG ingest] Could not resolve recipient for message_edit', { mid });
       }
     } catch (err) {
-      logger.warn('[IG ingest] Error during message_edit recipient resolution', { error: err });
+      logger.error('[IG ingest] Error during message_edit recipient resolution', { error: err });
     }
   }
   next();

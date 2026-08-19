@@ -1394,18 +1394,20 @@ const SupportScreen = (): ReactElement => {
     }
 
     const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaProvider = searchParams.get('socialMediaProvider');
     const socialMediaError = searchParams.get('socialMediaError');
-    if (socialMediaOAuth === 'success') {
+    if (socialMediaOAuth === 'success' && socialMediaProvider === 'instagram') {
       toast.success('Instagram account connected successfully');
       setSearchParams(
         prev => {
           const p = new URLSearchParams(prev);
           p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
           return p;
         },
         { replace: true },
       );
-    } else if (socialMediaError) {
+    } else if (socialMediaError && socialMediaProvider === 'instagram') {
       // mismatch error carries the expected handle: "instagram_account_mismatch:@xyne.spaces"
       const [errorCode, errorPayload] = socialMediaError.split(':');
       const mismatchMessage = errorPayload
@@ -1422,6 +1424,7 @@ const SupportScreen = (): ReactElement => {
         prev => {
           const p = new URLSearchParams(prev);
           p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
           return p;
         },
         { replace: true },
@@ -2022,8 +2025,10 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const provider = searchParams.get('socialMediaProvider');
     const error = searchParams.get('socialMediaError');
     const failedPackage = searchParams.get('socialMediaPackage');
+    if (provider === 'instagram') return; // handled by the Instagram useEffect above
     if (!connected && !error) return;
     if (connected) {
       toast.success('Google Play reviews connected successfully');
@@ -2040,6 +2045,7 @@ const SupportScreen = (): ReactElement => {
       previous => {
         const next = new URLSearchParams(previous);
         next.delete('socialMediaOAuth');
+        next.delete('socialMediaProvider');
         next.delete('socialMediaError');
         next.delete('socialMediaPackage');
         return next;
@@ -3413,6 +3419,7 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
+                        deskType={channelPreference?.deskType}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={handleChannelBoardIdResolved}
