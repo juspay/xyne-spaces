@@ -9,12 +9,15 @@ export interface CreateNoteTakerCallParams {
   workspaceId: string;
   createdBy: string;
   notesCanvasId: string;
+  detailedSummaryCanvasId: string;
   roomLink: string;
   now: Date;
 }
 
 interface NoteTakerCallMetadata {
   notesCanvasId?: string;
+  detailedSummaryCanvasId?: string;
+  detailedSummaryReady?: boolean;
   conversationId?: string;
   messageId?: string;
   channelId?: string;
@@ -34,15 +37,13 @@ export class NoteTakerCallRepository {
   }
 
   async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
-    const { callId, roomName, workspaceId, createdBy, notesCanvasId, roomLink, now } = params;
+    const { callId, roomName, workspaceId, createdBy, notesCanvasId, detailedSummaryCanvasId, roomLink, now } = params;
 
-    // Thread-linkage (conversationId/messageId/channelId) is deliberately NOT
-    // stamped here — it's only added to metadata by createThreadAnchorMessage,
-    // and only once that method's workspace/channel/membership checks pass.
-    // Writing it here unconditionally would let a later-failed validation
-    // still leave metadata.channelId behind for shareThreadRecordingIfLinked /
-    // updateThreadMessageOnEnd to act on.
-    const metadata: NoteTakerCallMetadata = { notesCanvasId };
+    const metadata: NoteTakerCallMetadata = {
+      notesCanvasId,
+      detailedSummaryCanvasId,
+      detailedSummaryReady: false,
+    };
 
     return this.db.call.create({
       data: {
@@ -149,9 +150,19 @@ export class NoteTakerCallRepository {
     createdBy: string;
     workspaceId: string;
     notesCanvasId: string;
+    detailedSummaryCanvasId: string;
   }): Promise<boolean> {
-    const { callId, conversationId, channelId, messageId, callExternalId, createdBy, workspaceId, notesCanvasId } =
-      params;
+    const {
+      callId,
+      conversationId,
+      channelId,
+      messageId,
+      callExternalId,
+      createdBy,
+      workspaceId,
+      notesCanvasId,
+      detailedSummaryCanvasId,
+    } = params;
 
     const conversation = await repositories.conversations.findByIdAndWorkspace(conversationId, workspaceId);
     if (!conversation || conversation.channelId !== channelId) {
@@ -206,10 +217,24 @@ export class NoteTakerCallRepository {
         },
       });
 
-      // Persist the thread linkage onto the Call row itself.
+
+      const currentCall = await tx.call.findUnique({ where: { id: callId }, select: { metadata: true } });
+      const currentCallMetadata: Record<string, unknown> =
+        currentCall?.metadata && typeof currentCall.metadata === 'object' && !Array.isArray(currentCall.metadata)
+          ? (currentCall.metadata as Record<string, unknown>)
+          : {};
       await tx.call.update({
         where: { id: callId },
-        data: { metadata: { notesCanvasId, conversationId, messageId, channelId } as Prisma.InputJsonValue },
+        data: {
+          metadata: {
+            ...currentCallMetadata,
+            notesCanvasId,
+            detailedSummaryCanvasId,
+            conversationId,
+            messageId,
+            channelId,
+          } as Prisma.InputJsonValue,
+        },
       });
     });
 

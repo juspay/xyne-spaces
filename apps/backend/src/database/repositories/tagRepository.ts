@@ -109,6 +109,27 @@ export class TagRepository {
     });
   }
 
+  async findActiveTagsBySourceIds(
+    sourceIds: string[],
+    workspaceId: string,
+    sourceType: string,
+    tagCategory?: string,
+    tx?: TxClient
+  ): Promise<Tag[]> {
+    if (sourceIds.length === 0) return [];
+
+    return this.client(tx).tag.findMany({
+      where: {
+        workspaceId,
+        sourceId: { in: sourceIds },
+        sourceType,
+        isDeleted: false,
+        ...(tagCategory !== undefined ? { tagCategory } : {}),
+      },
+      orderBy: [{ tag: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   /**
    * Bulk-resolve Tag ids to their `{ id, tag }` rows, scoped to a workspace.
    * Used to resolve id-referencing arrays (e.g. Call.labels) back to display
@@ -125,15 +146,24 @@ export class TagRepository {
     workspaceId: string,
     sourceType: string,
     tagCategory: string,
+    query?: string
   ): Promise<string[]> {
+    const where: Prisma.TagWhereInput = {
+      workspaceId,
+      sourceType,
+      tagCategory,
+      isDeleted: false,
+      ...(query ? { tag: { contains: query, mode: 'insensitive' } } : {}),
+    };
+
     const rows = await this.client().tag.findMany({
-      where: { workspaceId, sourceType, tagCategory, isDeleted: false },
+      where,
       distinct: ['tag'],
       select: { tag: true },
       orderBy: { tag: 'asc' },
       take: 50,
     });
-    return rows.map(r => r.tag);
+    return rows.map((r) => r.tag);
   }
 
   async insertTagRow(data: InsertTagRowData, tx?: TxClient): Promise<Tag> {
@@ -213,7 +243,7 @@ export class TagRepository {
     if (pairs.length === 0) return [];
 
     const conditions = pairs.map(
-      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`,
+      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`
     );
     const whereClause = Prisma.join(conditions, ' OR ');
 

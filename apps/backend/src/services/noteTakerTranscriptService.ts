@@ -152,22 +152,21 @@ class NoteTakerTranscriptService {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
+          detailedSummaryReady: detailedSummary ? true : undefined,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
 
-      // Thread-linked recording (started from inside a thread — see
-      // callController's headless-initiate branch): now that the detailed
-      // summary canvas exists, auto-share the recording to that thread's
-      // channel. Must wait until here — recordingSharingService requires both
-      // notesCanvasId AND detailedSummaryCanvasId to be on Call.metadata
-      // before it can sync canvas access, so calling it any earlier (e.g. at
-      // call-start) always fails with "Detailed summary canvas is not ready yet".
-      if (detailedSummary?.canvasId) {
-        await this.shareThreadRecordingIfLinked(call);
-      }
+      // Thread-linked recording: already auto-shared to the thread's channel
+      // immediately when the recording ended (see
+      // noteTakerWebhookController.handleParticipantLeft /
+      // handleRoomFinished). This call is now just an idempotent fallback in
+      // case that earlier attempt failed — recordingSharingService's grant
+      // is a safe upsert, so re-running it here is harmless even when the
+      // earlier share already succeeded.
+      await this.shareThreadRecordingIfLinked(call);
     } finally {
       await releaseLock(lockHandle);
     }
@@ -183,6 +182,7 @@ class NoteTakerTranscriptService {
   ): Promise<{
     summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
+    detailedSummaryReady: boolean;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
@@ -209,6 +209,7 @@ class NoteTakerTranscriptService {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
+        detailedSummaryReady: true,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
       markedItems,
@@ -217,6 +218,7 @@ class NoteTakerTranscriptService {
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
       detailedSummaryCanvasId: detailedSummary.canvasId,
+      detailedSummaryReady: true,
     };
   }
 
@@ -257,9 +259,13 @@ class NoteTakerTranscriptService {
    * so every thread/channel member can see the recording message card and
    * open /recordings/:callId. No-op for recordings not started from a thread
    * (no channelId on Call.metadata). Best-effort — a failure here must never
-   * block transcript/summary processing.
+   * block transcript/summary processing. Public so
+   * noteTakerWebhookController can call this immediately once the recording
+   * ends (handleParticipantLeft / handleRoomFinished) — both canvases
+   * already exist by then via eager creation, so there's no reason to wait
+   * for the detailed-summary pipeline anymore.
    */
-  private async shareThreadRecordingIfLinked(call: Call): Promise<void> {
+  async shareThreadRecordingIfLinked(call: Call): Promise<void> {
     const metadata =
       call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
         ? (call.metadata as Record<string, unknown>)
@@ -314,6 +320,17 @@ class NoteTakerTranscriptService {
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
 
+    // Fetch the current DB row once (rather than trusting `call`, which is the
+    // in-memory snapshot from the top of processTranscript) whenever we're about
+    // to merge onto either JSON column. Generation can take minutes, during
+    // which another write — e.g. ensureStreamingCanvas's early publish of
+    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+    // the DB. Merging onto the stale snapshot would silently erase that write.
+    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+    const current = needsFreshRead
+      ? await repositories.calls.findByExternalId(call.externalId)
+      : undefined;
+
     const data: {
       metadata?: Record<string, unknown>;
       labels?: string[];
@@ -321,9 +338,12 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      const currentMetadataSource = current?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        currentMetadataSource &&
+        typeof currentMetadataSource === 'object' &&
+        !Array.isArray(currentMetadataSource)
+          ? (currentMetadataSource as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
@@ -331,7 +351,6 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems !== undefined) {
-      const current = await repositories.calls.findByExternalId(call.externalId);
       data.markedItems = mergeRecordingSummaryMarkedItems(
         current?.markedItems ?? call.markedItems,
         updates.markedItems,

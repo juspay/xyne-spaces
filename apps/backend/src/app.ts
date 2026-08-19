@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -92,6 +93,7 @@ import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -384,6 +386,10 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -444,6 +450,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);

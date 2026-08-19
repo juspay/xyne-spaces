@@ -141,6 +141,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [postToEmailNonce, setPostToEmailNonce] = useState(0);
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
@@ -208,10 +209,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     if (connected) {
       toast.success('Google email connected');
+      // Remount so the compose context is refetched — in Electron the modal is still
+      // mounted from before the consent screen opened in the system browser.
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
     if (connectionError) {
       toast.error(connectionError);
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
 
@@ -383,6 +388,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const linkedTicketId = typeof rawLinkedTicketId === 'string' ? rawLinkedTicketId : null;
       const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
+      const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
       const next: RecordingDetail = {
         ...prev,
@@ -395,6 +401,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
           typeof rawDetailedSummaryCanvasId === 'string'
             ? rawDetailedSummaryCanvasId
             : prev.detailedSummaryCanvasId,
+        detailedSummaryReady:
+          typeof rawDetailedSummaryReady === 'boolean'
+            ? rawDetailedSummaryReady
+            : prev.detailedSummaryReady,
         notesCanvasId:
           prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
         markedItems: recordingRow.markedItems ?? prev.markedItems,
@@ -417,14 +427,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
     const request = getSummaryRequest(recordingId);
     if (!request || recording?.externalId !== recordingId) return;
     const requestedSummaryIsReady = request.templateId
-      ? recording?.summaryTemplateId === request.templateId
-      : !!recording?.detailedSummaryCanvasId;
+      ? recording?.summaryTemplateId === request.templateId && !!recording?.detailedSummaryReady
+      : !!recording?.detailedSummaryReady;
     if (!requestedSummaryIsReady) return;
     setAwaitingSummary(false);
     setPendingSummaryTemplateId(null);
     clearSummaryRequested(recordingId);
   }, [
-    recording?.detailedSummaryCanvasId,
+    recording?.detailedSummaryReady,
     recording?.externalId,
     recording?.summaryTemplateId,
     recordingId,
@@ -539,7 +549,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (!recording || isRegeneratingSummary) return;
 
     // Picking the template the existing summary was already written with is a no-op
-    if (recording.detailedSummaryCanvasId && summaryTemplateId === recording.summaryTemplateId) {
+    if (
+      recording.detailedSummaryCanvasId &&
+      recording.detailedSummaryReady !== false &&
+      summaryTemplateId === recording.summaryTemplateId
+    ) {
       handleTabSelect('summary');
       return;
     }
@@ -565,6 +579,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               summaryTemplateId: result.summaryTemplateId,
               detailedSummaryCanvasId:
                 result.detailedSummaryCanvasId ?? current.detailedSummaryCanvasId,
+              detailedSummaryReady: result.detailedSummaryReady,
             }
           : current,
       );
@@ -725,7 +740,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Polling has given up (or was skipped for an old recording) and there is still no
   // stitched audio, so the control bar shows an unavailable indicator, not a spinner.
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
-  const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
+  // The canvas itself now exists from call-start (so sharing works
+  // immediately) — gate on detailedSummaryReady too, otherwise this would
+  // flip true instantly and skip straight past the shimmer. `null` means the
+  // recording predates this flag (already finished generating long ago), so
+  // only an explicit `false` counts as "still generating".
+  const hasDetailedSummary =
+    !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady !== false;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const summaryTemplateOptions: RecordingSummaryTemplate[] = [
     DEFAULT_SUMMARY_TEMPLATE_OPTION,
@@ -754,6 +775,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Nothing to summarize without a transcript, so the offer waits for one to exist.
   const hasTranscript =
     !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording.hasTranscript;
+
+  const showSummaryShimmer =
+    awaitingSummary || (!hasDetailedSummary && hasTranscript && !summaryFailed);
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -985,7 +1009,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2.5'>
                   <h2 className='text-lg font-semibold text-foreground'>Summary</h2>
-                  {!hasDetailedSummary && !awaitingSummary && (
+                  {!hasDetailedSummary && !showSummaryShimmer && (
                     <span className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground'>
                       Not generated
                     </span>
@@ -1013,7 +1037,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 />
               ) : (
                 <SummaryGenerationPanel
-                  isAwaiting={awaitingSummary}
+                  isAwaiting={showSummaryShimmer}
                   canGenerate={hasTranscript}
                   onGenerate={handleShowSummaryShimmer}
                   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
@@ -1053,6 +1077,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
           title='Post to channel'
           data-testid='post-recording-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
         >
           <PostRecordingToChannelModal
             recording={recording}
@@ -1071,6 +1096,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           testId='post-recording-to-email-dialog'
         >
           <PostRecordingToEmailModal
+            key={postToEmailNonce}
             recording={recording}
             onClose={() => setShowPostToEmailModal(false)}
           />

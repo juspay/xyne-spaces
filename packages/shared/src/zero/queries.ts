@@ -35,6 +35,7 @@ import {
   TicketPriority,
   TicketStageRequestStatus,
   MailboxState,
+  MessageArtifactStatus,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -540,6 +541,17 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 
 export const queries = defineQueries({
+  activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
+    zql.message_artifacts
+      .where('workspaceId', ctx.workspaceId)
+      .where('status', MessageArtifactStatus.ACTIVE)
+      // Banner delivery is participant-only even when public channel messages are readable.
+      .whereExists('channelParticipants', participant =>
+        participant.where('userId', ctx.userID),
+      )
+      .orderBy('messageCreatedAt', 'desc'),
+  ),
+
   userChannelSections: defineQuery(z.object({}), () => {
     return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
   }),
@@ -3502,6 +3514,13 @@ export const queries = defineQueries({
     z.object({ userId: z.string() }),
     ({ args: { userId } }) => {
       return zql.user_assignment_states.where('userId', userId);
+    },
+  ),
+  // Query for assignment states across several user groups at once
+  getUserAssignmentStatesByGroupIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()) }),
+    ({ args: { userGroupIds } }) => {
+      return zql.user_assignment_states.where('userGroupId', 'IN', userGroupIds);
     },
   ),
   // Query for board complexity scores for a user group
