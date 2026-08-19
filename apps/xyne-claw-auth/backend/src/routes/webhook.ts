@@ -724,13 +724,28 @@ async function continueExperimentAfterResult(ctx: SessionContext, sessionId: str
     });
   });
 
-  if (now < active.deadlineAt.getTime()) {
+  // repo-history is COMMIT-bound, not time-bound: every commit from the initial
+  // sha to HEAD must be walked, so the deadline is NOT its stop condition — it
+  // keeps chaining epochs until the agent ends the run at HEAD (end-experiment,
+  // which flips the row out of "active" so this function returns early next
+  // time). The only backstop is an epoch-count cap, since a walk that never
+  // advances the cursor would otherwise loop forever — a time deadline would
+  // defeat the whole point. Other kinds keep the deadline as their safety cap.
+  const MAX_REPO_HISTORY_EPOCHS = 1000;
+  const keepGoing =
+    active.kind === "repo-history"
+      ? active.epoch < MAX_REPO_HISTORY_EPOCHS
+      : now < active.deadlineAt.getTime();
+  if (keepGoing) {
     const next = await experimentRepository.update(active.id, {
       epoch: { increment: 1 },
       lastEpochEndedAt: new Date(),
     });
     await dispatchExperimentEpoch(next);
     return true;
+  }
+  if (active.kind === "repo-history") {
+    clog.warn(`[experiment] repo-history ${active.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
   }
 
   const finishing = await experimentRepository.update(active.id, {
@@ -4872,8 +4887,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // re-dispatch the message we just enqueued into the still-held session
     // lock, whose new session_locked result re-enters this handler (live
     // ping-pong). The lock holder's own completion drains this queue.
+    // MUST pass resultUserScope: a digital-twin slot is keyed
+    // conv:digital-twin:<userId> (see scoped() in message-queue.ts). Releasing
+    // without it targets the 2-part conv:digital-twin key, misses the real
+    // 3-part marker, and the twin slot leaks for the full 20m TTL — every new
+    // twin tag then queues behind a phantom "active run" (observed 2026-08-19).
     if (QUEUE_ENABLED && resultConversationId && resultAgentSlug) {
-      await releaseSlot(resultConversationId, resultAgentSlug).catch(() => {});
+      await releaseSlot(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
     return;
   }

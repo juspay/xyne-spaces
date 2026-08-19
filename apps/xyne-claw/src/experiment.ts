@@ -17,7 +17,7 @@ export interface ExperimentContext {
    *  Each unexplored path is recorded as an open conjecture; closing every one of
    *  them (proved/refuted, with evidence) is the exit. The deadline still applies
    *  as a hard safety cap so the loop stays bounded. */
-  kind?: "understanding" | "framework" | "security";
+  kind?: "understanding" | "framework" | "security" | "repo-history";
 }
 
 /** Minimum closed paths before an "exhausted" frontier is believed. Guards the
@@ -383,6 +383,28 @@ export function buildExperimentTools(
                 );
               }
             }
+            // repo-history: a distilled batch is only "proved" when it yields a
+            // durable RULE tied to the SHA it came from and a theme TAG. This
+            // stops the failure mode of recording a changelog ("commit X changed
+            // Y") instead of the reusable coding decision someone rebuilding the
+            // repo would follow. Reconciliation-against-HEAD is the checker's job.
+            if (ctx.kind === "repo-history" && status === "proved") {
+              const note = typeof p["note"] === "string" ? p["note"] : "";
+              const hasRule = /(^|\n)\s*rule:\s*\S/i.test(note);
+              const hasSha = /(^|\n)\s*sha:\s*[0-9a-f]{7,}/i.test(note);
+              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+              if (!hasRule || !hasSha || !hasTag) {
+                const missing = [
+                  !hasRule ? "a `Rule:` line (the durable instruction someone rebuilding the repo would follow — not a changelog of what changed)" : null,
+                  !hasSha ? "a `sha:` line naming the commit this rule derives from" : null,
+                  !hasTag ? "a `Tag:` line (kebab-case theme — e.g. error-handling, provider-fallback, security; reuse a tag already in the ledger if it fits)" : null,
+                ].filter(Boolean).join("; ");
+                return textResult(
+                  `Cannot close this batch — the note is missing: ${missing}. Record the DECISION (the rule), not the diff. If the batch establishes no durable rule, refute it and advance the cursor.`,
+                  { error: true, needsRepoHistoryContract: true },
+                );
+              }
+            }
             const payload: {
               epoch: number;
               status: FindingStatus;
@@ -461,7 +483,11 @@ export function buildExperimentTools(
         // way — there is always one more endpoint — so an exhaustion gate would
         // either never open or open on a false claim of completeness. A security
         // run is time-boxed and exits on the deadline like /experiment.
-        if (ctx.kind === "understanding" || ctx.kind === "framework") {
+        // repo-history is progress-gated but shares this machinery: its frontier
+        // is the commit batches ahead of the cursor, so `open === 0` means the
+        // walk has reached HEAD (nothing left to enumerate). Same exit + .md
+        // deliverable gate as framework.
+        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "repo-history") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
           // runs out. The deadline is only a hard safety cap so the loop stays
@@ -486,7 +512,14 @@ export function buildExperimentTools(
           // The cheapest way to satisfy an exhaustion gate is to enumerate less,
           // so the gate has to require that enumeration happened at all.
           const frontierExhausted = open === 0 && closed >= MIN_CLOSED_PATHS;
-          if (!pastDeadline && !frontierExhausted) {
+          // repo-history is COMMIT-bound, not time-bound: every commit from the
+          // initial sha to HEAD must be walked, so the deadline is NOT an escape
+          // hatch — the ONLY exit is an exhausted commit frontier (cursor at
+          // HEAD). For understanding/framework the deadline still releases the run
+          // as a safety cap. (The epoch loop keeps chaining past the deadline for
+          // repo-history too — see continueExperiment.)
+          const deadlineReleases = ctx.kind !== "repo-history";
+          if ((!pastDeadline || !deadlineReleases) && !frontierExhausted) {
             const openStr = open === undefined ? "unknown" : String(open);
             const why = open === 0 && closed < MIN_CLOSED_PATHS
               ? `Only ${closed} path(s) closed — an exhausted frontier means the scope was enumerated, not that one path was explained. Enumerate every reachable path in scope (at least ${MIN_CLOSED_PATHS}) before the frontier counts as empty.`
@@ -507,7 +540,7 @@ export function buildExperimentTools(
           // produces a markdown report of tagged opportunities. Requiring .html
           // for framework (the old bug) refused every correctly-finished
           // framework run and told it to draw SVG diagrams for a dedup report.
-          const wantsHtml = ctx.kind === "understanding";
+          const wantsHtml = ctx.kind === "understanding" || ctx.kind === "repo-history";
           const ext = wantsHtml ? ".html" : ".md";
           const hasDeliverable = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(ext));
           if (ledgerReadOk && !hasDeliverable) {
