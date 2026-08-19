@@ -205,6 +205,22 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
+
+    const apiPathPrefix = config.apiPathPrefix;
+    if (apiPathPrefix) {
+      this.app.use((req: Request, _res: Response, next: express.NextFunction): void => {
+        const url = req.url;
+        const isPrefixed =
+          url === apiPathPrefix ||
+          url.startsWith(`${apiPathPrefix}/`) ||
+          url.startsWith(`${apiPathPrefix}?`);
+        if (isPrefixed) {
+          req.url = `/api${url.slice(apiPathPrefix.length)}`;
+        }
+        next();
+      });
+    }
+
     // Security middleware
     this.app.use(helmet());
 
