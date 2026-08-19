@@ -65,6 +65,7 @@ import { TicketsHeader } from '../../components/Tickets/TicketsHeader/TicketsHea
 import { hasAnyFilterChip } from '../../components/Tickets/TicketsHeader/filterChips';
 import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../components/Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import {
   clearCreateTicketParams,
   hasCreateTicketFlag,
@@ -610,6 +611,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkCreateModalOpen, setIsBulkCreateModalOpen] = useState(false);
   const [createTicketSeed, setCreateTicketSeed] = useState<CreateTicketSeed | null>(null);
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
@@ -4665,6 +4667,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             : null
         }
         linkBoardsMetadata={JSON.stringify({ channelId, source: 'kanban_header' })}
+        onBulkCreateTicket={
+          canCreateTicket && effectiveProjectId && channel && !channel.isArchived
+            ? (): void => setIsBulkCreateModalOpen(true)
+            : null
+        }
+        bulkCreateTicketMetadata={JSON.stringify({ boardId, channelId })}
         layoutView={layoutView}
         onLayoutChange={handleLayoutChange}
         showLayoutPicker={!isFlowBoard}
@@ -5761,6 +5769,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Bulk Create Tickets Modal */}
+      {effectiveProjectId && channel && (
+        <BulkCreateTicketsModal
+          isOpen={isBulkCreateModalOpen}
+          onClose={() => setIsBulkCreateModalOpen(false)}
+          channelId={channel.id}
+          projectId={effectiveProjectId}
+          boardId={currentBoardId ?? ''}
+          boardName={selectedBoardDetail?.name}
         />
       )}
 
