@@ -391,7 +391,7 @@ function pendingWindows(channel: {
  * left to the model.
  */
 async function knownEntities(projectCode: string, userId: string): Promise<string[]> {
-  const project = await prisma.kbProject.findFirst({ where: { projectCode } });
+  const project = await prisma.kbProject.findUnique({ where: { projectCode } });
   if (!project || !userId) return [];
 
   try {
@@ -402,7 +402,16 @@ async function knownEntities(projectCode: string, userId: string): Promise<strin
       },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // Silence here reads as "the KB is empty", and an empty vocabulary is
+      // exactly what makes a batch invent its own names — the failure this
+      // function exists to prevent. Usually an expired session for enabledBy.
+      logger.warn("[kb-extract] known-entity list failed", {
+        code: projectCode,
+        status: String(res.status),
+      });
+      return [];
+    }
 
     const body = (await res.json()) as { data?: { paths?: string[] } };
     const names = new Set<string>();

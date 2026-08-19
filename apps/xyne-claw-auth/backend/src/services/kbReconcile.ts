@@ -278,8 +278,8 @@ async function reconcileOne(
  * than before the run, and the remaining entities are still worth correcting.
  */
 export async function runKbReconcile(projectCode: string, onlyEntity?: string): Promise<void> {
-  const project = await prisma.kbProject.findFirst({ where: { projectCode, enabled: true } });
-  if (!project) {
+  const project = await prisma.kbProject.findUnique({ where: { projectCode } });
+  if (!project || !project.enabled) {
     logger.info("[kb-reconcile] no enabled project", { code: projectCode });
     return;
   }

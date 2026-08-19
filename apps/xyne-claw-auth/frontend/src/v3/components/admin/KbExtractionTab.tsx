@@ -54,6 +54,8 @@ interface KbProject {
   projectName: string;
   collectionId: string;
   extractAgentSlug: string | null;
+  mergeAgentSlug: string | null;
+  reconcileAgentSlug: string | null;
   enabled: boolean;
   enabledBy: string | null;
   enabledAt: string | null;
@@ -121,13 +123,15 @@ export function KbExtractionTab() {
   /* Ids are typed in rather than picked: Spaces has no list-projects endpoint,
      and an admin adding a project already has the id to hand. A picker can
      replace this without changing anything below. */
-  const [allRuns, setAllRuns] = useState<KbRun[]>([]);
+  const [runs, setRuns] = useState<KbRun[]>([]);
+  const [mergeRuns, setMergeRuns] = useState<KbRun[]>([]);
+  const [reconcileRuns, setReconcileRuns] = useState<KbRun[]>([]);
   const [showRuns, setShowRuns] = useState(false);
   const [showReconcile, setShowReconcile] = useState(false);
   const [showAddProject, setShowAddProject] = useState(false);
   const [newProject, setNewProject] = useState({
     projectId: "", projectCode: "", projectName: "", workspaceId: "", collectionId: "",
-    extractAgentSlug: "",
+    extractAgentSlug: "", mergeAgentSlug: "", reconcileAgentSlug: "",
   });
   const [addChannelTo, setAddChannelTo] = useState<string | null>(null);
   const [newChannel, setNewChannel] = useState({
@@ -137,13 +141,22 @@ export function KbExtractionTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, r] = await Promise.all([
+      // One request per stage, not one split client-side: a single backfill
+      // night is well over 150 EXTRACT rows, and a shared limit meant the merge
+      // and reconcile panels rendered "No merges yet" — the failure they exist
+      // to surface, reported as its opposite — precisely when the pipeline was
+      // busiest.
+      const [p, extract, merge, reconcile] = await Promise.all([
         api<KbProject[]>("/projects"),
         // Non-fatal: the run history is diagnostic, not required to operate.
-        api<KbRun[]>("/runs?limit=150").catch(() => [] as KbRun[]),
+        api<KbRun[]>("/runs?kind=EXTRACT&limit=150").catch(() => [] as KbRun[]),
+        api<KbRun[]>("/runs?kind=MERGE&limit=60").catch(() => [] as KbRun[]),
+        api<KbRun[]>("/runs?kind=RECONCILE&limit=60").catch(() => [] as KbRun[]),
       ]);
       setProjects(p);
-      setAllRuns(r);
+      setRuns(extract);
+      setMergeRuns(merge);
+      setReconcileRuns(reconcile);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -161,12 +174,10 @@ export function KbExtractionTab() {
      for the length of a backfill is a lot of load for numbers nobody is
      watching. Refresh when you want to know.
 
-     Split by kind here rather than fetched per kind: one request answers "what
-     happened to this project?", which is the question actually being asked. */
-  const runs = allRuns.filter((r) => r.kind === "EXTRACT");
-  const mergeRuns = allRuns.filter((r) => r.kind === "MERGE");
-  const reconcileRuns = allRuns.filter((r) => r.kind === "RECONCILE");
-  const inFlight = allRuns.some((r) => r.status === "RUNNING");
+     Fetched per kind rather than split from one list: the stages produce wildly
+     different row counts, so a shared limit lets extraction crowd the other two
+     out of the response entirely. */
+  const inFlight = [...runs, ...mergeRuns, ...reconcileRuns].some((r) => r.status === "RUNNING");
 
   const toggleChannel = async (project: KbProject, channel: KbChannel) => {
     setBusy(channel.channelId);
@@ -194,7 +205,10 @@ export function KbExtractionTab() {
     try {
       await api("/projects", { method: "POST", body: JSON.stringify({ ...newProject, enabled: true }) });
       setShowAddProject(false);
-      setNewProject({ projectId: "", projectCode: "", projectName: "", workspaceId: "", collectionId: "", extractAgentSlug: "" });
+      setNewProject({
+        projectId: "", projectCode: "", projectName: "", workspaceId: "", collectionId: "",
+        extractAgentSlug: "", mergeAgentSlug: "", reconcileAgentSlug: "",
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -380,6 +394,12 @@ export function KbExtractionTab() {
               <Field label="Extractor agent (blank = kb-extract)" value={newProject.extractAgentSlug}
                      placeholder="kb-extract"
                      onChange={(v) => setNewProject((p) => ({ ...p, extractAgentSlug: v }))} />
+              <Field label="Merge agent (blank = kb-merge)" value={newProject.mergeAgentSlug}
+                     placeholder="kb-merge"
+                     onChange={(v) => setNewProject((p) => ({ ...p, mergeAgentSlug: v }))} />
+              <Field label="Reconcile agent (blank = kb-reconcile)" value={newProject.reconcileAgentSlug}
+                     placeholder="kb-reconcile"
+                     onChange={(v) => setNewProject((p) => ({ ...p, reconcileAgentSlug: v }))} />
             </div>
             <p className="mt-2 text-[10px] text-xyne-fg-tertiary">
               The code becomes the KB path segment (projects/&lt;CODE&gt;/) and cannot be changed later —
@@ -418,7 +438,8 @@ export function KbExtractionTab() {
                 <span className="ml-2 font-normal text-xyne-fg-tertiary">{project.projectName}</span>
               </h3>
               <p className="mt-0.5 text-[11px] text-xyne-fg-tertiary">
-                KB → {project.collectionId} · agent: {project.extractAgentSlug ?? "kb-extract"}
+                KB → {project.collectionId} · agents: {project.extractAgentSlug ?? "kb-extract"} /{" "}
+                {project.mergeAgentSlug ?? "kb-merge"} / {project.reconcileAgentSlug ?? "kb-reconcile"}
                 {project.enabledBy && ` · enabled by ${project.enabledBy}`}
               </p>
             </div>

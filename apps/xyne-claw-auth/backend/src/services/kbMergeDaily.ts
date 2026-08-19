@@ -19,6 +19,7 @@
  */
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { gcsService } from "./gcsService.js";
 import { createLogger } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
@@ -56,50 +57,31 @@ interface FindingsObject {
 /**
  * Lists and downloads the day's findings for one project.
  *
- * Goes through the JSON API rather than a storage SDK so the same code works
- * against fake-gcs locally and real GCS in production — the emulator speaks the
- * same endpoints, and claw already writes through an equivalent path.
+ * Through gcsService rather than raw fetch against the JSON API: production
+ * buckets are private, so an unauthenticated GET is a 401 — and gcsService
+ * already carries Application Default Credentials, the fake-gcs `apiEndpoint`
+ * switch for local dev, the configured bucket name, and list pagination. The
+ * write side (claw's emit-finding flush) goes through the SDK too, so this is
+ * also the same code path in both directions.
  */
 async function fetchFindings(projectCode: string, day: string): Promise<FindingsObject[]> {
-  const bucket = process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments";
-  const host = storageHost();
   const prefix = `${FINDINGS_PREFIX}/dt=${day}/${projectCode}/`;
-
-  const listUrl = `${host}/storage/v1/b/${bucket}/o?prefix=${encodeURIComponent(prefix)}`;
-  const listRes = await fetch(listUrl, { signal: AbortSignal.timeout(30_000) });
-  if (!listRes.ok) {
-    throw new Error(`findings list failed (${listRes.status}): ${await listRes.text()}`);
-  }
-
-  const listed = (await listRes.json()) as { items?: Array<{ name?: string }> };
-  const names = (listed.items ?? []).map((i) => i.name).filter((n): n is string => Boolean(n));
+  const names = await gcsService.listFiles(prefix);
 
   const objects: FindingsObject[] = [];
   for (const name of names) {
-    const url = `${host}/storage/v1/b/${bucket}/o/${encodeURIComponent(name)}?alt=media`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) {
+    try {
+      const buffer = await gcsService.getFileBuffer(name);
+      objects.push({ name, body: buffer.toString("utf8") });
+    } catch (err) {
       // One unreadable object should not cost the whole night's merge.
-      logger.warn("[kb-merge] findings object unreadable; skipping", { name, status: String(res.status) });
-      continue;
+      logger.warn("[kb-merge] findings object unreadable; skipping", {
+        name,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
-    objects.push({ name, body: await res.text() });
   }
   return objects;
-}
-
-/**
- * Where object storage lives.
- *
- * FAKE_GCS_HOST points at the docker-compose emulator in dev; production talks
- * to Google directly. Mirrors normalizeFakeGcsHost() in claw's config.
- */
-function storageHost(): string {
-  const fake = process.env["FAKE_GCS_HOST"]?.trim();
-  if (fake && process.env["NODE_ENV"] !== "production") {
-    return fake.startsWith("http") ? fake : `http://${fake}`;
-  }
-  return "https://storage.googleapis.com";
 }
 
 
@@ -206,7 +188,7 @@ async function runBatch(
  * Cheap: one list, one download, both of which the merge would do anyway.
  */
 async function assertKbWritable(projectId: string): Promise<void> {
-  const project = await prisma.kbProject.findFirst({ where: { projectId } });
+  const project = await prisma.kbProject.findUnique({ where: { projectId } });
   if (!project) throw new Error(`kb project ${projectId} not found`);
 
   const userId = project.enabledBy;
@@ -359,7 +341,19 @@ export async function runKbMergePending(onlyProjectCode?: string): Promise<void>
   });
 
   for (const project of projects) {
-    const days = await pendingDays(project.projectCode);
+    // A storage failure used to be swallowed into an empty list, so the nightly
+    // logged "nothing pending" forever and the admin panel showed no merges —
+    // the exact failure it exists to surface, reported as its opposite.
+    let days: string[];
+    try {
+      days = await pendingDays(project.projectCode);
+    } catch (err) {
+      logger.error("[kb-merge] cannot list pending findings", {
+        code: project.projectCode,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
     if (days.length === 0) {
       logger.info("[kb-merge] nothing pending", { code: project.projectCode });
       continue;
@@ -383,16 +377,15 @@ export async function runKbMergePending(onlyProjectCode?: string): Promise<void>
  * so a partial backfill resumes rather than re-merging ground already covered.
  */
 async function pendingDays(projectCode: string): Promise<string[]> {
-  const bucket = process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments";
-  const url = `${storageHost()}/storage/v1/b/${bucket}/o?prefix=${encodeURIComponent(FINDINGS_PREFIX + "/dt=")}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) return [];
-
-  const listed = (await res.json()) as { items?: Array<{ name?: string }> };
+  // The partition is dt=<day>/<CODE>/, so the day comes before the code and a
+  // project cannot be narrowed by prefix — everything under the findings root
+  // is listed and filtered here. gcsService pages the listing; the previous
+  // raw JSON-API call read only the first 1000 objects and silently stopped.
+  const names = await gcsService.listFiles(`${FINDINGS_PREFIX}/dt=`);
   const days = new Set<string>();
-  for (const item of listed.items ?? []) {
+  for (const name of names) {
     // people-kb/findings/dt=2026-04-14/XYNE/<session>.jsonl
-    const match = /\/dt=(\d{4}-\d{2}-\d{2})\/([^/]+)\//.exec(item.name ?? "");
+    const match = /\/dt=(\d{4}-\d{2}-\d{2})\/([^/]+)\//.exec(name);
     if (match && match[2] === projectCode) days.add(match[1]!);
   }
 
