@@ -114,6 +114,12 @@ import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
+import {
+  parseBoardEtaManagement,
+  mergeBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+} from '../validation/etaManagementSchema.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
@@ -4256,6 +4262,12 @@ export const mutators = defineMutators({
         isArchived: z.boolean().optional(),
         kanbanPosition: z.string().nullable().optional(),
         updatedAt: z.number(),
+        // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit - see
+        // the matching backend mutator. Not used by this optimistic client-side write (the
+        // server is authoritative on the fingerprint check); accepted here only so callers
+        // passing them don't hit an excess-property type error.
+        etaExpectedFingerprint: z.string().optional(),
+        etaChangeReason: z.string().optional(),
       }),
       async ({
         tx,
@@ -4379,6 +4391,41 @@ export const mutators = defineMutators({
         await updateTicketMdFromZero(tx, zql, ticketId);
       },
     ),
+    acknowledgeEtaRisk: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        expectedFingerprint: z.string(),
+        reason: z.string().min(1),
+        clientTimestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket) return;
+
+        const current = parseTicketEtaManagement(ticket.metadata);
+        // Optimistic no-op on a stale fingerprint - the server is authoritative and will
+        // reject with a conflict the client can refetch from; this just avoids the local
+        // optimistic UI flashing an acknowledgment that won't be confirmed.
+        if (current.planningRisk.state !== 'ACTIVE' || current.planningRisk.fingerprint !== expectedFingerprint) {
+          return;
+        }
+
+        const merged = mergeTicketEtaManagement(ticket.metadata, {
+          planningRisk: {
+            state: 'ACKNOWLEDGED',
+            acknowledgedAt: clientTimestamp,
+            acknowledgedBy: ctx.userID,
+            acknowledgmentReason: reason,
+          },
+        });
+
+        await tx.mutate.tickets.update({
+          id: ticketId,
+          metadata: merged as ReadonlyJSONValue,
+          updatedAt: clientTimestamp,
+        });
+      },
+    ),
   },
   ticketStageEta: {
     update: defineMutator(
@@ -4388,6 +4435,9 @@ export const mutators = defineMutators({
         updatedAt: z.number(),
         ticketId: z.string().optional(),
         stageId: z.string().optional(),
+        // See ticket.update's matching fields - accepted so callers passing it don't hit an
+        // excess-property type error; the server is authoritative on the fingerprint check.
+        etaExpectedFingerprint: z.string().optional(),
       }),
       async ({ tx, ctx, args: { id, stageEta, updatedAt, ticketId, stageId } }) => {
         await tx.mutate.ticket_stage_eta.update({
@@ -4820,6 +4870,37 @@ export const mutators = defineMutators({
     ),
   },
   board: {
+    updateEtaManagement: defineMutator(
+      z.object({
+        boardId: z.string(),
+        autoRecomputeEnabled: z.boolean(),
+        now: z.number(),
+        // Standard Path - see the backend mutator for the real validation; this optimistic
+        // client-side write skips it (server is authoritative and will reject an invalid path).
+        standardPathStageIds: z.array(z.string()).optional(),
+      }),
+      async ({ tx, ctx, args: { boardId, autoRecomputeEnabled, now, standardPathStageIds } }) => {
+        const board = await tx.run(zql.boards.where('id', boardId).one());
+        if (!board) return;
+
+        const current = parseBoardEtaManagement(board.metadata);
+        const merged = mergeBoardEtaManagement(board.metadata, {
+          schemaVersion: 1,
+          autoRecomputeEnabled,
+          ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+          configVersion: current.configVersion + 1,
+          updatedAt: now,
+          updatedBy: ctx.userID,
+        });
+
+        await tx.mutate.boards.update({
+          id: boardId,
+          metadata: merged as ReadonlyJSONValue,
+          updatedBy: ctx.userID,
+          updatedAt: now,
+        });
+      },
+    ),
     updateFlowPlan: defineMutator(
       z.object({
         boardId: z.string(),

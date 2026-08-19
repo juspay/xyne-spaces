@@ -107,6 +107,12 @@ const envSchema = Joi.object({
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
+  // Deployment-level kill switch for the ETA risk-detection/auto-recalculation feature
+  // (planning risk, Standard Path, automatic due-date extension). Defaults off so rolling
+  // out the integration code has zero effect until explicitly enabled; per-board
+  // `autoRecomputeEnabled`/`standardPathStageIds` remain finer-grained switches underneath
+  // this one once it's on.
+  ETA_MANAGEMENT_ENABLED: Joi.boolean().default(false),
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
@@ -701,6 +707,7 @@ export const config = {
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
+  etaManagementEnabled: envVars.ETA_MANAGEMENT_ENABLED,
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,

@@ -1,5 +1,5 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import { ActivityClassification } from '@xyne/shared';
+import { ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -10,6 +10,7 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { websocketService } from '@/services/websocketService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { dispatchEtaNotifications, etaSignalsFromMetadataDiff } from '@/services/etaManagement';
 
 import {
   emitTicketUpdated,
@@ -194,12 +195,54 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
         workspaceId: true,
         createdBy: true,
         assignedTo: true,
+        userGroupId: true,
+        boardId: true,
+        eta: true,
+        statusV2: true,
+        metadata: true,
       },
     });
 
     if (!ticket) {
       logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found`);
       return;
+    }
+
+    // ETA planning-risk alerts. Driven off the committed before-vs-after state rather
+    // than the in-transaction evaluation result, so one place covers every Zero mutator
+    // that writes a ticket (ticket.update, nonLinear.transition, ticketStageEta.update).
+    // Fingerprint-based signal derivation makes this naturally idempotent when one
+    // logical mutation emits several `tickets.update` jobs (e.g. board transfer). The
+    // Prisma write paths own their own post-commit dispatch - they never reach here.
+    //
+    // Deliberately drops the `newEta` signal: a due-date change is already notified by
+    // the generic `etaChanged` branch below, to the same awareness recipient set. Only
+    // the risk alert (which goes to the narrower "action recipients" set) is new here.
+    // PRD §6.9: planning-risk notifications are suppressed while the ticket is paused
+    // (state stays visible, just labeled paused) - mirrors the same guard already applied
+    // in stageEtaDeadlineWorker.ts's reconciliation pass.
+    if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
+      try {
+        const { riskAlert } = etaSignalsFromMetadataDiff({
+          previousMetadata: prev.metadata,
+          currentMetadata: ticket.metadata,
+          previousEta: prev.eta,
+          currentEta: ticket.eta?.getTime() ?? null,
+        });
+        await dispatchEtaNotifications(
+          { riskAlert, newEta: null },
+          {
+            ticketId,
+            createdBy: ticket.createdBy,
+            assignedTo: ticket.assignedTo,
+            ticketUserGroupId: ticket.userGroupId,
+            boardId: ticket.boardId,
+            actorId,
+          },
+        );
+      } catch (error) {
+        logger.error(`[TicketsSideEffectHandler] Failed to dispatch ETA planning-risk notification:`, error);
+      }
     }
 
     // Fetch all role assignments (manager, team lead, dev, qa, pr reviewer, etc.)
@@ -294,7 +337,13 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           logger.info(`[TicketsSideEffectHandler] Sent priority change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
         }
 
-        if (etaChanged && args.eta !== undefined) {
+        // PRD §6.9: no reminders/notifications while paused. This field is a plain diff
+        // (fires for ANY eta write, automatic or manual), and a stage move that lands the
+        // ticket in a paused stage can itself trigger an automatic forecast extension
+        // (§6.1: "a ticket enters or re-enters a stage" recomputes the forecast) - without
+        // this guard that extension's notification would leak out even though the ticket
+        // is being paused, not actively worked.
+        if (etaChanged && args.eta !== undefined && ticket.statusV2 !== TicketStatusV2.PAUSED) {
           const formattedDate = new Date(args.eta).toLocaleDateString('en-US', {
             month: 'long',
             day: 'numeric',

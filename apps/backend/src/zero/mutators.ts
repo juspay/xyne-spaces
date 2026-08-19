@@ -102,6 +102,12 @@ import {
   entityLinkContextSchema,
   updateSubTicketsMdFromZero,
   linkSubTicketConversationToParentFromZero,
+  parseBoardEtaManagement,
+  mergeBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+  type EtaRiskAcknowledgedActivityValue,
+  type EtaManuallyUpdatedActivityValue,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -119,6 +125,17 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
+import{
+  resolveStepEstimate,
+  evaluateEta,
+  buildEtaActivityIntents,
+  isTerminalStatus,
+  isEtaManagementKillSwitchActive,
+  canUserModifyTicketControl,
+  msToDate,
+  dateToMs,
+  writeEtaActivitiesZero,
+} from '@/services/etaManagement';
 import {
   FLOW_STAGE_NAMES,
   FlowPlanSchema,
@@ -5818,6 +5835,12 @@ export function createMutators(
           isArchived: z.boolean().optional(),
           kanbanPosition: z.string().nullable().optional(),
           updatedAt: z.number(),
+          // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
+          // Optional (not required) so existing/other callers that touch `eta` without this
+          // context keep working unchanged; the dashboard's dedicated due-date editor (M5)
+          // is expected to always pass both.
+          etaExpectedFingerprint: z.string().optional(),
+          etaChangeReason: z.string().optional(),
         }),
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).one());
@@ -5894,46 +5917,62 @@ export function createMutators(
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
+          const isStageChanging = params.stageName !== undefined && params.stageName !== ticket.stageName;
+          const isEnteringTerminal =
+            params.statusV2 !== undefined &&
+            params.statusV2 !== ticket.statusV2 &&
+            (params.statusV2 === TicketStatusV2.COMPLETED || params.statusV2 === TicketStatusV2.CANCELLED);
+          const isLeavingTerminal =
+            params.statusV2 !== undefined &&
+            params.statusV2 !== ticket.statusV2 &&
+            (ticket.statusV2 === TicketStatusV2.COMPLETED || ticket.statusV2 === TicketStatusV2.CANCELLED);
+          const isResumingFromPause =
+            params.statusV2 !== undefined &&
+            ticket.statusV2 === TicketStatusV2.PAUSED &&
+            params.statusV2 !== TicketStatusV2.PAUSED;
 
-          if ((isAssigneeChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
-            // Get board to check if transfer is restricted
-            const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
+          // Board/etaManagement context, fetched once and reused by both the permission gate
+          // below and the ETA domain-service evaluation further down - only when one of the
+          // triggers that actually needs it is present, so an unrelated field edit (title,
+          // description, ...) never pays for this lookup.
+          const needsBoardEtaContext =
+            isAssigneeChanging ||
+            isEtaChanging ||
+            isBoardChanging ||
+            isStageChanging ||
+            isEnteringTerminal ||
+            isLeavingTerminal ||
+            isResumingFromPause;
+          const etaBoard = needsBoardEtaContext
+            ? await tx.run(zql.boards.where('id', ticket.boardId).one())
+            : null;
+          const boardEtaManagement = parseBoardEtaManagement(etaBoard?.metadata ?? null);
 
-            if (board?.metadata && typeof board.metadata === 'object') {
-              const metadata = board.metadata as BoardMetadata;
+          // Stage-only moves are gated only once a board has opted into automatic ETA
+          // management (stage moves can now trigger auto-recompute) - scoped the same way as
+          // the nonLinear.transition / ticketStageEta.update gates, so boards not using this
+          // feature see no behavior change (PRD §5.5).
+          const isStageChangingGated = isStageChanging && boardEtaManagement.autoRecomputeEnabled;
 
-              const controlRoleIds = Array.isArray(metadata.ticketControlRoleIds)
-                ? metadata.ticketControlRoleIds
-                : [];
-              // Restriction fires when the board has ticketControlRoleIds set
-              // (role-driven path) OR the legacy isAllowedToTransfer toggle is on
-              // (enum fallback). Boards with neither are unrestricted.
-              if (controlRoleIds.length > 0 || metadata.isAllowedToTransfer === true) {
-                // User must be part of the current user group with proper responsibility
-                const userGroupMapping = await tx.run(
-                  zql.user_group_mappings
-                    .where("userId", authData.sub)
-                    .where("userGroupId", ticket.userGroupId)
-                    .one()
-                );
-
-                if (!userGroupMapping) {
-                  throw new Error('You must be a member of the current user group to modify this ticket');
-                }
-
-                if (controlRoleIds.length > 0) {
-                  // Role-driven: raw roleId membership. Works for custom roles.
-                  if (!userGroupMapping.roleId || !controlRoleIds.includes(userGroupMapping.roleId)) {
-                    throw new Error('Only users with a configured role can modify Assignee, ETA, Stage, or Board on this board');
-                  }
-                } else {
-                  // Legacy enum fallback (only fires when isAllowedToTransfer===true).
-                  const responsibility = userGroupMapping.responsibility;
-                  if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
-                    throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify Assignee, ETA, Stage, or Board on this board');
-                  }
-                }
-              }
+          if ((isAssigneeChanging || isEtaChanging || isBoardChanging || isStageChangingGated) && ticket.userGroupId) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => etaBoard?.metadata ?? null,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
+            );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
             }
           }
 
@@ -5972,13 +6011,10 @@ export function createMutators(
 
             const firstStage = newBoardStages[0];
 
-            // 2. Calculate total ETA from new board's stages (same logic as ticket creation)
-            const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
-            const newTicketEta = totalEtaHours > 0
-              ? calculateETADeadline(new Date(now), totalEtaHours).getTime()
-              : null;
-
-            // 3. Update ticket with first stage and new ETA
+            // 2. Update ticket with first stage. `eta` is deliberately left untouched here -
+            // PRD §6.8: an automatic due date is only ever set/changed by the domain-service
+            // evaluation below, and only when the target board has opted into automatic ETA
+            // management.
             const existingTicketsInFirstStage = await tx.run(
               zql.tickets
                 .where('boardId', params.boardId)
@@ -6000,7 +6036,6 @@ export function createMutators(
               ...(firstStage.defaultTicketStatusV2 && {
                 statusV2: firstStage.defaultTicketStatusV2
               }),
-              ...(newTicketEta && { eta: newTicketEta }),
               kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
@@ -6033,6 +6068,81 @@ export function createMutators(
                 updatedBy: authData.sub
               });
             }
+            // ETA domain-service evaluation for the new board: when it has opted into
+            // automatic ETA management, compute a forecast-based, extend-only value from the
+            // new first stage onward, using the ticket's actual pre-transfer due date as the
+            // extend-only floor. Left untouched otherwise (PRD §6.8).
+            const targetBoardEtaManagement = parseBoardEtaManagement(targetBoard?.metadata ?? null);
+            if (targetBoardEtaManagement.autoRecomputeEnabled) {
+              const targetBoardTransitions = await tx.run(
+                zql.stage_transitions.where('boardId', params.boardId),
+              );
+              const newActiveVisits = await tx.run(
+                zql.ticket_stage_eta.where('ticketId', params.id).where('stageId', firstStage.id),
+              );
+              const activeVisitRow = newActiveVisits.find(e => e.stageLeftAt === null) ?? null;
+              const deadlineTracked = activeVisitRow
+                ? activeVisitRow.stageEta !== activeVisitRow.stageEnteredAt
+                : false;
+              const stepEstimateForMetadata = resolveStepEstimate(
+                { id: firstStage.id, eta: firstStage.eta },
+                null,
+                { requireExplicitTransition: false },
+              );
+              const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+              const effectiveStatusV2 = firstStage.defaultTicketStatusV2 ?? ticket.statusV2;
+
+              const etaResult = evaluateEta({
+                ticketId: params.id,
+                ticketStatus: effectiveStatusV2,
+                isTerminal: isTerminalStatus(effectiveStatusV2),
+                currentTicketEta: msToDate(ticket.eta),
+                currentTicketEtaManagement,
+                boardType: targetBoard?.boardType ?? '',
+                boardEtaManagement: targetBoardEtaManagement,
+                currentStageId: firstStage.id,
+                stages: newBoardStages,
+                transitions: targetBoardTransitions,
+                activeVisit: {
+                  stageVisitId: activeVisitRow?.id ?? null,
+                  transitionId: null,
+                  deadline: activeVisitRow ? new Date(activeVisitRow.stageEta) : null,
+                  deadlineTracked,
+                  estimateSource: stepEstimateForMetadata.source,
+                  estimateHours: stepEstimateForMetadata.incomplete ? null : stepEstimateForMetadata.hours,
+                },
+                trigger: 'STAGE_TRANSITION',
+                now: new Date(now),
+                globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
+              });
+
+              const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+              await tx.mutate.tickets.update({
+                id: params.id,
+                ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+                  ? { eta: etaResult.etaDecision.newEta.getTime() }
+                  : {}),
+                metadata: mergedMetadata as ReadonlyJSONValue,
+                updatedAt: now,
+              });
+
+              const boardTransferActivityIntents = buildEtaActivityIntents(etaResult, {
+                currentStageId: firstStage.id,
+                oldEta: ticket.eta ?? null,
+                boardConfigVersion: targetBoardEtaManagement.configVersion,
+                trigger: 'STAGE_TRANSITION',
+                systemReason: `Automatic recalculation after moving ticket to board "${targetBoard?.name ?? params.boardId}"`,
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+              await writeEtaActivitiesZero(tx, boardTransferActivityIntents, {
+                ticketId: params.id,
+                workspaceId: authData.workspaceId,
+                channelId: ticket.channelId,
+                timestamp: now,
+              });
+
+            }
+
             if (ticket.userGroupId) {
               // Fire and forget - retrigger autoassignment for the new board
               asyncTasks.push(async () => {
@@ -6370,7 +6480,159 @@ export function createMutators(
             }
           }
 
+          // ETA domain-service evaluation: consolidates every trigger this mutator can
+          // produce that needs immediate re-evaluation per PRD §9.5 (manual due-date change,
+          // stage transition on a linear/DEFAULT/RELEASE board - NON_LINEAR direct stage
+          // changes already threw above -, pause resume, terminal entry/exit).
+          let etaActivityIntentsForTicketUpdate: ReturnType<typeof buildEtaActivityIntents> = [];
+          const needsEtaEvaluation =
+            isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause;
+
+          // Pure manual due-date edit (no simultaneous stage/resume/terminal trigger):
+          // optimistic-concurrency check against the persisted risk fingerprint, when the
+          // caller supplied one - a stale client must refetch and retry rather than silently
+          // committing a change decided against outdated risk state.
+          const isPureManualEtaChange =
+            isEtaChanging && !isStageChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
+          if (isPureManualEtaChange && params.etaExpectedFingerprint !== undefined) {
+            const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
+            if (preCheckEtaManagement.planningRisk.fingerprint !== params.etaExpectedFingerprint) {
+              throw new ApplicationError(
+                'Planning risk state has changed since you loaded this ticket. Refresh and try again.',
+                {
+                  details: {
+                    code: 'STALE_FINGERPRINT',
+                    currentFingerprint: preCheckEtaManagement.planningRisk.fingerprint,
+                  },
+                },
+              );
+            }
+          }
+
+          if (needsEtaEvaluation) {
+            const effectiveStageName = (updateData.stageName as string | undefined) ?? ticket.stageName;
+            const effectiveStatusV2 = (updateData.statusV2 as string | undefined) ?? ticket.statusV2;
+            const effectiveStage = effectiveStageName
+              ? await tx.run(zql.stages.where('boardId', ticket.boardId).where('name', effectiveStageName).one())
+              : null;
+
+            if (effectiveStage) {
+              const visitsAtEffectiveStage = await tx.run(
+                zql.ticket_stage_eta.where('ticketId', params.id).where('stageId', effectiveStage.id),
+              );
+              const activeVisitRow = visitsAtEffectiveStage.find(e => e.stageLeftAt === null) ?? null;
+              const deadlineTracked = activeVisitRow
+                ? activeVisitRow.stageEta !== activeVisitRow.stageEnteredAt
+                : false;
+              const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+
+              // A manual due-date change or a terminal-only transition must never let an
+              // automatic forecast override the value just set (or the ticket being closed) -
+              // force autoRecomputeEnabled off for THOSE evaluations only. Detection
+              // (planning-risk state) still runs regardless of this flag either way.
+              const evalBoardEtaManagement =
+                isStageChanging || isResumingFromPause
+                  ? boardEtaManagement
+                  : { ...boardEtaManagement, autoRecomputeEnabled: false };
+
+              const allBoardStages = await tx.run(zql.stages.where('boardId', ticket.boardId));
+              const boardTransitions = await tx.run(zql.stage_transitions.where('boardId', ticket.boardId));
+              const stepEstimateForMetadata = resolveStepEstimate(
+                { id: effectiveStage.id, eta: effectiveStage.eta },
+                null,
+                { requireExplicitTransition: false },
+              );
+              const baselineEtaMs = (updateData.eta as number | undefined) ?? ticket.eta ?? null;
+              const trigger = isStageChanging
+                ? 'STAGE_TRANSITION'
+                : isResumingFromPause
+                  ? 'RESUME'
+                  : isEnteringTerminal
+                    ? 'TERMINAL_ENTRY'
+                    : isLeavingTerminal
+                      ? 'TERMINAL_EXIT'
+                      : 'MANUAL_DUE_DATE';
+
+              const etaResult = evaluateEta({
+                ticketId: params.id,
+                ticketStatus: effectiveStatusV2,
+                isTerminal: isTerminalStatus(effectiveStatusV2),
+                currentTicketEta: msToDate(baselineEtaMs),
+                currentTicketEtaManagement,
+                boardType: etaBoard?.boardType ?? '',
+                boardEtaManagement: evalBoardEtaManagement,
+                currentStageId: effectiveStage.id,
+                stages: allBoardStages,
+                transitions: boardTransitions,
+                activeVisit: {
+                  stageVisitId: activeVisitRow?.id ?? null,
+                  transitionId: null,
+                  deadline: activeVisitRow ? new Date(activeVisitRow.stageEta) : null,
+                  deadlineTracked,
+                  estimateSource: stepEstimateForMetadata.source,
+                  estimateHours: stepEstimateForMetadata.incomplete ? null : stepEstimateForMetadata.hours,
+                },
+                trigger,
+                now: new Date(params.updatedAt),
+                globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
+              });
+
+              if (etaResult.etaDecision.changed && etaResult.etaDecision.newEta) {
+                updateData.eta = etaResult.etaDecision.newEta.getTime();
+              }
+              updateData.metadata = mergeTicketEtaManagement(
+                updateData.metadata ?? ticket.metadata,
+                etaResult.ticketEtaManagementPatch,
+              );
+
+              etaActivityIntentsForTicketUpdate = buildEtaActivityIntents(etaResult, {
+                currentStageId: effectiveStage.id,
+                oldEta: ticket.eta ?? null,
+                boardConfigVersion: boardEtaManagement.configVersion,
+                trigger,
+                systemReason: isStageChanging
+                  ? `Automatic recalculation after moving to stage "${params.stageName}"`
+                  : isResumingFromPause
+                    ? 'Automatic recalculation after resuming from pause'
+                    : isEnteringTerminal || isLeavingTerminal
+                      ? 'Planning risk resolved on terminal status change'
+                      : 'Planning risk re-evaluated after manual due-date change',
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+            }
+          }
+
+          if (isPureManualEtaChange) {
+            // User-attributed (not the system actor) - this is a direct, deliberate manual
+            // edit, distinct from the system-attributed ETA_AUTO_RECOMPUTED/ETA_RISK_* rows
+            // written below. Kept alongside the existing generic ActivityType.ETA row the
+            // `fields` loop already writes (unchanged, for existing timeline consumers) -
+            // this one carries the reason and is the PRD-specified audit shape.
+            await tx.mutate.ticket_activities.insert({
+              workspaceId: authData.workspaceId,
+              id: uuidv4(),
+              ticketId: params.id,
+              updatedBy: authData.sub,
+              timestamp: Date.now(),
+              activityType: ActivityType.ETA_MANUALLY_UPDATED,
+              value: {
+                oldEta: ticket.eta ?? null,
+                newEta: params.eta as number,
+                reason: params.etaChangeReason ?? '',
+                actingUserId: authData.sub,
+              } satisfies EtaManuallyUpdatedActivityValue as ReadonlyJSONValue,
+              channelId: ticket.channelId,
+            });
+          }
+
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          await writeEtaActivitiesZero(tx, etaActivityIntentsForTicketUpdate, {
+            ticketId: params.id,
+            workspaceId: authData.workspaceId,
+            channelId: ticket.channelId,
+            timestamp: params.updatedAt,
+          });
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED
@@ -6646,6 +6908,121 @@ export function createMutators(
           }
         },
       ),
+      /**
+       * Acknowledge the ticket's CURRENT planning-risk fingerprint: records that an
+       * authorized user reviewed this exact risk condition and intentionally kept the
+       * current values. Hides the actionable banner but never changes either ETA. Requires
+       * `expectedFingerprint` to match the persisted fingerprint at write time (optimistic
+       * concurrency - a stale client must refetch and retry rather than silently
+       * acknowledging a condition that has since changed).
+       */
+      acknowledgeEtaRisk: defineMutator(
+        z.object({
+          ticketId: z.string(),
+          expectedFingerprint: z.string(),
+          reason: z.string().min(1),
+          clientTimestamp: z.number(),
+        }),
+        async ({ tx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) throw new Error('Ticket not found');
+
+          const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+          const currentRisk = currentTicketEtaManagement.planningRisk;
+
+          if (currentRisk.state !== 'ACTIVE' || currentRisk.fingerprint !== expectedFingerprint) {
+            throw new ApplicationError(
+              'This planning risk has changed since you loaded this ticket. Refresh and try again.',
+              {
+                details: {
+                  code: 'STALE_FINGERPRINT',
+                  currentState: currentRisk.state,
+                  currentFingerprint: currentRisk.fingerprint,
+                },
+              },
+            );
+          }
+
+          const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          const permission = await canUserModifyTicketControl(
+            authData.sub,
+            ticket.userGroupId ?? null,
+            ticket.boardId,
+            {
+              getBoardMetadata: async () => board?.metadata ?? null,
+              getUserGroupMapping: async (userId, userGroupId) => {
+                const mapping = await tx.run(
+                  zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                );
+                return mapping
+                  ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                  : null;
+              },
+            },
+          );
+          if (!permission.allowed) {
+            throw new Error(permission.reason ?? 'Not authorized to acknowledge this planning risk');
+          }
+
+          const now = Date.now();
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            planningRisk: {
+              state: 'ACKNOWLEDGED',
+              acknowledgedAt: now,
+              acknowledgedBy: authData.sub,
+              acknowledgmentReason: reason,
+            },
+          });
+
+          await tx.mutate.tickets.update({
+            id: ticketId,
+            metadata: mergedMetadata as ReadonlyJSONValue,
+            updatedAt: now,
+          });
+
+          // Record + system message only - no additional notification (PRD §8.2).
+          await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
+            id: uuidv4(),
+            ticketId,
+            updatedBy: authData.sub,
+            timestamp: now,
+            activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
+            value: {
+              fingerprint: expectedFingerprint,
+              reason,
+              acknowledgedBy: authData.sub,
+              acknowledgedAt: now,
+            } satisfies EtaRiskAcknowledgedActivityValue as ReadonlyJSONValue,
+            channelId: ticket.channelId,
+          });
+
+          if (ticket.conversationId) {
+            const user = await tx.run(zql.users.where('id', authData.sub).one());
+            const userName = user?.displayName || user?.name || 'Someone';
+            await tx.mutate.messages.insert({
+              messageId: uuidv4(),
+              conversationId: ticket.conversationId,
+              workspaceId: authData.workspaceId,
+              senderId: authData.sub,
+              content: `${userName} acknowledged the planning-risk warning: ${reason}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: true,
+              showInChannel: false,
+              createdAt: now,
+              metadata: {
+                activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
+                isTicketActivity: true,
+              },
+            });
+          }
+
+          void clientTimestamp; // display-consistency hint only; server timestamp (`now`) is authoritative for persistence.
+        },
+      ),
       archiveDeskTicket: defineMutator(
         z.object({
           id: z.string(),
@@ -6772,9 +7149,12 @@ export function createMutators(
           updatedAt: z.number(),
           ticketId: z.string().optional(),
           stageId: z.string().optional(),
+          // Optional optimistic-concurrency guard against the ticket's persisted planning-risk
+          // fingerprint - see the matching param on ticket.update for why it's optional.
+          etaExpectedFingerprint: z.string().optional(),
         }),
         async ({ tx, args }) => {
-          const { id, stageEta, updatedAt, ticketId, stageId } = args;
+          const { id, stageEta, updatedAt, ticketId, stageId, etaExpectedFingerprint } = args;
 
           const now = Date.now();
           if (stageEta < now) {
@@ -6794,21 +7174,6 @@ export function createMutators(
             logger.warn('[MUTATOR] Ticket stage ETA entry not found and no ticketId/stageId provided');
             return;
           }
-
-          // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
-          await tx.mutate.ticket_stage_eta.upsert({
-            workspaceId: authData.workspaceId,
-            id,
-            ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
-            stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
-            version: 1,
-            stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
-            stageLeftAt: null,
-            stageEta,
-            createdAt: oldTicketStageEtaEntry?.createdAt ?? now,
-            updatedAt,
-            updatedBy: authData.sub,
-          });
 
           // 3. Use the old entry for other data
           const ticketStageEtaEntry = oldTicketStageEtaEntry ?? {
@@ -6831,54 +7196,148 @@ export function createMutators(
 
           if (!currentStage) return;
 
-          // 5. Fetch ALL stages for this board
+          const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          const boardEtaManagement = parseBoardEtaManagement(board?.metadata ?? null);
+
+          if (etaExpectedFingerprint !== undefined) {
+            const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
+            if (preCheckEtaManagement.planningRisk.fingerprint !== etaExpectedFingerprint) {
+              throw new ApplicationError(
+                'Planning risk state has changed since you loaded this ticket. Refresh and try again.',
+                {
+                  details: {
+                    code: 'STALE_FINGERPRINT',
+                    currentFingerprint: preCheckEtaManagement.planningRisk.fingerprint,
+                  },
+                },
+              );
+            }
+          }
+
+          // This mutator changes Ticket.eta the same way ticket.update's eta-changing path
+          // does, but has never been gated by ticketControlRoleIds. Close that gap the same
+          // way nonLinear.transition's new gate is scoped - only once a board has opted into
+          // autoRecomputeEnabled - so boards not using this feature see no behavior change.
+          if (boardEtaManagement.autoRecomputeEnabled && ticket.userGroupId) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => board?.metadata ?? null,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
+            );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
+            }
+          }
+
+          // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
+          await tx.mutate.ticket_stage_eta.upsert({
+            workspaceId: authData.workspaceId,
+            id,
+            ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
+            stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
+            version: 1,
+            stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
+            stageLeftAt: null,
+            stageEta,
+            createdAt: oldTicketStageEtaEntry?.createdAt ?? now,
+            updatedAt,
+            updatedBy: authData.sub,
+          });
+
+          // 5. Fetch ALL stages/transitions for this board
           const allBoardStages = await tx.run(
             zql.stages.where('boardId', ticket.boardId)
           );
-
-          // 6. Filter to get FUTURE stages (after current stage)
-          const futureStages = allBoardStages
-            .filter(stage => stage.sequenceNumber > currentStage.sequenceNumber)
-            .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-
-          // 7. Calculate total hours needed for future stages (only stages with ETA)
-          const futureStagesHours = futureStages.reduce(
-            (totalHours, stage) => totalHours + (stage.eta || 0),
-            0
+          const boardTransitions = await tx.run(
+            zql.stage_transitions.where('boardId', ticket.boardId),
           );
+          const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
 
-          // 8. Get the NEW current stage deadline (what user just set)
+          // ETA domain-service evaluation: the manually-set stageEta is now the authoritative,
+          // MANUAL-sourced deadline for the current visit - this is the "manual active-stage-
+          // deadline update" trigger from PRD §9.5's immediate re-evaluation list.
+          const etaResult = evaluateEta({
+            ticketId: ticketStageEtaEntry.ticketId,
+            ticketStatus: ticket.statusV2,
+            isTerminal: isTerminalStatus(ticket.statusV2),
+            currentTicketEta: msToDate(ticket.eta),
+            currentTicketEtaManagement,
+            boardType: board?.boardType ?? '',
+            boardEtaManagement,
+            currentStageId: ticketStageEtaEntry.stageId,
+            stages: allBoardStages,
+            transitions: boardTransitions,
+            activeVisit: {
+              stageVisitId: id,
+              transitionId: null,
+              deadline: new Date(stageEta),
+              deadlineTracked: true,
+              estimateSource: 'MANUAL',
+              estimateHours: null,
+            },
+            trigger: 'MANUAL_STAGE_DEADLINE',
+            now: new Date(now),
+            globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
+          });
+
+          // Get the NEW current stage deadline (what user just set)
           const currentStageDeadline = new Date(stageEta);
+          let finalEtaMs: number | null | undefined;
 
-          // 9. Calculate overall ticket ETA only if there are future stages with ETA
-          if (futureStagesHours > 0) {
-            // Calculate overall ticket ETA using working hours logic
-            // Starting from: current stage deadline
-            // Adding: working hours for all future stages
-            const overallTicketEta = calculateETADeadline(
-              currentStageDeadline,  // Start from user's new deadline for current stage
-              futureStagesHours      // Add working hours for future stages
-            );
+          // PRD §6.8: when automatic ETA management is disabled, a manual stage-deadline
+          // edit must never automatically touch the ticket's overall due date - leave
+          // finalEtaMs undefined so the write below skips the `eta` field entirely.
+          if (boardEtaManagement.autoRecomputeEnabled) {
+            // Forecast-based, extend-only - the PRD's replacement for the legacy naive
+            // delta-add, which could silently overwrite existing schedule buffer.
+            finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
+          }
 
-            // 10. Update the ticket's overall ETA
-            await tx.mutate.tickets.update({
-              id: ticket.id,
-              eta: overallTicketEta.getTime(),
-              updatedAt: Date.now(),
-            });
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+          await tx.mutate.tickets.update({
+            id: ticket.id,
+            updatedAt: now,
+            ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
+            metadata: mergedMetadata as ReadonlyJSONValue,
+          });
 
+          if (finalEtaMs !== undefined && finalEtaMs !== null) {
             logger.info('[MUTATOR] Updated ticket ETA', {
               ticketId: ticket.id,
               currentStageDeadline: currentStageDeadline.toISOString(),
-              futureStagesHours,
-              newOverallEta: overallTicketEta.toISOString(),
+              newOverallEta: new Date(finalEtaMs).toISOString(),
             });
           } else {
-            logger.info('[MUTATOR] No future stages with ETA, ticket ETA not updated', {
-              ticketId: ticket.id,
-              futureStagesHours,
-            });
+            logger.info('[MUTATOR] Ticket ETA not updated', { ticketId: ticket.id });
           }
+
+          // ETA evaluation audit trail (auto-recompute/risk detected/reopened/resolved/
+          // forecast-incomplete), attributed to the system actor.
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: ticketStageEtaEntry.stageId,
+            oldEta: ticket.eta ?? null,
+            boardConfigVersion: boardEtaManagement.configVersion,
+            trigger: 'MANUAL_STAGE_DEADLINE',
+            systemReason: `Manual stage deadline update for "${currentStage.name}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+          await writeEtaActivitiesZero(tx, etaActivityIntents, {
+            ticketId: ticket.id,
+            workspaceId: authData.workspaceId,
+            channelId: ticket.channelId,
+            timestamp: now,
+          });
 
           // 11. Create ticket activity for stage ETA change
           const newStageEta = stageEta;
@@ -6934,6 +7393,9 @@ export function createMutators(
               },
             });
           }
+
+          // ETA notifications are dispatched post-commit by TicketsSideEffectHandler,
+          // which fires off the `tx.mutate.tickets.update` above.
         }
       ),
     },
@@ -7902,6 +8364,131 @@ export function createMutators(
           });
           awaitedPostCommitTasks.push(async () => {
             await onFlowPlanUpdated({ boardId, actorUserId: authData.sub });
+          });
+        },
+      ),
+      /**
+       * Toggle automatic ETA management (extend-only forecast-based due-date recalculation)
+       * for a board. Deliberately a narrow, dedicated mutator rather than folded into the
+       * generic `board.update` below: this keeps the admin-only gate and the atomic
+       * configVersion bump (PRD §5.5/§14.1 - "the save operation updates the board metadata
+       * and increments configVersion atomically") specific and auditable, and validates
+       * through the shared etaManagement schema rather than accepting `metadata` as
+       * arbitrary JSON the way `board.update` still does for its other fields.
+       */
+      updateEtaManagement: defineMutator(
+        z.object({
+          boardId: z.string(),
+          autoRecomputeEnabled: z.boolean(),
+          now: z.number(),
+          // Standard Path (NON_LINEAR only, PRD §6.2). Omitted = leave the existing path
+          // untouched; [] explicitly clears it (disables Standard Path forecasting without
+          // changing allowed transitions).
+          standardPathStageIds: z.array(z.string()).optional(),
+        }),
+        async ({ tx, args: { boardId, autoRecomputeEnabled, now, standardPathStageIds } }) => {
+          const board = await tx.run(zql.boards.where('id', boardId).one());
+          if (!board) {
+            throw new Error('Board not found');
+          }
+
+          // Board-admin action, mirroring nonLinear.syncTransitions's gate (BoardAcl.canUpdate).
+          if (board.createdBy !== authData.sub && !(await hasProjectAdminAccess({ userID: authData.sub }, tx))) {
+            throw new Error('Not authorized to edit ETA management settings for this board');
+          }
+
+          if (standardPathStageIds !== undefined && standardPathStageIds.length > 0) {
+            if (board.boardType !== BoardType.NON_LINEAR) {
+              throw new Error('A Standard Path can only be configured on a non-linear board');
+            }
+
+            const uniqueIds = new Set(standardPathStageIds);
+            if (uniqueIds.size !== standardPathStageIds.length) {
+              throw new Error('Standard Path stages must be unique');
+            }
+
+            const [boardStages, boardTransitions] = await Promise.all([
+              tx.run(zql.stages.where('boardId', boardId)),
+              tx.run(zql.stage_transitions.where('boardId', boardId)),
+            ]);
+            const stagesById = new Map(boardStages.map(s => [s.id, s]));
+
+            for (const stageId of standardPathStageIds) {
+              if (!stagesById.has(stageId)) {
+                throw new Error(`Standard Path references a stage that does not belong to this board: ${stageId}`);
+              }
+            }
+
+            const firstStage = stagesById.get(standardPathStageIds[0]!)!;
+            const lastStage = stagesById.get(standardPathStageIds[standardPathStageIds.length - 1]!)!;
+            if (
+              firstStage.defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+              firstStage.defaultTicketStatusV2 === TicketStatusV2.CANCELLED
+            ) {
+              throw new Error('Standard Path must start with a non-terminal stage');
+            }
+            if (lastStage.defaultTicketStatusV2 !== TicketStatusV2.COMPLETED) {
+              throw new Error('Standard Path must end in a Completed stage');
+            }
+            const hasEachRequiredStatus = [
+              TicketStatusV2.TODO,
+              TicketStatusV2.STARTED,
+              TicketStatusV2.COMPLETED,
+            ].every(status => standardPathStageIds.some(id => stagesById.get(id)?.defaultTicketStatusV2 === status));
+            if (!hasEachRequiredStatus) {
+              throw new Error('Standard Path must include at least one To Do, one Started, and one Completed stage');
+            }
+
+            const boardHasTransitions = boardTransitions.length > 0;
+            for (let i = 0; i < standardPathStageIds.length - 1; i++) {
+              const fromId = standardPathStageIds[i]!;
+              const toId = standardPathStageIds[i + 1]!;
+              const transition =
+                boardTransitions.find(t => t.fromStageId === fromId && t.toStageId === toId) ??
+                boardTransitions.find(t => t.fromStageId == null && t.toStageId === toId) ??
+                null;
+
+              const outgoingFromThisStage = boardTransitions.some(t => t.fromStageId === fromId);
+              // Traversable per PRD §6.2: an explicit edge, an applicable global edge, or the
+              // board's unrestricted-transition behavior (this stage has zero outgoing edges
+              // configured anywhere, mirroring nonLinear.transition's own edge-gating).
+              if (!transition && boardHasTransitions && outgoingFromThisStage) {
+                throw new Error(
+                  `Standard Path step "${stagesById.get(fromId)?.name ?? fromId}" -> "${stagesById.get(toId)?.name ?? toId}" is not a traversable transition`,
+                );
+              }
+
+              // Config error (PRD §6.3) - checked against the raw transition config, stricter
+              // than the live path's resolveStepEstimate (which falls back to the stage
+              // default for a misconfigured FIXED_HOURS edge to avoid regressing existing
+              // traffic). Standard Path activation is opt-in, so it can afford to be strict.
+              // ("No matching transition on a graphed board" is already a hard traversal
+              // error above - not a separate case to check here.)
+              if (transition && transition.visitSlaMode === VisitSlaMode.FIXED_HOURS) {
+                if (!transition.fixedEtaHours || transition.fixedEtaHours <= 0) {
+                  throw new Error(
+                    `Standard Path step "${stagesById.get(fromId)?.name ?? fromId}" -> "${stagesById.get(toId)?.name ?? toId}" has fixed-hours SLA selected with no value set`,
+                  );
+                }
+              }
+            }
+          }
+
+          const currentEtaManagement = parseBoardEtaManagement(board.metadata);
+          const mergedMetadata = mergeBoardEtaManagement(board.metadata, {
+            schemaVersion: 1,
+            autoRecomputeEnabled,
+            ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+            configVersion: currentEtaManagement.configVersion + 1,
+            updatedAt: now,
+            updatedBy: authData.sub,
+          });
+
+          await tx.mutate.boards.update({
+            id: boardId,
+            metadata: mergedMetadata as ReadonlyJSONValue,
+            updatedBy: authData.sub,
+            updatedAt: now,
           });
         },
       ),
@@ -17076,6 +17663,34 @@ export function createMutators(
           if (board?.boardType !== BoardType.NON_LINEAR) {
             throw new Error('nonLinear.transition is only valid for NON_LINEAR boards');
           }
+          const boardEtaManagement = parseBoardEtaManagement(board.metadata);
+
+          // Stage moves can now trigger automatic ETA extension once a board opts into
+          // autoRecomputeEnabled - gate them the same way ticket.update gates assignee/eta/
+          // board changes, so a user who can't otherwise touch ETA can't do it indirectly by
+          // moving the ticket. Scoped to boards that actually opted in, so this never changes
+          // behavior for boards that don't use this feature (PRD: no silent behavior change).
+          if (boardEtaManagement.autoRecomputeEnabled && ticket.userGroupId) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => board.metadata,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
+            );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
+            }
+          }
 
           const targetStage = await tx.run(
             zql.stages.where('boardId', ticket.boardId).where('name', toStageName).one(),
@@ -17243,9 +17858,20 @@ export function createMutators(
             targetStage.eta,
           );
 
+          // Track the FINAL persisted deadline/entered-at regardless of which branch below
+          // fires - a CONTINUE-reopen leaves the row's stageEta/stageEnteredAt untouched (not
+          // `stageEtaDeadline` as just computed), and this is the one value the ETA domain
+          // service evaluation further below must use as "the actual deadline now in effect".
+          let finalStageEtaMs: number;
+          let finalStageEnteredAtMs: number;
+          let finalStageVisitId: string;
+
           if (existingEtaId) {
+            const existingRow = targetETAs.find(e => e.id === existingEtaId);
             // REUSE (form unchanged): rebaseEta (RESET) restarts the clock; CONTINUE keeps it.
             if (rebaseEta) {
+              finalStageEtaMs = stageEtaDeadline;
+              finalStageEnteredAtMs = now;
               await tx.mutate.ticket_stage_eta.update({
                 id: existingEtaId,
                 stageEnteredAt: now,
@@ -17256,6 +17882,8 @@ export function createMutators(
               });
             } else {
               // CONTINUE: only clear stageLeftAt (do NOT touch stageEnteredAt/stageEta).
+              finalStageEtaMs = existingRow?.stageEta ?? stageEtaDeadline;
+              finalStageEnteredAtMs = existingRow?.stageEnteredAt ?? now;
               await tx.mutate.ticket_stage_eta.update({
                 id: existingEtaId,
                 stageLeftAt: null,
@@ -17263,12 +17891,16 @@ export function createMutators(
                 updatedBy: authData.sub,
               });
             }
+            finalStageVisitId = existingEtaId;
           } else {
             // NEW visit version (first visit, or form changed): insert a fresh ETA row at
             // newVisitIndex with a clock started from now.
+            finalStageEtaMs = stageEtaDeadline;
+            finalStageEnteredAtMs = now;
+            finalStageVisitId = uuidv4();
             await tx.mutate.ticket_stage_eta.insert({
               workspaceId: authData.workspaceId,
-              id: uuidv4(),
+              id: finalStageVisitId,
               ticketId,
               stageId: targetStage.id,
               version: newVisitIndex,
@@ -17280,6 +17912,45 @@ export function createMutators(
             });
           }
 
+          // ETA domain-service evaluation: forecast (extend-only) + planning-risk state. Same
+          // pure logic as the Prisma call sites (ticketStageTransitionService.ts,
+          // ticketRepository.ts) - only the data-loading glue differs, so results can never
+          // drift between the Prisma and Zero non-linear transition paths.
+          const allBoardStages = await tx.run(zql.stages.where('boardId', ticket.boardId));
+          const deadlineTracked = finalStageEtaMs !== finalStageEnteredAtMs;
+          const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+          const stepEstimateForMetadata = resolveStepEstimate(
+            { id: targetStage.id, eta: targetStage.eta },
+            transition,
+            { requireExplicitTransition: false },
+          );
+
+          const etaResult = evaluateEta({
+            ticketId,
+            ticketStatus: ticket.statusV2,
+            isTerminal: isTerminalStatus(ticket.statusV2),
+            currentTicketEta: msToDate(ticket.eta),
+            currentTicketEtaManagement,
+            boardType: board.boardType,
+            boardEtaManagement,
+            currentStageId: targetStage.id,
+            stages: allBoardStages,
+            transitions: boardTransitions,
+            activeVisit: {
+              stageVisitId: finalStageVisitId,
+              transitionId: transition?.id ?? null,
+              deadline: msToDate(finalStageEtaMs),
+              deadlineTracked,
+              estimateSource: stepEstimateForMetadata.source,
+              estimateHours: stepEstimateForMetadata.incomplete ? null : stepEstimateForMetadata.hours,
+            },
+            trigger: 'STAGE_TRANSITION',
+            now: new Date(now),
+            globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
+          });
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+          const finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
+
           await tx.mutate.tickets.update({
             id: ticketId,
             stageName: toStageName,
@@ -17287,6 +17958,20 @@ export function createMutators(
               statusV2: targetStage.defaultTicketStatusV2,
             }),
             updatedAt: now,
+            ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
+            metadata: mergedMetadata as ReadonlyJSONValue,
+          });
+
+          // Audit trail for the ETA evaluation, deferred alongside the other post-commit
+          // activity/message writes below (system-actor resolution needs an async lookup that
+          // doesn't belong on the synchronous mutation path).
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: targetStage.id,
+            oldEta: ticket.eta ?? null,
+            boardConfigVersion: boardEtaManagement.configVersion,
+            trigger: 'STAGE_TRANSITION',
+            systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
           });
 
           // Defer the non-transactional side-effects (post-commit, via asyncTasks). All three
@@ -17366,6 +18051,47 @@ export function createMutators(
                 },
               });
             }
+
+            const etaSystemActorId = await writeEtaActivitiesZero(tx, etaActivityIntents, {
+              ticketId,
+              workspaceId: authData.workspaceId,
+              channelId: ticket.channelId,
+              timestamp: now,
+            });
+            if (etaSystemActorId) {
+
+              // Deviation-return always gets a thread system message (PRD §15), regardless
+              // of whether the due date changed.
+              if (etaResult.deviationReturned && conversationId) {
+                const { offPathStageIds, offPathWorkingDurationMs } = etaResult.deviationReturned;
+                const hoursOffPath = Math.round((offPathWorkingDurationMs / 3_600_000) * 10) / 10;
+                const dueDateNote =
+                  etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+                    ? `Due date extended to ${etaResult.etaDecision.newEta.toLocaleDateString()}.`
+                    : 'Due date unchanged.';
+                await tx.mutate.messages.insert({
+                  messageId: uuidv4(),
+                  conversationId,
+                  workspaceId: authData.workspaceId,
+                  senderId: etaSystemActorId,
+                  content: `Ticket returned to the Standard Path at "${toStageName}" after ~${hoursOffPath}h off-path (${offPathStageIds.length} stage${offPathStageIds.length === 1 ? '' : 's'}). ${dueDateNote}`,
+                  msgType: MessageType.SYSTEM,
+                  hasAttachment: false,
+                  edited: false,
+                  isDeleted: false,
+                  isSent: true,
+                  showInChannel: false,
+                  createdAt: now,
+                  metadata: {
+                    activityType: ActivityType.ETA_DEVIATION_RETURNED,
+                    isTicketActivity: true,
+                  },
+                });
+              }
+            }
+
+            // ETA notifications are dispatched post-commit by TicketsSideEffectHandler,
+            // which fires off the `tx.mutate.tickets.update` this mutator performed.
             } catch (error) {
               logger.error('stage_transition_side_effects_failed', { ticketId, targetStageId, error });
             }

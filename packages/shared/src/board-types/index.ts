@@ -6,6 +6,8 @@
 // their own module; re-exported here so `@xyne/shared` consumers are unchanged.
 export * from './flow-plan';
 
+import type { BoardEtaManagement } from '../validation/etaManagementSchema';
+
 export interface TicketFormConfig {
   userGroupsOnly?: {
     enabled: boolean;
@@ -105,4 +107,12 @@ export interface BoardMetadata {
    * Absent = treat as visible (backward compat for boards saved before this existed).
    */
   customFieldVisibility?: Record<string, boolean>;
+  /**
+   * Config + versioning for the ETA risk-detection/auto-recalculation
+   * feature (planning risk, Standard Path, automatic due-date extension).
+   * Absent = configVersion 0, no Standard Path, automation disabled - see
+   * `parseBoardEtaManagement` in `validation/etaManagementSchema.ts`, which
+   * every reader must go through rather than casting this field directly.
+   */
+  etaManagement?: BoardEtaManagement;
 }

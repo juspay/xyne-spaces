@@ -7,6 +7,7 @@ import {
   PRStatusEvent,
   serializeFlowPlan,
   TicketStatusV2,
+  mergeBoardEtaManagement,
   type FlowPlan,
 } from '@xyne/shared';
 import { EntitySequenceService } from '@/services/entitySequenceService';
@@ -83,6 +84,21 @@ export class BoardRepository {
 
     // Use transaction to create board and stages together
     return await this.db.$transaction(async (tx) => {
+      const resolvedBoardType = data.boardType || BoardType.DEFAULT;
+      // New-board creation writes the explicit versioned etaManagement defaults (PRD §5.5/
+      // §10.3) rather than leaving it unset, so this board's automation state is unambiguous
+      // from day one - autoRecomputeEnabled defaults on only for DEFAULT (linear) boards;
+      // NON_LINEAR/RELEASE/FLOW start disabled (Standard Path is opt-in later for
+      // NON_LINEAR; RELEASE/FLOW automatic management is deferred entirely this release).
+      const metadataWithEtaDefaults = mergeBoardEtaManagement(data.metadata ?? null, {
+        schemaVersion: 1,
+        autoRecomputeEnabled: resolvedBoardType === BoardType.DEFAULT,
+        standardPathStageIds: [],
+        configVersion: 1,
+        updatedAt: Date.now(),
+        updatedBy: data.createdBy,
+      });
+
       const board = await tx.board.create({
         data: {
           name: data.name,
@@ -90,8 +106,8 @@ export class BoardRepository {
           projectId: data.projectId,
           workspaceId: data.workspaceId,
           createdBy: data.createdBy,
-          boardType: data.boardType || BoardType.DEFAULT,
-          ...(data.metadata !== undefined && { metadata: data.metadata  as Prisma.InputJsonValue}),
+          boardType: resolvedBoardType,
+          metadata: metadataWithEtaDefaults as Prisma.InputJsonValue,
           ...(data.flowPlan !== undefined && { flowPlan: serializeFlowPlan(data.flowPlan) }),
         },
       });

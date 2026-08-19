@@ -2514,6 +2514,80 @@ class NotificationService {
   }
 
   /**
+   * Planning-risk detected/reopened (PRD §8.2): the current stage deadline is later than
+   * the ticket due date, not yet overdue. Sent only to "action recipients" (awareness
+   * recipients who also satisfy the board's ETA-update permission policy) - unlike every
+   * other ticket notification here, which goes to the full awareness set - since a
+   * planning-risk alert is only actionable for someone who can actually change the due
+   * date or stage deadline. Caller is responsible for the "once per fingerprint" dedup
+   * (comparing the previous vs. new fingerprint before calling).
+   */
+  async sendPlanningRiskDetectedNotification(
+    ticketId: string,
+    actionRecipients: string[],
+    details: { stageDeadline: number; ticketDue: number },
+  ): Promise<void> {
+    if (actionRecipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+          channel: { select: { type: true } },
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Planning Risk';
+      const message = `Ticket '${ticketDisplayId}' has a stage deadline later than its due date`;
+
+      await Promise.allSettled(
+        actionRecipients.map(async (userId) => {
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_ETA_PLANNING_RISK,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_ETA_PLANNING_RISK, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_ETA_PLANNING_RISK,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              stageDeadline: details.stageDeadline,
+              ticketDue: details.ticketDue,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send planning risk notification:', error);
+    }
+  }
+
+  /**
    * Shared pipeline for status-like ticket events - same TICKET_STATUS_CHANGE
    * preferences and delivery for every flavour. Callers own the finished copy;
    * the fetch below is only for routing (channel, conversation, actionUrl).

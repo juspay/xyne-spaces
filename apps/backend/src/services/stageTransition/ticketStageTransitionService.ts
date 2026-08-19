@@ -4,11 +4,24 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus, ApproverType } from '@xyne/shared';
+import { FormEntityType, BoardType, ReenterMode, TicketStageRequestStatus, ApproverType, TicketStatusV2, parseTicketEtaManagement, mergeTicketEtaManagement } from '@xyne/shared';
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
+import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import {
+  resolveStepEstimate,
+  loadBoardEtaContext,
+  evaluateEta,
+  buildEtaActivityIntents,
+  isTerminalStatus,
+  isEtaManagementKillSwitchActive,
+  dispatchEtaNotifications,
+  etaSignalsFromResult,
+  writeEtaActivitiesPrisma,
+} from '@/services/etaManagement';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -294,6 +307,10 @@ export class TicketStageTransitionService {
     }
 
     // ── 8. Execute transition ───────────────────────────────────────────────
+    // Resolved outside the transaction: a stable bot-user lookup, not part of the
+    // transactional state, and best kept off the held connection.
+    const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+
     const result = await prisma.$transaction(async (tx) => {
       const now = new Date();
 
@@ -391,8 +408,12 @@ export class TicketStageTransitionService {
         existingEtaToReopen = decision.existingEtaId ? { id: decision.existingEtaId } : null;
       }
 
-      // 8c. Compute stage ETA
-      const stageEta = this.computeStageEta(now, targetStage.eta, transition);
+      // 8c. Compute stage ETA (shared decision table with the ETA domain service, so the
+      // live entry path and the forecast path can never drift - see estimateResolution.ts).
+      const stepEstimate = resolveStepEstimate(targetStage, transition, {
+        requireExplicitTransition: false,
+      });
+      const stageEta = stepEstimate.hours > 0 ? calculateETADeadline(now, stepEstimate.hours) : now;
 
       // 8d. Create or reopen TicketStageEta
       if (existingEtaToReopen) {
@@ -430,17 +451,103 @@ export class TicketStageTransitionService {
         });
       }
 
-      // 8e. Update ticket stage
+      // 8d-2. ETA domain-service evaluation: forecast (extend-only) + planning-risk state.
+      // Re-read the active visit rather than trusting local branch variables above, since a
+      // CONTINUE-preserved reopen leaves the row's stageEta untouched (not `stageEta` as
+      // just computed) - this is the one authoritative source for "the actual deadline now
+      // in effect" regardless of which branch fired.
+      const activeVisitRow = await tx.ticketStageEta.findFirst({
+        where: { ticketId, stageId: targetStage.id, stageLeftAt: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      const deadlineTracked = activeVisitRow
+        ? activeVisitRow.stageEta.getTime() !== activeVisitRow.stageEnteredAt.getTime()
+        : false;
+      const boardEtaCtx = await loadBoardEtaContext(tx, ticket.boardId);
+      const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+
+      const etaResult = evaluateEta({
+        ticketId,
+        ticketStatus: ticket.statusV2,
+        isTerminal: isTerminalStatus(ticket.statusV2),
+        currentTicketEta: ticket.eta,
+        currentTicketEtaManagement,
+        boardType: boardEtaCtx.boardType,
+        boardEtaManagement: boardEtaCtx.boardEtaManagement,
+        currentStageId: targetStage.id,
+        stages: boardEtaCtx.stages,
+        transitions: boardEtaCtx.transitions,
+        activeVisit: {
+          stageVisitId: activeVisitRow?.id ?? null,
+          transitionId: transition?.id ?? null,
+          deadline: activeVisitRow?.stageEta ?? null,
+          deadlineTracked,
+          estimateSource: stepEstimate.source,
+          estimateHours: stepEstimate.incomplete ? null : stepEstimate.hours,
+        },
+        trigger: 'STAGE_TRANSITION',
+        now,
+        globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
+      });
+
+      // 8e. Update ticket stage (+ ETA/metadata from the domain-service evaluation, in the
+      // same write - never a second `ticket.update` call for the same transaction).
+      const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
       const updatedTicket = await tx.ticket.update({
         where: { id: ticketId },
         data: {
           stageName: toStageName,
           updatedBy: userId,
           updatedAt: now,
+          ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+            ? { eta: etaResult.etaDecision.newEta }
+            : {}),
+          metadata: mergedMetadata as Prisma.InputJsonValue,
         },
       });
 
       await syncStageOverdueFlag(tx, ticketId, now);
+      // 8e-2. Audit trail for the ETA evaluation (auto-recompute, risk detected/reopened/
+      // resolved, forecast-incomplete) - attributed to the system actor since these are
+      // computed by automatic recalculation, not authored by the transitioning user.
+      const activityIntents = buildEtaActivityIntents(etaResult, {
+        currentStageId: targetStage.id,
+        oldEta: ticket.eta ? ticket.eta.getTime() : null,
+        boardConfigVersion: boardEtaCtx.boardEtaManagement.configVersion,
+        trigger: 'STAGE_TRANSITION',
+        systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
+        previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+      });
+      await writeEtaActivitiesPrisma(tx, activityIntents, {
+        ticketId,
+        workspaceId: ticket.workspaceId,
+        channelId: ticket.channelId,
+        timestamp: now.getTime(),
+        systemActorId,
+      });
+
+      // Deviation-return always gets a thread system message (PRD §15), regardless of
+      // whether the due date changed - distinct from the other ETA activities above, which
+      // don't post a message on this path.
+      if (etaResult.deviationReturned && ticket.conversationId) {
+        const { offPathStageIds, offPathWorkingDurationMs } = etaResult.deviationReturned;
+        const hoursOffPath = Math.round((offPathWorkingDurationMs / 3_600_000) * 10) / 10;
+        const dueDateNote = etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+          ? `Due date extended to ${etaResult.etaDecision.newEta.toLocaleDateString()}.`
+          : 'Due date unchanged.';
+        await recordTicketTimelineEvent(
+          {
+            message: {
+              conversationId: ticket.conversationId,
+              senderId: systemActorId,
+              content: `Ticket returned to the Standard Path at "${toStageName}" after ~${hoursOffPath}h off-path (${offPathStageIds.length} stage${offPathStageIds.length === 1 ? '' : 's'}). ${dueDateNote}`,
+              activityType: 'ETA_DEVIATION_RETURNED',
+              workspaceId: ticket.workspaceId,
+            },
+          },
+          tx,
+        );
+      }
 
       // 8f. Persist form values (scoped to stage + visitIndex)
       if (formValues && transition?.formId) {
@@ -455,7 +562,7 @@ export class TicketStageTransitionService {
         );
       }
 
-      return { updatedTicket, newVisitIndex };
+      return { updatedTicket, newVisitIndex, etaResult };
     });
 
     // Sync conversation ticket_md outside the transaction
@@ -473,46 +580,27 @@ export class TicketStageTransitionService {
     // would only add latency to the transition response.
     void maybeCreateEntryApprovalRequest(ticketId, userId, toStageName);
 
+    // Post-commit notification dispatch - best-effort, must never affect the already-
+    // committed transition response. PRD §6.9: suppressed while the ticket is paused.
+    if (result.updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
+      void dispatchEtaNotifications(etaSignalsFromResult(result.etaResult), {
+        ticketId,
+        createdBy: ticket.createdBy,
+        assignedTo: ticket.assignedTo,
+        ticketUserGroupId: ticket.userGroupId,
+        boardId: ticket.boardId,
+        actorId: userId,
+      }).catch(error => {
+        logger.error(`[TicketStageTransitionService] Failed to dispatch ETA notifications for ${ticketId}:`, error);
+      });
+    }
+
     return {
       success: true,
       ticket: result.updatedTicket,
       transition: transition || undefined,
       newVisitIndex: result.newVisitIndex,
     };
-  }
-
-  /**
-   * Compute the stage ETA deadline based on the transition's SLA mode.
-   */
-  private computeStageEta(
-    enteredAt: Date,
-    stageEtaHours: number | null,
-    transition: StageTransition | null,
-  ): Date {
-    const slaMode = transition?.visitSlaMode ?? VisitSlaMode.STAGE_DEFAULT;
-
-    switch (slaMode) {
-      case VisitSlaMode.FIXED_HOURS:
-        if (transition?.fixedEtaHours && transition.fixedEtaHours > 0) {
-          return calculateETADeadline(enteredAt, transition.fixedEtaHours);
-        }
-        // Fall through to stage default if fixed hours not set
-        if (stageEtaHours && stageEtaHours > 0) {
-          return calculateETADeadline(enteredAt, stageEtaHours);
-        }
-        return enteredAt;
-
-      case VisitSlaMode.NONE:
-        // No SLA tracking; use enteredAt as placeholder (schema requires non-null DateTime)
-        return enteredAt;
-
-      case VisitSlaMode.STAGE_DEFAULT:
-      default:
-        if (stageEtaHours && stageEtaHours > 0) {
-          return calculateETADeadline(enteredAt, stageEtaHours);
-        }
-        return enteredAt;
-    }
   }
 
   /**
