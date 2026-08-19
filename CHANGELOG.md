@@ -1,3 +1,10 @@
+## [1.199.4](https://github.com/juspay/xyne-spaces/compare/v1.199.3...v1.199.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* removed email channel list query ([#709](https://github.com/juspay/xyne-spaces/issues/709)) ([aee222d](https://github.com/juspay/xyne-spaces/commit/aee222dfd2dd0364b26280d88c243e4c50b43b1e))
+
 ## [1.199.3](https://github.com/juspay/xyne-spaces/compare/v1.199.2...v1.199.3) (2026-08-19)
 
 
