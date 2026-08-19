@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.10](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.9...v1.187.1-release-20260817.10) (2026-08-19)
+
+
+### Bug Fixes
+
+* scope automation approval DM send to service actor to stop empty duplicate DMs ([#743](https://github.com/juspay/xyne-spaces/issues/743)) ([08d02c1](https://github.com/juspay/xyne-spaces/commit/08d02c157d48da3a21515661e83dadf79d4dd540)), closes [#741](https://github.com/juspay/xyne-spaces/issues/741) [#517](https://github.com/juspay/xyne-spaces/issues/517)
+
 ## [1.187.1-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.8...v1.187.1-release-20260817.9) (2026-08-19)
 
 
