@@ -978,6 +978,7 @@ model UserGroupMapping {
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   startOffset    Int?                // Cold-start fairness offset, added once for brand-new members with zero prior workload history
+  isNotified     Boolean  @default(false) // Subscriber flag: when true, this member is notified whenever the group's maxWorkload cap blocks an assignment
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
