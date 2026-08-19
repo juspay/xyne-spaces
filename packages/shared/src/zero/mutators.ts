@@ -75,6 +75,7 @@ import {
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
 import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
+import { isManualSubTicketBoard, linkedSubTicketId } from '../tickets/utils.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -4278,33 +4279,76 @@ export const mutators = defineMutators({
       },
     ),
     // Client-optimistic twin of apps/backend/src/zero/mutators.ts subTicket.linkExisting.
-    // Links an EXISTING ticket as a sub-ticket via mappedTicketId. Server mutator
-    // enforces dedupe/nesting guards and writes the activity + system message.
+    //
+    // Mirrors the server's structural guards the way the `create` twin above does, so
+    // an illegal link is rejected before it renders instead of flashing into the
+    // Sub-Tickets list and rolling back a round trip later. The server stays the
+    // authority: it additionally enforces workspace and channel access, and writes the
+    // activity and system message.
     linkExisting: defineMutator(
       z.object({
-        subTicketId: z.string(),
         mappingId: z.string(),
         timestamp: z.number(),
         ticketId: z.string(),
         mappedTicketId: z.string(),
+        subTicketTitle: z.string(),
       }),
       async ({
         tx,
         ctx,
-        args: { subTicketId, mappingId, timestamp, ticketId, mappedTicketId },
+        args: { mappingId, timestamp, ticketId, mappedTicketId, subTicketTitle },
       }) => {
-        const mappedTicket = await tx.run(zql.tickets.where('id', mappedTicketId).one());
-        const title = mappedTicket?.title || mappedTicket?.xyneId || 'Subticket';
+        if (mappedTicketId === ticketId) {
+          throw new Error('A ticket cannot be linked as its own sub-ticket');
+        }
 
-        // Sub-ticket already pointing at the existing ticket.
+        const subTicketId = linkedSubTicketId(ticketId, mappedTicketId);
+
+        const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
+        const parentBoard = parentTicket
+          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+          : null;
+        if (!isManualSubTicketBoard(parentBoard?.boardType)) {
+          throw new Error('Sub-tickets on this board are managed automatically');
+        }
+
+        // All rows, not `.one()`: a ticket can legitimately sit behind more than one
+        // sub_tickets row, and only the ones that still hold a mapping make it a child.
+        const parentAsSubTickets = await tx.run(
+          zql.sub_tickets.where('mappedTicketId', ticketId).related('ticketMappings'),
+        );
+        if (parentAsSubTickets.some(row => (row.ticketMappings?.length ?? 0) > 0)) {
+          throw new Error('Cannot add a sub-ticket under a sub-ticket');
+        }
+
+        const targetHasSubTickets = await tx.run(
+          zql.ticket_sub_ticket_mappings.where('ticketId', mappedTicketId).one(),
+        );
+        if (targetHasSubTickets) {
+          throw new Error('Cannot link a ticket that already has sub-tickets');
+        }
+
+        const existingSubTickets = await tx.run(
+          zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings'),
+        );
+        for (const existing of existingSubTickets) {
+          const mappings = existing.ticketMappings ?? [];
+          if (mappings.some(mapping => mapping.ticketId === ticketId)) {
+            throw new Error('This ticket is already linked as a sub-ticket');
+          }
+          if (mappings.length > 0) {
+            throw new Error('This ticket is already a sub-ticket of another ticket');
+          }
+        }
+
         await tx.mutate.sub_tickets.insert({
           id: subTicketId,
-          title,
+          title: subTicketTitle,
           description: null,
           mappedTicketId,
           createdBy: ctx.userID,
           updatedBy: ctx.userID,
-          conversationId: mappedTicket?.conversationId ?? null,
+          conversationId: parentTicket?.conversationId ?? null,
           createdAt: timestamp,
           updatedAt: timestamp,
           stageProgression: null,
@@ -4312,13 +4356,51 @@ export const mutators = defineMutators({
           workspaceId: ctx.workspaceId,
         });
 
-        // Parent -> sub-ticket hierarchy mapping.
         await tx.mutate.ticket_sub_ticket_mappings.insert({
           workspaceId: ctx.workspaceId,
           id: mappingId,
           ticketId,
           subTicketId,
         });
+      },
+    ),
+    // Client-optimistic twin of apps/backend/src/zero/mutators.ts subTicket.unlink.
+    // Drops the parent -> sub-ticket edge and the sub_tickets row with it. The linked
+    // ticket itself is never touched.
+    unlink: defineMutator(
+      z.object({
+        mappingId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { mappingId } }) => {
+        const mapping = await tx.run(
+          zql.ticket_sub_ticket_mappings.where('id', mappingId).one(),
+        );
+        if (!mapping) {
+          throw new Error('Sub-ticket link not found');
+        }
+
+        const parentTicket = await tx.run(zql.tickets.where('id', mapping.ticketId).one());
+        const parentBoard = parentTicket
+          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+          : null;
+        if (!isManualSubTicketBoard(parentBoard?.boardType)) {
+          throw new Error('Sub-tickets on this board are managed automatically');
+        }
+
+        const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
+        if (!subTicket?.mappedTicketId) {
+          throw new Error('Only linked sub-tickets can be unlinked');
+        }
+
+        await tx.mutate.ticket_sub_ticket_mappings.delete({ id: mappingId });
+
+        const remainingMappings = await tx.run(
+          zql.ticket_sub_ticket_mappings.where('subTicketId', mapping.subTicketId),
+        );
+        if (remainingMappings.length === 0) {
+          await tx.mutate.sub_tickets.delete({ id: mapping.subTicketId });
+        }
       },
     ),
     update: defineMutator(

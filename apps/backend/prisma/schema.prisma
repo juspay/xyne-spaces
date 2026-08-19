@@ -243,6 +243,9 @@ model TicketSubTicketMapping {
   ticket    Ticket    @relation(fields: [ticketId], references: [id])
   subTicket SubTicket @relation(fields: [subTicketId], references: [id])
 
+  // A parent -> sub-ticket edge is meaningless more than once, and the mutator's
+  // read-then-write dedupe cannot survive concurrent pushes on its own.
+  @@unique([ticketId, subTicketId])
   @@index([ticketId])
   @@index([subTicketId])
 
