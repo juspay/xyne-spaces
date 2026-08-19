@@ -40,6 +40,15 @@ import { AccessType } from '@xyne/shared';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
+export const RAIL_SHORTCUT_LIMIT = 9;
+export const railShortcutsAvailable = (): boolean => isElectronApp();
+
+// Read the number off event.code, not event.key: mod+1..9 match on physical key
+// position, and on layouts like AZERTY that key types '&' rather than '1'.
+export const railItemIndexFromEvent = (event: KeyboardEvent): number => {
+  const positional = /^(?:Digit|Numpad)([1-9])$/.exec(event.code)?.[1];
+  return Number(positional ?? event.key) - 1;
+};
 
 export interface NavigationItem {
   path: string;
