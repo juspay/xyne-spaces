@@ -16,6 +16,7 @@ interface InitiateCallParams {
   targetUserIds?: string[];
   callDisplayName?: string;
   conversationId?: string;
+  artifactMessageId?: string;
   onComplete?: () => void;
 }
 
@@ -38,6 +39,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     targetUserIds?: string[];
     callDisplayName?: string;
     conversationId?: string;
+    artifactMessageId?: string;
     onComplete?: () => void;
   } | null>(null);
 
@@ -85,6 +87,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
+          ...(action.artifactMessageId && { artifactMessageId: action.artifactMessageId }),
         });
 
         // Call completion callback after sending initiate event
@@ -141,6 +144,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     targetUserIds,
     callDisplayName,
     conversationId,
+    artifactMessageId,
     onComplete,
   }: InitiateCallParams): void => {
     if (!channelId) return;
@@ -157,6 +161,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         ...(targetUserIds && { targetUserIds }),
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),
+        ...(artifactMessageId && { artifactMessageId }),
       });
       onComplete?.();
       return;
@@ -169,6 +174,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
       ...(conversationId && { conversationId }),
+      ...(artifactMessageId && { artifactMessageId }),
       ...(onComplete && { onComplete }),
     };
     roomActor.send({ type: 'DISCONNECT' });

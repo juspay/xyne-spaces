@@ -55,6 +55,20 @@ names with yours.
 Check the endpoint answers, so you are debugging one thing rather than two:
 
 ```bash
+pnpm run doctor:llm
+```
+
+It reads whatever is in the env files and sends one real completion to it, then
+says which of the three things is wrong — the URL, the key, or the model name. It
+exits non-zero on failure, so CI can run it too. `pnpm run env:setup` runs the same
+check automatically on the values you just entered.
+
+Rate limiting counts as a pass: a `429` proves the URL resolved, the key was
+accepted, and the model exists.
+
+The equivalent by hand, if you want to see the raw response:
+
+```bash
 curl -s "$LITELLM_BASE_URL/chat/completions" \
   -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
@@ -63,6 +77,9 @@ curl -s "$LITELLM_BASE_URL/chat/completions" \
 
 A JSON body containing `choices` means the gateway is good. `401` means the key is
 wrong; a connection error means the URL is wrong or the proxy is not running.
+
+One gotcha worth knowing: most OpenAI-compatible gateways expect the base URL to end
+in `/v1`. Without it the request 404s, which is easy to misread as a bad key.
 
 Env files are read at process start, so **restart the apps** after editing:
 

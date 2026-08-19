@@ -12,7 +12,6 @@ import {
   CHAT_SIDEBAR_MAX_WIDTH,
   CHAT_SIDEBAR_MIN_WIDTH,
 } from '../../routes/ChatScreen/chatSidebarWidth';
-import { cn } from '../../utils/classNames';
 
 interface AIShellProps {
   activeSessionId?: string | undefined;
@@ -22,7 +21,6 @@ interface AIShellProps {
   mobileOpen?: boolean | undefined;
   onMobileOpenChange?: ((open: boolean) => void) | undefined;
   mainRef?: RefObject<HTMLDivElement | null> | undefined;
-  mainClassName?: string | undefined;
   children: ReactNode;
 }
 
@@ -34,7 +32,6 @@ export function AIShell({
   mobileOpen,
   onMobileOpenChange,
   mainRef,
-  mainClassName,
   children,
 }: AIShellProps): ReactElement {
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
@@ -78,7 +75,7 @@ export function AIShell({
       <Panel id='ai-main' minSize='30%'>
         <div
           ref={mainRef}
-          className={cn('relative flex h-full min-w-0 flex-1 flex-col', mainClassName)}
+          className='bg-background relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl'
         >
           {children}
         </div>

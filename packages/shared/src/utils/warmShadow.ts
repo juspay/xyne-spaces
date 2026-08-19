@@ -70,11 +70,6 @@ export async function consumeShadow<T = unknown>(
   const entry = await readShadow<T>(userID, queryName, args);
   if (entry && adapter?.removeShadowValue) {
     void adapter.removeShadowValue(shadowKeyFor(userID, queryName, args));
-    // eslint-disable-next-line no-console
-    console.log(
-      `[WarmShadow] promoted ${queryName} args=${canonicalArgsJson(args)}` +
-        ` savedAt=${entry.savedAt} rows=${Array.isArray(entry.data?.[0]) ? entry.data[0].length : 'n/a'}`,
-    );
   }
   return entry;
 }

@@ -30,6 +30,7 @@ import { sendEmailReplyStep } from './steps/send-email-reply.step';
 import { sendEmailToUserStep } from './steps/send-email-to-user.step';
 import { notifyGroupStep } from './steps/notify-group.step';
 import { updateTagsStep } from './steps/update-tags.step';
+import { applyConversationLabelStep } from './steps/apply-conversation-label.step';
 import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
 import { triggerWebhookStep } from './steps/trigger-webhook.step';
 import { runAgentStep } from './steps/run-agent.step';
@@ -76,6 +77,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(sendEmailToUserStep);
   stepRegistry.register(notifyGroupStep);
   stepRegistry.register(updateTagsStep);
+  stepRegistry.register(applyConversationLabelStep);
   stepRegistry.register(assignTicketToGroupStep);
   stepRegistry.register(triggerWebhookStep);
   stepRegistry.register(runAgentStep);

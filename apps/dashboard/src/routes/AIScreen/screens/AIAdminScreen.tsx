@@ -7,14 +7,10 @@ const AIAdminScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
         data-id='ai-admin-view'
-        className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
+        className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
         <div className='h-[32px] w-full shrink-0' />
         <div className='relative flex min-h-0 flex-1 flex-col overflow-hidden'>

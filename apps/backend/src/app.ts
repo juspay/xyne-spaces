@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -61,7 +62,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -92,6 +92,7 @@ import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -384,6 +385,10 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -402,7 +407,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
@@ -444,6 +448,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -581,8 +586,10 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes (auth required)
-    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
+    // Y-Sweet collaboration routes. Auth already runs for every /api request via
+    // the /api attachment mounts above; applying it here again cost two more DB
+    // round-trips per canvas open.
+    this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 

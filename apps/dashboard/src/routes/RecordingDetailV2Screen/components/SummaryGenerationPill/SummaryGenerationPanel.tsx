@@ -18,9 +18,12 @@ export interface SummaryGenerationPanelProps {
   isAwaiting: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  onRetry: () => void;
   hasFailed?: boolean;
   onReadTranscript?: (() => void) | undefined;
   generationRunId?: number;
+  initialProgress?: number;
+  onProgressPause?: (progress: number) => void;
 }
 
 /** A status line shown while Scribe works, swapped in once `atMs` has elapsed. */
@@ -63,16 +66,19 @@ export const SummaryGenerationPanel = ({
   isAwaiting,
   canGenerate,
   onGenerate,
+  onRetry,
   hasFailed = false,
   onReadTranscript,
   generationRunId = 0,
+  initialProgress = 0,
+  onProgressPause,
 }: SummaryGenerationPanelProps): ReactElement => {
   // —— State and hooks ———
   const shouldReduceMotion = useReducedMotion() ?? false;
   const [stageIndex, setStageIndex] = useState(0);
   const progressWidth = useMotionValue(INITIAL_PROGRESS_WIDTH);
 
-  /** Reset up front as well as on the way out, so every run starts on the first stage. */
+  /** Status copy restarts when the panel remounts; only the bar position is persisted. */
   useEffect(() => {
     setStageIndex(0);
     if (!isAwaiting) return;
@@ -86,11 +92,22 @@ export const SummaryGenerationPanel = ({
 
   useLayoutEffect(() => {
     if (!isAwaiting) return;
-    const controls = animateSummaryProgress(progressWidth);
+    const controls = animateSummaryProgress(progressWidth, initialProgress);
     return (): void => {
       controls.stop();
     };
-  }, [isAwaiting, generationRunId, progressWidth]);
+  }, [initialProgress, isAwaiting, generationRunId, progressWidth]);
+
+  // saves the current loading-bar percentage before the loading panel stops or disappears.
+  useEffect((): (() => void) | undefined => {
+    if (!isAwaiting || !onProgressPause) return undefined;
+    return (): void => {
+      const progress = Number.parseFloat(progressWidth.get());
+      if (Number.isFinite(progress)) {
+        onProgressPause(progress);
+      }
+    };
+  }, [isAwaiting, onProgressPause, progressWidth]);
 
   // —— Derived values ———
   const fadeTransition = buildFadeTransition(shouldReduceMotion);
@@ -136,7 +153,7 @@ export const SummaryGenerationPanel = ({
                   <Button
                     variant='default'
                     size={null}
-                    onClick={onGenerate}
+                    onClick={onRetry}
                     disabled={!canGenerate}
                     className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
                     data-track-category='RecordingDetailV2'

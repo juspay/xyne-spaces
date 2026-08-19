@@ -77,6 +77,10 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
           if (isSelfDm(a) && !isSelfDm(b)) return -1;
           if (!isSelfDm(a) && isSelfDm(b)) return 1;
         }
+        // 1:1 DMs rank above group DMs; recency (most recent first) orders within each.
+        const aIsOneToOne = a.scopeType === ChannelScopeType.DM;
+        const bIsOneToOne = b.scopeType === ChannelScopeType.DM;
+        if (aIsOneToOne !== bIsOneToOne) return aIsOneToOne ? -1 : 1;
         return b.lastActivityAt - a.lastActivityAt;
       });
   }, [allChannels, dmSearchQuery, usersById, currentUserId]);

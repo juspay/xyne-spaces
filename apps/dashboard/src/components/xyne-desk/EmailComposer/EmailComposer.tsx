@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, {
   ReactElement,
   useCallback,
@@ -487,8 +488,8 @@ export const EmailComposer = ({
   const [isToExpanded, setIsToExpanded] = useState(false);
   const [isCcExpanded, setIsCcExpanded] = useState(false);
   const [isBccExpanded, setIsBccExpanded] = useState(false);
-  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
-  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
+  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => undefined);
+  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => undefined);
 
   const applyRecipients = useCallback(
     (next: { to: string[]; cc: string[]; bcc: string[] }): void => {
@@ -1557,7 +1558,11 @@ export const EmailComposer = ({
         (error instanceof Error ? error.message : null) ||
         (isComposeMode ? 'Failed to send email' : 'Failed to send reply');
       toast.error(message);
-      console.warn('Failed to send email:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to send email:'),
+        context: [error],
+      });
     } finally {
       setIsSending(false);
     }
@@ -1570,7 +1575,11 @@ export const EmailComposer = ({
   const runSendEmail = (): void => {
     handleSendEmail().catch(error => {
       toast.error('Failed to send');
-      console.error('Failed to send email:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to send email:'),
+        error: error,
+      });
     });
   };
 
