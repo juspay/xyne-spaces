@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.8...v1.187.1-release-20260817.9) (2026-08-19)
+
+
+### Bug Fixes
+
+* added 60 days and 90 days filter, added age column for tickets, form fields coming as columns ([#589](https://github.com/juspay/xyne-spaces/issues/589)) ([#748](https://github.com/juspay/xyne-spaces/issues/748)) ([72e7c72](https://github.com/juspay/xyne-spaces/commit/72e7c72fbb158cf109a8129b7f753d2a2254b28c))
+
 ## [1.187.1-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.7...v1.187.1-release-20260817.8) (2026-08-19)
 
 
