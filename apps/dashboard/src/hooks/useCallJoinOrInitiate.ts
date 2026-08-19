@@ -84,7 +84,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         conversationId?: string;
         artifactMessageId?: string;
         sdlcLink?: SdlcCallLink;
-    onComplete?: () => void;
+        onComplete?: () => void;
       })
     | null
   >(null);
