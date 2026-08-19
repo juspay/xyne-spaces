@@ -1,3 +1,10 @@
+## [1.187.1-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.7...v1.187.1-release-20260817.8) (2026-08-19)
+
+
+### Bug Fixes
+
+* stack PR [#626](https://github.com/juspay/xyne-spaces/issues/626) and [#518](https://github.com/juspay/xyne-spaces/issues/518) onto release-20260817 ([#742](https://github.com/juspay/xyne-spaces/issues/742)) ([23ef50c](https://github.com/juspay/xyne-spaces/commit/23ef50ce378733df37f7b89519e91ff23ae61f50))
+
 ## [1.187.1-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.6...v1.187.1-release-20260817.7) (2026-08-18)
 
 
