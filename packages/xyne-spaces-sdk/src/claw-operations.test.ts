@@ -189,6 +189,25 @@ describe('claw device-flow login', () => {
 
     await expect(sdk.claw.login()).rejects.toThrow(/malformed device-authorization/i);
   });
+
+  // A caller who leaves `clawBaseUrl` unset against a bare Spaces backend gets
+  // that backend's generic route-not-found, which explains nothing. The flow's
+  // first call has to name the likely cause itself.
+  it('blames the base url when the device-flow route 404s', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ success: false, error: 'Route /claw/api/v1/cli/auth/start not found' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+      )
+    );
+    const sdk = createClient({ baseUrl: 'https://spaces.example.com' });
+
+    await expect(sdk.claw.login()).rejects.toThrow(/clawBaseUrl/);
+  });
 });
 
 function stubFetch(body: unknown): void {

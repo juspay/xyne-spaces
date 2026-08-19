@@ -117,6 +117,62 @@ for (const m of optionsBody.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9_]*)\??:/gm)) {
   );
 }
 
+// ── 2b: enumerated search values, not just parameter names ──────────────────
+
+/*
+ * Names agreeing is not enough. `type` and `apps` are validated by the server
+ * against a fixed list, and an unrecognised value is rejected rather than
+ * ignored — so a parameter can be spelled perfectly and still fail. While the
+ * SDK typed these `string | string[]`, `type: 'message'` (the singular form
+ * `SearchResult.type` returns) compiled and then failed as `validation_failed`.
+ */
+
+/** Values of a `const NAME = [...] as const` array in a contract module. */
+function contractEnum(file, constName) {
+  const src = readFileSync(join(contractSrc, file), 'utf8');
+  const m = new RegExp(`const ${constName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as const`).exec(src);
+  if (!m) {
+    problems.push(`contract: ${constName} not found in ${file}`);
+    return new Set();
+  }
+  return new Set([...m[1].matchAll(/'([^']+)'/g)].map((v) => v[1]));
+}
+
+/** Members of an `export type Name = 'a' | 'b'` union in the SDK's types. */
+function sdkUnion(typeName) {
+  const start = typesSrc.indexOf(`export type ${typeName} =`);
+  if (start === -1) {
+    problems.push(`types/index.ts: ${typeName} not found`);
+    return new Set();
+  }
+  const decl = typesSrc.slice(start, typesSrc.indexOf(';', start));
+  return new Set([...decl.matchAll(/'([^']+)'/g)].map((v) => v[1]));
+}
+
+let enumsChecked = 0;
+for (const [typeName, file, constName] of [
+  ['SearchType', 'schemas/search.ts', 'TYPES'],
+  ['SearchApp', 'schemas/search.ts', 'APPS'],
+]) {
+  const contractValues = contractEnum(file, constName);
+  const sdkValues = sdkUnion(typeName);
+  if (contractValues.size === 0 || sdkValues.size === 0) continue;
+  enumsChecked++;
+
+  for (const v of sdkValues) {
+    if (!contractValues.has(v)) {
+      problems.push(
+        `${typeName} allows "${v}", which ${constName} does not — the server rejects it`
+      );
+    }
+  }
+  for (const v of contractValues) {
+    if (!sdkValues.has(v)) {
+      problems.push(`${typeName} is missing "${v}", which ${constName} accepts`);
+    }
+  }
+}
+
 // ── 3: every other direct-API operation against its route's declared body ───
 
 /** Columns of every table in the Zero schema, keyed by SQL table name. */
@@ -318,6 +374,7 @@ for (const m of httpSrc.matchAll(/serverCode === '([a-z_]+)'/g)) {
 
 console.log(`contract:  ${accepted.size} search params, ${codes.size} error codes`);
 console.log(`search:    ${sent.size} params sent by registry/search.ts`);
+console.log(`enums:     ${enumsChecked} enumerated search value sets compared`);
 console.log(
   `api ops:   ${apiOpsChecked} of ${bodies.size} direct-API routes checked ` +
     `(the rest take inline or multipart-only inputs with no named type to compare)`

@@ -12,7 +12,7 @@
  * Sending mail is not in this catalog; these operations manage what surrounds it.
  */
 
-import { query, mutator } from './types.js';
+import { query, mutator, firstOrNull } from './types.js';
 import { now } from '../core/ids.js';
 import type {
   ConversationLabel,
@@ -91,6 +91,13 @@ export const emailOperations = {
    * Maps to: Zero query 'getDraftForConversationV2'
    *
    * V2 adds `channelId` / `isMember` for ACL membership gating. Same result shape.
+   *
+   * The query returns a **list** — it has no `.one()` — ordered by `updatedAt`
+   * descending, and there can legitimately be two rows (the caller's own draft and
+   * a shared one with a null `userId`). The newest is the one to show, so
+   * `mapResult` takes the first. While this was declared `EmailDraft | null` with
+   * no mapping, callers received an array and every field read came back
+   * `undefined`.
    */
   getDraftForConversation: query<
     { conversationId: string; channelId: string; isMember?: boolean },
@@ -101,6 +108,7 @@ export const emailOperations = {
       channelId: args.channelId,
       isMember: args.isMember ?? true,
     }),
+    mapResult: (raw) => firstOrNull<EmailDraft>(raw),
   }),
 
   /**
@@ -118,9 +126,13 @@ export const emailOperations = {
   /**
    * A channel's desk configuration.
    * Maps to: Zero query 'getEmailChannelPreference'
+   *
+   * At most one row exists per channel, but the query does not say `.one()`, so the
+   * server sends a list. Unwrapped here rather than pushed onto callers.
    */
   getChannelPreference: query<{ channelId: string }, EmailChannelPreference | null>(
-    'getEmailChannelPreference'
+    'getEmailChannelPreference',
+    { mapResult: (raw) => firstOrNull<EmailChannelPreference>(raw) }
   ),
 
   /**

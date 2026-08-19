@@ -111,3 +111,19 @@ export function api<TArgs = void, TResult = unknown>(
 ): ApiOperation<TArgs, TResult> {
   return { type: 'api', method, path, ...options };
 }
+
+/**
+ * The first row of a list result, or null.
+ *
+ * For a `mapResult` on a query that is logically singular but whose Zero
+ * definition omits `.one()`, so the server sends an array. Declaring the singular
+ * type without mapping is the bug this exists to prevent: the caller gets an array
+ * typed as an object and every field reads `undefined`.
+ *
+ * Tolerates a server that does collapse the row, so the same mapping stays correct
+ * if `.one()` is added to the query later.
+ */
+export function firstOrNull<T>(raw: unknown): T | null {
+  if (Array.isArray(raw)) return (raw[0] as T) ?? null;
+  return (raw as T | null | undefined) ?? null;
+}

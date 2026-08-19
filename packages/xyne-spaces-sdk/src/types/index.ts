@@ -504,7 +504,16 @@ export interface Project {
   updatedAt: number | null;
 }
 
-export type StageRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+/**
+ * Stage-approval request states. Mirrors `TicketStageRequestStatus`.
+ *
+ * This read `'PENDING' | 'APPROVED' | 'REJECTED'`, and every one of those three
+ * words was wrong in a way the compiler could not see: `PENDING` is not a member,
+ * so `upsertStageRequest` rejected it server-side, while `DRAFT` and `SUBMITTED`
+ * were inexpressible — meaning the method could decide an approval request but
+ * never raise one.
+ */
+export type StageRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 
 /** A request to move a ticket into a stage that requires approval. */
 export interface TicketStageRequest {
@@ -825,6 +834,12 @@ export interface Recap {
 
 export interface SearchResult {
   id: string;
+  /**
+   * What this result is. **Singular**, and a different vocabulary from
+   * {@link SearchType}, which is the request-side filter. Feeding a value from
+   * here straight back into `SearchOptions.type` fails with `validation_failed`
+   * — use the plural form (`'message'` → `'messages'`).
+   */
   type: 'message' | 'ticket' | 'file' | 'channel' | 'call' | 'user';
   score: number;
   highlight?: Record<string, string[]>;
@@ -838,19 +853,55 @@ export interface SearchResponse {
 }
 
 /**
+ * Result types `SearchOptions.type` accepts. Plural — see {@link SearchResult.type}.
+ *
+ * Mirrors `TYPES` in the contract's `searchQuerySchema`, which the server
+ * validates strictly, and `npm run contract-check` fails if the two drift.
+ */
+export type SearchType =
+  | 'messages'
+  | 'attachments'
+  | 'calls'
+  | 'channels'
+  | 'tickets'
+  | 'users'
+  | 'files'
+  | 'canvas'
+  | 'transcript'
+  | 'rca'
+  | 'people'
+  | 'emails';
+
+/** Apps `SearchOptions.apps` accepts. Mirrors `APPS` in the contract. */
+export type SearchApp =
+  | 'chat'
+  | 'ticket'
+  | 'user'
+  | 'file'
+  | 'collection'
+  | 'mail'
+  | 'xyneapp'
+  | 'call';
+
+/**
  * Search parameters.
  *
  * Names match the server's query contract exactly. Note `orderBy` — an earlier
  * version of this SDK sent `sortBy`/`sortOrder`, which exist in neither search
  * validator, so sorting silently did nothing.
+ *
+ * `type` and `apps` are literal unions rather than `string`, because the server
+ * rejects an unrecognised value outright instead of ignoring it. While they were
+ * typed `string | string[]`, `type: 'message'` — the singular form that
+ * `SearchResult.type` hands back — compiled cleanly and failed at runtime.
  */
 export interface SearchOptions {
   /** Free text. Omit to search by filters alone. */
   q?: string;
   /** Restrict to result types, e.g. `'messages'` or `['messages','tickets']`. */
-  type?: string | string[];
+  type?: SearchType | SearchType[];
   /** Apps to search: `chat`, `ticket`, `user`, `file`. */
-  apps?: string | string[];
+  apps?: SearchApp | SearchApp[];
   subApp?: 'canvas' | 'transcript' | 'recording' | 'rca' | 'collections';
 
   limit?: number;
