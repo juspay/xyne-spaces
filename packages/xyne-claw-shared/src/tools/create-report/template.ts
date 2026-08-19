@@ -10,6 +10,8 @@
  * `marked.parse()`). Any sanitization happens BEFORE this template wraps it.
  */
 
+import sanitizeHtml from "sanitize-html";
+
 export interface HtmlTemplateInput {
   /** Becomes both <title> and the visible <h1>. */
   title: string;
@@ -166,44 +168,52 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Strip the small set of HTML tags that pose real script-execution risk
- * when the resulting file is opened in a browser. Defense in depth — agents
- * aren't expected to emit these, but a prompt-injected agent could be
- * convinced to. We're explicitly NOT installing DOMPurify (would need jsdom
- * server-side, heavy dep) since the threat model is narrow: agent-emitted
- * markdown rendered to a downloadable file, not user-uploaded HTML.
+ * Sanitize already-rendered HTML (the output of `marked.parse()`) before the
+ * report template wraps it and it is written to a downloadable file.
  *
- * Removed: <script>...</script>, <style>...</style>, <iframe>, <object>,
- * <embed>, <link>, <meta>, <form>, on* event handler attributes,
- * javascript: URLs in href/src.
+ * Uses `sanitize-html` — a pure-JS, allow-list parser with NO jsdom — instead of
+ * the previous regex denylist. The regex was bypassable (finding C-2): it only
+ * stripped whitespace-preceded event handlers, so `<img src=x /onerror=...>`
+ * survived. An allow-list closes that whole bug class by construction: anything
+ * not explicitly permitted (event handlers, <script>/<iframe>/<svg>/<object>,
+ * javascript:/vbscript:/data:text-html schemes) is dropped by the parser.
+ *
+ * We deliberately keep the inline HTML the report feature supports — <details>,
+ * <summary>, <code>, <pre>, tables, headings — and raster `data:` images used by
+ * embedded charts. `<img>`-loaded SVG cannot execute script, but
+ * data:image/svg+xml and data:text/html srcs are dropped anyway as defense in
+ * depth via exclusiveFilter.
  */
 export function sanitizeHtmlBody(html: string): string {
-  return (
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-      // <svg>/<math> are foreign-content roots that enable mutation-XSS and are
-      // not needed in a text report (charts are embedded as <img> data: rasters).
-      .replace(/<(iframe|object|embed|form|link|meta|base|svg|math)\b[^>]*>/gi, "")
-      .replace(/<\/(iframe|object|embed|form|svg|math)>/gi, "")
-      // C-2: event-handler attributes. The old pattern required a WHITESPACE
-      // delimiter (\son\w+), so a slash-separated handler — `<img src=x
-      // /onerror=alert(1)>` — slipped through and executed. Match a handler
-      // preceded by ANY non-name delimiter (whitespace, slash, quote) and
-      // re-insert a space so neighbouring attributes don't fuse.
-      .replace(/[\s/]on\w+\s*=\s*"[^"]*"/gi, " ")
-      .replace(/[\s/]on\w+\s*=\s*'[^']*'/gi, " ")
-      .replace(/[\s/]on\w+\s*=\s*[^\s>]+/gi, " ")
-      // Dangerous URL schemes in href/src/xlink:href. javascript: and vbscript:
-      // are always unsafe; data:text/html and data:image/svg+xml can carry
-      // script, but raster data: images (png/jpeg/gif/webp — used by embedded
-      // charts) are preserved. Tolerant of leading whitespace after `=`.
-      .replace(/(href|src|xlink:href)\s*=\s*"\s*(?:javascript|vbscript):[^"]*"/gi, '$1="#"')
-      .replace(/(href|src|xlink:href)\s*=\s*'\s*(?:javascript|vbscript):[^']*'/gi, "$1='#'")
-      .replace(/(href|src|xlink:href)\s*=\s*(?:javascript|vbscript):[^\s>]+/gi, '$1="#"')
-      .replace(/(href|src|xlink:href)\s*=\s*"\s*data:text\/html[^"]*"/gi, '$1="#"')
-      .replace(/(href|src|xlink:href)\s*=\s*'\s*data:text\/html[^']*'/gi, "$1='#'")
-      .replace(/(href|src|xlink:href)\s*=\s*"\s*data:image\/svg\+xml[^"]*"/gi, '$1="#"')
-      .replace(/(href|src|xlink:href)\s*=\s*'\s*data:image\/svg\+xml[^']*'/gi, "$1='#'")
-  );
+  return sanitizeHtml(html, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+      "img",
+      "h1",
+      "h2",
+      "details",
+      "summary",
+    ]),
+    allowedAttributes: {
+      "*": ["class", "id", "align"],
+      a: ["href", "name", "target", "rel"],
+      img: ["src", "alt", "title", "width", "height"],
+      details: ["open"],
+      ol: ["start", "type"],
+      td: ["colspan", "rowspan"],
+      th: ["colspan", "rowspan", "scope"],
+    },
+    // javascript:/vbscript:/ftp/etc. are rejected; only these survive.
+    allowedSchemes: ["http", "https", "mailto"],
+    // Raster data: images (charts) are allowed on <img> only.
+    allowedSchemesByTag: { img: ["http", "https", "data"] },
+    allowProtocolRelative: false,
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const src = (frame.attribs?.src ?? "").trim().toLowerCase();
+      return (
+        src.startsWith("data:text/html") ||
+        src.startsWith("data:image/svg+xml")
+      );
+    },
+  });
 }
