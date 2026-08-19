@@ -22,6 +22,7 @@ import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
+import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
@@ -517,9 +518,34 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             ),
           }
         : {}),
+      // Follow-up handle. Only exposed when this subagent opts in via
+      // def.supportsFollowUp. When the parent passes the `session_id` a PRIOR
+      // call of THIS subagent returned, the follow-up question runs INSIDE that
+      // same child session (full prior context) instead of a fresh one.
+      ...(def.supportsFollowUp
+        ? {
+            session_id: Type.Optional(
+              Type.String({
+                description:
+                  "Optional. To ask THIS subagent a follow-up WITH the full context of a previous call, pass the `session_id` that the previous call of THIS SAME subagent returned. Omit to start a fresh session. Never pass a session_id that a DIFFERENT subagent returned.",
+              }),
+            ),
+          }
+        : {}),
     }),
     async execute(_toolCallId: string, params: unknown) {
       const question = (params as Record<string, string>)[def.paramName] ?? "";
+      // Optional follow-up handle: resume the SAME child session (full prior
+      // context) instead of a fresh one. Only honoured when the def opts in,
+      // and only after the handle passes a strict single-path-segment check so
+      // it can never be used for path traversal.
+      const rawFollowUpId = def.supportsFollowUp
+        ? (params as Record<string, unknown>)["session_id"]
+        : undefined;
+      const followUpId = isValidFollowUpHandle(rawFollowUpId) ? rawFollowUpId : undefined;
+      if (typeof rawFollowUpId === "string" && rawFollowUpId.length > 0 && !followUpId) {
+        log.warn(`[${def.name}] Ignoring malformed session_id handle — starting a fresh session`);
+      }
       const execStartedAt = Date.now();
       log.info(`[${def.name}] Subagent start t=${execStartedAt} call=${_toolCallId.slice(0,8)}: ${question.slice(0, 100)}`);
 
@@ -574,7 +600,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // entirely. Skipped when there is no parentSessionId — without a
       // bounded scope we'd risk cross-run pollution.
       const parentSid = progressCtx?.parentSessionId;
-      if (parentSid) {
+      // Follow-ups are stateful and must NEVER dedupe against a prior fresh call
+      // (or against each other) — bypass the memo cache when a session_id is in
+      // play so each resume actually runs against the evolving child session.
+      if (parentSid && !followUpId) {
         const subMap = subagentResultCache.get(parentSid) ?? new Map<string, CachedEntry>();
         if (!subagentResultCache.has(parentSid)) subagentResultCache.set(parentSid, subMap);
         const key = subagentCacheKey(def.name, question);
@@ -602,6 +631,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // can clear the timer on early failures without leaking the interval.
       let stickyLabel: string | null = null;
       let sessionRef: unknown = null;
+      // Declared before the try so the finally can release it. Guards concurrent
+      // follow-up resumes that share one persisted child session directory.
+      let releaseFollowUpLock: (() => void) | null = null;
       let toolBudget: ToolBudgetTracker | null = null;
       // Hoisted so the finally can clean it up regardless of success/error.
       let childSkillScope: string | null = null;
@@ -778,6 +810,47 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         const parentSessionId = progressCtx?.parentSessionId;
         const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
+
+        // ── Follow-up session persistence. When this subagent supports
+        // follow-ups AND we have a conversation to scope under, the child
+        // session is PERSISTED in its own per-handle directory beneath the
+        // parent conversation's session dir. That directory is picked up by the
+        // existing recursive session archiver (session-store walk), so a
+        // resumed follow-up survives across turns/pods for free — no new GCS
+        // pipeline. Without a conversationId (nested/anon runs) or when the def
+        // opts out, fall back to the original in-memory session (no resume).
+        const followUpConversationId = progressCtx?.parentMeta?.conversationId;
+        const followUpEnabled = !!(def.supportsFollowUp && followUpConversationId);
+        let followUpHandle: string | null = null;
+        let followUpResumed = false;
+        let childSessionManager: SessionManager;
+        if (followUpEnabled) {
+          followUpHandle = followUpId ?? crypto.randomUUID();
+          // Root strictly under THIS conversation's session dir + this def's
+          // name. A handle minted by another conversation or subagent simply
+          // won't exist here, so continueRecent starts a fresh session rather
+          // than reading a foreign one — structural cross-tenant isolation.
+          const childSessionRoot = join(
+            sessionDir(followUpConversationId!),
+            "subagents",
+            def.name,
+            followUpHandle,
+          );
+          const { mkdir } = await import("node:fs/promises");
+          await mkdir(childSessionRoot, { recursive: true });
+          // Serialize any concurrent resume of the same handle before we open it.
+          releaseFollowUpLock = await acquireFollowUpLock(childSessionRoot);
+          if (followUpId) {
+            childSessionManager = SessionManager.continueRecent(childWorkingDir, childSessionRoot);
+            followUpResumed = true;
+            log.info(`[${def.name}] Resuming follow-up session handle=${followUpHandle}`);
+          } else {
+            childSessionManager = SessionManager.create(childWorkingDir, childSessionRoot);
+            log.info(`[${def.name}] Created persistent follow-up session handle=${followUpHandle}`);
+          }
+        } else {
+          childSessionManager = SessionManager.inMemory();
+        }
         // Same allowlist-must-include-customTools subtlety as agent.ts —
         // pi v0.75 treats `tools` as a global allowlist that filters
         // customTools too. Listing only the 5 built-ins would silently
@@ -799,7 +872,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // a subagent's read/grep could walk the whole container.
           tools: ["read", "write", "grep", "find", "ls", ...subagentCustomNames],
           cwd: childWorkingDir,
-          sessionManager: SessionManager.inMemory(),
+          sessionManager: childSessionManager,
           authStorage,
           modelRegistry,
           // cwd-scoped file tools (override pi's unscoped read/write/grep/find/
@@ -1082,8 +1155,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         let systemPrompt = `${preamble}${def.systemPrompt}`;
 
         const childPrompt = `${systemPrompt}\n\n## Question\n${question}`;
+        // On a RESUMED follow-up the child session already holds the system
+        // prompt + all prior turns; re-injecting the preamble/systemPrompt would
+        // bloat context and re-anchor the model. Send ONLY the new question.
+        const promptText = followUpResumed ? `## Follow-up\n${question}` : childPrompt;
         pushDebugEvent("session_prompt", {
-          prompt: childPrompt,
+          prompt: promptText,
           messages: snapshotMessages(),
         });
         turnStartedAt = Date.now();
@@ -1112,7 +1189,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         };
         subagentAbortSignal?.addEventListener("abort", onParentAbort, { once: true });
         try {
-          await session.prompt(childPrompt);
+          await session.prompt(promptText);
 
           const sq = session as unknown as { _agentEventQueue?: Promise<void> };
           if (sq._agentEventQueue) await sq._agentEventQueue;
@@ -1226,7 +1303,15 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             log.warn(`[${def.name}] Failed to write child debug artifact: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        return { content: [{ type: "text" as const, text }], details: {} };
+        if (followUpEnabled && followUpHandle) {
+          text += `\n\n---\n_Follow-up:_ to ask THIS \`${def.name}\` subagent another question WITH the full context of this run, call \`${def.name}\` again passing \`session_id: "${followUpHandle}"\`. Omit it to start fresh.`;
+        }
+        return {
+          content: [{ type: "text" as const, text }],
+          details: followUpEnabled && followUpHandle
+            ? { session_id: followUpHandle, resumed: followUpResumed }
+            : {},
+        };
       } catch (err) {
         if (stickyTimer) clearInterval(stickyTimer);
         stopStreamRateTimer();
@@ -1266,6 +1351,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // already disposed it (dispose() is idempotent), but the catch path
         // didn't, leaking the session's listeners/extension context on every
         // failed subagent. Best-effort.
+        try { releaseFollowUpLock?.(); } catch { /* ignore */ }
         try { (sessionRef as { dispose?: () => void } | null)?.dispose?.(); } catch { /* ignore */ }
         if (toolBudget) {
           metric.observe("tool_calls_per_run", toolBudget.calls, {
