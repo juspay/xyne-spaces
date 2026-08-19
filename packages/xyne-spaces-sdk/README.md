@@ -1,8 +1,8 @@
 # @xyne/spaces-sdk
 
-TypeScript SDK for Xyne Spaces. **455 methods across 24 resources**, covering the
+TypeScript SDK for Xyne Spaces. **477 methods across 25 resources**, covering the
 complete operation catalog — every read and write the Spaces product itself
-performs.
+performs — plus Xyne Claw remote agents.
 
 ```typescript
 import { createClient } from '@xyne/spaces-sdk';
@@ -355,25 +355,25 @@ allows data that the approving user can access normally.
 | `sdk.attachments` | 2 |
 | `sdk.admin` | 31 |
 | `sdk.automations` | 13 |
-| `sdk.boards` | 22 |
-| `sdk.calls` | 24 |
-| `sdk.claw` | 7 · [separate login](#claw-remote-agents) |
-| `sdk.canvases` | 38 |
+| `sdk.boards` | 23 |
+| `sdk.calls` | 25 |
+| `sdk.claw` | 8 · [separate login](#claw-remote-agents) |
+| `sdk.canvases` | 40 |
 | `sdk.channels` | 41 |
 | `sdk.collections` | 11 |
 | `sdk.conversations` | 21 |
 | `sdk.dashboards` | 8 |
 | `sdk.email` | 27 |
-| `sdk.forms` | 13 |
-| `sdk.incidents` | 23 |
-| `sdk.messages` | 33 |
-| `sdk.preferences` | 18 |
+| `sdk.forms` | 15 |
+| `sdk.incidents` | 24 |
+| `sdk.messages` | 34 |
+| `sdk.preferences` | 19 |
 | `sdk.projects` | 13 |
 | `sdk.recaps` | 10 |
 | `sdk.search` | 2 |
 | `sdk.supportTickets` | 6 |
-| `sdk.tickets` | 41 |
-| `sdk.userGroups` | 18 |
+| `sdk.tickets` | 45 |
+| `sdk.userGroups` | 19 |
 | `sdk.users` | 6 |
 | `sdk.workspace` | 20 |
 
@@ -474,6 +474,7 @@ await sdk.messages.send({
 and delete anything you leave out. Read the current set first:
 
 - `sdk.boards.update({ stages })`
+- `sdk.boards.updateFlowPlan({ nodes })`
 - `sdk.forms.update({ fields })`
 - `sdk.boards.syncTransitions()`
 - `sdk.recaps.saveSubscriptions()`
@@ -507,6 +508,21 @@ try {
 `upstream_unavailable`, …). It is absent for purely local failures — `code` is
 `network_error` or `timeout` in those cases.
 
+**Reading someone's history: use `messages.listByUser`, not search.**
+`search.query({ from: userId })` ranks by relevance and has a practical offset
+ceiling, so a thin page cannot be told apart from a truncated one. `listByUser`
+orders by `createdAt` and cursors cleanly:
+
+```typescript
+let cursor: MessageCursor | undefined;
+for (;;) {
+  const page = await sdk.messages.listByUser({ userId, limit: 100, start: cursor });
+  const last = page[page.length - 1];
+  if (page.length < 100 || !last) break;
+  cursor = { messageId: last.messageId, createdAt: last.createdAt };
+}
+```
+
 **Support tickets are read-only here.** `sdk.supportTickets` is the desk view of
 the same rows `sdk.tickets` writes to — reassigning or restaging a support ticket
 goes through `sdk.tickets`.
@@ -524,10 +540,10 @@ npm run coverage
 ```
 
 ```
-catalog:  239 queries, 240 mutators (479 total)
-exposed:  437
-excluded: 42
-accounted for: 479/479
+catalog:  254 queries, 244 mutators (498 total)
+exposed:  451
+excluded: 47
+accounted for: 498/498
 ```
 
 Every catalog operation must be either exposed as a method or listed in
@@ -536,8 +552,11 @@ someone decides which. The same check verifies that every referenced operation
 actually exists and that every required argument is supplied — neither of which
 TypeScript can catch, since the registries reference operations by string.
 
-The 42 exclusions are superseded versions (`…V1` where `…V3` is exposed), plus one
-the backend itself marks deprecated.
+Of the 47 exclusions, 45 are superseded versions (`…V1` where `…V3` is exposed).
+The other two are `myChannelParticipations`, which the backend marks deprecated,
+and `activeSlashCommandArtifacts`, which takes no arguments and is scoped entirely
+to the caller's own id — it drives an in-product banner rather than anything an API
+client can address.
 
 Operations absent from the catalog—creating channels and tickets and uploading
 files—use the same direct API operation structure as search. See
