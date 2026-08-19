@@ -49,6 +49,7 @@ import {
   Info as InfoIcon,
   Ticket as TicketIcon,
   Tag as TagIcon,
+  CalendarRange,
 } from 'lucide-react';
 import {
   ChannelVisibility,
@@ -160,6 +161,7 @@ import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyCo
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDrafts } from '../../hooks/useEmailDraft';
@@ -536,7 +538,7 @@ interface DemergeEmailResponse {
   };
 }
 
-type ViewMode = 'kanban' | 'list' | 'table';
+type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
 const SupportScreen = (): ReactElement => {
   const {
@@ -3121,6 +3123,20 @@ const SupportScreen = (): ReactElement => {
                         >
                           <Table2 size={16} />
                         </button>
+                        <button
+                          onClick={() => setViewMode('calendar')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'calendar'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='Calendar View'
+                          data-track-category='Support'
+                          data-track-name='SetCalendarView'
+                        >
+                          <CalendarRange size={16} />
+                        </button>
                       </div>
                       {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
                       {isSelectedChannelJoined && selectedChannelFull && (
@@ -3344,6 +3360,21 @@ const SupportScreen = (): ReactElement => {
                         onTicketClick={handleTicketClick}
                         onTicketsLoaded={setKanbanTickets}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
+                      />
+                    ) : viewMode === 'calendar' && selectedChannelId ? (
+                      <DeskCalendarView
+                        channelId={selectedChannelId}
+                        isMember={isSelectedChannelJoined}
+                        ticketFilter={ticketFilter}
+                        onTicketClick={ticket => {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
+                        onTicketsLoaded={setKanbanTickets}
                       />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
