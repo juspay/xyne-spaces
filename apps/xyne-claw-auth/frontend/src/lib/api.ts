@@ -164,6 +164,17 @@ export async function listServers(userId?: string): Promise<McpServer[]> {
   return data.data;
 }
 
+/**
+ * Outcome of POST /api/v1/servers.
+ *  - "saved":       a personal connector was created/updated in place.
+ *  - "editRequest": a shared (scope=global) connector edit was queued for
+ *                   admin approval; the live definition is unchanged and there
+ *                   is nothing to reconnect. Callers MUST branch on `kind`.
+ */
+export type CreateServerResult =
+  | { kind: "saved"; server: McpServer }
+  | { kind: "editRequest"; editRequestId: string; message: string };
+
 export async function createServer(
   payload: {
     name: string;
@@ -179,12 +190,30 @@ export async function createServer(
     connectorMeta?: Record<string, unknown>;
   },
   userId: string,
-): Promise<McpServer> {
-  const data = await request<{ success: boolean; data: McpServer }>(
+): Promise<CreateServerResult> {
+  const data = await request<{ success: boolean; data: unknown }>(
     `${AUTH_API_URL}/api/v1/servers`,
     { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
   );
-  return data.data;
+  const payloadData = data.data;
+  // A scope=global connector definition is never edited in place. The backend
+  // queues an McpConnectorEditRequest (HTTP 202) for admin review and returns
+  // { editRequest, message } instead of a server row. Detect that shape so
+  // callers can show an approval toast instead of silently reverting the form.
+  if (
+    payloadData &&
+    typeof payloadData === "object" &&
+    "editRequest" in payloadData &&
+    (payloadData as { editRequest?: unknown }).editRequest
+  ) {
+    const queued = payloadData as { editRequest: { id: string }; message?: string };
+    return {
+      kind: "editRequest",
+      editRequestId: queued.editRequest.id,
+      message: queued.message ?? "Change submitted for admin review.",
+    };
+  }
+  return { kind: "saved", server: payloadData as McpServer };
 }
 
 export async function requestServerPublish(serverId: string, userId: string): Promise<void> {
