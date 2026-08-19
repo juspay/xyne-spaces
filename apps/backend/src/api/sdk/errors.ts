@@ -8,7 +8,12 @@
  * on `code`, never on message text.
  */
 
-import { ERROR_CATALOG, type ErrorCode, type ErrorDetail } from '@xyne/spaces-contract';
+import {
+  ERROR_CATALOG,
+  isErrorCode,
+  type ErrorCode,
+  type ErrorDetail,
+} from '@xyne/spaces-contract';
 import { MutationACLError } from '@/zero/acl/core/types';
 import { ZodError } from 'zod';
 
@@ -106,7 +111,7 @@ function isApplicationError(err: unknown): err is ApplicationErrorLike {
 function extractCode(details: unknown): ErrorCode | undefined {
   if (details && typeof details === 'object' && 'code' in details) {
     const raw = (details as { code?: unknown }).code;
-    if (typeof raw === 'string' && raw in ERROR_CATALOG) return raw as ErrorCode;
+    if (typeof raw === 'string' && isErrorCode(raw)) return raw;
   }
   return undefined;
 }

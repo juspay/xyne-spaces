@@ -114,6 +114,19 @@ export class UserGroupsResource extends Resource {
     return this.call(userGroupsOperations.listAssignmentStates, { userGroupId });
   }
 
+  /**
+   * List per-member workload weightings for a group.
+   *
+   * Pairs with `listAssignmentStates`: that says who is available, this says how
+   * much work each of them already holds.
+   *
+   * @example
+   * const workload = await sdk.userGroups.listWorkloadMappings('group-1');
+   */
+  listWorkloadMappings(userGroupId: string): Promise<unknown[]> {
+    return this.call(userGroupsOperations.listWorkloadMappings, { userGroupId });
+  }
+
   /** Get one user's assignment state across their groups. */
   getAssignmentStateForUser(userId: string): Promise<unknown[]> {
     return this.call(userGroupsOperations.getAssignmentStateForUser, { userId });

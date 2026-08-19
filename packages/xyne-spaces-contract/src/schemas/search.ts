@@ -102,9 +102,9 @@ export const searchQuerySchema = z.object({
   view: z.enum(['installed', 'org', 'marketplace']).optional(),
 });
 
-export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
-export const VESPA_SCHEMAS = [
+/** Consumed by `searchSchemaQuerySchema` below; not part of the public surface. */
+const VESPA_SCHEMAS = [
   'chat_message',
   'chat_attachment',
   'chat_container',
