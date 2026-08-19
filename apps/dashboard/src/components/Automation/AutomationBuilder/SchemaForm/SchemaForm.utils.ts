@@ -100,6 +100,7 @@ export function detectEntityArrayKind(fieldKey: string): EntityKind | null {
     case 'memberIds':
     case 'mentionedUserIds':
     case 'participantUserIds':
+    case 'fromUserIds':
       return EntityKind.USER;
     case 'boardIds':
       return EntityKind.BOARD;
