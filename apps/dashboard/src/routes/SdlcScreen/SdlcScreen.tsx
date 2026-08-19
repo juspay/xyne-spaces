@@ -34,6 +34,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { isFramedSdlcSurface, requestSdlcFrameReset } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
@@ -1162,8 +1163,24 @@ export default function SdlcScreen(): ReactElement {
         style={{ backdropFilter: 'blur(var(--sidebar-background-blur))' }}
       >
         <div className='border-b border-sidebar-border-muted p-4'>
-          <div className='text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground'>
-            SDLC Hub
+          <div className='flex items-center justify-between gap-2'>
+            <div className='text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground'>
+              SDLC Hub
+            </div>
+            {/* Escape hatch for a wedged frame; only meaningful when framed. */}
+            {isFramedSdlcSurface() && (
+              <button
+                type='button'
+                onClick={requestSdlcFrameReset}
+                title='Reload SDLC Hub — discards this session and starts fresh at the hub root'
+                aria-label='Reload SDLC Hub'
+                className='rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+                data-track-category='SdlcHub'
+                data-track-name='FrameReset'
+              >
+                <RefreshCw className='h-3.5 w-3.5' aria-hidden='true' />
+              </button>
+            )}
           </div>
           <Select
             value={repo.id}

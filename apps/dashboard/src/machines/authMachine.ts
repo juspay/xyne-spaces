@@ -19,7 +19,7 @@ import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -1338,7 +1338,7 @@ export const authMachine = createMachine(
           /* empty */
         }
 
-        await dropAllDatabases();
+        await dropZeroDatabases();
         await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
