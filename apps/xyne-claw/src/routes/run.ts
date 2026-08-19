@@ -30,6 +30,7 @@ import {
   type ClawStreamMeta,
   type ClawDoneStatus,
   type Todo,
+  type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
@@ -1188,6 +1189,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
+    uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -1977,9 +1979,9 @@ async function processTask(
     // (URL or emitter, whichever is plumbed).
     const progressEmitter = progressUrl && typeof progressUrl !== "string" ? progressUrl : undefined;
     const progressUrlForCustom = typeof progressUrl === "string" ? progressUrl : undefined;
-    const emitPlanForCustom =
+    const emitUiWidgetForCustom =
       progressEmitter
-        ? (todos: Todo[]) => progressEmitter.plan(sessionId, todos)
+        ? async (widget: UiWidget) => progressEmitter.uiWidget(sessionId, widget)
         : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
@@ -1992,7 +1994,7 @@ async function processTask(
       sessionToken,
       undefined,
       runtimeProviderConfig,
-      emitPlanForCustom,
+      emitUiWidgetForCustom,
       taskCommand?.autoTools ?? [],
     );
     const {
@@ -2252,13 +2254,17 @@ async function processTask(
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
-    const fastCatalogCandidateItems = fastModeEnabled
-      ? buildToolCatalog({
-          groups: allGroups,
-          customTools: customToolDefs,
-          ...(customSubagents ? { customSubagents } : {}),
-        })
-      : [];
+    // The catalog is built for EVERY run, not just fast-mode ones. Its CONTENT
+    // is what differs: with subagent delegation on, the wrappers already carry
+    // their read tools, so only presentation (response-only) tools are lazy.
+    // With delegation off (fast mode) the catalog stands in for the wrappers
+    // and carries their read tools too — identical to before.
+    const fastCatalogCandidateItems = buildToolCatalog({
+      groups: allGroups,
+      customTools: customToolDefs,
+      ...(customSubagents ? { customSubagents } : {}),
+      includeSubagentTools: fastModeEnabled,
+    });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
     let fastCatalogNames: string[] = [];
@@ -2458,7 +2464,7 @@ async function processTask(
           calleeSessionToken,
           undefined,
           calleeProviderConfigForTools,
-          emitPlanForCustom,
+          emitUiWidgetForCustom,
         );
         const calleeGroupsWithoutKb = calleeMcp.groups.filter((g) => g.serverType !== "knowledge-base");
         const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];
@@ -3088,7 +3094,13 @@ async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
-    if (fastModeEnabled) {
+    // Derived predicate, not a new config knob: the catalog machinery runs when
+    // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
+    // byte-identical — a fast-mode run with an EMPTY catalog still gets its
+    // (empty) meta-tools exactly as it did before, rather than silently losing
+    // search-tools/load-tools.
+    const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
+    if (catalogActive) {
       const registeredToolNames = new Set(allTools.map((tool) => tool.name));
       fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
         registeredToolNames.has(item.entry.name) &&
@@ -3109,7 +3121,7 @@ async function processTask(
       fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
     }
 
-    const fastModeLoadedToolBudget = fastModeEnabled
+    const fastModeLoadedToolBudget = catalogActive
       ? Math.max(
           0,
           providerToolRequestCap(provider) -
@@ -3117,8 +3129,8 @@ async function processTask(
             allTools.filter((tool) => !fastCatalogNames.includes(tool.name)).length,
         )
       : undefined;
-    if (fastModeEnabled) {
-      log(`[fast] catalog=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)}`);
+    if (catalogActive) {
+      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled}`);
     }
 
     const tools = allTools.length > 0 ? allTools : undefined;
@@ -3630,8 +3642,12 @@ async function processTask(
           `CONTEXT: mentionNote=${(context ?? "").includes("You were @mentioned")} | sender=${senderName ?? "(none)"} channel=${channelName ?? "(none)"}`,
       );
     }
-    const fastModeCatalogPrompt = fastModeEnabled
-      ? renderToolCatalogForPrompt(fastCatalogItems.map((item) => item.entry))
+    const fastModeCatalogPrompt = catalogActive
+      ? renderToolCatalogForPrompt(fastCatalogItems.map((item) => item.entry), {
+          // Only fast mode actually turns delegation off; asserting it on a
+          // normal run would be a lie the model acts on.
+          subagentDelegationDisabled: fastModeEnabled,
+        })
       : "";
     if (fastModeCatalogPrompt) {
       fullContext = fullContext
@@ -3782,9 +3798,9 @@ async function processTask(
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: backgroundSubagentRegistry,
         fastMode: fastModeEnabled,
-        ...(fastModeEnabled ? { fastToolCatalogNames: fastCatalogNames } : {}),
-        ...(fastModeEnabled ? { fastToolController } : {}),
-        ...(fastModeEnabled ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
+        ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
+        ...(catalogActive ? { fastToolController } : {}),
+        ...(catalogActive ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
         ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
         handoff: handoffControl,
       });
@@ -4220,7 +4236,7 @@ async function processTask(
     }
 
     clog.info(
-      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
+      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,

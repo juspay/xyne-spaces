@@ -22,8 +22,8 @@ import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
-import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
 import { compactionExtension } from "./compaction-extension.js";
@@ -1528,6 +1528,12 @@ export function buildSubagentTools(
     }
 
     for (const [source, tools] of customBySource) {
+      // Response-only cards stay out of the always-active set here exactly as
+      // they do in buildFastModeDirectTools — routes/run.ts catalogues them
+      // instead, and a name that reaches fastAlwaysActiveToolNames is filtered
+      // back OUT of the catalog, which would silently make them eager again.
+      // This is the non-fast-mode half of that invariant.
+      if (isPresentationToolSource(source)) continue;
       const def = findSubagentDefinitionForServer(source);
       if (def && tools.length > 0) {
         const customSkills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
