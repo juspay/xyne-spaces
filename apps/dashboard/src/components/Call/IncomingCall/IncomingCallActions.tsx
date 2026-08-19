@@ -18,12 +18,12 @@ const CIRCLE =
 const DECLINE_COLORS =
   'bg-[var(--call-decline-bg)] text-[var(--call-decline-fg)] ' +
   'hover:bg-[var(--call-decline-bg-hover)] active:bg-[var(--call-decline-bg-active)] ' +
-  'focus-visible:shadow-[0_0_0_2px_var(--popover),0_0_0_5px_rgb(224_30_30/0.5)]';
+  'focus-visible:shadow-[0_0_0_2px_hsl(var(--popover)),0_0_0_5px_rgb(224_30_30/0.5)]';
 
 const ACCEPT_COLORS =
   'bg-[var(--call-accept-bg)] text-[var(--call-accept-fg)] ' +
   'hover:bg-[var(--call-accept-bg-hover)] active:bg-[var(--call-accept-bg-active)] ' +
-  'focus-visible:shadow-[0_0_0_2px_var(--popover),0_0_0_5px_rgb(from_var(--call-accept-bg)_r_g_b/0.5)]';
+  'focus-visible:shadow-[0_0_0_2px_hsl(var(--popover)),0_0_0_5px_rgb(from_var(--call-accept-bg)_r_g_b/0.5)]';
 
 const LABEL = 'mt-2 text-xs font-medium text-muted-foreground';
 

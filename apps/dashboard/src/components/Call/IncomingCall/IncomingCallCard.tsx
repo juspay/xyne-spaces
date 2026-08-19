@@ -86,7 +86,7 @@ export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardPro
             <div className='mb-4 flex items-start gap-2 rounded-[9px] bg-muted px-3 py-[9px] ring-1 ring-border'>
               <AlertTriangle className='mt-px h-3.5 w-3.5 shrink-0 text-[var(--call-notice-icon)]' />
               <span className='text-[12.5px] leading-[1.45] text-muted-foreground'>
-                You are already in a call. Answering will leave it.
+                Accepting will end your current call
               </span>
             </div>
           )}

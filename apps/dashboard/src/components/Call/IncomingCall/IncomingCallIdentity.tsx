@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import type { CSSProperties, ReactElement } from 'react';
 import Avatar, { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { usePrefersReducedMotion } from '../../../hooks/usePrefersReducedMotion';
@@ -78,7 +78,7 @@ export function IncomingCallIdentity({ identity }: IncomingCallIdentityProps): R
             />
           </>
         )}
-        <div className='relative rounded-full shadow-[0_0_0_2px_var(--popover),0_0_0_4px_var(--call-ring-accent)]'>
+        <div className='relative rounded-full shadow-[0_0_0_2px_hsl(var(--popover)),0_0_0_4px_var(--call-ring-accent)]'>
           <RosterAvatar
             entry={{
               userId: identity.userId,
@@ -98,17 +98,20 @@ export function IncomingCallIdentity({ identity }: IncomingCallIdentityProps): R
         <div
           key={entry.key}
           className={cn(
-            'relative rounded-full shadow-[0_0_0_2px_var(--popover)] transition-none hover:z-20',
+            'relative rounded-full shadow-[0_0_0_2px_hsl(var(--popover))]',
+            // Caller on top, each subsequent avatar tucked behind — until one is
+            // hovered, which lifts it clear of its neighbours.
+            'z-[var(--stack-depth)] hover:z-20',
             index > 0 && '-ml-3',
           )}
-          style={{ zIndex: identity.visible.length - index }}
+          style={{ '--stack-depth': identity.visible.length - index } as CSSProperties}
         >
           <RosterAvatar entry={entry} size={48} />
         </div>
       ))}
 
       {identity.overflowCount > 0 && (
-        <div className='relative -ml-3 h-12 w-12 shrink-0 rounded-full bg-muted shadow-[0_0_0_2px_var(--popover)]'>
+        <div className='relative -ml-3 h-12 w-12 shrink-0 rounded-full bg-muted shadow-[0_0_0_2px_hsl(var(--popover))]'>
           <div className='flex h-full w-full items-center justify-center rounded-full text-[13.5px] font-semibold text-muted-foreground'>
             +{identity.overflowCount}
           </div>
