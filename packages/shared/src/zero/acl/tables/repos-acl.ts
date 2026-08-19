@@ -13,7 +13,7 @@ export class ReposACL extends BaseQueryACL<'repos'> {
             return denyGuestSelect(query, 'id');
         }
 
-        // All users can see all repos
-        return query;
+        // Scope repos to the caller's workspace. Mirrors ApplicationsACL/ToolsACL.
+        return query.where('workspaceId', '=', this.ctx.workspaceId);
     }
 }

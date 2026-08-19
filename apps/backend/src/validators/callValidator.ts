@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MeetingStatus } from '@prisma/client';
+import { MeetingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
@@ -236,7 +236,7 @@ export type UpdateRecurringSeriesInput = z.infer<typeof UpdateRecurringSeriesSch
  * Validation schema for cancelling a single scheduled call instance.
  * No body required — callId comes from URL params.
  */
-export const CancelScheduledCallSchema = z.object({});
+export const CancelScheduledCallSchema = z.object({}).default({});
 
 export type CancelScheduledCallInput = z.infer<typeof CancelScheduledCallSchema>;
 
@@ -244,6 +244,6 @@ export type CancelScheduledCallInput = z.infer<typeof CancelScheduledCallSchema>
  * Validation schema for cancelling an entire recurring series.
  * No body required — seriesId comes from URL params.
  */
-export const CancelRecurringSeriesSchema = z.object({});
+export const CancelRecurringSeriesSchema = z.object({}).default({});
 
 export type CancelRecurringSeriesInput = z.infer<typeof CancelRecurringSeriesSchema>;

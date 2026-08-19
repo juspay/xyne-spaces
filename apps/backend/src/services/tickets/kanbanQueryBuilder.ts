@@ -1,8 +1,10 @@
+import { Prisma } from '@prisma/client';
 import {
-  Prisma,
+  TicketPriority,
   TicketStatusV2,
   UserResponsibility,
-} from '@prisma/client';
+  type FlowStepVisibilityOptions,
+} from '@xyne/shared';
 import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 
 const SUPPORT_TICKET_TYPE = 'Support';
@@ -24,7 +26,7 @@ export type KanbanFormFieldGroup = {
 export type KanbanGroupBy = 'none' | 'assignee' | 'status' | 'priority' | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {
-  priority?: import('@prisma/client').TicketPriority[];
+  priority?: TicketPriority[];
   assignee?: string[];
   userGroups?: string[];
   createdBy?: string[];
@@ -45,7 +47,7 @@ export type KanbanTicketFilters = {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 };
 
-export type KanbanTicketQueryContext = {
+export type KanbanTicketQueryContext = FlowStepVisibilityOptions & {
   workspaceId: string;
   currentUserId?: string;
   viewMode: KanbanTicketViewMode;
@@ -214,6 +216,7 @@ export const buildKanbanTicketWhere = (
       { isArchived: false },
       buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
+      context.excludeFlowSteps ? { rootId: null } : undefined,
       {
         OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }],
       },

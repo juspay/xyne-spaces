@@ -1,3 +1,4 @@
+import { CallType } from '@xyne/shared';
 export interface ScreenSource {
   id: string;
   name: string;
@@ -38,7 +39,7 @@ export interface ElectronAPI {
     callId: string;
     callerName: string;
     callerEmail: string;
-    callType: 'AUDIO' | 'VIDEO';
+    callType: CallType;
     callerPicture?: string;
   }) => void;
   closeCallNotification: (callId: string) => void;
@@ -52,6 +53,8 @@ export interface ElectronAPI {
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  // Optional: absent on Electron builds older than the one that added it.
+  onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
   onOpenXyneAIWithContext: (
     callback: (data: {
@@ -96,6 +99,9 @@ export interface ElectronAPI {
     html: string,
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
+  onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingResumeRequest?: (callback: () => void) => () => void;
+  onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;
   getErrorReportScreenSources?: () => Promise<{
@@ -135,10 +141,34 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
   };
   recordingPill?: {
-    onShow: (callback: (startTime: number) => void) => () => void;
+    onShow: (
+      callback: (state: {
+        startTime: number;
+        paused: boolean;
+        pauseStartedAt: number | null;
+        accumulatedPausedMs: number;
+      }) => void,
+    ) => () => void;
     onHide: (callback: () => void) => () => void;
+    onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
+    onMinimizedChanged: (callback: (minimized: boolean) => void) => () => void;
     stopRecording: () => void;
-    cancelRecording: () => void;
+    resumeRecording: () => void;
+    openApp: () => void;
+    setIgnoreMouse: (ignore: boolean) => void;
+    dragStart: () => void;
+    dragEnd: () => void;
+  };
+  platform?: string;
+  tray?: {
+    getVisible: () => Promise<boolean>;
+    setVisible: (visible: boolean) => void;
+    onVisibleChanged: (callback: (visible: boolean) => void) => () => void;
+  };
+  recordingPillSettings?: {
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => void;
+    onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;

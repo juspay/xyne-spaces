@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import { session, BrowserWindow, app } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
@@ -74,8 +75,8 @@ function setupDownloadHandler(): void {
       counter++;
     }
     item.setSavePath(filePath);
-    
-    console.log(`[Download] Saving file to: ${filePath}`);
+
+    log.info(`[Download] Saving file to: ${filePath}`);
   });
 }
 
@@ -150,10 +151,32 @@ export function setupXyneSpacesInterceptor(): void {
  * for the main window, embedded contents can't request at all.
  */
 const RESTRICTED_MEDIA_PERMISSIONS = new Set(['media', 'display-capture', 'mediaKeySystem']);
+
+// First-party Xyne content loaded outside the main window (e.g. in-app browser panel →
+// persist:xyne-spaces) is allowed this narrow set of low-risk permissions — clipboard
+// writes for "copy" buttons and fullscreen for the media/pptx/pdf viewers. Only this set,
+// and only for first-party origins; all other permissions stay denied except the main window.
+const FIRST_PARTY_NONMEDIA_PERMISSIONS = new Set([
+  'clipboard-sanitized-write', 'clipboard-read', 'fullscreen', 'pointerLock',
+]);
 function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): boolean {
   if (!webContents) return false;
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   return webContents === mainWindow.webContents;
+}
+// Mirrors preload.ts isTrustedOrigin(), but evaluated main-side against a webContents URL.
+function isFirstPartyUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl) return false;
+  try {
+    const { protocol, hostname } = new URL(rawUrl);
+    if (protocol.startsWith('xyne-spaces')) return true;              // bundled UI custom scheme
+    if (protocol === 'file:') return true;                            // bundled local HTML
+    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) return true;
+    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 function installMediaPermissionGuard(targetSession: Electron.Session, label: string): void {
   targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -167,13 +190,31 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
       callback(allowed);
       return;
     }
-    callback(true);
+    // Main window keeps permissive behaviour; first-party Xyne content outside it gets ONLY
+    // the narrow clipboard/fullscreen set; every other session (in-app browser panel
+    // `persist:browser-tabs`, the `preview` partition, embedded `<webview>`s) is denied.
+    if (isTopLevelMainWindow(webContents)) {
+      callback(true);
+      return;
+    }
+    if (FIRST_PARTY_NONMEDIA_PERMISSIONS.has(permission) && isFirstPartyUrl(webContents?.getURL())) {
+      callback(true);
+      return;
+    }
+    Logger.warn(
+      `[permissions:${label}] denied ${permission} for non-main webContents (url=${webContents?.getURL() ?? 'n/a'})`,
+    );
+    callback(false);
   });
   targetSession.setPermissionCheckHandler((webContents, permission) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
       return isTopLevelMainWindow(webContents ?? undefined);
     }
-    return true;
+    // Non-media permission checks succeed for the first-party main window,
+    // and for the narrow clipboard/fullscreen set on first-party content hosted outside
+    // it (e.g. the in-app browser panel); untrusted embedded content is denied.
+    if (isTopLevelMainWindow(webContents ?? undefined)) return true;
+    return FIRST_PARTY_NONMEDIA_PERMISSIONS.has(permission) && isFirstPartyUrl(webContents?.getURL());
   });
 }
 function setupMediaPermissionGuard(): void {
@@ -258,7 +299,6 @@ export function setupRequestInterceptor(): void {
     }
   );
 
-  // Handle responses for auth-related actions
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: [`${config.BACKEND_URL}/*`] },
     (details, callback) => {
@@ -278,7 +318,8 @@ export function setupRequestInterceptor(): void {
     }
   );
   
-  // Start with native OS picker by default — matches the CAC default (customPickerEnabled: false).
+  // Start with native OS picker by default — mat
+  // Handle responses for auth-related actionsches the CAC default (customPickerEnabled: false).
   // CustomLiveKitRoom will call setCustomScreenPickerEnabled(true) if CAC enables the custom picker.
   setCustomScreenPickerEnabled(false);
 

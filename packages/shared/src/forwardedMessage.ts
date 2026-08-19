@@ -86,10 +86,7 @@ export function createForwardedMessageXml(data: ForwardedMessageData): string {
  * @example
  * ```typescript
  * const data = parseForwardedMessageXml(xmlString);
- * if (data) {
- *   console.log(data.originalSenderName); // 'John Doe'
- *   console.log(data.content); // 'Original message text'
- * }
+ * if (data) renderForwardedMessage(data);
  * ```
  */
 export function parseForwardedMessageXml(xml: string): ForwardedMessageData | null {
@@ -130,8 +127,7 @@ export function parseForwardedMessageXml(xml: string): ForwardedMessageData | nu
       optionalText: optionalText || null,
       content,
     };
-  } catch (error) {
-    console.error('Failed to parse forwarded message XML:', error);
+  } catch {
     return null;
   }
 }

@@ -8,7 +8,7 @@ import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 
-type FilterTab = 'all' | 'created_by_me';
+type FilterTab = 'all' | 'created_by_me' | 'shared';
 
 const channelCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Channel_Grouped',
@@ -29,6 +29,7 @@ interface ChannelCanvasListProps {
   currentUserId?: string | undefined;
   selectedCanvasId?: string | undefined;
   onDelete?: (id: string) => void;
+  onArchiveToggle?: (canvas: Canvas) => void;
   onCreateCanvasInFolder?: (folder: CanvasFolder) => void;
   isCreatingCanvas?: boolean;
   showStarredOnly?: boolean;
@@ -48,6 +49,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   currentUserId,
   selectedCanvasId,
   onDelete,
+  onArchiveToggle,
   onCreateCanvasInFolder,
   isCreatingCanvas = false,
   showStarredOnly = false,
@@ -75,13 +77,12 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
 
   const displayedFolders = useMemo(() => {
     if (searchQuery.trim()) return [];
-    return activeFilter === 'created_by_me' && currentUserId
-      ? folders.filter(folder => folder.createdBy === currentUserId)
-      : folders;
-  }, [activeFilter, currentUserId, folders, searchQuery]);
+    return folders;
+  }, [folders, searchQuery]);
 
   const { folderGroups, rootCanvases } = useMemo(() => {
     const groups = new Map<string, FolderGroup>();
+    const hasContentFilter = activeFilter !== 'all' || showStarredOnly;
 
     for (const folder of displayedFolders) {
       groups.set(folder.id, { folder, canvases: [] });
@@ -102,7 +103,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
           ...group,
           canvases: sortByName(group.canvases, canvas => canvas.title || 'Untitled'),
         }))
-        .filter(group => !showStarredOnly || group.canvases.length > 0),
+        .filter(group => !hasContentFilter || group.canvases.length > 0),
       rootCanvases: sortByName(root, canvas => canvas.title || 'Untitled'),
     };
   }, [activeFilter, displayedCanvases, displayedFolders, showStarredOnly]);
@@ -154,6 +155,19 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
               >
                 Created by me
               </button>
+              <button
+                onClick={() => onFilterChange('shared')}
+                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+                  activeFilter === 'shared'
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground hover:bg-accent'
+                }`}
+                data-testid='canvas-filter-shared'
+                data-track-category='CANVAS'
+                data-track-name='Filter_Channel_Canvases_Shared'
+              >
+                Shared
+              </button>
             </div>
 
             <div className='relative w-full sm:w-auto'>
@@ -194,6 +208,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
+                  onArchiveToggle={onArchiveToggle}
                   onDelete={
                     onDelete
                       ? (id): void => {
@@ -254,6 +269,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           currentUserId={currentUserId}
                           trackNames={channelCanvasRowTrackNames}
                           onToggleStar={onToggleStar}
+                          onArchiveToggle={onArchiveToggle}
                           onDelete={
                             onDelete
                               ? (id): void => {
@@ -279,6 +295,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
+                  onArchiveToggle={onArchiveToggle}
                   onDelete={
                     onDelete
                       ? (id): void => {

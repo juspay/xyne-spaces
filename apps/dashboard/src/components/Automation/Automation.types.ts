@@ -7,6 +7,7 @@ export type {
   SwitchStepConfig,
   SwitchCaseEntry,
   AutomationRun,
+  AutomationRunSummary,
   Condition,
   LeafCondition,
   JsonSchema,

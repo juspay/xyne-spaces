@@ -92,7 +92,7 @@ export async function loadApp(window: BrowserWindow) {
 /**
  * Creates the main application window
  */
-export async function createMainWindow(): Promise<BrowserWindow> {
+export async function createMainWindow(options?: { inactive?: boolean }): Promise<BrowserWindow> {
   const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyne.ico');
 
   const createOpts = getCreateOptions();
@@ -119,7 +119,15 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   // Restore maximized/windowed state, then reveal once painted to avoid a resize flash.
   applyPostCreate(mainWindow);
   track(mainWindow, () => isCompactMode);
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () =>
+    options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
+  );
+
+  // Mirrors 'open-in-browser-panel' so links sent to the external browser are
+  // logged too, not just the ones routed into the panel.
+  const notifyExternalOpen = (externalUrl: string): void => {
+    mainWindow?.webContents.send('link-opened-external', externalUrl);
+  };
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -140,6 +148,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
       if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         shell.openExternal(url);
+        notifyExternalOpen(url);
         return { action: 'deny' };
       }
 
@@ -151,6 +160,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
         const wantExternal = prefExternal !== modifier;
         if (wantExternal) {
           shell.openExternal(url);
+          notifyExternalOpen(url);
         } else {
           mainWindow?.webContents.send('open-in-browser-panel', url);
         }
@@ -172,7 +182,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       return { action: 'allow' };
       
     } catch (error) {
-      console.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
       return { action: 'deny' };
     }
 });
@@ -201,12 +211,14 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
         return;
       }
 
       event.preventDefault();
       if (browserSettingsService.getSettings().openLinksExternally) {
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
       } else {
         mainWindow?.webContents.send('open-in-browser-panel', navUrl);
       }
@@ -215,7 +227,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     }
   });
 
-  console.log('✅ setWindowOpenHandler configured for main window');
+  log.info('✅ setWindowOpenHandler configured for main window');
 
 
   // Setup spellchecker context menu

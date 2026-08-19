@@ -1,7 +1,7 @@
 import { BaseRepository } from './base';
-import { Project, ProjectType, TicketStatusV2 } from '@prisma/client';
+import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {
@@ -183,7 +183,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // try {
     //   await queueProjectIngestion({ id: result.id }, 'delete');
     // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project deletion for Vespa: ${result.id}`, error);
     //   // Don't throw - project is still deleted in DB
     // }
 

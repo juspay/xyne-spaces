@@ -1,4 +1,5 @@
 import Bull from 'bull';
+import { IngestionStatus, VespaInsertionStatus } from '@xyne/shared';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, fileSchema, VespaSchema } from '@/vespa/src/types';
@@ -10,7 +11,6 @@ import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
 import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
-import { IngestionStatus } from '@prisma/client';
 import { SubApp } from '@/vespa/src/types';
 
 export class VespaFileWorker {
@@ -143,7 +143,7 @@ export class VespaFileWorker {
 					entityType,
 					workspaceId,
 					type: VespaOperationType[job.data.jobType],
-					status: 'FAILED',
+					status: VespaInsertionStatus.FAILED,
 					namespace: this.namespace,
 					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
 					errorDetails: JSON.stringify({

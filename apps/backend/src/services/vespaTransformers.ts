@@ -3,6 +3,7 @@ import {NAMESPACE} from '@/vespa/vespaConfig';
 import {channelSchema, projectSchema} from '@/vespa/src/types';
 import { chatContainerSchema } from '@xyne/vespa-ts/types';
 import { convert } from 'html-to-text';
+import { ChannelScopeType } from '@xyne/shared';
 
 /**
  * Transformer functions to convert Prisma models to Vespa document format
@@ -72,7 +73,6 @@ export function transformMessageToVespa(
     metadata: JSON.stringify(message.metadata || {}),
   };
 
-  logger.debug(`[VESPA_TRANSFORMER] Message transformed:`, JSON.stringify(vespaDoc, null, 2));
   return vespaDoc;
 }
 
@@ -226,8 +226,8 @@ export function transformChannelToVespa(
     creator: channel.creator, // Should be email
     scopeType: channel.scopeType,
     visibility: channel.visibility,
-    isIm: channel.scopeType === 'DM',
-    isMpim: channel.scopeType === 'GROUP_DM',
+    isIm: channel.scopeType === ChannelScopeType.DM,
+    isMpim: channel.scopeType === ChannelScopeType.GROUP_DM,
     permissions: channel.permissions || [], // group of user ids in this channel
     isPrivate: channel.visibility === 'PRIVATE',
     createdBy: channel.creator, // Should be email (same as creator)
@@ -327,7 +327,7 @@ export interface VespaTicketDocument {
 export function transformTicketToVespa(
   ticket: any
 ): VespaTicketDocument {
-  logger.info(`[VESPA_TRANSFORMER] Transforming ticket to Vespa format: ticketId=${ticket.id}, title=${ticket.title}, status=${ticket.statusV2}`);
+  logger.info(`[VESPA_TRANSFORMER] Transforming ticket to Vespa format: ticketId=${ticket.id}, status=${ticket.statusV2}`);
 
   const vespaDoc = {
     docId: ticket.id,
@@ -357,7 +357,6 @@ export function transformTicketToVespa(
     deletedAt: toTimestamp(ticket.deletedAt),
   };
 
-  logger.debug(`[VESPA_TRANSFORMER] Ticket transformed:`, JSON.stringify(vespaDoc, null, 2));
   return vespaDoc;
 }
 

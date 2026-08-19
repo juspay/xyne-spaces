@@ -2,6 +2,7 @@ import type { Condition, LeafCondition } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import { ConditionOperator } from '../types/operators';
 import { extractRefPath, isPureRef } from '../util/variable-ref';
+import { logger } from '@/utils/logger';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -45,6 +46,40 @@ function looseEquals(a: unknown, b: unknown): boolean {
   return false;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function applyNumericOperator(
+  operator: ConditionOperator.GT | ConditionOperator.GTE | ConditionOperator.LT | ConditionOperator.LTE,
+  resolved: unknown,
+  refValue: unknown,
+): boolean {
+  const left = toFiniteNumber(resolved);
+  const right = toFiniteNumber(refValue);
+  if (left === null || right === null) return false;
+
+  switch (operator) {
+    case ConditionOperator.GT:
+      return left > right;
+    case ConditionOperator.GTE:
+      return left >= right;
+    case ConditionOperator.LT:
+      return left < right;
+    case ConditionOperator.LTE:
+      return left <= right;
+    default:
+      return assertNever(operator);
+  }
+}
+
 function applyOperator(
   operator: ConditionOperator,
   resolved: unknown,
@@ -67,13 +102,46 @@ function applyOperator(
       return false;
 
     case ConditionOperator.GT:
-      return resolved !== undefined && resolved !== null && (resolved as number) > (refValue as number);
     case ConditionOperator.GTE:
-      return resolved !== undefined && resolved !== null && (resolved as number) >= (refValue as number);
     case ConditionOperator.LT:
-      return resolved !== undefined && resolved !== null && (resolved as number) < (refValue as number);
     case ConditionOperator.LTE:
-      return resolved !== undefined && resolved !== null && (resolved as number) <= (refValue as number);
+      return applyNumericOperator(operator, resolved, refValue);
+
+    case ConditionOperator.HAS_TAG: {
+      if (!Array.isArray(resolved)) {
+        logger.info(`[CONDITION] has_tag — resolved is not an array (got ${typeof resolved}), result=false`);
+        return false;
+      }
+      const raw = String(refValue);
+      // value format: "category:match:tag1,tag2"  e.g. "priority:any:critical,high"
+      const firstColon = raw.indexOf(':');
+      const secondColon = raw.indexOf(':', firstColon + 1);
+      if (firstColon === -1 || secondColon === -1) {
+        logger.info(`[CONDITION] has_tag — malformed value="${raw}", result=false`);
+        return false;
+      }
+      const category = raw.slice(0, firstColon);
+      const match = raw.slice(firstColon + 1, secondColon);
+      const tags = raw.slice(secondColon + 1).split(',').filter(Boolean);
+      if (match !== 'any' && match !== 'all') {
+        logger.info(`[CONDITION] has_tag — invalid match="${match}", result=false`);
+        return false;
+      }
+      if (tags.length === 0) {
+        logger.info(`[CONDITION] has_tag — empty tag list, result=false`);
+        return false;
+      }
+      const tagEntries = resolved as Array<{ category: string; tag: string }>;
+      const presentTags = tagEntries.filter(t => t.category === category).map(t => t.tag);
+      const result = match === 'all'
+        ? tags.every(t => presentTags.includes(t))
+        : tags.some(t => presentTags.includes(t));
+      logger.debug(
+        `[CONDITION] has_tag category=${category} match=${match} want=[${tags.join(',')}] present=[${presentTags.join(',')}] result=${result}`,
+      );
+      return result;
+    }
+
     default:
       return assertNever(operator);
   }

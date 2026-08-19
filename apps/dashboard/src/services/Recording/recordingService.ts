@@ -5,14 +5,18 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { RecordingType } from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
+import { CallType } from '@xyne/shared';
 
 export interface RecordingSession {
+  /** Public Call ID used by the recording routes (same value as externalId). */
+  callId: string;
   id: string;
   externalId: string;
   token: string;
   serverUrl: string;
-  channelId: string;
+  channelId: string | null;
+  notesCanvasId: string;
   startTime: number;
 }
 
@@ -20,18 +24,145 @@ export interface Recording {
   id: string;
   externalId: string;
   title: string;
+  status?: 'SCHEDULED' | 'ACTIVE' | 'IN_PROGRESS' | 'ENDED' | 'CANCELLED';
+  createdByUserId?: string;
   startedAt: string;
   endedAt: string | null;
   durationMs: number | null;
   hasTranscript: boolean;
   hasSummary: boolean;
   hasRecording?: boolean;
+  labels?: string[];
+  markedItems?: unknown[];
+  summaryTemplateId?: string | null;
+}
+
+export interface SummaryTemplate {
+  id: string;
+  workspaceId: string;
+  name: string;
+  autoTriggerPrompt: string | null;
+  sections: SummaryTemplateSection[];
+  version: number;
+  systemPrompt: string;
+  defaultOutlet: DefaultOutlet;
+  createdBy: string;
+  createdAt: string;
+  visibility: 'PRIVATE' | 'WAITING_FOR_APPROVAL' | 'PUBLIC';
+  canEdit: boolean;
+  isSystem: boolean;
+}
+
+export interface SummaryTemplateSection {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export type SummaryTemplateInput = Pick<
+  SummaryTemplate,
+  'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt' | 'version' | 'defaultOutlet'
+>;
+
+export interface SummaryTemplateAiInput {
+  name: string;
+  meetingContext?: string | null;
+  sections?: Array<Pick<SummaryTemplateSection, 'title' | 'description'>>;
+}
+
+export interface RecordingUpdate {
+  title?: string;
+  labels?: string[];
+  markedItems?: Record<string, unknown>[];
+  summaryTemplateId?: string | null;
+}
+
+export interface RecordingTicketLinkState {
+  linkedTicketId: string | null;
+  linkedTicketMessageId: string | null;
+}
+
+export type RecordingShareTarget =
+  | { type: 'user'; id: string }
+  | { type: 'user_group'; id: string }
+  | { type: 'channel'; id: string };
+
+export type SummaryTemplateShareTarget = RecordingShareTarget;
+
+export interface SummaryTemplateShare {
+  id: string;
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+  entityUserAccess: string;
+  user: { id: string; name: string | null; email: string | null } | null;
+  userGroup: { id: string; name: string } | null;
+  channel: { id: string; name: string } | null;
+}
+
+export interface SummaryTemplateSharingResult {
+  action: 'grant' | 'revoke';
+  shares: SummaryTemplateShare[];
+}
+
+export interface SummaryTemplatePublicationAdmin {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
+
+export interface SummaryTemplatePublicationContext {
+  admins: SummaryTemplatePublicationAdmin[];
+  isAdmin: boolean;
+}
+
+export type SummaryTemplatePublicationAction =
+  | 'request'
+  | 'publish'
+  | 'withdraw'
+  | 'approve'
+  | 'deny';
+
+export interface RecordingSharingResult {
+  action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket';
+  linkedTicketId?: string | null;
+  linkedTicketMessageId?: string | null;
+  shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
+}
+
+export interface RegenerateRecordingSummaryResult {
+  summaryTemplateId: string;
+  detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean;
+}
+
+export interface ExportRecordingGoogleDocResult {
+  documentId: string;
+  documentUrl: string;
+}
+
+export interface RecordingGoogleDocComposeContext {
+  canExport: boolean;
+  unavailableReason?: string;
+  summary: string | null;
+}
+
+interface GoogleRecordingDocConnectionResponse {
+  authUrl: string;
 }
 
 export interface BulkDeleteRecordingsResult {
   success: boolean;
   deleted: string[];
   failed: Array<{ callId: string; reason: string }>;
+}
+
+export interface CitationSegment {
+  n: number;
+  timestamp: string;
+  speaker: string;
+  speakerId?: string;
+  snippet: string;
 }
 
 export interface RecordingDetail extends Recording {
@@ -44,7 +175,12 @@ export interface RecordingDetail extends Recording {
   channelId: string | null;
   messageId: string | null;
   notesCanvasId: string | null;
+  detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean | null;
+  citationSegments: CitationSegment[];
   hasRecording?: boolean;
+  linkedTicketId?: string | null;
+  linkedTicketMessageId?: string | null;
 }
 
 /** A single in-call recording session (call_recordings row). */
@@ -85,7 +221,10 @@ interface InitiateCallResponse {
   token: string;
   livekitUrl: string;
   externalId: string;
-  channelId: string;
+  callId?: string;
+  channelId: string | null;
+  notesCanvasId: string;
+  conversationId?: string;
 }
 
 interface RecordingsResponse {
@@ -103,28 +242,37 @@ interface RecordingDetailResponse {
 class RecordingService {
   /**
    * Start a headless recording session
-   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials
+   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials.
+   * When `conversationId` + `channelId` are provided (recording started from a
+   * thread), the backend posts a single anchor message into that conversation
+   * that live-updates as the recording progresses and ends.
    */
   async startRecording(params?: {
     sttModel?: 'google' | 'azure' | 'deepgram';
+    conversationId?: string;
+    channelId?: string;
   }): Promise<RecordingSession> {
     const response: AxiosResponse<InitiateCallResponse> = await apiInstance.post(
       '/calls/initiate',
       {
         isHeadless: true,
-        callType: 'AUDIO',
-        sttModel: params?.sttModel || 'azure',
+        callType: CallType.AUDIO,
+        sttModel: params?.sttModel || 'google',
+        ...(params?.conversationId && { conversationId: params.conversationId }),
+        ...(params?.channelId && { channelId: params.channelId }),
       },
     );
 
     const data: InitiateCallResponse = response.data;
 
     return {
+      callId: data.callId ?? data.externalId,
       id: data.externalId,
       externalId: data.externalId,
       token: data.token,
       serverUrl: data.livekitUrl,
       channelId: data.channelId,
+      notesCanvasId: data.notesCanvasId,
       startTime: Date.now(),
     };
   }
@@ -162,7 +310,184 @@ class RecordingService {
    * Update recording title
    */
   async updateRecordingTitle(callId: string, title: string): Promise<void> {
-    await apiInstance.patch(`/calls/recordings/${callId}`, { title });
+    await this.updateRecording(callId, { title });
+  }
+
+  async updateRecording(callId: string, update: RecordingUpdate): Promise<void> {
+    await apiInstance.patch(`/calls/recordings/${callId}`, update);
+  }
+
+  async regenerateSummary(
+    callId: string,
+    summaryTemplateId: string,
+  ): Promise<RegenerateRecordingSummaryResult> {
+    const response: AxiosResponse<{ success: true } & RegenerateRecordingSummaryResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
+        summaryTemplateId,
+      });
+    return response.data;
+  }
+
+  async exportGoogleDoc(callId: string): Promise<ExportRecordingGoogleDocResult> {
+    const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
+      `/calls/recordings/${callId}/export-google-doc`,
+    );
+    return response.data;
+  }
+
+  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+    const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
+      `/calls/recordings/${callId}/google-doc-compose-context`,
+    );
+    return response.data;
+  }
+
+  async connectGoogleDoc(
+    returnPath: string,
+    platform: 'electron' | 'web' = 'web',
+  ): Promise<string> {
+    const response = await apiInstance.post<GoogleRecordingDocConnectionResponse>(
+      '/integrations/google/connect/recording-doc/init',
+      { returnPath, platform },
+    );
+    return response.data.authUrl;
+  }
+
+  async grantRecordingAccess(
+    callId: string,
+    targets: RecordingShareTarget[],
+    access?: GrantableEntityUserAccess,
+  ): Promise<RecordingSharingResult> {
+    const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+        action: 'grant',
+        targets,
+        ...(access ? { access } : {}),
+      });
+    return response.data;
+  }
+
+  async revokeRecordingAccess(
+    callId: string,
+    targets: RecordingShareTarget[],
+  ): Promise<RecordingSharingResult> {
+    const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+        action: 'revoke',
+        targets,
+      });
+    return response.data;
+  }
+
+  async linkRecordingToTicket(callId: string, ticketId: string): Promise<RecordingTicketLinkState> {
+    const response: AxiosResponse<
+      { success: true } & RecordingSharingResult & RecordingTicketLinkState
+    > = await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+      action: 'link_ticket',
+      ticketId,
+    });
+    return {
+      linkedTicketId: response.data.linkedTicketId,
+      linkedTicketMessageId: response.data.linkedTicketMessageId,
+    };
+  }
+
+  async unlinkRecordingFromTicket(callId: string): Promise<RecordingTicketLinkState> {
+    const response: AxiosResponse<
+      { success: true } & RecordingSharingResult & RecordingTicketLinkState
+    > = await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+      action: 'unlink_ticket',
+    });
+    return {
+      linkedTicketId: response.data.linkedTicketId,
+      linkedTicketMessageId: response.data.linkedTicketMessageId,
+    };
+  }
+
+  async createSummaryTemplate(input: SummaryTemplateInput): Promise<SummaryTemplate> {
+    const response: AxiosResponse<{ success: boolean; template: SummaryTemplate }> =
+      await apiInstance.post('/calls/summary-templates', input);
+    return response.data.template;
+  }
+
+  async updateSummaryTemplate(
+    templateId: string,
+    update: Partial<SummaryTemplateInput>,
+  ): Promise<SummaryTemplate> {
+    const response: AxiosResponse<{ success: boolean; template: SummaryTemplate }> =
+      await apiInstance.patch(`/calls/summary-templates/${templateId}`, update);
+    return response.data.template;
+  }
+
+  async getSummaryTemplateShares(templateId: string): Promise<SummaryTemplateShare[]> {
+    const response: AxiosResponse<{ success: boolean; shares: SummaryTemplateShare[] }> =
+      await apiInstance.get(`/calls/summary-templates/${templateId}/shares`);
+    return response.data.shares;
+  }
+
+  async grantSummaryTemplateAccess(
+    templateId: string,
+    targets: SummaryTemplateShareTarget[],
+  ): Promise<SummaryTemplateSharingResult> {
+    const response: AxiosResponse<{ success: true } & SummaryTemplateSharingResult> =
+      await apiInstance.post(`/calls/summary-templates/${templateId}/sharing`, {
+        action: 'grant',
+        targets,
+      });
+    return response.data;
+  }
+
+  async revokeSummaryTemplateAccess(
+    templateId: string,
+    targets: SummaryTemplateShareTarget[],
+  ): Promise<SummaryTemplateSharingResult> {
+    const response: AxiosResponse<{ success: true } & SummaryTemplateSharingResult> =
+      await apiInstance.post(`/calls/summary-templates/${templateId}/sharing`, {
+        action: 'revoke',
+        targets,
+      });
+    return response.data;
+  }
+
+  async getSummaryTemplatePublicationContext(): Promise<SummaryTemplatePublicationContext> {
+    const response: AxiosResponse<{ success: true } & SummaryTemplatePublicationContext> =
+      await apiInstance.get('/calls/summary-templates/publication/context');
+    return response.data;
+  }
+
+  async manageSummaryTemplatePublication(
+    templateId: string,
+    action: SummaryTemplatePublicationAction,
+  ): Promise<SummaryTemplate> {
+    const response: AxiosResponse<{ success: true; template: SummaryTemplate }> =
+      await apiInstance.post(`/calls/summary-templates/${templateId}/publication`, { action });
+    return response.data.template;
+  }
+
+  async deleteSummaryTemplate(templateId: string): Promise<void> {
+    await apiInstance.delete(`/calls/summary-templates/${templateId}`);
+  }
+
+  async draftSummaryTemplateContext(input: SummaryTemplateAiInput): Promise<string> {
+    const response: AxiosResponse<{ success: boolean; context: string }> = await apiInstance.post(
+      '/calls/summary-templates/ai/draft-context',
+      input,
+    );
+    return response.data.context;
+  }
+
+  async suggestSummaryTemplateSections(
+    input: SummaryTemplateAiInput,
+  ): Promise<SummaryTemplateSection[]> {
+    const response: AxiosResponse<{ success: boolean; sections: SummaryTemplateSection[] }> =
+      await apiInstance.post('/calls/summary-templates/ai/suggest-sections', input);
+    return response.data.sections;
+  }
+
+  async generateSummaryTemplateSystemPrompt(input: SummaryTemplateAiInput): Promise<string> {
+    const response: AxiosResponse<{ success: boolean; systemPrompt: string }> =
+      await apiInstance.post('/calls/summary-templates/ai/generate-system-prompt', input);
+    return response.data.systemPrompt;
   }
 
   /**

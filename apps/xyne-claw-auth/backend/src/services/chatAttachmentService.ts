@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { gcsService } from "./gcsService.js";
+import { gcsService } from "./storageService.js";
 import { chatAttachmentRepository } from "../repositories/chatAttachmentRepository.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("chat-attachment-service");
 
 export interface FileMeta {
   hasThumbnail?: boolean;
@@ -17,6 +20,18 @@ export interface UploadedAttachment {
   size: number;
   width: number | null;
   height: number | null;
+}
+
+export interface Base64Attachment {
+  fileName: string;
+  mimeType: string;
+  data: string;
+}
+
+export interface PersistedAttachmentRef {
+  id: string;
+  originalFilename: string;
+  mimeType: string;
 }
 
 function sanitizeFilename(name: string): string {
@@ -77,5 +92,33 @@ export async function uploadChatAttachments(
     });
   }
 
+  return results;
+}
+
+/** Persist trusted internal-run callback attachments and bind them to a message. */
+export async function persistBase64ChatAttachments(
+  chatMessageId: string,
+  uploaderUserId: string,
+  attachments: Base64Attachment[] | undefined,
+): Promise<PersistedAttachmentRef[]> {
+  const results: PersistedAttachmentRef[] = [];
+  for (const attachment of attachments ?? []) {
+    try {
+      const buffer = Buffer.from(attachment.data, "base64");
+      const destPath = pathFor(uploaderUserId, attachment.fileName);
+      await gcsService.uploadFile(buffer, destPath, attachment.mimeType);
+      const row = await chatAttachmentRepository.create({
+        chatMessageId,
+        uploaderUserId,
+        url: destPath,
+        originalFilename: attachment.fileName,
+        mimeType: attachment.mimeType,
+        size: buffer.length,
+      });
+      results.push({ id: row.id, originalFilename: row.originalFilename, mimeType: row.mimeType });
+    } catch (err) {
+      log.warn(`[callback] failed to persist attachment ${attachment.fileName}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   return results;
 }

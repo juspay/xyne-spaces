@@ -12,7 +12,7 @@ import { AutoDraftStatus } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { useSlackUserAuth, useDisconnectSlackUser } from '../../../hooks/useSlackUserAuth';
 import { useSlackUsers } from '../../../hooks/useSlackUsers';
-import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
 import Tooltip from '../../ui/Tooltip';
 import { EditorToolbar, EmojiPickerButton } from '../../ui/EditorToolbar';
 import { MentionExtension, mentionPluginKey } from '../../ui/TipTapExtensions';
@@ -25,6 +25,7 @@ const lowlight = createLowlight(all);
 interface SlackComposerProps {
   conversationId: string;
   channelId?: string | null;
+  drafts?: readonly EmailDraftRecord[];
   variant?: 'slack' | 'app';
   recordOnly?: boolean;
 }
@@ -32,6 +33,7 @@ interface SlackComposerProps {
 const SlackComposer = ({
   conversationId,
   channelId,
+  drafts,
   variant = 'slack',
   recordOnly = false,
 }: SlackComposerProps): ReactElement => {
@@ -44,8 +46,11 @@ const SlackComposer = ({
   const { data: slackAuth, isLoading: authLoading } = useSlackUserAuth();
   const disconnectMutation = useDisconnectSlackUser();
   const { filteredUsers, searchUsers } = useSlackUsers();
-  const draft = useEmailDraft(conversationId);
-  const { deleteDraft } = useEmailDraftOperations(conversationId, channelId);
+  const { deleteDraft, latestDraft: draft } = useEmailDraftOperations(
+    conversationId,
+    channelId,
+    drafts,
+  );
   const isAutoDraftGenerating = draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
   const lastLoadedDraftRef = useRef<string>('');
 
@@ -74,10 +79,6 @@ const SlackComposer = ({
       CodeBlockLowlight.configure({
         lowlight,
         defaultLanguage: 'plaintext',
-        HTMLAttributes: {
-          class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-          style: 'padding: 0.75rem;',
-        },
       }),
       LinkExtension.extend({ inclusive: false }).configure({
         openOnClick: false,

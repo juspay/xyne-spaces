@@ -10,6 +10,7 @@ import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
@@ -235,7 +236,7 @@ export async function createKnowledgeCanvas(
         workspaceId,
         content: content as any, // BlockNote JSON array
         createdBy: createdByUserId,
-        visibility: 'PUBLIC',
+        visibility: CanvasVisibility.PUBLIC,
         isTemplate: false,
         lastEditedBy: createdByUserId,
         lastEditedAt: now,
@@ -261,7 +262,7 @@ export async function createKnowledgeCanvas(
         canvasId,
         workspaceId,
         userId: createdByUserId,
-        role: 'OWNER',
+        role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
       },
@@ -273,14 +274,13 @@ export async function createKnowledgeCanvas(
 
     // Queue Vespa indexing job for the canvas
     try {
-      const user = await prisma.user.findUnique({ where: { id: createdByUserId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed',
         userId: createdByUserId,
         app: SubApp.CANVAS,
-        ...(user?.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        workspaceId,
       });
       logger.info(`[CanvasService] Queued Vespa indexing for canvas ${canvasId}`);
     } catch (error) {
@@ -316,16 +316,18 @@ type LooseBlock = {
   children?: LooseBlock[];
 };
 
-// Inline content types the frontend canvas schema adds on top of the BlockNote
-// defaults. ServerBlockNoteEditor.create() only knows the default schema, so any
-// of these custom inline nodes make blocksToMarkdownLossy throw
-// "node type <x> not found in schema". We rewrite them to plain text first.
-const CUSTOM_INLINE_TYPES = new Set(['mention']);
+// ServerBlockNoteEditor.create() only knows the default schema, so custom inline
+// nodes must be rewritten before Markdown export.
+const CUSTOM_INLINE_TYPES = new Set(['mention', 'citation']);
 
 // Render a custom inline node as plain text, mirroring the frontend display
 // logic (CanvasMentionSpec: prefer the group name for group mentions, otherwise
 // the username).
 function customInlineToText(inline: LooseInline): string {
+  // Citation chips are annotations that point at a transcript segment; in a
+  // plain-text/markdown export (or Vespa index text) they carry no useful prose
+  // — the cited words already live in the transcript — so drop them to empty.
+  if (inline.type === 'citation') return '';
   const props = inline.props || {};
   const groupId = props['groupId'] as string | undefined;
   const groupName = props['groupName'] as string | undefined;
@@ -334,26 +336,41 @@ function customInlineToText(inline: LooseInline): string {
   return `@${name}`;
 }
 
-// Recursively replace custom inline nodes with plain-text runs so the default
-// server schema can serialize the document. Returns a new tree; the input is not
-// mutated.
+function normalizeInlineContent(content: unknown): unknown {
+  if (Array.isArray(content)) {
+    return content.map(normalizeInlineContent);
+  }
+
+  if (!content || typeof content !== 'object') {
+    return content;
+  }
+
+  const inline = content as LooseInline;
+  if (inline.type && CUSTOM_INLINE_TYPES.has(inline.type)) {
+    return { type: 'text', text: customInlineToText(inline), styles: {} };
+  }
+
+  return Object.fromEntries(
+    Object.entries(content).map(([key, value]) => [key, normalizeInlineContent(value)]),
+  );
+}
+
+// Remove citation blocks and replace custom inline nodes before serialization.
 function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
-  return blocks.map(block => {
+  return blocks.flatMap(block => {
+    if (block.type === 'citation') return [];
+
     const next: LooseBlock = { ...block };
 
-    if (Array.isArray(block.content)) {
-      next.content = (block.content as LooseInline[]).map(inline =>
-        inline?.type && CUSTOM_INLINE_TYPES.has(inline.type)
-          ? { type: 'text', text: customInlineToText(inline), styles: {} }
-          : inline,
-      );
+    if (block.content !== undefined) {
+      next.content = normalizeInlineContent(block.content);
     }
 
     if (Array.isArray(block.children) && block.children.length > 0) {
       next.children = normalizeBlocksForMarkdown(block.children);
     }
 
-    return next;
+    return [next];
   });
 }
 
@@ -386,12 +403,14 @@ export async function convertBlockNoteToMarkdown(blocks: unknown[]): Promise<str
  */
 export async function approveKnowledgeCanvas(
   canvasId: string,
-  approvedByUserId: string
+  approvedByUserId: string,
+  callerWorkspaceId: string
 ): Promise<{
   success: boolean;
   documentIds?: string[];
   error?: string;
   alreadyApproved?: boolean;
+  forbidden?: boolean;
 }> {
   const prisma = DatabaseClient.getInstance();
 
@@ -404,6 +423,8 @@ export async function approveKnowledgeCanvas(
         title: true,
         content: true,
         metadata: true,
+        workspaceId: true,
+        createdBy: true,
       },
     });
 
@@ -415,6 +436,38 @@ export async function approveKnowledgeCanvas(
     const metadata = canvas.metadata as Record<string, unknown> | null;
     if (!metadata || metadata.source !== 'workflow_knowledge') {
       return { success: false, error: 'Canvas is not a knowledge canvas' };
+    }
+
+    // CanvasesACL resolves canvases by workspace only, so this endpoint enforces the
+    // workspace boundary and an approver-ownership check itself.
+    if (canvas.workspaceId !== callerWorkspaceId) {
+      return { success: false, error: 'Canvas not found', forbidden: true };
+    }
+
+    let authorized = canvas.createdBy === approvedByUserId;
+    if (!authorized) {
+      const ownerParticipant = await prisma.canvasParticipant.findFirst({
+        where: { canvasId: canvas.id, userId: approvedByUserId, role: 'OWNER' },
+        select: { id: true },
+      });
+      authorized = !!ownerParticipant;
+    }
+    if (!authorized) {
+      const wfExecId = metadata.workflowExecutionId as string | undefined;
+      if (wfExecId) {
+        const wfExec = await prisma.workflowExecution.findUnique({
+          where: { id: wfExecId },
+          select: { createdBy: true },
+        });
+        authorized = !!wfExec?.createdBy && wfExec.createdBy === approvedByUserId;
+      }
+    }
+    if (!authorized) {
+      return {
+        success: false,
+        error: 'Not authorized to approve this knowledge canvas',
+        forbidden: true,
+      };
     }
 
     // Check if already approved
@@ -505,14 +558,13 @@ export async function approveKnowledgeCanvas(
 
     // Queue Vespa update for the canvas (metadata changed)
     try {
-      const user = await prisma.user.findUnique({ where: { id: approvedByUserId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed', // Re-feed to update the document
         userId: approvedByUserId,
         app: SubApp.CANVAS,
-        ...(user?.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        workspaceId: callerWorkspaceId,
       });
       logger.info(`[CanvasService] Queued Vespa update for approved canvas ${canvasId}`);
     } catch (error) {

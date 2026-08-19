@@ -41,23 +41,70 @@ export class ReleaseRepository {
 		commitId?: string | null;
 		filePath?: string | null;
 	}): Promise<ReleaseChangeType> {
+		// Idempotency: re-runs must not duplicate (release, app, changeType,
+		// filePath, commitId). findFirst is the fast path; the partial unique
+		// indexes close the concurrent-miss race. commitId in the key keeps
+		// different commits' changes for the same file.
+		const dedupeWhere =
+			input.releaseId && input.filePath
+				? {
+						releaseId: input.releaseId,
+						applicationId: input.applicationId,
+						changeType: input.changeType,
+						filePath: input.filePath,
+						commitId: input.commitId ?? null,
+					}
+				: null;
+
+		if (dedupeWhere) {
+			const existing = await prisma.releaseChangeType.findFirst({ where: dedupeWhere });
+			if (existing) {
+				logger.info(
+					`[ReleaseRepository] Reusing existing ReleaseChangeType ${existing.id} for ${input.changeType} ${input.filePath} on release=${input.releaseId}`,
+				);
+				return existing;
+			}
+		}
+
+		// All release changes for an application share its workspace; stamp the
+		// denormalized tenant key on insert (matches main's tenant stamping).
 		const application = await prisma.application.findUniqueOrThrow({
 			where: { id: input.applicationId },
 			select: { workspaceId: true },
 		});
-		return await prisma.releaseChangeType.create({
-			data: {
-				applicationId: input.applicationId,
-				workspaceId: application.workspaceId,
-				changeType: input.changeType,
-				releaseId: input.releaseId ?? null,
-				applicationReleaseId: input.applicationReleaseId ?? null,
-				devTicketXyneId: input.devTicketXyneId ?? null,
-				commitId: input.commitId ?? null,
-				filePath: input.filePath ?? null,
-				createdAt: new Date(),
-			},
-		});
+
+		try {
+			return await prisma.releaseChangeType.create({
+				data: {
+					applicationId: input.applicationId,
+					workspaceId: application.workspaceId,
+					changeType: input.changeType,
+					releaseId: input.releaseId ?? null,
+					applicationReleaseId: input.applicationReleaseId ?? null,
+					devTicketXyneId: input.devTicketXyneId ?? null,
+					commitId: input.commitId ?? null,
+					filePath: input.filePath ?? null,
+					createdAt: new Date(),
+				},
+			});
+		} catch (error) {
+			// A concurrent re-run won the race: the unique index rejected our insert
+			// (P2002). Re-fetch and return the row it created.
+			if (
+				dedupeWhere &&
+				error instanceof Prisma.PrismaClientKnownRequestError &&
+				error.code === 'P2002'
+			) {
+				const existing = await prisma.releaseChangeType.findFirst({ where: dedupeWhere });
+				if (existing) {
+					logger.info(
+						`[ReleaseRepository] Lost dedupe race for ${input.changeType} ${input.filePath} on release=${input.releaseId}; reusing ${existing.id}`,
+					);
+					return existing;
+				}
+			}
+			throw error;
+		}
 	}
 
 	async createReleaseEvent(

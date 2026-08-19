@@ -1,5 +1,4 @@
 import { DatabaseClient } from '@/database/client';
-import { logger } from '@/utils/logger';
 import {
   ActivityClassification,
   AuthProvider,
@@ -14,8 +13,8 @@ import {
   ConversationParticipation,
   InvitationResponse,
   MeetingStatus,
-  ProjectType,
-} from '@prisma/client';
+  ProjectType, OrgRole, WorkspaceRole } from '@xyne/shared';
+import { logger } from '@/utils/logger';
 
 export class TestAuthSeeder {
   public static async seedWorkspaceFixtures(
@@ -304,7 +303,7 @@ export class TestAuthSeeder {
         let orgMember = await db.orgMember.findUnique({ where: { email } });
         if (!orgMember) {
           orgMember = await db.orgMember.create({
-            data: { orgId: workspace.orgId, email, role: 'MEMBER' },
+            data: { orgId: workspace.orgId, email, role: OrgRole.MEMBER },
           });
         }
         user = await db.user.create({
@@ -315,7 +314,7 @@ export class TestAuthSeeder {
             picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(spec.name)}&background=random`,
             authProvider: AuthProvider.GOOGLE,
             workspace: { connect: { id: workspaceId } },
-            role: 'MEMBER',
+            role: WorkspaceRole.MEMBER,
             orgMember: { connect: { memberId: orgMember.memberId } },
           },
         });

@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import { MessageType } from '@xyne/shared';
 import { Request, Response } from 'express';
 import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js';
 import type { BotExecutionContext, InternalBotDefinition, BotEvent } from '@/bots/unified/types/index.js';
@@ -21,6 +22,7 @@ import {
   formatUserMention,
   type JenkinsWebhookPayload,
 } from './alert-formatting';
+import { prThreadNotificationService } from '@/services/prThreadNotificationService';
 type QaAlertBotInput = { message: string };
 type QaAlertBotOutput = { response: string };
 
@@ -187,7 +189,6 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
     }
 
     try {
-     
       const ticket = await this.ticketRepository.getTicketByXyneId(ticketXyneId, config.defaultWorkspaceId);
 
       if (!ticket) {
@@ -200,7 +201,6 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
         return { success: false, message: `Ticket ${ticketXyneId} has no conversation` };
       }
 
-      
       const qaAlertBot = await unifiedBotUserService.getBotByEmail('qa-alert-bot@bot.xyne.ai', ticket.workspaceId);
 
       if (!qaAlertBot) {
@@ -248,17 +248,18 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
         conversationId: ticket.conversationId,
         userId: qaAlertBot.id,
         content: alertMessage,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         isBot: true,
       });
 
       logger.info(
         `[QaAlertBot] Alert posted to ticket ${ticketXyneId} conversation ${ticket.conversationId}`
       );
-      
-      
 
-      
+      // Mirror the alert to channel threads where the ticket's PR link was
+      // posted (pr_thread_links, e.g. -merge channels). Fire-and-forget.
+      void this.broadcastAlertToPrThreads(payload, ticket, qaAlertBot.id, alertMessage);
+
       handler
         .onInsert({
           entityId: result.message.messageId,
@@ -280,6 +281,57 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
       };
     }
   }
+
+  /**
+   * Mirror a Jenkins alert into channel threads subscribed to the ticket's
+   * PR(s) via pr_thread_links. Uses the payload's prUrl when present,
+   * otherwise the PRs linked to the ticket.
+   *
+   * Intentionally mirrors every alert category (failures and successes):
+   * merge-channel threads track "is this PR safe to merge", so both signals
+   * are relevant there.
+   */
+  private async broadcastAlertToPrThreads(
+    payload: JenkinsWebhookPayload,
+    ticket: { id: string; conversationId: string | null },
+    senderId: string,
+    alertMessage: string
+  ): Promise<void> {
+    try {
+      let prUrls: string[];
+      if (payload.prUrl) {
+        prUrls = [payload.prUrl];
+      } else {
+        const prs = await db.pullRequests.findMany({
+          where: { ticketId: ticket.id },
+          select: { prUrl: true },
+          distinct: ['prUrl'],
+        });
+        prUrls = prs.map(pr => pr.prUrl);
+      }
+
+      if (prUrls.length === 0) {
+        logger.debug(`[QaAlertBot] No PRs linked to ticket ${ticket.id} — nothing to mirror`);
+        return;
+      }
+
+      // Independent per-PR broadcasts — run concurrently. broadcastPRUpdate is
+      // best-effort and handles its own errors, so allSettled just preserves that.
+      await Promise.allSettled(
+        prUrls.map(prUrl =>
+          prThreadNotificationService.broadcastPRUpdate({
+            prUrl,
+            content: alertMessage,
+            senderId,
+            excludeConversationId: ticket.conversationId ?? undefined,
+            metadata: { activityType: 'JENKINS_ALERT', prUrl },
+          })
+        )
+      );
+    } catch (error) {
+      logger.error('[QaAlertBot] Failed to broadcast alert to PR threads:', error);
+    }
+  }
 }
 
 
@@ -293,7 +345,7 @@ export const qaAlertBot = new QaAlertBot();
  */
 export async function handleJenkinsWebhook(req: Request, res: Response): Promise<void> {
   try {
-    console.log('[JenkinsWebhook] Received webhook:', req.body);
+    logger.info('[JenkinsWebhook] Received webhook:', req.body);
     let payload: JenkinsWebhookPayload;
 
 if (Buffer.isBuffer(req.body)) {

@@ -68,24 +68,43 @@ const cleanDiff = (raw: string): string[] => {
   return raw.split('\n').filter(line => !drop.test(line));
 };
 
-// Build a Bitbucket file-browse URL for a given commit. Falls back to the
-// repo root when commitId isn't available.
+// github.com / GHE host → GitHub URLs; else Bitbucket. Rejects github.com.<lookalike>.
+const isGitHubRepoUrl = (repoUrl: string): boolean => {
+  try {
+    const host = new URL(repoUrl).hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host === 'www.github.com' ||
+      (host.startsWith('github.') && !host.startsWith('github.com.'))
+    );
+  } catch {
+    return false;
+  }
+};
+
+// Repo web base (strip trailing slash + .git).
+const repoWebBase = (repoUrl: string): string => repoUrl.replace(/\/$/, '').replace(/\.git$/, '');
+
+// File link for a commit — GitHub blob/<sha> or Bitbucket browse?at=<sha>.
 const buildFileUrl = (
   repoUrl: string | null,
   filePath: string,
   commitId: string | null,
 ): string | null => {
   if (!repoUrl) return null;
-  const trimmed = repoUrl.replace(/\/$/, '');
+  const base = repoWebBase(repoUrl);
   const path = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-  return commitId ? `${trimmed}/browse/${path}?at=${commitId}` : `${trimmed}/browse/${path}`;
+  if (isGitHubRepoUrl(repoUrl)) {
+    return `${base}/blob/${commitId ?? 'HEAD'}/${path}`;
+  }
+  return commitId ? `${base}/browse/${path}?at=${commitId}` : `${base}/browse/${path}`;
 };
 
-// Bitbucket single-commit URL.
+// Single-commit URL per provider.
 const buildCommitUrl = (repoUrl: string | null, commitId: string | null): string | null => {
   if (!repoUrl || !commitId) return null;
-  const trimmed = repoUrl.replace(/\/$/, '');
-  return `${trimmed}/commits/${commitId}`;
+  const base = repoWebBase(repoUrl);
+  return isGitHubRepoUrl(repoUrl) ? `${base}/commit/${commitId}` : `${base}/commits/${commitId}`;
 };
 
 /**

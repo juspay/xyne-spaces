@@ -27,6 +27,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { CanvasUser, FolderGroup, ProjectGroup } from './CanvasListGrouped.utils';
 import {
+  filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
@@ -89,6 +90,9 @@ interface FolderGroupSectionProps {
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   onToggleFolder: (folderId: string) => void;
   onCreateCanvasInFolder: (folder: CanvasFolder) => void | Promise<void>;
   onStartRenameFolder: (folder: CanvasFolder) => void;
@@ -115,6 +119,9 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   onDelete,
   onDuplicate,
   onToggleStar,
+  onArchiveToggle,
+  includeArchived,
+  onlyArchived,
   onToggleFolder,
   onCreateCanvasInFolder,
   onStartRenameFolder,
@@ -130,6 +137,8 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
     queries.projectFolderCanvases({
       folderId: folderGroup.folder.id,
       projectId: folderGroup.folder.projectId ?? '',
+      includeArchived,
+      onlyArchived,
     }),
     { enabled: !isCollapsed && isProjectFolder },
   );
@@ -137,6 +146,8 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
     queries.hierarchyCanvases({
       scope: 'folder',
       folderId: folderGroup.folder.id,
+      includeArchived,
+      onlyArchived,
     }),
     { enabled: !isCollapsed && !isProjectFolder },
   );
@@ -150,7 +161,10 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
       filterStarredCanvases(
         filterExcludedCallGeneratedCanvases(
           withStarredCanvasState(
-            toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
+            filterArchivedCanvases(
+              toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
+              { includeArchived, onlyArchived },
+            ),
           ),
           excludeCallGeneratedCanvases,
         ),
@@ -159,7 +173,9 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
     [
       excludeCallGeneratedCanvases,
       genericFolderCanvases,
+      includeArchived,
       isProjectFolder,
+      onlyArchived,
       projectFolderCanvases,
       showStarredOnly,
     ],
@@ -320,6 +336,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onToggleStar={onToggleStar}
+                onArchiveToggle={onArchiveToggle}
                 highlightQuery={searchQuery}
               />
             ))}
@@ -369,6 +386,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   onSelect,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   onToggleChannel,
   onToggleFolder,
   onOpenChannelCreateDialog,
@@ -380,6 +398,8 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
   showStarredOnly,
+  includeArchived,
+  onlyArchived,
   onToggleStar,
   searchQuery,
 }) => {
@@ -396,6 +416,8 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
     queries.hierarchyCanvases({
       scope: 'channel_root',
       channelId: channelGroup.channel.id,
+      includeArchived,
+      onlyArchived,
     }),
     { enabled: !isCollapsed },
   );
@@ -403,12 +425,23 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
     () =>
       filterStarredCanvases(
         filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(toArray<Canvas>(channelRootCanvasesResult)),
+          withStarredCanvasState(
+            filterArchivedCanvases(toArray<Canvas>(channelRootCanvasesResult), {
+              includeArchived,
+              onlyArchived,
+            }),
+          ),
           excludeCallGeneratedCanvases,
         ),
         showStarredOnly,
       ),
-    [channelRootCanvasesResult, excludeCallGeneratedCanvases, showStarredOnly],
+    [
+      channelRootCanvasesResult,
+      excludeCallGeneratedCanvases,
+      includeArchived,
+      onlyArchived,
+      showStarredOnly,
+    ],
   );
   const channelNameMatches = matchesGroupedCanvasSearch(channelName, searchQuery);
   const visibleChannelRootCanvases = useMemo(
@@ -496,6 +529,9 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              onArchiveToggle={onArchiveToggle}
+              includeArchived={includeArchived}
+              onlyArchived={onlyArchived}
               onToggleFolder={onToggleFolder}
               onCreateCanvasInFolder={onCreateCanvasInFolder}
               onStartRenameFolder={onStartRenameFolder}
@@ -517,6 +553,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              onArchiveToggle={onArchiveToggle}
               highlightQuery={searchQuery}
             />
           ))}
@@ -542,6 +579,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   onSelect,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   onToggleProject,
   onToggleChannel,
   onToggleFolder,
@@ -556,6 +594,8 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
   showStarredOnly,
+  includeArchived,
+  onlyArchived,
   onToggleStar,
   searchQuery,
 }) => {
@@ -575,12 +615,20 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
     () =>
       filterStarredCanvases(
         filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(group.rootCanvases),
+          withStarredCanvasState(
+            filterArchivedCanvases(group.rootCanvases, { includeArchived, onlyArchived }),
+          ),
           excludeCallGeneratedCanvases,
         ),
         showStarredOnly,
       ),
-    [excludeCallGeneratedCanvases, group.rootCanvases, showStarredOnly],
+    [
+      excludeCallGeneratedCanvases,
+      group.rootCanvases,
+      includeArchived,
+      onlyArchived,
+      showStarredOnly,
+    ],
   );
   const projectNameMatches = matchesGroupedCanvasSearch(group.project.name, searchQuery);
   const visibleProjectRootCanvases = useMemo(
@@ -696,7 +744,10 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onArchiveToggle={onArchiveToggle}
               onToggleStar={onToggleStar}
+              includeArchived={includeArchived}
+              onlyArchived={onlyArchived}
               onToggleChannel={onToggleChannel}
               onToggleFolder={onToggleFolder}
               onOpenChannelCreateDialog={onOpenChannelCreateDialog}
@@ -729,6 +780,9 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              onArchiveToggle={onArchiveToggle}
+              includeArchived={includeArchived}
+              onlyArchived={onlyArchived}
               onToggleFolder={onToggleFolder}
               onCreateCanvasInFolder={onCreateCanvasInFolder}
               onStartRenameFolder={onStartRenameFolder}
@@ -751,6 +805,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              onArchiveToggle={onArchiveToggle}
               highlightQuery={searchQuery}
             />
           ))}
@@ -769,6 +824,7 @@ interface SharedPersonalSectionProps {
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
   onToggleFolder: (folderId: string) => void;
   searchQuery: string;
 }
@@ -782,6 +838,7 @@ const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
   onDelete,
   onDuplicate,
   onToggleStar,
+  onArchiveToggle,
   onToggleFolder,
   searchQuery,
 }) => {
@@ -850,6 +907,7 @@ const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onToggleStar={onToggleStar}
+                onArchiveToggle={onArchiveToggle}
                 highlightQuery={searchQuery}
               />
             ))}
@@ -886,6 +944,9 @@ export interface CanvasListGroupedContentProps {
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   onCreatePersonalCanvas: () => void | Promise<void>;
   onCreateCanvasInProject: (
@@ -930,6 +991,9 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onDelete,
   onDuplicate,
   onToggleStar,
+  onArchiveToggle,
+  includeArchived,
+  onlyArchived,
   onSetPersonalSectionCollapsed,
   onCreatePersonalCanvas,
   onCreateCanvasInProject,
@@ -947,7 +1011,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   const isSearchActive = searchQuery.length > 0;
   const personalRootCanvases = useMemo(() => {
     let filtered = filterExcludedCallGeneratedCanvases(
-      personalCanvases,
+      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
       excludeCallGeneratedCanvases,
     );
 
@@ -958,10 +1022,18 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
     return isSearchActive
       ? filtered.filter(canvas => canvasMatchesGroupedSearch(canvas, searchQuery))
       : filtered;
-  }, [currentUserId, excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
+  }, [
+    currentUserId,
+    excludeCallGeneratedCanvases,
+    includeArchived,
+    isSearchActive,
+    onlyArchived,
+    personalCanvases,
+    searchQuery,
+  ]);
   const sharedRootCanvases = useMemo(() => {
     let filtered = filterExcludedCallGeneratedCanvases(
-      personalCanvases,
+      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
       excludeCallGeneratedCanvases,
     );
 
@@ -970,7 +1042,15 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
     return isSearchActive
       ? filtered.filter(canvas => canvasMatchesGroupedSearch(canvas, searchQuery))
       : filtered;
-  }, [currentUserId, excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
+  }, [
+    currentUserId,
+    excludeCallGeneratedCanvases,
+    includeArchived,
+    isSearchActive,
+    onlyArchived,
+    personalCanvases,
+    searchQuery,
+  ]);
 
   if (isEmpty) {
     return (
@@ -1070,6 +1150,9 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onToggleStar={onToggleStar}
+                onArchiveToggle={onArchiveToggle}
+                includeArchived={includeArchived}
+                onlyArchived={onlyArchived}
                 onToggleFolder={onToggleFolder}
                 onCreateCanvasInFolder={onCreateCanvasInFolder}
                 onStartRenameFolder={onStartRenameFolder}
@@ -1091,6 +1174,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onToggleStar={onToggleStar}
+                onArchiveToggle={onArchiveToggle}
                 highlightQuery={searchQuery}
               />
             ))}
@@ -1103,6 +1187,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              onArchiveToggle={onArchiveToggle}
               onToggleFolder={onToggleFolder}
               searchQuery={searchQuery}
             />
@@ -1138,6 +1223,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           onToggleFolder={onToggleFolder}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onArchiveToggle={onArchiveToggle}
           onCreateCanvasInProject={onCreateCanvasInProject}
           onCreateFolder={onCreateFolder}
           onOpenChannelCreateDialog={onOpenChannelCreateDialog}
@@ -1149,6 +1235,8 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           onRegisterFolderIds={onRegisterFolderIds}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
           showStarredOnly={showStarredOnly}
+          includeArchived={includeArchived}
+          onlyArchived={onlyArchived}
           onToggleStar={onToggleStar}
           searchQuery={searchQuery}
         />

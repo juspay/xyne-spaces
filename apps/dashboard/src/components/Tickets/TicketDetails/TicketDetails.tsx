@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
@@ -10,6 +11,7 @@ import {
   FileText,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   LinkIcon,
   Minimize2,
   Sparkles,
@@ -21,7 +23,10 @@ import {
   ClipboardCheck,
   ArrowRight,
   Archive,
+  GitBranch,
+  Lock,
 } from 'lucide-react';
+import type { QueryResultType } from '@rocicorp/zero';
 import type {
   SubTicket,
   Ticket,
@@ -30,6 +35,7 @@ import type {
   FormEntityValues,
   TicketStageRequest,
   BoardMetadata,
+  FlowPlan,
 } from '@xyne/shared';
 import {
   TicketPriority,
@@ -47,6 +53,10 @@ import {
   ReenterMode,
   isFieldActive,
   parseFieldOptionValues,
+  FlowPlanModel,
+  normalizeFlowPlan,
+  flowGateOf,
+  FLOW_STAGE_NAMES,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -85,11 +95,13 @@ import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../../utils/classNames';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
+import { getFlowMeta } from '../../Board/FlowRun/flowRun.utils';
 import { FormViewerDialog } from './FormViewerDialog';
 import { BoardTicketNav } from '../BoardTicketNav';
 import Tooltip from '../../ui/Tooltip';
@@ -103,8 +115,20 @@ import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   resolveBoardAdditionalFields,
+  resolveLeftoverFieldValues,
   type ResolvedBoardAdditionalField,
+  type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
+
+type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
+type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
+
+interface SubTicketTreeNode {
+  subTicket: SubTicketTreeSubTicket;
+  parentTicketId: string;
+  depth: number;
+  children: SubTicketTreeNode[];
+}
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -290,6 +314,40 @@ const getFormEntityFieldEnum = (
     fieldValue.formField?.fieldEnum;
   const options = parseFieldOptionValues(fieldEnum);
   return options.length > 0 ? options : undefined;
+};
+
+/** Plain-text formatting for a retired field's read-only value — no edit affordance, so no need for the richer per-type widgets EditableFormField uses. */
+const formatLeftoverFieldValue = (
+  field: LeftoverFieldValue,
+  userById: ReadonlyMap<string, { id: string; name?: string | null; email?: string | null }>,
+): string => {
+  const raw = field.actualFieldValue ?? field.fieldValue;
+  if (raw === null || raw === undefined || raw === '') return '—';
+
+  if (field.fieldType === FormFieldType.BOOLEAN) {
+    if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
+    if (typeof raw === 'string') {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'yes') return 'Yes';
+      if (normalized === 'false' || normalized === 'no') return 'No';
+    }
+  }
+
+  if (field.fieldType === FormFieldType.USER) {
+    const ids = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    if (ids.length === 0) return '—';
+    return ids
+      .map(id => {
+        const normalizedId = id.startsWith('user:') ? id.slice('user:'.length) : id;
+        const user = userById.get(normalizedId);
+        return user ? getUserDisplayName(user) : id;
+      })
+      .join(', ');
+  }
+
+  if (Array.isArray(raw)) return raw.map(String).join(', ') || '—';
+  if (typeof raw === 'object') return JSON.stringify(raw);
+  return String(raw);
 };
 
 // ── Stage Form Submissions Component ──────────────────────────────────────────
@@ -521,6 +579,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [selectedSubTicket, setSelectedSubTicket] = useState<SubTicket | null>(null);
+  const [expandedSubTicketTicketIds, setExpandedSubTicketTicketIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [mappedTicketId, setMappedTicketId] = useState<string | null>(null);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [stageFormModal, setStageFormModal] = useState<{
@@ -719,12 +780,73 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boardData] = useCachedQuery(queries.boardDetailById({ boardId: ticket?.boardId ?? '' }), {
     enabled: !!ticket?.boardId,
   });
+  const flowRootTicketId = ticket ? (getFlowMeta(ticket)?.rootTicketId ?? '') : '';
+  const [flowRootTicket] = useCachedQuery(queries.ticketRowById({ ticketId: flowRootTicketId }), {
+    enabled: !!flowRootTicketId,
+  });
+  const isFlowRunPaused = flowRootTicket?.statusV2 === TicketStatusV2.PAUSED;
 
   const isNonLinearBoard = boardData?.boardType === BoardType.NON_LINEAR;
   const showNextStageFormInTicketDetails =
     !isNonLinearBoard &&
     ((boardData?.metadata as BoardMetadata | null | undefined)?.showNextStageFormInTicketDetails ??
       false) === true;
+
+  // Plan-node titles for FLOW boards — form values are scoped by planNodeId,
+  // so submissions/activity resolve their label through this map.
+  const flowNodeTitleById = useMemo(() => {
+    if (boardData?.boardType !== BoardType.FLOW) return null;
+    if (typeof boardData.flowPlan !== 'string') return null;
+    const flowPlan = normalizeFlowPlan(JSON.parse(boardData.flowPlan) as FlowPlan);
+    return new Map(flowPlan.nodes.map(node => [node.id, node.title]));
+  }, [boardData?.boardType, boardData?.flowPlan]);
+
+  // Flow step ticket: surface the step's gate form as a prefillable inline
+  // form — flow boards behave as if "Prefillable forms" is always ON.
+  const flowStepForm = useMemo(() => {
+    if (boardData?.boardType !== BoardType.FLOW || !ticket) return null;
+    const planNodeId = getFlowMeta(ticket)?.planNodeId;
+    if (!planNodeId) return null; // the run's main ticket has no gate form
+    const flowMeta = getFlowMeta(ticket);
+    const snapshot = flowMeta?.nodeSnapshot;
+    const flowPlan =
+      typeof boardData.flowPlan === 'string'
+        ? normalizeFlowPlan(JSON.parse(boardData.flowPlan) as FlowPlan)
+        : null;
+    const planNode = flowPlan ? new FlowPlanModel(flowPlan).getNode(planNodeId) : null;
+    const gate = snapshot?.gate ?? (planNode ? flowGateOf(planNode) : null);
+    if (!gate) return null;
+    if (gate.type !== 'form' || !gate.formId) return null;
+    return {
+      planNodeId,
+      formId: gate.formId,
+      stepTitle: snapshot?.title ?? planNode?.title ?? ticket.title,
+      settled:
+        ticket.statusV2 === TicketStatusV2.COMPLETED ||
+        ticket.statusV2 === TicketStatusV2.CANCELLED,
+    };
+  }, [boardData?.boardType, boardData?.flowPlan, ticket]);
+
+  const [flowForm] = useCachedQuery(queries.getFormById({ formId: flowStepForm?.formId ?? '' }), {
+    enabled: !!flowStepForm,
+  });
+  const flowFormName = flowStepForm ? (flowForm?.formName ?? 'Form') : null;
+
+  const completeFlowStep = useCallback(async (): Promise<void> => {
+    if (!ticket) return;
+    const result = zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        statusV2: TicketStatusV2.COMPLETED,
+        stageName: FLOW_STAGE_NAMES.COMPLETED,
+        updatedAt: Date.now(),
+      }),
+    );
+    const response = await result.server;
+    if (response?.type === 'error') {
+      throw new Error(response.error.message || 'Failed to complete the step');
+    }
+  }, [zero, ticket]);
 
   // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
   const [boardStageTransitions] = useCachedQuery(
@@ -1031,11 +1153,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           return;
         }
 
-        console.warn('[TicketDetails] Failed to load Vespa project tickets', {
-          projectId: ticket.projectId,
-          offset,
-          query: normalizedQuery || '*',
-          error,
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[TicketDetails] Failed to load Vespa project tickets'),
+          context: [
+            {
+              projectId: ticket.projectId,
+              offset,
+              query: normalizedQuery || '*',
+              error,
+            },
+          ],
         });
 
         if (replace) {
@@ -1135,23 +1263,102 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     enabled: !!ticket?.id,
   });
 
-  // Fetch subtickets
-  const [subTicketMappings] = useCachedQuery(queries.subTicketsForTicket({ ticketId: ticketId }));
+  useEffect(() => {
+    setExpandedSubTicketTicketIds(new Set());
+  }, [ticketId]);
+
+  const subTicketTreeParentIds = useMemo(
+    () => [ticketId, ...Array.from(expandedSubTicketTicketIds)],
+    [expandedSubTicketTicketIds, ticketId],
+  );
+
+  const [subTicketMappings] = useCachedQuery(
+    queries.subTicketMappingsForTickets({ ticketIds: subTicketTreeParentIds }),
+    { enabled: !!ticketId },
+  );
+
+  const subTicketMappingsByParentTicketId = useMemo(() => {
+    const map = new Map<string, SubTicketTreeMapping[]>();
+
+    subTicketMappings?.forEach(mapping => {
+      const mappings = map.get(mapping.ticketId);
+      if (mappings) {
+        mappings.push(mapping);
+      } else {
+        map.set(mapping.ticketId, [mapping]);
+      }
+    });
+
+    return map;
+  }, [subTicketMappings]);
+
   const subTickets = useMemo(
+    () =>
+      subTicketMappingsByParentTicketId
+        .get(ticketId)
+        ?.map(mapping => mapping.subTicket)
+        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined) || [],
+    [subTicketMappingsByParentTicketId, ticketId],
+  );
+
+  const loadedSubTickets = useMemo(
     () =>
       subTicketMappings
         ?.map(mapping => mapping.subTicket)
-        .filter((st): st is NonNullable<typeof st> => st !== null && st !== undefined) || [],
+        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined) || [],
     [subTicketMappings],
   );
+
+  const subTicketTreeNodes = useMemo(() => {
+    const buildTree = (
+      parentTicketId: string,
+      depth: number,
+      visitedTicketIds: Set<string>,
+    ): SubTicketTreeNode[] => {
+      const mappings = subTicketMappingsByParentTicketId.get(parentTicketId) ?? [];
+
+      return mappings
+        .map(mapping => mapping.subTicket)
+        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined)
+        .map(subTicket => {
+          const mappedTicketId = subTicket.mappedTicketId ?? undefined;
+          const canRenderChildren =
+            mappedTicketId &&
+            expandedSubTicketTicketIds.has(mappedTicketId) &&
+            !visitedTicketIds.has(mappedTicketId);
+
+          return {
+            subTicket,
+            parentTicketId,
+            depth,
+            children: canRenderChildren
+              ? buildTree(mappedTicketId, depth + 1, new Set([...visitedTicketIds, mappedTicketId]))
+              : [],
+          };
+        });
+    };
+
+    return buildTree(ticketId, 0, new Set([ticketId]));
+  }, [expandedSubTicketTicketIds, subTicketMappingsByParentTicketId, ticketId]);
+
+  const toggleSubTicketBranch = useCallback((mappedTicketId: string): void => {
+    setExpandedSubTicketTicketIds(prev => {
+      const next = new Set(prev);
+      if (next.has(mappedTicketId)) {
+        next.delete(mappedTicketId);
+      } else {
+        next.add(mappedTicketId);
+      }
+      return next;
+    });
+  }, []);
 
   // Fetch parent tickets - check if this ticket is a mapped ticket for any sub-ticket
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-
-  // Subtickets cannot be nested: a ticket that is itself a subticket cannot have its own
-  const isSubTicket = (parentSubTickets?.length ?? 0) > 0;
+  const canCreateNestedSubTicket =
+    (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -1238,15 +1445,34 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
 
+  // Values this ticket has saved for fields no longer part of the board's current form —
+  // e.g. left behind by a "Copy Board Configuration" run that swapped in another board's
+  // form. Never deleted, just unreachable through the lookup above; shown separately and
+  // read-only rather than silently dropped.
+  const leftoverFieldValues = useMemo(
+    () =>
+      resolveLeftoverFieldValues({
+        formMapping: formMapping ?? undefined,
+        formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
+        boardId: ticket?.boardId,
+      }),
+    [formMapping, formEntityValues, ticket?.boardId],
+  );
+
+  const leftoverFieldUserById = useMemo(() => {
+    const list = Array.isArray(users) ? users : [];
+    return new Map(list.map(user => [user.id, user]));
+  }, [users]);
+
   // Group form values by stage+version — shared with the Messages thread (StageMoveFormBlock)
   // so both surfaces render the exact same "Form submission" block.
   const stageVisitFormValues = useMemo(
     () =>
-      buildStageVisitFormValues(
-        formEntityValues as FormEntityValueWithField[] | undefined,
-        stagesWithFormInfo,
-      ),
-    [formEntityValues, stagesWithFormInfo],
+      buildStageVisitFormValues(formEntityValues as FormEntityValueWithField[] | undefined, [
+        ...(stagesWithFormInfo ?? []),
+        ...Array.from(flowNodeTitleById?.entries() ?? []).map(([id, name]) => ({ id, name })),
+      ]),
+    [flowNodeTitleById, formEntityValues, stagesWithFormInfo],
   );
 
   type FormsToShowItem = {
@@ -1429,8 +1655,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     });
 
-    // Add board IDs from mapped tickets of sub-tickets
-    subTickets.forEach(subTicket => {
+    loadedSubTickets.forEach(subTicket => {
       if (subTicket?.mappedTicket?.boardId) {
         boardIds.add(subTicket.mappedTicket.boardId);
       }
@@ -1442,7 +1667,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
 
     return Array.from(boardIds);
-  }, [referencesOut, referencesIn, ticket, subTickets]);
+  }, [referencesOut, referencesIn, ticket, loadedSubTickets]);
   const [referenceStages] = useCachedQuery(
     queries.getStagesByBoardIds({ boardIds: referenceBoardIds }),
     {
@@ -1555,15 +1780,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     async (
       update: Parameters<typeof mutators.ticket.update>[0],
       errorFallback = 'Failed to update ticket',
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       try {
         const result = await zero.mutate(mutators.ticket.update(update)).server;
         if (result.type === 'error') {
           toast.error(result.error.message || errorFallback);
+          return false;
         }
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         toast.error(message || errorFallback);
+        return false;
       }
     },
     [zero],
@@ -1749,8 +1977,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           void navigate(`${basePath}/${channelId}/${sourceTicketXyneId}`);
         }
       }
-    } catch {
-      toast.error('Failed to unmerge ticket');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to unmerge ticket'));
     }
   };
 
@@ -2225,13 +2453,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
 
     // Default: Direct stage update
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         stageName,
         ...(newStatus && { statusV2: newStatus }),
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update stage',
     );
   };
 
@@ -2318,7 +2547,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       updateData.eta = newETADate.getTime();
     }
 
-    void zero.mutate(mutators.ticket.update(updateData));
+    void applyTicketUpdate(updateData, 'Failed to update due date');
     setEditingETA(false);
   };
 
@@ -2334,12 +2563,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     zero.mutate(mutators.ticketStageRequest.deleteByTicketId({ ticketId: ticket.id }));
 
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         boardId: pendingBoardChange,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to change board',
     );
 
     setShowBoardChangeConfirmDialog(false);
@@ -2406,14 +2636,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
     setShowArchiveConfirmDialog(false);
 
-    void zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        isArchived: true,
-        updatedAt: Date.now(),
-      }),
-    );
-    toast.success('Ticket archived successfully');
+    void applyTicketUpdate(
+      { id: ticket.id, isArchived: true, updatedAt: Date.now() },
+      'Failed to archive ticket',
+    ).then(ok => {
+      if (ok) toast.success('Ticket archived successfully');
+    });
   };
 
   const handleMinimizeExpandedView = (): void => {
@@ -2553,6 +2781,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </select>
               <ChevronDown className='pointer-events-none absolute right-3 h-4 w-4 text-muted-foreground' />
             </div>
+          ) : isFlowRunPaused ? (
+            <div className='my-4 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground'>
+              Flow run is paused. Resume main ticket before completing this step.
+            </div>
           ) : (
             <span className='inline-flex items-center px-3 py-2 rounded-lg border border-border text-sm font-medium text-foreground bg-background shadow-sm'>
               {label}
@@ -2632,24 +2864,175 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  const createSubTicketButton = (
-    <button
-      onClick={() => setIsSubTicketModalOpen(true)}
-      disabled={isSubTicket}
-      data-testid='create-sub-ticket-button'
-      data-track-event='BUTTON_CLICK'
-      data-track-category='TICKETS'
-      data-track-name='CREATE_SUB_TICKET'
-      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-      className={cn(
-        'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
-        isSubTicket ? 'opacity-50 pointer-events-none' : 'hover:text-foreground',
-      )}
-    >
-      <Plus size={16} />
-      Create Sub-Ticket
-    </button>
-  );
+  const openMappedSubTicket = (mappedTicketId: string | null | undefined): void => {
+    if (!mappedTicketId) return;
+
+    if (onNavigateToTicket) {
+      onNavigateToTicket(mappedTicketId);
+    } else {
+      setMappedTicketId(mappedTicketId);
+    }
+  };
+
+  const renderSubTicketNode = (node: SubTicketTreeNode): React.ReactElement => {
+    const { subTicket } = node;
+    const isFlowBoard = boardData?.boardType === BoardType.FLOW;
+    const mappedTicket = subTicket.mappedTicket;
+    const mappedTicketId = subTicket.mappedTicketId ?? undefined;
+    const canExpand = Boolean(mappedTicketId) && !isFlowBoard;
+    const isExpanded = mappedTicketId
+      ? canExpand && expandedSubTicketTicketIds.has(mappedTicketId)
+      : false;
+    const displayId = mappedTicket?.xyneId || subTicket.id.substring(0, 8).toUpperCase();
+    const displayTitle = mappedTicket?.title || subTicket.title;
+    const boardStages = mappedTicket?.boardId
+      ? stagesByBoardId.get(mappedTicket.boardId)
+      : undefined;
+    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
+    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+    const priority = mappedTicket?.priority;
+    const assignedTo = mappedTicket?.assignedTo;
+    const priorityIcon = priority ? getPriorityIcon(priority) : null;
+    const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+    const handleRowClick = (): void => {
+      if (mappedTicketId) {
+        if (isFlowBoard) {
+          openMappedSubTicket(mappedTicketId);
+          return;
+        }
+        toggleSubTicketBranch(mappedTicketId);
+        return;
+      }
+
+      setSelectedSubTicket(subTicket);
+      setIsCreateTicketModalOpen(true);
+    };
+
+    return (
+      <React.Fragment key={subTicket.id}>
+        <div
+          role='button'
+          tabIndex={0}
+          onClick={handleRowClick}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleRowClick();
+            }
+          }}
+          data-testid={`sub-ticket-item-${subTicket.id}`}
+          data-track-category='Tickets'
+          data-track-name='OpenSubTicket'
+          data-track-metadata={JSON.stringify({
+            subTicketId: subTicket.id,
+            parentTicketId: node.parentTicketId,
+            mappedTicketId: subTicket.mappedTicketId,
+            depth: node.depth,
+          })}
+          className='flex items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80 cursor-pointer'
+          style={{ marginLeft: node.depth * 18 }}
+        >
+          <div className='flex items-center gap-2 flex-1 min-w-0'>
+            {canExpand ? (
+              <button
+                type='button'
+                className='flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+                onClick={event => {
+                  event.stopPropagation();
+                  if (mappedTicketId) toggleSubTicketBranch(mappedTicketId);
+                }}
+                aria-label={isExpanded ? 'Collapse sub-ticket tree' : 'Expand sub-ticket tree'}
+                data-track-category='Tickets'
+                data-track-name={isExpanded ? 'CollapseSubTicketTree' : 'ExpandSubTicketTree'}
+                data-track-metadata={JSON.stringify({
+                  subTicketId: subTicket.id,
+                  mappedTicketId,
+                  depth: node.depth,
+                })}
+              >
+                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
+            ) : (
+              <span className='h-5 w-5 shrink-0' />
+            )}
+            <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
+              {displayId}
+            </span>
+            <span className='text-sm text-foreground truncate'>{displayTitle}</span>
+          </div>
+          <div className='flex items-center gap-3 shrink-0'>
+            {mappedTicketId && (
+              <Tooltip content='Open ticket'>
+                <button
+                  type='button'
+                  className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
+                  onClick={event => {
+                    event.stopPropagation();
+                    openMappedSubTicket(mappedTicketId);
+                  }}
+                  aria-label='Open mapped ticket'
+                  data-track-category='Tickets'
+                  data-track-name='OpenMappedSubTicket'
+                  data-track-metadata={JSON.stringify({
+                    subTicketId: subTicket.id,
+                    mappedTicketId,
+                    depth: node.depth,
+                  })}
+                >
+                  <FileText size={14} />
+                </button>
+              </Tooltip>
+            )}
+            {boardStages && boardStages.length > 0 && (
+              <div className='flex items-center gap-1.5'>
+                <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                <span className='text-xs font-medium text-foreground whitespace-nowrap'>
+                  {boardStages.findIndex(stage => stage.name === mappedTicket?.stageName) + 1}/
+                  {boardStages.length}
+                </span>
+              </div>
+            )}
+            {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+            {assigneeId ? (
+              <UserAvatar
+                userId={assigneeId}
+                size={AvatarSize.SM}
+                shape={AvatarShape.ROUNDED}
+                showActiveStatus={false}
+              />
+            ) : (
+              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
+            )}
+          </div>
+        </div>
+        {!isFlowBoard && isExpanded && node.children.length > 0 && (
+          <div className='space-y-2'>{node.children.map(renderSubTicketNode)}</div>
+        )}
+      </React.Fragment>
+    );
+  };
+
+  const createSubTicketButton =
+    boardData?.boardType === BoardType.FLOW ? null : (
+      <button
+        onClick={() => setIsSubTicketModalOpen(true)}
+        disabled={!canCreateNestedSubTicket}
+        data-testid='create-sub-ticket-button'
+        data-track-event='BUTTON_CLICK'
+        data-track-category='TICKETS'
+        data-track-name='CREATE_SUB_TICKET'
+        data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+        title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
+        className={cn(
+          'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
+          canCreateNestedSubTicket ? 'hover:text-foreground' : 'cursor-not-allowed opacity-50',
+        )}
+      >
+        <Plus size={16} />
+        Create Sub-Ticket
+      </button>
+    );
 
   return (
     <div className='mx-auto px-[24px] py-[20px] h-full overflow-auto no-scrollbar bg-background'>
@@ -3503,8 +3886,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
-        {/* Additional Form Fields */}
-        {allFormFields && allFormFields.length > 0 && (
+        {/* Additional Form Fields — current, editable fields plus (marked with a trailing
+            "*") any values the ticket has for fields no longer part of the board's current
+            configuration (e.g. left behind by a config copy from another board). Those are
+            read-only rather than editable, since the field itself no longer exists in the
+            board's schema. */}
+        {(allFormFields.length > 0 || leftoverFieldValues.length > 0) && (
           <div className='border border-border bg-muted rounded-lg p-4 my-4'>
             <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
             <div className='space-y-4'>
@@ -3525,9 +3912,56 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   }
                 />
               ))}
+              {leftoverFieldValues.map(field => (
+                <div key={field.resolvedFieldId} className='flex items-start gap-2 w-full'>
+                  <span
+                    className='flex items-center gap-1 text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
+                    title={`${field.fieldName} — no longer part of this board's configuration, read-only`}
+                  >
+                    {field.fieldName}
+                    <Lock size={11} className='flex-shrink-0 text-muted-foreground' />
+                  </span>
+                  <span className='flex-1 text-sm text-foreground break-all pt-0.5'>
+                    {formatLeftoverFieldValue(field, leftoverFieldUserById)}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
+
+        {/* Flow step gate form — prefillable by default on flow boards; same
+            inline panel as linear-board prefillable forms */}
+        {flowStepForm &&
+          ticket &&
+          (flowStepForm.settled ? (
+            <StageFormInlinePanel
+              ticket={ticket}
+              targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
+              sourceStageName=''
+              formId={flowStepForm.formId}
+              hasApprovers={false}
+              isNonLinearBoard={false}
+              headerTitle={flowFormName ?? 'Form'}
+              headerSubtitle={`${flowStepForm.stepTitle} form · Submitted answers`}
+              saveOnly
+              saveSuccessMessage='Submitted form updated'
+              editableOnDemand
+            />
+          ) : (
+            <StageFormInlinePanel
+              ticket={ticket}
+              targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
+              sourceStageName=''
+              formId={flowStepForm.formId}
+              hasApprovers={false}
+              isNonLinearBoard={false}
+              headerTitle={flowFormName ?? 'Form'}
+              headerSubtitle={`${flowStepForm.stepTitle} form`}
+              onCommit={completeFlowStep}
+              commitSuccessMessage='Step completed'
+            />
+          ))}
 
         {nextStageDetailsConfig &&
           (nextStageDetailsConfig.formId ? (
@@ -3990,6 +4424,107 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           )}
 
+        {parentTickets && parentTickets.length > 0 && (
+          <div className='mt-6 space-y-4' data-testid='parent-tickets-section'>
+            <div className='flex items-center gap-3'>
+              <p className='text-base font-semibold text-foreground'>Parent Tickets</p>
+              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                {parentTickets.length}
+              </span>
+            </div>
+            <div className='space-y-2'>
+              {parentTickets.map(parentTicket => {
+                const priorityIcon = parentTicket.priority
+                  ? getPriorityIcon(parentTicket.priority)
+                  : null;
+                const boardStages = parentTicket.boardId
+                  ? stagesByBoardId.get(parentTicket.boardId)
+                  : undefined;
+                const stageIndex =
+                  boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
+                const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
+                const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+                const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+                const openParentTicket = (): void => {
+                  if (onNavigateToTicket) {
+                    onNavigateToTicket(parentTicket.id);
+                  } else {
+                    setMappedTicketId(parentTicket.id);
+                  }
+                };
+
+                return (
+                  <div
+                    key={parentTicket.id}
+                    role='button'
+                    tabIndex={0}
+                    onClick={openParentTicket}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openParentTicket();
+                      }
+                    }}
+                    className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'
+                    data-track-category='Tickets'
+                    data-track-name='ViewParentTicket'
+                    data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+                  >
+                    <div className='flex min-w-0 flex-1 items-center gap-2'>
+                      <span className='h-5 w-5 shrink-0' />
+                      <span className='shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground'>
+                        {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
+                      </span>
+                      <span className='truncate text-sm text-foreground'>
+                        {parentTicket.title || 'Untitled Ticket'}
+                      </span>
+                    </div>
+                    <div className='flex shrink-0 items-center gap-3'>
+                      <Tooltip content='Open ticket'>
+                        <button
+                          type='button'
+                          className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
+                          onClick={event => {
+                            event.stopPropagation();
+                            openParentTicket();
+                          }}
+                          aria-label='Open parent ticket'
+                          data-track-category='Tickets'
+                          data-track-name='OpenParentTicket'
+                          data-track-metadata={JSON.stringify({
+                            parentTicketId: parentTicket.id,
+                          })}
+                        >
+                          <FileText size={14} />
+                        </button>
+                      </Tooltip>
+                      {boardStages && boardStages.length > 0 && (
+                        <div className='flex items-center gap-1.5'>
+                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                          <span className='whitespace-nowrap text-xs font-medium text-foreground'>
+                            {stageIndex + 1}/{boardStages.length}
+                          </span>
+                        </div>
+                      )}
+                      {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+                      {assigneeId ? (
+                        <UserAvatar
+                          userId={assigneeId}
+                          size={AvatarSize.SM}
+                          shape={AvatarShape.ROUNDED}
+                          showActiveStatus={false}
+                        />
+                      ) : (
+                        <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Sub-Tickets Section */}
         <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
           <div>
@@ -4001,111 +4536,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               >
                 {subTickets.length}
               </span>
+              {boardData?.boardType !== BoardType.FLOW && (
+                <span className='inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                  <GitBranch size={12} />
+                  Tree
+                </span>
+              )}
             </div>
 
             <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
               {subTickets.length > 0 ? (
-                <div className='space-y-2'>
-                  {subTickets.map(subTicket => {
-                    // Extract mappedTicket once
-                    const mappedTicket = subTicket?.mappedTicket;
-
-                    const displayId =
-                      mappedTicket?.xyneId || subTicket.id.substring(0, 8).toUpperCase();
-                    const displayTitle = mappedTicket?.title || subTicket.title;
-
-                    // Calculate stage progress using existing helper
-                    const boardStages = mappedTicket?.boardId
-                      ? stagesByBoardId.get(mappedTicket.boardId)
-                      : undefined;
-                    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
-                    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
-
-                    const priority = mappedTicket?.priority;
-                    const assignedTo = mappedTicket?.assignedTo;
-                    const priorityIcon = priority ? getPriorityIcon(priority) : null;
-                    const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-
-                    const handleClick = (): void => {
-                      if (subTicket.mappedTicketId) {
-                        if (onNavigateToTicket) {
-                          onNavigateToTicket(subTicket.mappedTicketId);
-                        } else {
-                          setMappedTicketId(subTicket.mappedTicketId);
-                        }
-                      } else {
-                        setSelectedSubTicket(subTicket);
-                        setIsCreateTicketModalOpen(true);
-                      }
-                    };
-
-                    return (
-                      <div
-                        key={subTicket.id}
-                        role='button'
-                        tabIndex={0}
-                        onClick={handleClick}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            handleClick();
-                          }
-                        }}
-                        data-testid={`sub-ticket-item-${subTicket.id}`}
-                        data-track-category='Tickets'
-                        data-track-name='OpenSubTicket'
-                        data-track-metadata={JSON.stringify({
-                          subTicketId: subTicket.id,
-                          mappedTicketId: subTicket.mappedTicketId,
-                        })}
-                        className='flex items-center justify-between p-3 bg-muted rounded-lg hover:bg-muted transition-colors cursor-pointer'
-                      >
-                        <div className='flex items-center gap-3 flex-1 min-w-0'>
-                          <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
-                            {displayId}
-                          </span>
-                          <span className='text-sm text-foreground truncate'>{displayTitle}</span>
-                          {subTicket.mappedTicketId && (
-                            <FileText size={14} className='text-blue-600 flex-shrink-0' />
-                          )}
-                        </div>
-                        <div className='flex items-center gap-3 shrink-0'>
-                          {/* Stage progress using TicketStatusIcon */}
-                          {boardStages && boardStages.length > 0 && (
-                            <div className='flex items-center gap-1.5'>
-                              <TicketStageIcon progressPercentage={displayProgress} size={18} />
-                              <span className='text-xs font-medium text-foreground whitespace-nowrap'>
-                                {boardStages.findIndex(s => s.name === mappedTicket?.stageName) + 1}
-                                /{boardStages.length}
-                              </span>
-                            </div>
-                          )}
-                          {priorityIcon && (
-                            <span className='flex items-center'>{priorityIcon}</span>
-                          )}
-                          {assigneeId ? (
-                            <UserAvatar
-                              userId={assigneeId}
-                              size={AvatarSize.SM}
-                              shape={AvatarShape.ROUNDED}
-                              showActiveStatus={false}
-                            />
-                          ) : (
-                            <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {isSubTicket ? (
-                <Tooltip content='Sub-tickets cannot be created under a sub-ticket'>
-                  <span className='inline-flex cursor-not-allowed'>{createSubTicketButton}</span>
-                </Tooltip>
+                <div className='space-y-2'>{subTicketTreeNodes.map(renderSubTicketNode)}</div>
               ) : (
-                createSubTicketButton
+                <div className='rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground'>
+                  No sub-tickets yet.
+                </div>
               )}
+              {createSubTicketButton}
             </div>
           </div>
         </div>
@@ -4115,95 +4562,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <div className='flex items-center gap-3'>
               <p className='text-base font-semibold text-foreground'>Related Tickets</p>
               <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                {referencesOut.length + referencesIn.length + (parentTickets?.length || 0)}
+                {referencesOut.length + referencesIn.length}
               </span>
             </div>
 
             <div className='mt-4 space-y-3'>
-              {/* Parent Tickets */}
-              {parentTickets && parentTickets.length > 0 && (
-                <div className='space-y-3'>
-                  {parentTickets.map(parentTicket => {
-                    const link = buildTicketLink(parentTicket);
-                    const priorityIcon = parentTicket.priority
-                      ? getPriorityIcon(parentTicket.priority)
-                      : null;
-                    const boardStages = parentTicket.boardId
-                      ? stagesByBoardId.get(parentTicket.boardId)
-                      : undefined;
-                    const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
-                    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
-                    const assigneeId =
-                      parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
-
-                    return (
-                      <div key={parentTicket.id} className='flex flex-col gap-2'>
-                        <div>
-                          <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-foreground'>
-                            Parent:
-                          </span>
-                        </div>
-                        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
-                          <div className='flex items-center gap-3 min-w-0'>
-                            <TicketStageIcon progressPercentage={displayProgress} size={18} />
-                            <div className='flex items-center gap-4 min-w-0'>
-                              <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
-                                {parentTicket.xyneId ||
-                                  parentTicket.id.substring(0, 8).toUpperCase()}
-                              </span>
-                              {link ? (
-                                <Link
-                                  className='text-sm font-normal text-foreground truncate'
-                                  to={link}
-                                >
-                                  {parentTicket.title || 'Untitled Ticket'}
-                                </Link>
-                              ) : (
-                                <span className='text-sm font-normal text-foreground truncate'>
-                                  {parentTicket.title || 'Untitled Ticket'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className='flex items-center gap-3 shrink-0'>
-                            {priorityIcon && (
-                              <span className='flex items-center'>{priorityIcon}</span>
-                            )}
-                            {assigneeId ? (
-                              <UserAvatar
-                                userId={assigneeId}
-                                size={AvatarSize.SM}
-                                shape={AvatarShape.ROUNDED}
-                                showActiveStatus={false}
-                              />
-                            ) : (
-                              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-                            )}
-                          </div>
-                          <button
-                            onClick={() => {
-                              if (onNavigateToTicket) {
-                                onNavigateToTicket(parentTicket.id);
-                              } else {
-                                setMappedTicketId(parentTicket.id);
-                              }
-                            }}
-                            className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
-                            data-track-category='Tickets'
-                            data-track-name='ViewParentTicket'
-                            data-track-metadata={JSON.stringify({
-                              parentTicketId: parentTicket.id,
-                            })}
-                          >
-                            View
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
               {/* Regular Related Tickets */}
               {referencesOut.length + referencesIn.length > 0 && (
                 <>
@@ -4236,7 +4599,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </>
               )}
 
-              {!parentTickets?.length && referencesOut.length + referencesIn.length === 0 && (
+              {referencesOut.length + referencesIn.length === 0 && (
                 <p className='text-sm text-muted-foreground'>No related tickets yet.</p>
               )}
 
@@ -4282,6 +4645,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           userGroups={userGroups}
           boards={boards}
           stageVisitFormValues={stageVisitFormValues}
+          {...(flowStepForm?.planNodeId ? { flowFormContextId: flowStepForm.planNodeId } : {})}
         />
       </div>
       {/* SubTicket Modal */}

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 
@@ -8,6 +9,11 @@ export type XyneAIState = 'closed' | 'open';
 export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'canvas' | 'general';
 
 // Thread info interface
+export interface DeskAutoDraftContext {
+  conversationId: string;
+  channelId: string;
+}
+
 export interface ThreadInfo {
   conversationId: string;
   // The channel the context was captured from. Pinned here rather than read off
@@ -57,6 +63,23 @@ export interface CanvasSelectionContext {
   selections: SelectionInfo[];
 }
 
+/**
+ * Context pills to seed when Ask AI is opened from a surface that already knows
+ * exactly which records the question is about. Keeping this in the machine
+ * means the global sidebar, rather than an ad-hoc query string, owns the same
+ * context that it sends to the Claw API.
+ */
+export interface AskAIInitialContextSelections {
+  canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  recordings: Array<{
+    id: string;
+    title: string;
+    channelId?: string;
+    conversationId?: string;
+    externalId?: string;
+  }>;
+}
+
 // Context interface for the XyneAI machine
 export interface XyneAIContext {
   xyneAIState: XyneAIState;
@@ -72,8 +95,17 @@ export interface XyneAIContext {
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
   canvasContexts: CanvasSelectionContext[];
+  /** Context pills supplied by the surface that opened Ask AI. */
+  initialContextSelections: AskAIInitialContextSelections | null;
+  /** Re-seeds context even when a user clicks Ask AI on the same item twice. */
+  contextOpenNonce: number;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
+  /** Set when Ask AI is opened on a Xyne Desk auto-draft. That claw conversation
+   *  belongs to the desk persona, so the viewer has no turns of their own in it:
+   *  history must be hydrated through the Spaces proxy, and the first message the
+   *  viewer sends has to fork the conversation into one they own. */
+  deskAutoDraft: DeskAutoDraftContext | null;
   // Knowledge Base context
   kbCollectionId: string | null;
   kbChannelId: string | null;
@@ -100,10 +132,12 @@ export type XyneAIEvent =
       selectionInfos?: SelectionInfo[];
       /** When set, selects this Ask AI session after OPEN (e.g. toast View) */
       focusSessionId?: string | null;
+      deskAutoDraft?: DeskAutoDraftContext | null;
       kbCollectionId?: string | null;
       kbChannelId?: string | null;
       kbDocId?: string | null;
       kbDocName?: string | null;
+      initialContextSelections?: AskAIInitialContextSelections | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -250,7 +284,11 @@ const saveContextToIndexedDB = async (context: Partial<XyneAIContext>): Promise<
     const store = transaction.objectStore(STORE_NAME);
     store.put(context, 'xyneai-context');
   } catch (error) {
-    console.error('Failed to save XyneAI context to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save XyneAI context to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -267,7 +305,11 @@ export const loadContextFromIndexedDB = async (): Promise<Partial<XyneAIContext>
         reject(new Error(request.error?.message || 'Failed to get context from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load XyneAI context from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -280,7 +322,11 @@ const clearContextFromIndexedDB = async (): Promise<void> => {
     const store = transaction.objectStore(STORE_NAME);
     store.delete('xyneai-context');
   } catch (error) {
-    console.error('Failed to clear XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear XyneAI context from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -312,7 +358,11 @@ export const saveMermaidDiagram = async (
 
     store.put(mermaidData, messageId);
   } catch (error) {
-    console.error('Failed to save mermaid diagram to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save mermaid diagram to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -330,7 +380,11 @@ export const loadMermaidDiagram = async (messageId: string): Promise<MermaidDiag
         reject(new Error(request.error?.message || 'Failed to get mermaid diagram from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load mermaid diagram from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -343,7 +397,11 @@ export const deleteMermaidDiagram = async (messageId: string): Promise<void> => 
     const store = transaction.objectStore(MERMAID_STORE_NAME);
     store.delete(messageId);
   } catch (error) {
-    console.error('Failed to delete mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to delete mermaid diagram from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -368,7 +426,11 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
       }
     };
   } catch (error) {
-    console.error('Failed to clear old mermaid diagrams from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear old mermaid diagrams from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -426,10 +488,16 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections: event.initialContextSelections ?? null,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
               : null,
+          deskAutoDraft: event.deskAutoDraft ?? null,
           kbCollectionId: event.kbCollectionId ?? null,
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
@@ -492,6 +560,14 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections:
+            event.initialContextSelections !== undefined
+              ? event.initialContextSelections
+              : context.initialContextSelections,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -544,7 +620,10 @@ export const xyneAIMachine = setup({
         startFreshChat: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
+        initialContextSelections: null,
+        contextOpenNonce: context.contextOpenNonce,
         focusSessionId: null,
+        deskAutoDraft: null,
         kbCollectionId: null,
         kbChannelId: null,
         kbDocId: null,
@@ -686,7 +765,10 @@ export const xyneAIMachine = setup({
     startFreshChat: false,
     canvasInfo: null,
     canvasContexts: [],
+    initialContextSelections: null,
+    contextOpenNonce: 0,
     focusSessionId: null,
+    deskAutoDraft: null,
     kbCollectionId: null,
     kbChannelId: null,
     kbDocId: null,
@@ -784,13 +866,20 @@ const initializeActor = async (): Promise<void> => {
         ...(persistedContext.threadInfo !== undefined && {
           threadInfo: persistedContext.threadInfo,
         }),
+        ...(persistedContext.initialContextSelections !== undefined && {
+          initialContextSelections: persistedContext.initialContextSelections,
+        }),
       });
     }
 
     // Clean up old mermaid diagrams on app startup
     void clearOldMermaidDiagrams();
   } catch (error) {
-    console.error('Failed to initialize XyneAI actor with persisted state:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to initialize XyneAI actor with persisted state:'),
+      error: error,
+    });
   }
 };
 

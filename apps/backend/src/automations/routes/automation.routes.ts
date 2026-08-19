@@ -19,6 +19,7 @@ import { logger } from '@/utils/logger';
 import { AutomationStatus } from '../types/status';
 import {
   workflowExecutionToRun,
+  workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
   triggerTypeToEventType,
@@ -27,7 +28,7 @@ import {
 import {
   getAutomationPauseState,
   getExecutionState,
-  stitchExecutionStateMany,
+  stitchExecutionContextMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
 import { approvalService, ApprovalError } from '../services/approval.service';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
@@ -40,6 +41,10 @@ import {
   releaseAutomationTemplate,
   storeAutomationTemplates,
 } from '../services/automation-template.service';
+import {
+  deskLabelRulesService,
+  DeskLabelRulesPayloadSchema,
+} from '../services/desk-label-rules.service';
 
 const router = Router();
 
@@ -50,7 +55,7 @@ router.use((_req, res, next) => {
 
 const OPERATOR_METADATA: Record<
   ConditionOperator,
-  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' }
+  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag' }
 > = {
   [ConditionOperator.EQ]: { label: 'equals', valueType: 'string' },
   [ConditionOperator.NEQ]: { label: 'does not equal', valueType: 'string' },
@@ -60,6 +65,7 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.LT]: { label: 'is less than', valueType: 'number' },
   [ConditionOperator.LTE]: { label: 'is less than or equal to', valueType: 'number' },
   [ConditionOperator.EXISTS]: { label: 'exists', valueType: 'none' },
+  [ConditionOperator.HAS_TAG]: { label: 'has tag', valueType: 'tag' },
 };
 
 const AutomationPayloadSchema = z.object({
@@ -259,6 +265,141 @@ router.post('/validate', (req: Request, res: Response) => {
   }
   const result = automationService.validateConfig(body.config);
   res.json({ success: true, data: result, timestamp: new Date().toISOString() });
+});
+
+// POST /desk-label-rules — create 1–2 personal ACTIVE auto-label automations (no approval)
+router.post('/desk-label-rules', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const parsed = DeskLabelRulesPayloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+
+    const result = await deskLabelRulesService.create(parsed.data, auth);
+    res.status(result.created ? 201 : 200).json({
+      success: true,
+      data: result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'invalid') {
+      res.status(400).json({
+        success: false,
+        error: (err as Error).message,
+        data: (err as { validation?: unknown }).validation,
+      });
+      return;
+    }
+    logger.error('[automations] desk-label-rules failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to create desk label rules' });
+  }
+});
+
+// GET /desk-label-rules — owner + desk scoped list (never syncs via Zero automationsList)
+router.get('/desk-label-rules', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const channelId =
+      typeof req.query.channelId === 'string' && req.query.channelId.length > 0
+        ? req.query.channelId
+        : undefined;
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+    const limit = parseListLimit(req.query.limit);
+    const cursor = decodeAutomationListCursor(req.query.cursor);
+    const page = await deskLabelRulesService.listOwned(auth, channelId, { limit, cursor });
+    res.json({
+      success: true,
+      data: {
+        automations: page.automations,
+        counts: page.counts,
+        pagination: {
+          limit: page.pagination.limit,
+          nextCursor: page.pagination.nextCursor
+            ? encodeAutomationListCursor(page.pagination.nextCursor)
+            : null,
+          hasMore: page.pagination.hasMore,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules list failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list desk label rules' });
+  }
+});
+
+const DeskLabelRuleStatusSchema = z.object({
+  status: z.enum([AutomationStatus.ACTIVE, AutomationStatus.DISABLED]),
+});
+
+// PATCH /desk-label-rules/:id — owner disable/activate without AUTOMATIONS admin
+router.patch('/desk-label-rules/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const parsed = DeskLabelRuleStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+    const automation = await deskLabelRulesService.setStatus(
+      req.params.id,
+      parsed.data.status,
+      auth,
+    );
+    res.json({
+      success: true,
+      data: { automation },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules patch failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to update desk label rule' });
+  }
 });
 
 // POST / — create a new automation as DRAFT (no activation)
@@ -509,7 +650,7 @@ router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) =
   }
 });
 
-// DELETE /:id — raise an archive request to admins via DM; does not archive directly
+// DELETE /:id — personal desk rules archive immediately; others raise an admin archive request
 router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -521,24 +662,39 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
     const existing = await db.workflow.findFirst({
       where: {
         id: req.params.id,
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
         workspaceId: auth.workspaceId,
         status: { not: AutomationStatus.ARCHIVED },
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
       },
     });
-    if (!existing) {
-      res.status(404).json({ success: false, error: 'Automation not found' });
+    if (existing) {
+      void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
+        logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
+      );
+      res.json({
+        success: true,
+        data: { message: 'Archive request submitted to admins.' },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
-    void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
-      logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
-    );
-    res.json({
-      success: true,
-      data: { message: 'Archive request submitted to admins.' },
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      const archived = await deskLabelRulesService.archivePersonal(req.params.id, auth);
+      res.json({
+        success: true,
+        data: { automation: archived, message: 'Personal desk rule archived.' },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'not-found' || code === 'forbidden') {
+        // Do not disclose another user's personal rule through this shared endpoint.
+        res.status(404).json({ success: false, error: 'Automation not found' });
+        return;
+      }
+      throw err;
+    }
   } catch (err) {
     logger.error('[automations] delete failed:', err);
     res.status(500).json({ success: false, error: 'Failed to submit archive request' });
@@ -610,6 +766,13 @@ router.get(
           ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
           : {}),
       },
+      select: {
+        id: true,
+        workflowId: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
@@ -619,13 +782,13 @@ router.get(
     const page = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
 
-    const stitched = await stitchExecutionStateMany(page);
+    const stitched = await stitchExecutionContextMany(page);
 
     res.json({
       success: true,
       data: {
         runs: stitched.map(row =>
-          workflowExecutionToRun(row, { context: row.context }),
+          workflowExecutionToRunSummary(row, { context: row.context }),
         ),
         nextCursor,
       },

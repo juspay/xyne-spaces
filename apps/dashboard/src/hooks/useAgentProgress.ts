@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useEffect, useRef, useState } from 'react';
 import { websocketService } from '../services/clients/socketClient';
 import {
@@ -5,6 +6,7 @@ import {
   type AgentSpinnerVariant,
 } from '../components/ui/AgentSpinner';
 import { apiInstance } from '../services/clients/apiClient';
+import { MessageType } from '@xyne/shared';
 
 /**
  * Ephemeral agent-progress state.
@@ -57,7 +59,7 @@ interface SessionActivityEvent {
     senderId: string;
     senderName: string;
     content: string;
-    msgType: string;
+    msgType: MessageType;
     createdAt: Date;
   };
 }
@@ -123,8 +125,12 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
       });
 
     const handler = (evt: SessionActivityEvent): void => {
-      console.info('Received session_activity event', evt);
-      if (evt?.message?.msgType !== 'SYSTEM') return;
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('Received session_activity event'),
+        context: [evt],
+      });
+      if (evt?.message?.msgType !== MessageType.SYSTEM) return;
       let parsed: AgentProgressData | undefined;
       try {
         parsed = JSON.parse(evt.message.content) as AgentProgressData;

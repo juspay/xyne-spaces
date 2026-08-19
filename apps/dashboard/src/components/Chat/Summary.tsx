@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Unified Summary Component
  * Handles both thread and channel summarization with shared UI and logic
@@ -9,6 +10,7 @@ import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
 import { sanitizeHtmlString } from '../../utils/sanitizer';
+import { ChannelScopeType } from '@xyne/shared';
 
 // AI keypoints are markdown; convert **bold** → <strong>, then run through the
 // shared allowlist sanitizer so any HTML smuggled into the (prompt-injection-
@@ -537,8 +539,11 @@ export const Summary = (props: SummaryProps): ReactElement => {
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return;
-        // eslint-disable-next-line no-console
-        console.error('Error fetching summary:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error fetching summary:'),
+          error: err,
+        });
         if (currentIdRef.current === fetchId) {
           setError(err instanceof Error ? err.message : 'Failed to fetch summary');
           setState('error');
@@ -641,8 +646,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
     }
   };
 
-  const isDM = props.scopeType === 'DM';
-  const isGroupDM = props.scopeType === 'GROUP_DM';
+  const isDM = props.scopeType === ChannelScopeType.DM;
+  const isGroupDM = props.scopeType === ChannelScopeType.GROUP_DM;
   const isDMType = isDM || isGroupDM;
   const dmLabel = isGroupDM ? 'Group DM' : 'DM';
   const title = isThread

@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { decrypt } from '@/services/encryptionService';
+import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -48,6 +53,13 @@ export class FlowController {
       return;
     }
 
+    // 2b. Amazon SNS confirmation is owned by the incoming-webhook controller,
+    // not proxied: an incoming webhook has no outbound webhookUrl to proxy to.
+    if (actionId === SNS_CONFIRM_ACTION_ID) {
+      res.status(200).json(await incomingWebhookController.confirmSnsSubscription(values));
+      return;
+    }
+
     try {
       // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
       const message = await repositories.messages.findById(messageId);
@@ -62,19 +74,12 @@ export class FlowController {
         return;
       }
 
-      // 4. Look up the installed app to get its webhook/action URL.
-      // Webhook is configured per-app, but there can be multiple InstalledApps
-      // rows for the same appId (e.g. one per workspace) and only some carry a
-      // webhookUrl. The lookup MUST be scoped to the acting user's workspace and
-      // require a configured webhook so we never non-deterministically pick
-      // another tenant's install row (tenant-isolation, relevant for OSS /
-      // multi-tenant deployments) or a row whose webhookUrl is null/empty (which
-      // surfaced as a spurious "No webhook URL configured" 502 even though the
-      // app's webhook was set). Mirrors configureWebhook / updateInstalledApp.
+      // 4. Look up the installed app to get its webhook/action URL. Multiple InstalledApps
+      // rows can exist for the same appId (one per workspace) and only some carry a
+      // webhookUrl, so scope the lookup to the user's workspace and require a configured
+      // webhook.
       const workspaceId = req.user?.workspaceId;
       if (!workspaceId) {
-        // No workspace on the authenticated user — refuse rather than fall back
-        // to an unscoped, cross-tenant lookup.
         res.status(400).json({ error: 'Workspace not found for user' });
         return;
       }
@@ -91,6 +96,17 @@ export class FlowController {
         return;
       }
 
+      // Flow actions are sent to the same app webhook as ordinary Spaces
+      // events, so they must carry the same app-level HMAC. claw-auth treats
+      // fields such as context.userId as authoritative; never forward the
+      // action unsigned when signing material is missing.
+      const app = await repositories.apps.findById(appId);
+      if (!app?.signingSecret) {
+        logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
+        res.status(502).json({ error: `No signing secret configured for app: ${appId}` });
+        return;
+      }
+
       // 5. Build the payload sent to the app backend
       const appPayload = {
         actionId,
@@ -103,17 +119,35 @@ export class FlowController {
           userId: userId ?? null,
         },
       };
+      // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
+      const body = JSON.stringify(appPayload);
+      const signature = signWebhookPayload(body, decrypt(app.signingSecret));
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 
-      // 6. Call the app backend synchronously
+      // Reject webhook URLs whose host resolves to an internal/private address.
+      try {
+        await assertWebhookUrlSafe(installedApp.webhookUrl);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
+          res.status(502).json({ error: 'App webhook URL is not allowed' });
+          return;
+        }
+        throw err;
+      }
+
+      // 6. Call the app backend synchronously.
       const appResponse = await fetch(installedApp.webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Xyne-Event': 'flow_action',
+          'X-Xyne-Signature': signature,
+          'X-Source': 'XyneSpaces',
         },
-        body: JSON.stringify(appPayload),
+        body,
+        redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
       });
 
@@ -174,4 +208,3 @@ export class FlowController {
     }
   };
 }
-

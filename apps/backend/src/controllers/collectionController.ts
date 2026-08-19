@@ -10,7 +10,8 @@ import { SubApp } from '@/vespa/src/types';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 import type { VespaFileDocument, VespaChunkMeta } from '@/vespa/src/types';
-import { CollectionRole, CollectionPermission, IngestionStatus, Collection } from '@prisma/client';
+import { CollectionPermission, Collection } from '@prisma/client';
+import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
 import {
@@ -36,9 +37,43 @@ import {
  */
 const HIGHLIGHT_SNIPPET_BASE_WORDS = 30;
 const HIGHLIGHT_SNIPPET_HARD_WORDS = 80;
+/**
+ * Drop the heading breadcrumb Docling prepends to a chunk — the document title
+ * and section path ("# <title>", "## CHAPTER – IV …") that precede the prose.
+ * Those lines come from the outline and are never contiguous with the body in
+ * the PDF's text layer, so a find window starting with them (as the 30-word one
+ * always did) matches nothing and no highlight appears.
+ *
+ * Returns the original text when a chunk is nothing but headings (a
+ * table-of-contents chunk), so the caller still has something to work with.
+ */
+function stripLeadingHeadings(raw: string): string {
+    const lines = raw.split(/\r?\n/);
+    let i = 0;
+    const isSkippable = (line: string): boolean => {
+        const t = line.trim();
+        if (t.length === 0) return true;
+        if (/^#{1,6}\s/.test(t)) return true; // markdown heading
+        if (/^[-–—*_]{3,}$/.test(t)) return true; // horizontal rule
+        // A line that is ENTIRELY bold/emphasis is a heading in disguise
+        // ("**RESERVE BANK OF INDIA**"). A bold-PREFIXED paragraph
+        // ("**26.** (1) An RE should…") is real prose — keep it.
+        if (/^\*\*[^*]+\*\*$/.test(t)) return true;
+        return false;
+    };
+    while (i < lines.length && isSkippable(lines[i]!)) i++;
+    const body = lines.slice(i).join('\n').trim();
+    return body.length > 0 ? body : raw;
+}
+
 function buildHighlightSnippet(raw: string | undefined | null): string | null {
-    const cleaned = String(raw ?? '')
-        .replace(/^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i, '') // drop leading [Page N] / [Pages 1, 2, 3] marker
+    // Page marker FIRST: ingestion prepends it inline ("[Page 6] # Title…"), so
+    // the heading test below only fires once it's gone.
+    const withoutPageMarker = String(raw ?? '').replace(
+        /^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i,
+        '',
+    );
+    const cleaned = stripLeadingHeadings(withoutPageMarker)
         .replace(/<[^>]+>/g, ' ')                      // strip HTML tags
         .replace(/&[a-z]+;|&#\d+;/gi, ' ')             // strip HTML entities
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')       // unwrap markdown links
@@ -84,7 +119,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const { role } = await this.getCollectionOrRole(collectionId, user.id);
+            const { role } = await this.getCollectionOrRole(collectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
@@ -238,15 +273,18 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
      */
     private async getCollectionOrRole(
         collectionId: string,
-        userId: string
+        userId: string,
+        workspaceId: string
     ): Promise<{ role: CollectionRole | null; collection: ({ permissions: CollectionPermission[] } & Collection) | null }> {
         const collection = await this.collectionRepository.findCollectionByIdWithPermissions(collectionId);
         if (!collection) return { role: null, collection: null };
 
+        if (collection.workspaceId !== workspaceId) return { role: null, collection: null };
+
         const { role } = await resolveCollectionAccess(userId, {
             ownerId: collection.ownerId,
             isPrivate: collection.isPrivate,
-            permissions: collection.permissions,
+            permissions: collection.permissions as Parameters<typeof resolveCollectionAccess>[1]['permissions'],
         });
         return { role, collection };
     }
@@ -268,7 +306,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const scopeType = typeof req.query.scopeType === 'string' ? req.query.scopeType : undefined;
             const scopeId = typeof req.query.scopeId === 'string' ? req.query.scopeId : undefined;
 
-            const roots = await listAccessibleRootCollections(user.id, { scopeType, scopeId });
+            const roots = await listAccessibleRootCollections(user.id, user.workspaceId, { scopeType, scopeId });
             const collections = includeItems ? await expandCollectionTrees(roots) : roots;
 
             res.status(200).json({ success: true, collections });
@@ -497,13 +535,13 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             if (!folder) { res.status(404).json({ error: 'Folder not found' }); return; }
 
             const rootCollectionId = folder.rootCollectionId ?? folder.id;
-            const { role } = await this.getCollectionOrRole(rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(rootCollectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
             }
 
-            const files = await this.collectionRepository.findAllFilesInFolderRecursively(itemId.trim());
+            const files = await this.collectionRepository.findAllFilesInFolderRecursively(itemId.trim(), user.workspaceId);
 
             const escapedFilename = folder.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             res.setHeader('Content-Type', 'application/zip');
@@ -559,7 +597,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
@@ -611,7 +649,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const file = await this.collectionRepository.findItemById(itemId.trim());
             if (!file) { res.status(404).json({ error: 'File not found' }); return; }
 
-            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
@@ -659,7 +697,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const file = await this.collectionRepository.findItemById(itemId.trim());
             if (!file) { res.status(404).json({ error: 'File not found' }); return; }
 
-            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
@@ -693,7 +731,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const { role } = await this.getCollectionOrRole(collectionId, user.id);
+            const { role } = await this.getCollectionOrRole(collectionId, user.id, user.workspaceId);
             if (!role) {
                 res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
                 return;
@@ -731,7 +769,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             if (!item) { res.status(404).json({ error: 'Item not found' }); return; }
             if (!item.isLatest) { res.status(400).json({ error: 'Item is a historical version' }); return; }
 
-            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id, user.workspaceId);
             if (!role || role === CollectionRole.VIEWER) {
                 res.status(403).json({ error: 'Forbidden: Only editors and owners can replace files' });
                 return;
@@ -773,7 +811,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const item = await this.collectionRepository.findItemById(itemId);
             if (!item) { res.status(404).json({ error: 'Item not found' }); return; }
 
-            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id, user.workspaceId);
             if (!role) { res.status(403).json({ error: 'Forbidden' }); return; }
 
             const allVersions = await this.collectionRepository.findItemVersions(item.fileId);
@@ -814,7 +852,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id, user.workspaceId);
             if (!role || role === CollectionRole.VIEWER) {
                 res.status(403).json({ error: 'Forbidden: Only editors and owners can restore versions' });
                 return;
@@ -847,7 +885,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const version = await this.collectionRepository.findItemVersionById(versionId);
             if (!version || version.fileId !== item.fileId) { res.status(404).json({ error: 'Version not found' }); return; }
 
-            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id);
+            const { role } = await this.getCollectionOrRole(item.rootCollectionId, user.id, user.workspaceId);
             if (!role) { res.status(403).json({ error: 'Forbidden' }); return; }
 
             if (!version.attachment?.url || !version.attachment?.mimetype) {

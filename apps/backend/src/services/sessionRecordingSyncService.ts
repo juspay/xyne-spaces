@@ -1,9 +1,9 @@
 import { logger } from '@/utils/logger';
+import { SessionRecordingProcessStatus } from '@xyne/shared';
 import { redisService } from '@/services/redisService';
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
-import {  SessionRecordingProcessStatus  } from '@prisma/client';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';;
 import { SESSION_RECORDING_KEYS_SET, parseSessionRecordingKey } from '@/utils/sessionRecordingKeys';
 

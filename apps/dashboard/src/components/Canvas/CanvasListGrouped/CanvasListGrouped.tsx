@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Folder } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import type { CanvasChannel, CanvasFolder, CanvasProject } from '../Canvas.types';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -14,6 +13,7 @@ import type { CanvasListGroupedProps } from './CanvasListGrouped.utils';
 import { getChannelDisplayName, nextFolderName } from './CanvasListGrouped.utils';
 import { useCanvasListGroupedData } from './useCanvasListGroupedData';
 import { CanvasListGroupedContent } from './CanvasListGroupedContent';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   onSelect,
@@ -21,10 +21,13 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   selectedCanvasId,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   isPersonalSectionCollapsed,
   onSetPersonalSectionCollapsed,
   excludeCallGeneratedCanvases = true,
   showStarredOnly = false,
+  includeArchived = false,
+  onlyArchived = false,
   onToggleStar,
   searchQuery = '',
 }) => {
@@ -62,6 +65,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     collapsedProjects,
     excludeCallGeneratedCanvases,
     showStarredOnly,
+    includeArchived,
+    onlyArchived,
     forceExpandProjects: isSearchActive,
   });
 
@@ -549,8 +554,11 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onToggleFolder={handleToggleFolder}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onArchiveToggle={onArchiveToggle}
           onSetPersonalSectionCollapsed={onSetPersonalSectionCollapsed}
           showStarredOnly={showStarredOnly}
+          includeArchived={includeArchived}
+          onlyArchived={onlyArchived}
           onToggleStar={onToggleStar}
           onCreatePersonalCanvas={handleCreatePersonalCanvas}
           onCreateCanvasInProject={handleCreateCanvasInProject}

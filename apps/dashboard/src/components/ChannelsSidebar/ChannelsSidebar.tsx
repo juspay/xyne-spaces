@@ -26,6 +26,9 @@ const ChannelsSidebar = ({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
+      // Only bare j/k/Enter navigate; ignore ⌘/⌃/⌥ combos so browser and
+      // app shortcuts still work while the sidebar is focused.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k' && e.key !== 'Enter') return;
       const active = document.activeElement;
       if (!containerRef.current || !active || !containerRef.current.contains(active)) return;

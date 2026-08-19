@@ -9,7 +9,8 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from '@/types/database';
-import { AuthProvider, Prisma, UserStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AuthProvider, UserStatus } from '@xyne/shared';
 //import { queueUserIngestion } from '@/queues/vespaQueue';
 
 export class UserRepository extends BaseRepository<User, CreateUserInput, UpdateUserInput> {
@@ -44,7 +45,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'feed');
     // } catch (error) {
     //   // Log error but don't fail the user creation
-    //   console.error('Failed to queue user for Vespa ingestion:', error);
     // }
 
     return user;
@@ -146,7 +146,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'update');
     // } catch (error) {
     //   // Log error but don't fail the user update
-    //   console.error('Failed to queue user update for Vespa ingestion:', error);
     // }
 
     return user;
@@ -168,7 +167,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //     await queueUserIngestion(user, 'delete');
     //   } catch (error) {
     //     // Log error but don't fail the user deletion
-    //     console.error('Failed to queue user deletion for Vespa:', error);
     //   }
     // }
 
@@ -388,7 +386,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'update');
     // } catch (error) {
     //   // Log error but don't fail the status update
-    //   console.error('Failed to queue user status update for Vespa ingestion:', error);
     // }
 
     return user;

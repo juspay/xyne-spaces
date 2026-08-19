@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import { exec, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -106,7 +107,7 @@ class LinuxKeychainService implements IKeychain {
             throw new Error("No keys generated. Please generate keys first.");
         }
 
-        console.log(`Generating CSR for ${commonName}...`);
+        log.info(`Generating CSR for ${commonName}...`);
 
         const keyPath = path.join(os.tmpdir(), `key_${Date.now()}.pem`);
         await writeFileAsync(keyPath, this.privateKeyPem);
@@ -143,9 +144,8 @@ class LinuxKeychainService implements IKeychain {
         await writeFileAsync(certPath, certPem);
 
         try {
-            // ACCEPTED RISK (secops #289, MED): static 'changeit' P12 passphrase. The .p12 is a
-            // per-call temp file, immediately imported via pk12util and unlink()ed in the finally
-            // below, so the passphrase guards nothing on-host; kept static so export/import agree.
+            // The bundle is a per-call temp file, imported immediately and removed in the finally
+            // below. The passphrase is fixed so the export and import agree.
             // Create PKCS#12 bundle
             const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
@@ -156,9 +156,9 @@ class LinuxKeychainService implements IKeychain {
                 try {
                     const importCmd = `pk12util -d sql:${dir} -i "${p12Path}" -W changeit`;
                     await execAsync(importCmd);
-                    console.log(`Certificate imported into NSS DB: ${dir}`);
+                    log.info(`Certificate imported into NSS DB: ${dir}`);
                 } catch (e: any) {
-                    console.warn(`Failed to import certificate into ${dir}:`, e.stderr || e.message);
+                    log.warn(`Failed to import certificate into ${dir}:`, e.stderr || e.message);
                 }
             }
 
@@ -204,13 +204,13 @@ class LinuxKeychainService implements IKeychain {
 
         try {
             // Extract Common Name to use as nickname. execFile (no shell) — the CN comes from an
-            // untrusted certificate and must not be interpolated into a shell command (secops #362).
+            // Comes from an untrusted certificate, so it is never interpolated into a shell command.
             const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
             const rawNickname = cnMatch ? cnMatch[1].trim() : `XyneRootCA_${Date.now()}`;
             // Restrict the nickname to a safe charset: it is used both as a certutil -n value and as a
             // filename under /usr/local/share/ca-certificates below, so it must not carry shell
-            // metacharacters or path separators/traversal (secops #362).
+            // Rejects shell metacharacters, path separators and traversal.
             const nickname = rawNickname.replace(/[^A-Za-z0-9._@ -]/g, '_').slice(0, 128) || `XyneRootCA_${Date.now()}`;
 
             // Check if certificate with same nickname already exists
@@ -224,7 +224,7 @@ class LinuxKeychainService implements IKeychain {
                 return;
             } catch {
                 // Certificate not found, proceed with installation
-                console.log(`Certificate "${nickname}" not found. Proceeding with installation.`);
+                log.info(`Certificate "${nickname}" not found. Proceeding with installation.`);
             }
 
             // Add the CA certificate to all NSS databases (Chrome + Firefox)
@@ -233,9 +233,9 @@ class LinuxKeychainService implements IKeychain {
                 try {
                     const addCmd = `certutil -d sql:${dir} -A -t "CT,," -n "${nickname}" -i "${tmpPath}"`;
                     await execAsync(addCmd);
-                    console.log(`CA installed into NSS DB: ${dir}`);
+                    log.info(`CA installed into NSS DB: ${dir}`);
                 } catch (e: any) {
-                    console.warn(`Failed to install CA into ${dir}:`, e.stderr || e.message);
+                    log.warn(`Failed to install CA into ${dir}:`, e.stderr || e.message);
                 }
             }
 
@@ -244,25 +244,25 @@ class LinuxKeychainService implements IKeychain {
                 // Copy cert to system CA directory and update trust
                 const systemCertPath = `/usr/local/share/ca-certificates/${nickname}.crt`;
                 await execAsync(`sudo cp "${tmpPath}" "${systemCertPath}" && sudo update-ca-certificates`);
-                console.log("CA installed into system trust store.");
+                log.info("CA installed into system trust store.");
             } catch (e: any) {
                 // Fallback: try RHEL/Fedora method
                 try {
                     const systemCertPath = `/etc/pki/ca-trust/source/anchors/${nickname}.crt`;
                     await execAsync(`sudo cp "${tmpPath}" "${systemCertPath}" && sudo update-ca-trust`);
-                    console.log("CA installed into system trust store (RHEL).");
+                    log.info("CA installed into system trust store (RHEL).");
                 } catch {
-                    console.warn("Could not install CA into system trust store:", e.stderr || e.message);
+                    log.warn("Could not install CA into system trust store:", e.stderr || e.message);
                 }
             }
 
-            console.log("CA installed.");
+            log.info("CA installed.");
             Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                 exists_in_keychain: false,
                 skipped_installation: false,
             });
         } catch (e: any) {
-            console.error("CA install failed:", e.stderr);
+            log.error("CA install failed:", e.stderr);
             Logger.logError(EnrollmentEvent.ROOT_CA_INSTALL_FAILED, e);
             throw new Error(`Failed to install CA: ${e.stderr || e.message}`);
         } finally {
@@ -274,7 +274,7 @@ class LinuxKeychainService implements IKeychain {
      * Deletes a certificate identity from the NSS database.
      */
     async deleteIdentity(commonName: string): Promise<void> {
-        console.log(`Deleting identity for "${commonName}"...`);
+        log.info(`Deleting identity for "${commonName}"...`);
 
         try {
             // Delete the certificate from all NSS databases (Chrome + Firefox)
@@ -282,18 +282,18 @@ class LinuxKeychainService implements IKeychain {
             for (const dir of allNssDirs) {
                 try {
                     await execAsync(`certutil -d sql:${dir} -D -n "${commonName}"`);
-                    console.log(`Identity deleted from NSS DB: ${dir}`);
+                    log.info(`Identity deleted from NSS DB: ${dir}`);
                 } catch (e: any) {
                     if (e.stderr && (e.stderr.includes('not found') || e.stderr.includes('could not find'))) {
                         // Not in this DB, skip
                     } else {
-                        console.warn(`Delete identity warning for ${dir}:`, e.stderr || e.message);
+                        log.warn(`Delete identity warning for ${dir}:`, e.stderr || e.message);
                     }
                 }
             }
             Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
         } catch (e: any) {
-            console.warn("Delete identity warning:", e.stderr || e.message);
+            log.warn("Delete identity warning:", e.stderr || e.message);
             Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
         }
 
@@ -327,7 +327,7 @@ class LinuxKeychainService implements IKeychain {
      */
     async checkIdentity(commonName: string): Promise<boolean> {
         const nssDir = this.getNssDbDir();
-        console.log(`Checking identity for "${commonName}"...`);
+        log.info(`Checking identity for "${commonName}"...`);
 
         try {
             // List all certificates
@@ -351,7 +351,7 @@ class LinuxKeychainService implements IKeychain {
                     try {
                         const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpCert}" -noout -subject -nameopt multiline`);
                         if (subjectOut.includes(commonName)) {
-                            console.log(`Found identity "${commonName}" under nickname "${nickname}"`);
+                            log.info(`Found identity "${commonName}" under nickname "${nickname}"`);
                             Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
                             return true;
                         }

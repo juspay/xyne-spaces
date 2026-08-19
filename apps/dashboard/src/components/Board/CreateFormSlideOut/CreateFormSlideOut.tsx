@@ -552,6 +552,8 @@ export const CreateFormSlideOut = ({
   projectId,
   initialData,
   title = 'Create Form',
+  embedded = false,
+  submitLabel = 'Save',
 }: CreateFormSlideOutProps): ReactElement | null => {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -562,6 +564,8 @@ export const CreateFormSlideOut = ({
   // child along with it) the moment a child got expanded.
   const [expandedBranchFieldId, setExpandedBranchFieldId] = useState<string | null>(null);
   const [expandedOptionIds, setExpandedOptionIds] = useState<Set<string>>(new Set());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const fieldInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const fieldsContainerRef = useRef<HTMLDivElement>(null);
   const fieldOptionsResolversRef = useRef<Map<string, () => FieldEnumOption[]>>(new Map());
@@ -849,8 +853,8 @@ export const CreateFormSlideOut = ({
   };
 
   // Handle save
-  const handleSave = (): void => {
-    if (!isFormBuilderSavable(formName, fields)) return;
+  const handleSave = async (): Promise<void> => {
+    if (isSubmittingRef.current || !isFormBuilderSavable(formName, fields)) return;
 
     const formData = {
       formName: formName.trim(),
@@ -858,19 +862,19 @@ export const CreateFormSlideOut = ({
       fields: getSavableFormFields(fields),
     };
 
-    // If formId is provided, we're in edit mode
-    if (formId && onUpdate) {
-      onUpdate({ formId, ...formData });
-    } else {
-      onSave(formData);
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      // If formId is provided, we're in edit mode
+      if (formId && onUpdate) {
+        await onUpdate({ formId, ...formData });
+      } else {
+        await onSave(formData);
+      }
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     }
-
-    // Reset form
-    setFormName('');
-    setFormDescription('');
-    setFields([]);
-    setExpandedFieldId(null);
-    hasSeededRef.current = false;
   };
 
   const invalidReason: string | null = !formName.trim()
@@ -894,112 +898,128 @@ export const CreateFormSlideOut = ({
   if (!isOpen) return null;
 
   return (
-    <>
-      <div className='fixed right-[130px] top-[280px] bottom-[120px] z-50'>
-        <div className='w-[500px] h-full bg-background rounded-[12px] shadow-[0px_0px_4px_0px_rgba(0,0,0,0.14),0px_8px_24px_0px_rgba(43,45,47,0.08)] flex flex-col overflow-hidden relative'>
-          {/* Header */}
-          <div className='flex items-center justify-between px-[16px] pt-[14px]'>
-            <h2 className='text-[14px] font-medium text-foreground'>{title}</h2>
-            <Button
-              type='button'
-              onClick={onClose}
-              variant='ghost'
-              size='iconSm'
-              className='text-muted-foreground hover:text-foreground'
+    <div
+      className={
+        embedded
+          ? 'flex w-full min-h-0 flex-col'
+          : 'fixed right-[130px] top-[280px] bottom-[120px] z-50'
+      }
+    >
+      <div
+        className={
+          embedded
+            ? 'flex w-full min-h-0 flex-col overflow-hidden rounded-[12px] border border-border bg-background'
+            : 'w-[500px] h-full bg-background rounded-[12px] shadow-[0px_0px_4px_0px_rgba(0,0,0,0.14),0px_8px_24px_0px_rgba(43,45,47,0.08)] flex flex-col overflow-hidden relative'
+        }
+      >
+        {/* Header */}
+        <div className='flex items-center justify-between px-[16px] pt-[14px]'>
+          <h2 className='text-[14px] font-medium text-foreground'>{title}</h2>
+          <Button
+            type='button'
+            onClick={onClose}
+            variant='ghost'
+            size='iconSm'
+            className='text-muted-foreground hover:text-foreground'
+            data-track-category='board_config'
+            data-track-name='close_create_form'
+          >
+            <X size={16} />
+          </Button>
+        </div>
+
+        {/* Content */}
+        <div
+          className={
+            embedded
+              ? 'flex min-h-0 flex-col p-[12px]'
+              : 'flex-1 overflow-y-auto p-[16px] flex flex-col'
+          }
+        >
+          {/* Form Title Input */}
+          <div>
+            <input
+              type='text'
+              value={formName}
+              onChange={e => setFormName(e.target.value)}
+              placeholder='Form Title'
+              className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
               data-track-category='board_config'
-              data-track-name='close_create_form'
-            >
-              <X size={16} />
-            </Button>
+              data-track-name='form_title_input'
+            />
+            <textarea
+              value={formDescription}
+              onChange={e => setFormDescription(e.target.value)}
+              placeholder='Add description'
+              rows={2}
+              className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
+              data-track-category='board_config'
+              data-track-name='form_description_input'
+            />
           </div>
 
-          {/* Content */}
-          <div className='flex-1 overflow-y-auto p-[16px] flex flex-col'>
-            {/* Form Title Input */}
-            <div>
-              <input
-                type='text'
-                value={formName}
-                onChange={e => setFormName(e.target.value)}
-                placeholder='Form Title'
-                className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
-                data-track-category='board_config'
-                data-track-name='form_title_input'
-              />
-              <textarea
-                value={formDescription}
-                onChange={e => setFormDescription(e.target.value)}
-                placeholder='Add description'
-                rows={2}
-                className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
-                data-track-category='board_config'
-                data-track-name='form_description_input'
-              />
-            </div>
-
-            {/* Fields List */}
-            <div className='flex flex-col gap-[8px]' ref={fieldsContainerRef}>
-              {fields
-                .filter(field => !field.parentOptionId)
-                .map(field => (
-                  <FieldEditor
-                    key={field.id}
-                    field={field}
-                    projectId={projectId}
-                    isExpanded={expandedFieldId === field.id}
-                    registerInputRef={registerInputRef}
-                    registerFieldOptionsResolver={registerFieldOptionsResolver}
-                    onExpand={expandField}
-                    onToggleExpand={handleToggleExpand}
-                    onUpdate={handleUpdateField}
-                    onChangeType={handleChangeFieldType}
-                    onDelete={handleDeleteField}
-                    onNameChange={handleNameChange}
-                    onSelectExistingGlobalField={handleSelectExistingGlobalField}
-                    onCreateAsNewField={handleCreateAsNewField}
-                    getBranchFields={getBranchFields}
-                    isOptionBranchExpanded={isOptionBranchExpanded}
-                    onToggleOptionBranchPanel={handleToggleOptionBranchPanel}
-                    onAddBranchField={handleAddBranchField}
-                    onOptionsRemoved={handleOptionsRemoved}
-                    expandedBranchFieldId={expandedBranchFieldId}
-                    onExpandBranchField={expandBranchField}
-                    onToggleExpandBranchField={handleToggleBranchExpand}
-                  />
-                ))}
-            </div>
-
-            {/* Add Question Button */}
-            <div className='flex flex-wrap items-center gap-2'>
-              <Button
-                onClick={handleAddField}
-                variant='ghost'
-                size='sm'
-                className='text-[#6276be] font-medium hover:bg-blue-50 w-fit'
-                data-track-category='board_config'
-                data-track-name='add_question'
-              >
-                <Plus size={16} />
-                Add field
-              </Button>
-            </div>
+          {/* Fields List */}
+          <div className='flex flex-col gap-[8px]' ref={fieldsContainerRef}>
+            {fields
+              .filter(field => !field.parentOptionId)
+              .map(field => (
+                <FieldEditor
+                  key={field.id}
+                  field={field}
+                  projectId={projectId}
+                  isExpanded={expandedFieldId === field.id}
+                  registerInputRef={registerInputRef}
+                  registerFieldOptionsResolver={registerFieldOptionsResolver}
+                  onExpand={expandField}
+                  onToggleExpand={handleToggleExpand}
+                  onUpdate={handleUpdateField}
+                  onChangeType={handleChangeFieldType}
+                  onDelete={handleDeleteField}
+                  onNameChange={handleNameChange}
+                  onSelectExistingGlobalField={handleSelectExistingGlobalField}
+                  onCreateAsNewField={handleCreateAsNewField}
+                  getBranchFields={getBranchFields}
+                  isOptionBranchExpanded={isOptionBranchExpanded}
+                  onToggleOptionBranchPanel={handleToggleOptionBranchPanel}
+                  onAddBranchField={handleAddBranchField}
+                  onOptionsRemoved={handleOptionsRemoved}
+                  expandedBranchFieldId={expandedBranchFieldId}
+                  onExpandBranchField={expandBranchField}
+                  onToggleExpandBranchField={handleToggleBranchExpand}
+                />
+              ))}
           </div>
 
-          {/* Footer */}
-          <div className='px-[16px] py-[14px]'>
-            {invalidReason && (
-              <p className='text-[12px] text-muted-foreground mb-2 text-center'>{invalidReason}</p>
-            )}
+          {/* Add Question Button */}
+          <div className='flex flex-wrap items-center gap-2'>
             <Button
-              onClick={handleSave}
-              disabled={!isValid}
-              className='w-full bg-[#6276be] hover:bg-[#5060a0] disabled:bg-[#c9cccf] disabled:cursor-not-allowed text-white rounded-[8px] py-[6px] text-[13px] font-medium'
+              onClick={handleAddField}
+              variant='ghost'
+              size='sm'
+              className='text-[#6276be] font-medium hover:bg-blue-50 w-fit'
+              data-track-category='board_config'
+              data-track-name='add_question'
             >
-              Save
+              <Plus size={16} />
+              Add field
             </Button>
           </div>
         </div>
+
+        {/* Footer */}
+        <div className='px-[16px] py-[14px]'>
+          {invalidReason && (
+            <p className='text-[12px] text-muted-foreground mb-2 text-center'>{invalidReason}</p>
+          )}
+          <Button
+            onClick={() => void handleSave()}
+            disabled={!isValid || isSubmitting}
+            className='w-full bg-[#6276be] hover:bg-[#5060a0] disabled:bg-[#c9cccf] disabled:cursor-not-allowed text-white rounded-[8px] py-[6px] text-[13px] font-medium'
+          >
+            {isSubmitting ? `${submitLabel}…` : submitLabel}
+          </Button>
+        </div>
       </div>
-    </>
+    </div>
   );
 };

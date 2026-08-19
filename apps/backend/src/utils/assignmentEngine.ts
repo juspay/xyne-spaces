@@ -1,11 +1,12 @@
 import { repositories } from '@/database/repositories';
+import { UserResponsibility } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
   UserExpertiseMapping,
   UserAssignmentState,
   UserWorkloadMapping,
-  UserResponsibility,
 } from '@prisma/client';
 
 export interface AssignmentResult {
@@ -113,8 +114,8 @@ async function filterMappingsToChannelParticipants(
  *
  * Lower score = higher priority (fewer active tasks = more available).
  *
- * PR Reviewer Special Rule:
- * - If excludeUserId is provided (the ticket assignee), the PR reviewer cannot be the same person
+ * Exclusion rule:
+ * - If excludeUserId is provided, that user cannot be selected for the assignment
  * - The system picks the second-lowest score candidate if the lowest is the excluded user
  * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
  *
@@ -238,12 +239,14 @@ export async function evaluateAssignmentRule(
 
   // Get workload mappings and board scores for boards in this user group
   let [allWorkloadMappings, allBoardScores] = await Promise.all([
-    repositories.userWorkloadMapping.findMany({
-      where: {
-        userGroupId,
-        userId: { in: finalEligibleUserIds },
-      },
-    }),
+    withWorkspaceScope(() =>
+      repositories.userWorkloadMapping.findMany({
+        where: {
+          userGroupId,
+          userId: { in: finalEligibleUserIds },
+        },
+      }),
+    ),
     repositories.boardComplexityScore.findMany({
       where: { userGroupId },
     }),
@@ -330,7 +333,7 @@ export async function evaluateAssignmentRule(
   candidates.sort((a, b) => a.score - b.score);
 
   // Pick the first candidate who has not exceeded their maxTickets (if set)
-  // For PR_REVIEWER, exclude the ticket assignee (excludeUserId) - pick second best if assignee would be selected
+  // Exclude excludeUserId from assignment and pick the next-best candidate when possible.
   let selectedUser: AssignmentCandidate | undefined = undefined;
   let excludedCandidate: AssignmentCandidate | undefined = undefined;
 
@@ -341,8 +344,7 @@ export async function evaluateAssignmentRule(
       continue; // skip, above maxTickets
     }
 
-    // For PR_REVIEWER assignment, if this candidate is the excluded user (assignee), skip and remember them
-    if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && candidate.userId === excludeUserId) {
+    if (excludeUserId && candidate.userId === excludeUserId) {
       excludedCandidate = candidate;
       continue;
     }
@@ -354,7 +356,7 @@ export async function evaluateAssignmentRule(
   // If no valid candidate found after filtering, and we skipped the excluded user,
   // it means only the excluded user was available
   if (!selectedUser && excludedCandidate) {
-    logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for PR reviewer assignment`);
+    logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for assignment`);
     return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
   }
 
@@ -424,7 +426,7 @@ export async function evaluateAssignmentRule(
     fallbackCandidates.sort((a, b) => a.score - b.score);
 
     // Pick first fallback candidate who hasn't exceeded maxTickets
-    // For PR_REVIEWER, exclude the ticket assignee (excludeUserId) - pick second best if assignee would be selected
+    // Exclude excludeUserId from fallback assignment and pick the next-best candidate when possible.
     let fallbackExcludedCandidate: AssignmentCandidate | undefined = undefined;
 
     for (const candidate of fallbackCandidates) {
@@ -433,8 +435,7 @@ export async function evaluateAssignmentRule(
         continue;
       }
 
-      // For PR_REVIEWER assignment, if this candidate is the excluded user (assignee), skip and remember them
-      if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && candidate.userId === excludeUserId) {
+      if (excludeUserId && candidate.userId === excludeUserId) {
         fallbackExcludedCandidate = candidate;
         continue;
       }
@@ -446,7 +447,7 @@ export async function evaluateAssignmentRule(
     // If no valid candidate found after filtering, and we skipped the excluded user,
     // it means only the excluded user was available
     if (!selectedUser && fallbackExcludedCandidate) {
-      logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for PR reviewer assignment (fallback)`);
+      logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for assignment (fallback)`);
       return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
     }
 
@@ -624,7 +625,9 @@ export async function evaluateAllRoles(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    withWorkspaceScope(() =>
+      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
   ]);
 
@@ -763,7 +766,9 @@ export async function evaluateRoleSlots(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    withWorkspaceScope(() =>
+      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
   ]);
 

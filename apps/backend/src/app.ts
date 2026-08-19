@@ -11,10 +11,11 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { tenantScopeMiddleware } from '@/database/tenant/context';
+import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
+import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
@@ -34,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -54,12 +56,13 @@ import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
 import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
+import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
+import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
@@ -76,6 +79,7 @@ import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
+import encryptionRoutes from '@/routes/encryption';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
@@ -85,7 +89,10 @@ import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
+import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
+import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -93,37 +100,10 @@ import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
-import vespaBackfillRoutes from '@/routes/vespaBackfill';
+import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
-import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
-import ticketActivitySystemActorBackfillRoutes from '@/routes/ticketActivitySystemActorBackfill';
-import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
-import appPermissionsBackfillRoutes from '@/routes/appPermissionsBackfill';
-import projectTagsBackfillRoutes from '@/routes/projectTagsBackfill';
-import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
-import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
-import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
-import channelRecapToRecapBackfillRoutes from '@/routes/channelRecapToRecapBackfill';
-import emailChannelUnreadBackfillRoutes from '@/routes/emailChannelUnreadBackfill';
-import ticketEmailCountBackfillRoutes from '@/routes/ticketEmailCountBackfill';
-import emailReadAtBackfillRoutes from '@/routes/emailReadAtBackfill';
-import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
-import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
-import ticketStageBackfillRoutes from '@/routes/ticketStageBackfill';
-import queriesEntityTypeBackfillRoutes from '@/routes/queriesEntityTypeBackfill';
-import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
-import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
-import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
-import callParticipantCountBackfillRoutes from '@/routes/callParticipantCountBackfill';
-import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
-import dualWriteSequenceNumberBackfillRoutes from '@/routes/dualWriteSequenceNumberBackfill';
-import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
-import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
-import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
-import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
-import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
-import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
+import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
@@ -141,7 +121,6 @@ import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
 import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
-import deskMetricsBackfillRoutes from '@/routes/deskMetricsBackfill';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -154,7 +133,6 @@ import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
-import automationSeriesIdBackfillRoutes from '@/routes/automationSeriesIdBackfill';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
@@ -164,7 +142,6 @@ import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
-import telepresenceMonitoringRoutes from '@/telepresence-monitoring/routes';
 import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
 import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
 import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
@@ -181,7 +158,10 @@ import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
+import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
+import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
@@ -195,10 +175,13 @@ import { initStorage } from '@/services/storage';
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
-import applicationBackfillRoutes from '@/routes/applicationBackfill';
 import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
+import { ReactionController } from '@/controllers/reactionController';
+import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
+import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
+import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
 
@@ -288,6 +271,7 @@ export class App {
     this.app.use('/api/integrations/workspace-desk', workspaceDeskRoutes);
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
+    this.app.use('/api/integrations/social-media', socialMediaRoutes);
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
@@ -332,6 +316,8 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    this.app.use(decryptRequestBodyMiddleware);
+    this.app.use(encryptResponseBodyMiddleware);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -366,7 +352,6 @@ export class App {
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
-    this.app.use('/api/telepresence-monitoring', telepresenceMonitoringRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
     this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
@@ -387,90 +372,23 @@ export class App {
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 
-    // Admin backfill routes (must be before generic /api routes to avoid auth conflicts)
-    // Only enable when ENABLE_VESPA_BACKFILL_ROUTES environment variable is true
-    if (process.env.ENABLE_VESPA_BACKFILL_ROUTES === 'true') {
-      this.app.use('/api/admin/vespa-backfill', vespaBackfillRoutes);
-      this.app.use('/migrate/api/admin/vespa-backfill', vespaBackfillRoutes);
-    }
+    this.app.use('/api/admin', backfillMountGuard);
+    this.app.use('/migrate/api/admin', backfillMountGuard);
+
+    // Internal-only migration/backfill admin routes (Postman/curl-invoked one-off
+    // data-fix endpoints, not part of the public product). Real implementation
+    // lives in the private overlay repo; the checked-in stub here no-ops when
+    // it isn't present (i.e. in a standalone public build).
+    registerPrivateBackfillRoutes(this.app);
 
     // Ticket migration route (admin-only)
-    this.app.use('/api/admin/migrate-tickets-xyneid', ticketMigrationRoutes);
-    // Activities backfill route (for backfilling group mention actorAction)
-    if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
-      this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
-    }
-    // Ticket activity 'system' actor backfill — legacy literal → real automations bot User id
-    this.app.use('/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
-    // Activity isThreadActivity backfill
-    this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
-    this.app.use('/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
-    // App permissions backfill — grant all permissions to all installed apps
-    this.app.use('/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
-    this.app.use('/migrate/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
-    // App-level signing secret backfill — copy per-install secret up to the app / generate if missing
-    this.app.use('/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
-    this.app.use('/migrate/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
-    // Installed app commands backfill — snapshot each app's commands into existing installs
-    this.app.use('/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
-    this.app.use('/migrate/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
-    // Project tags + ticket_tag_mappings backfill from ticket_tags
-    this.app.use('/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
-    this.app.use('/migrate/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
-    // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
-    this.app.use(
-      '/api/admin/external-source-displayname-backfill',
-      externalSourceDisplayNameBackfillRoutes,
-    );
-    this.app.use(
-      '/migrate/api/admin/external-source-displayname-backfill',
-      externalSourceDisplayNameBackfillRoutes,
-    );
-    this.app.use('/migrate/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
-    this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
-    this.app.use('/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
-    this.app.use('/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-email-count-backfill', ticketEmailCountBackfillRoutes);
-    this.app.use('/api/admin/ticket-email-count-backfill', ticketEmailCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
-    this.app.use('/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
-    this.app.use('/migrate/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
-    this.app.use('/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
-    this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
-    this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
-    this.app.use('/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
-    this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
-    // Ticket duplicate backfill route (always available, no vespa flag)
-    this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
-    this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
-    this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
-    this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
-    this.app.use('/migrate/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
-    this.app.use('/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
-    this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
-    // Dual-write sequence number backfill (same handler, new router)
-    this.app.use('/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
-    this.app.use('/migrate/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
-    // Product insights recluster route (admin-only)
-    this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
-    this.app.use('/api/admin/gmail-watch-renewal', gmailWatchRenewalRoutes);
-    this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
-    this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
-    this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
-    this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceIdBackfillRoutes);
-    this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
-    this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
-
-    // Application backfill admin routes (auth required)
-    this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
+    this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
+    this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
+    this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -489,7 +407,7 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
+    this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
     // Claw MCP route (user + app auth) — must be before /api/tickets
@@ -499,6 +417,12 @@ export class App {
       authMiddleware.authenticate,
       aclMiddleware.checkAccess,
       ticketRoutes
+    );
+    this.app.use(
+      '/api/ticket-reports',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      ticketReportRoutes
     );
     this.app.use(
       '/api/workflows',
@@ -524,6 +448,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -531,6 +456,7 @@ export class App {
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
+    this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
@@ -562,6 +488,55 @@ export class App {
       (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
       void new ChatController().postMessage(req, res);
     });
+    this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
+      void new ReactionController().reactAsUser(req, res);
+    });
+    this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
+          userId?: string; targetUserId?: string; workspaceId?: string;
+        };
+        if (!userId || !targetUserId || !workspaceId) {
+          res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
+          return;
+        }
+        const channelId = await unifiedDMService.getOrCreateDirectMessage(userId, targetUserId, workspaceId);
+        res.json({ channelId });
+      } catch (err) {
+        logger.error('[getOrCreateDm] failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
+    this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const parsed = coerceTwinReplyDraft(req.body);
+        if ('error' in parsed) {
+          res.status(400).json({ error: parsed.error });
+          return;
+        }
+        const lookup = destinationNameLookup(parsed.draft);
+        if (lookup) {
+          try {
+            const prisma = DatabaseClient.getInstance();
+            if (lookup.field === 'destinationChannelName') {
+              const chan = await prisma.channel.findUnique({ where: { id: lookup.id }, select: { name: true } });
+              if (chan?.name) parsed.draft.destinationChannelName = chan.name;
+            } else {
+              const target = await prisma.user.findUnique({ where: { id: lookup.id }, select: { name: true, displayName: true } });
+              const name = target?.displayName || target?.name;
+              if (name) parsed.draft.destinationUserName = name;
+            }
+          } catch (err) {
+            logger.warn('[twin-reply-draft] destination name resolution failed', err);
+          }
+        }
+        await createTwinReplyDraft(parsed.draft);
+        res.json({ ok: true });
+      } catch (err) {
+        logger.error('[twin-reply-draft] create failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
@@ -579,7 +554,7 @@ export class App {
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
-    
+
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -611,8 +586,10 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes (auth required)
-    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
+    // Y-Sweet collaboration routes. Auth already runs for every /api request via
+    // the /api attachment mounts above; applying it here again cost two more DB
+    // round-trips per canvas open.
+    this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 
@@ -637,6 +614,8 @@ export class App {
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
+
+    this.app.use('/api/lotus-config', authMiddleware.authenticate, lotusCacConfigRoutes);
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);
@@ -788,8 +767,17 @@ export class App {
           await stageEtaDeadlineQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing board config copy queue...');
+          await boardConfigCopyQueue.initialize();
+          boardConfigCopyWorker.start();
+        })(),
+        (async () => {
           logger.info('Initializing assignment reactivation queue...');
           await assignmentReactivationQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing ticket reassignment queue...');
+          await ticketReassignmentQueue.initialize();
         })(),
         (async () => {
           logger.info('Initializing on-call rotation queue...');
@@ -831,8 +819,15 @@ export class App {
       logger.info('Initializing stage ETA deadline queue...');
       await stageEtaDeadlineQueue.initialize();
 
+      logger.info('Initializing board config copy queue...');
+      await boardConfigCopyQueue.initialize();
+      boardConfigCopyWorker.start();
+
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
+
+      logger.info('Initializing ticket reassignment queue...');
+      await ticketReassignmentQueue.initialize();
 
       logger.info('Initializing on-call rotation queue...');
       await onCallRotationQueue.initialize();
@@ -847,7 +842,7 @@ export class App {
       await emailClassificationQueue.initialize();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
-      // separate process) drains them nightly.
+      // separate process) drains each thread once its debounce window elapses.
       logger.info('Initializing entity extraction queue...');
       await entityExtractionQueue.initialize();
 
@@ -883,9 +878,17 @@ export class App {
     await configSyncService.syncConfigWithDatabase();
 
     // Initialize and start model sync queue (Bull-based scheduling)
-    logger.info('Initializing model sync queue...');
-    await modelSyncQueue.initialize();
-    await modelSyncQueue.runInitialSync();
+    // Only run when LiteLLM is configured; otherwise there is nothing to sync
+    // and we must not fire requests to LiteLLM (e.g. local `pnpm run dev`).
+    if (config.litellm.apiKey && config.litellm.baseUrl) {
+      logger.info('Initializing model sync queue...');
+      await modelSyncQueue.initialize();
+      await modelSyncQueue.runInitialSync();
+    } else {
+      logger.info(
+        'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
+      );
+    }
 
     // Initialize calendar sync queues
     logger.info('Initializing Microsoft Calendar sync queue...');
@@ -934,6 +937,19 @@ export class App {
     // Initialize unified bot framework
     logger.info('Initializing unified bot framework...');
     initializeBotRegistry(); // Register all bots (internal + external) with unified catalog
+
+    // Vespa queue MUST be initialized before syncing bot users below: each bot User
+    // upsert transparently fires the setupUserVespaSync Prisma middleware, which enqueues
+    // a user-index job on vespaQueue. If the queue isn't ready the enqueue is swallowed and
+    // logged ("Vespa queue not initialized Properly") — sync still succeeds, but the first
+    // bots' index jobs are silently dropped. The dependency is invisible at the sync call
+    // site (it lives in a Prisma $use hook), so keep these ordered explicitly.
+    logger.info('Initializing Vespa queue...');
+    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
+    await vespaQueue.initialize();
+    // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
+    await vespaBackfillQueue.initialize();
+
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();
     const workspaces = await dbClient.workspace.findMany({ select: { id: true } });
@@ -942,12 +958,6 @@ export class App {
     }
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
-
-    logger.info('Initializing Vespa queue...');
-    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
-    await vespaQueue.initialize();
-    // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
-    await vespaBackfillQueue.initialize();
 
     logger.info('Initializing conversation ingest queue (producer)...');
     await conversationIngestQueue.initialize();
@@ -965,6 +975,10 @@ export class App {
     logger.info('Initializing delayed message queue (producer)...');
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
+
+    logger.info('Initializing message classification queue (producer)...');
+    const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
+    await messageClassificationQueue.initialize();
 
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');
@@ -1009,8 +1023,14 @@ export class App {
       // Close stage ETA deadline queue
       await stageEtaDeadlineQueue.close();
 
+      // Close board config copy queue
+      await boardConfigCopyQueue.close();
+
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();
+
+      // Close ticket reassignment queue
+      await ticketReassignmentQueue.close();
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();

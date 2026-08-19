@@ -1,8 +1,8 @@
 import { BaseRepository } from './base';
-import { Message, MessageType } from '@prisma/client';
+import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH } from '@xyne/shared';
+import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -130,36 +130,19 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
-   * Resolve the workspaceId to denormalize onto a message row: caller-supplied value,
-   * else the owning conversation's workspaceId, else a hop through the conversation's
-   * channel (Channel.workspaceId is NOT NULL). Conversation.workspaceId is nullable and
-   * legitimately null for bot/system/webhook-created and un-backfilled conversations, so
-   * resolving it directly would leak workspaceId = NULL onto the message. Throw when it
-   * cannot be resolved rather than insert an untenanted row.
+   * Resolve the workspaceId to denormalize onto a message row: caller-supplied
+   * value, or (default) the owning conversation's workspaceId.
    */
   private async resolveMessageWorkspaceId(data: CreateMessageInput): Promise<string> {
     if (data.workspaceId) return data.workspaceId;
     const conversation = await this.db.conversation.findUnique({
       where: { conversationId: data.conversationId },
-      select: { workspaceId: true, channelId: true },
+      select: { workspaceId: true },
     });
     if (!conversation) {
       throw new Error(`workspaceId required: conversation ${data.conversationId} not found`);
     }
-    let workspaceId = conversation.workspaceId;
-    if (!workspaceId) {
-      const channel = await this.db.channel.findUnique({
-        where: { id: conversation.channelId },
-        select: { workspaceId: true },
-      });
-      workspaceId = channel?.workspaceId ?? null;
-    }
-    if (!workspaceId) {
-      throw new Error(
-        `workspaceId required: cannot resolve for conversation ${data.conversationId}`,
-      );
-    }
-    return workspaceId;
+    return conversation.workspaceId;
   }
 
   async create(data: CreateMessageInput): Promise<Message> {
@@ -168,7 +151,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     await this.validateString(data.senderId, 'senderId');
     
     // Content is required unless there are attachments OR it's a SYSTEM message with metadata
-    const isSystemMessageWithMetadata = data.msgType === 'SYSTEM' && data.metadata;
+    const isSystemMessageWithMetadata = data.msgType === MessageType.SYSTEM && data.metadata;
     if (!data.hasAttachment && !isSystemMessageWithMetadata && (!data.content || data.content.trim() === '')) {
       throw new Error('content is required when no attachments are present');
     }

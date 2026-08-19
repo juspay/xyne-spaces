@@ -22,7 +22,6 @@ interface EmailThreadHeaderProps {
   isCollapsed: boolean;
   previewText?: string;
   extras?: ReactNode;
-  isRead?: boolean;
   deskEmail?: string | null | undefined;
   emailId?: string;
 }
@@ -79,7 +78,6 @@ export const EmailThreadHeader = ({
   isCollapsed,
   previewText,
   extras,
-  isRead = true,
   deskEmail,
   emailId,
 }: EmailThreadHeaderProps): JSX.Element => {
@@ -130,14 +128,7 @@ export const EmailThreadHeader = ({
         <div className='flex items-start justify-between gap-3'>
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-1.5 flex-wrap'>
-              {!isRead && (
-                <span className='size-2 rounded-full bg-blue-500 shrink-0' aria-label='Unread' />
-              )}
-              <span
-                className={cn('text-sm text-foreground', isRead ? 'font-semibold' : 'font-bold')}
-              >
-                {fromName}
-              </span>
+              <span className='text-sm text-foreground font-semibold'>{fromName}</span>
               {fromEmail && (
                 <span className='text-xs text-muted-foreground font-normal truncate'>
                   {`<${fromEmail}>`}

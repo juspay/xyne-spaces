@@ -4,14 +4,21 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
 import { CommitAnalysisResult } from "@/services/commitAnalysisService";
 import { AffectedApplicationInfo } from "@/services/release/core";
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { config } from '@/config/env';
 import { UserRepository } from "@/database/repositories/users";
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
+
+// Distinct H2 heading that marks the hotfix block range inside the canvas. The
+// upsert logic slices the content on this exact text, so keep it stable —
+// changing it would orphan hotfix sections written by older builds.
+const HOTFIX_HEADING_TEXT = '🔥 Hotfix PRs';
 
 
 // Single source of truth for parsing env-var names + add/remove status from a
@@ -70,176 +77,28 @@ export interface CommitAnalysisCanvasMetadata {
   workspaceId?: string;
 }
 
-export async function createCommitAnalysisCanvas(
-  results: CommitAnalysisResult[],
-  affectedApplications: AffectedApplicationInfo[],
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined,
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
-  createdByUserId: string,
-  metadata: CommitAnalysisCanvasMetadata
-): Promise<string | null> {
-  try {
-    const now = new Date();
+// A "result" shape narrowed to what the PR/env/migration renderers read. Both
+// the main analysis and the hotfix delta feed the same renderers.
+type PrResult = {
+  commitId: string;
+  pullRequest: { id: number; title: string; url: string; author: { displayName: string; emailAddress?: string } } | null;
+  ticket: { id: string; xyneId: string; title: string; status: string } | null;
+  filePaths: string[];
+};
 
-    // Generate IDs
-    const canvasId = uuidv4();
-    const participantId = uuidv4();
+// -------------------------------------------------------------------------
+// User lookup (email → workspace user) with per-build cache, so a PR author
+// resolves to a @mention once regardless of how many PRs they touched.
+// -------------------------------------------------------------------------
+type UserLookupResult = { userId: string; username: string; userEmail: string; userPicture: string } | null;
+type UserLookup = (email: string | undefined, workspaceId: string) => Promise<UserLookupResult>;
 
-    const dateStr = now.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-    const finalTitle = `📦 Release Analysis: ${metadata.workspace}/${metadata.repoSlug} - ${dateStr}`;
-
-    // Format analysis to BlockNote content
-    const { blocks: content, mentionedUserIds } = await formatCommitAnalysisToBlockNote(
-      results,
-      affectedApplications,
-      envChanges,
-      migrationLinks,
-      metadata,
-      finalTitle
-    );
-
-    // Fetch complete context for the user to pass to side-effect handler
-    const user = await db.user.findUnique({
-      where: { id: createdByUserId },
-      select: { id: true, email: true, workspaceId: true, role: true },
-    });
-    if (!user || !user.workspaceId) {
-      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
-    }
-
-    // Create the canvas with PUBLIC visibility (read-only)
-    await prisma.canvas.create({
-      data: {
-        id: canvasId,
-        title: finalTitle,
-        content: content as any,
-        workspaceId: user.workspaceId,
-        createdBy: createdByUserId,
-        visibility: 'PUBLIC',
-        isTemplate: false,
-        isCollaborative: false,
-        lastEditedBy: createdByUserId,
-        lastEditedAt: now,
-        createdAt: now,
-        updatedAt: now,
-        channelId: metadata.channelId || null,
-        metadata: {
-          source: 'commit_analysis',
-          workspace: metadata.workspace,
-          repoSlug: metadata.repoSlug,
-          deployedCommitId: metadata.deployedCommitId,
-          newCommitId: metadata.newCommitId,
-          commitCount: results.length,
-          affectedApplicationCount: metadata.affectedApplicationCount,
-          migrationCount: metadata.migrationCount,
-          envChangeCount: metadata.envChangeCount,
-          mentionedUserIds,
-          ...(metadata.projectId && { projectId: metadata.projectId }),
-          ...(metadata.conversationId && { conversationId: metadata.conversationId }),
-        },
-      },
-    });
-
-    // (read-only canvas)
-    await prisma.canvasParticipant.create({
-      data: {
-        id: participantId,
-        canvasId,
-        workspaceId: user.workspaceId,
-        userId: createdByUserId,
-        role: 'VIEWER',
-        joinedAt: now,
-        updatedAt: now,
-      },
-    });
-
-    logger.info(
-      `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
-    );
-
-    // Email is globally unique in orgMember, single lookup is sufficient
-    const orgMember = await db.orgMember.findUnique({
-      where: { email: user.email },
-    });
-    if (!orgMember) {
-      throw new Error(`User ${createdByUserId} is not a member of any organization`);
-    }
-
-    // Manually call canvas handler for activities and notifications
-    // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
-    const canvasHandler = new CanvasSideEffectHandler({
-      userID: user.id,
-      workspaceId: user.workspaceId,
-      role: user.role,
-      memberId: orgMember.memberId,
-      orgRole: orgMember.role,
-    });
-    canvasHandler.onInsert({
-      entityId: canvasId,
-      entityType: 'canvases',
-      operation: 'insert'
-    }).catch(err => logger.error('[CanvasService] Canvas side-effect handler error:', err));
-
-    // Queue Vespa indexing for the canvas
-    try {
-      await vespaQueue.addJob({
-        schema: fileSchema,
-        docId: canvasId,
-        jobType: 'feed',
-        userId: createdByUserId,
-        workspaceId: user.workspaceId,
-        app: SubApp.CANVAS,
-      });
-      logger.info(`[CanvasService] Queued Vespa indexing for commit analysis canvas ${canvasId}`);
-    } catch (vespaError) {
-      logger.error(`[CanvasService] Failed to queue Vespa job for commit analysis canvas ${canvasId}:`, vespaError);
-    }
-
-    return canvasId;
-  } catch (error) {
-    logger.error('[CanvasService] Failed to create commit analysis canvas:', error);
-    return null;
-  }
-}
-
-async function formatCommitAnalysisToBlockNote(
-  results: Array<{
-    commitId: string;
-    pullRequest: { id: number; title: string; url: string; author: { displayName: string; emailAddress?: string } } | null;
-    ticket: { id: string; xyneId: string; title: string; status: string } | null;
-    filePaths: string[];
-  }>,
-  affectedApplications: Array<{
-    id: string;
-    name: string;
-    subTicketId?: string;
-    subTicketXyneId?: string;
-    mappedTicketId?: string;
-    matchedFiles: string[];
-  }>,
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined,
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
-  metadata: CommitAnalysisCanvasMetadata,
-  title: string
-): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
-  const blocks: BlockNoteBlock[] = [];
-  const mentionedUserIds = new Set<string>();
-
-  const userLookupCache = new Map<string, { userId: string; username: string; userEmail: string; userPicture: string } | null>();
+function makeUserLookup(): UserLookup {
+  const cache = new Map<string, UserLookupResult>();
   const userRepository = new UserRepository();
-
-  const lookupUserByEmail = async (email: string | undefined, workspaceId: string): Promise<{ userId: string; username: string; userEmail: string; userPicture: string } | null> => {
+  return async (email, workspaceId) => {
     if (!email) return null;
-
-    // Check cache first
-    if (userLookupCache.has(email)) {
-      return userLookupCache.get(email)!;
-    }
-
+    if (cache.has(email)) return cache.get(email)!;
     try {
       const user = await userRepository.findByEmail(email, workspaceId);
       if (user) {
@@ -249,16 +108,203 @@ async function formatCommitAnalysisToBlockNote(
           userEmail: user.email,
           userPicture: user.picture || '',
         };
-        userLookupCache.set(email, userData);
+        cache.set(email, userData);
         return userData;
       }
     } catch (error) {
       logger.warn(`[CanvasService] Failed to lookup user by email ${email}:`, error);
     }
-
-    userLookupCache.set(email, null);
+    cache.set(email, null);
     return null;
   };
+}
+
+// Index env changes primarily by `${commitId}::${filePath}` so two commits that
+// touch the SAME env file (e.g. a main PR and a later hotfix both editing
+// .env.prod) don't collapse to one entry. A path-only key is also stored as a
+// fallback for changes that lack a commitId (the run-accumulated summary).
+function indexEnvChangesByPath(
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined
+): Map<string, { fileName: string; newValue: string }> {
+  const map = new Map<string, { fileName: string; newValue: string }>();
+  if (envChanges) {
+    for (const change of envChanges) {
+      // newValue may legitimately be '' (emptied env file)
+      if (change.filePath && change.fileName) {
+        const entry = { fileName: change.fileName, newValue: change.newValue };
+        if (change.commitId) map.set(`${change.commitId}::${change.filePath}`, entry);
+        if (!map.has(change.filePath)) map.set(change.filePath, entry);
+      }
+    }
+  }
+  return map;
+}
+
+// Group migration links by commit so a file like schema.prisma touched by
+// multiple PRs resolves to the right per-commit diff.
+function indexMigrationLinksByCommit(
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined
+): Map<string, Map<string, string>> {
+  const map = new Map<string, Map<string, string>>();
+  if (migrationLinks) {
+    for (const link of migrationLinks) {
+      const commitMatch = link.diffUrl.match(/commits?\/([a-f0-9]+)/);
+      if (commitMatch) {
+        const commitId = commitMatch[1];
+        if (!map.has(commitId)) map.set(commitId, new Map());
+        map.get(commitId)!.set(link.filePath, link.diffUrl);
+      }
+    }
+  }
+  return map;
+}
+
+function uniquePrResults(results: PrResult[]): PrResult[] {
+  const seen = new Map<number, PrResult>();
+  for (const result of results) {
+    if (result.pullRequest && !seen.has(result.pullRequest.id)) {
+      seen.set(result.pullRequest.id, result);
+    }
+  }
+  return [...seen.values()];
+}
+
+// Render one PR into `blocks`. Shared by the main "Pull Requests & Tickets"
+// section and the "Hotfix PRs" section so both render identically.
+async function appendPullRequestBlocks(
+  blocks: BlockNoteBlock[],
+  result: PrResult,
+  metadata: CommitAnalysisCanvasMetadata,
+  mentionedUserIds: Set<string>,
+  lookupUserByEmail: UserLookup,
+  envChangesByPath: Map<string, { fileName: string; newValue: string }>,
+  migrationLinksByCommit: Map<string, Map<string, string>>,
+): Promise<void> {
+  if (!result.pullRequest) return;
+  const pr = result.pullRequest;
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 3 },
+    content: [
+      { type: 'text', text: `PR #${pr.id}: `, styles: { bold: true } },
+      { type: 'text', text: pr.title, styles: {} },
+    ],
+  });
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'URL: ', styles: { bold: true } },
+      { type: 'link', href: pr.url, content: [{ type: 'text', text: pr.url, styles: {} }] },
+    ],
+  });
+
+  const authorUser = metadata.workspaceId
+    ? await lookupUserByEmail(pr.author.emailAddress, metadata.workspaceId)
+    : null;
+  const authorContent: BlockNoteInlineContent[] = [
+    { type: 'text', text: 'Author: ', styles: { bold: true } },
+  ];
+  if (authorUser) {
+    authorContent.push({
+      type: 'mention',
+      props: {
+        userId: authorUser.userId,
+        username: authorUser.username,
+        userEmail: authorUser.userEmail,
+        userPicture: authorUser.userPicture,
+      },
+    });
+    mentionedUserIds.add(authorUser.userId);
+  } else {
+    authorContent.push({ type: 'text', text: pr.author.displayName, styles: {} });
+  }
+  blocks.push({ id: uuidv4(), type: 'paragraph', content: authorContent });
+
+  if (result.ticket && metadata.channelId) {
+    const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${result.ticket.id}&conversationId=${metadata.conversationId || ''}`;
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Ticket: ', styles: { bold: true } },
+        { type: 'link', href: ticketUrl, content: [{ type: 'text', text: `${result.ticket.xyneId}`, styles: {} }] },
+        { type: 'text', text: ` - ${result.ticket.title} (${result.ticket.status})`, styles: {} },
+      ],
+    });
+  }
+
+  // Env changes for this PR — look up by (commit, path) first so this PR shows
+  // ITS OWN env diff, falling back to path-only for commit-less changes.
+  const prEnvChangeList = result.filePaths
+    .map((filePath) => envChangesByPath.get(`${result.commitId}::${filePath}`) ?? envChangesByPath.get(filePath))
+    .filter((c): c is { fileName: string; newValue: string } => !!c);
+  if (prEnvChangeList.length > 0) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Environment Changes:', styles: { bold: true } }],
+    });
+    for (const item of parseEnvChanges(prEnvChangeList)) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content: [
+          { type: 'text', text: item.name, styles: { code: true } },
+          { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
+        ],
+      });
+    }
+  }
+
+  // Migration changes specific to this PR's commit
+  const prMigrationLinks = migrationLinksByCommit.get(result.commitId);
+  const prMigrationChanges = prMigrationLinks
+    ? result.filePaths.filter(fp => prMigrationLinks.has(fp))
+    : [];
+  if (prMigrationChanges.length > 0) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Migration Changes:', styles: { bold: true } }],
+    });
+    for (const filePath of prMigrationChanges) {
+      const fileName = filePath.split('/').pop() || filePath;
+      const diffUrl = prMigrationLinks!.get(filePath);
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content: [
+          { type: 'link', href: diffUrl!, content: [{ type: 'text', text: 'View Diff → ', styles: {} }] },
+          { type: 'text', text: fileName, styles: { code: true } },
+        ],
+      });
+    }
+  }
+
+  blocks.push({ id: uuidv4(), type: 'paragraph', content: [] });
+}
+
+// -------------------------------------------------------------------------
+// Content builders
+// -------------------------------------------------------------------------
+
+// Builds every block ABOVE the hotfix section: title, repo, range, summary,
+// services, config changes, env vars and the "🔀 Pull Requests & Tickets" list.
+async function buildMainAnalysisBlocks(
+  results: PrResult[],
+  affectedApplications: AffectedApplicationInfo[],
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  metadata: CommitAnalysisCanvasMetadata,
+  title: string,
+): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
+  const blocks: BlockNoteBlock[] = [];
+  const mentionedUserIds = new Set<string>();
+  const lookupUserByEmail = makeUserLookup();
 
   const envVarList = parseEnvChanges(envChanges);
   const envVariableCount = envVarList.length;
@@ -267,7 +313,6 @@ async function formatCommitAnalysisToBlockNote(
   const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
   const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
-  // Main title
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -275,7 +320,6 @@ async function formatCommitAnalysisToBlockNote(
     content: [{ type: 'text', text: title, styles: { bold: true } }],
   });
 
-  // Repository info
   blocks.push({
     id: uuidv4(),
     type: 'paragraph',
@@ -285,7 +329,6 @@ async function formatCommitAnalysisToBlockNote(
     ],
   });
 
-  // Commit range
   blocks.push({
     id: uuidv4(),
     type: 'paragraph',
@@ -295,7 +338,6 @@ async function formatCommitAnalysisToBlockNote(
     ],
   });
 
-  // Summary statistics
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -309,7 +351,6 @@ async function formatCommitAnalysisToBlockNote(
     content: [{ type: 'text', text: `${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets`, styles: {} }],
   });
 
-  // Services to deploy
   if (affectedApplications.length > 0) {
     blocks.push({
       id: uuidv4(),
@@ -322,23 +363,15 @@ async function formatCommitAnalysisToBlockNote(
       const content: BlockNoteInlineContent[] = [
         { type: 'text', text: app.name, styles: { bold: true } },
       ];
-
-      // Add ticket link if mappedTicketId exists
       if (app.mappedTicketId && metadata.channelId) {
         const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${app.mappedTicketId}&conversationId=${metadata.conversationId || ''}`;
         content.push({ type: 'text', text: ' - ', styles: {} });
         content.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket', styles: {} }] });
       }
-
-      blocks.push({
-        id: uuidv4(),
-        type: 'bulletListItem',
-        content,
-      });
+      blocks.push({ id: uuidv4(), type: 'bulletListItem', content });
     }
   }
 
-  // Environment and Migration changes
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -371,7 +404,6 @@ async function formatCommitAnalysisToBlockNote(
       props: { level: 3 },
       content: [{ type: 'text', text: '🔧 Environment Variables', styles: {} }],
     });
-
     for (const item of envVarList) {
       blocks.push({
         id: uuidv4(),
@@ -384,7 +416,6 @@ async function formatCommitAnalysisToBlockNote(
     }
   }
 
-  // Pull Requests and Tickets section
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -392,171 +423,382 @@ async function formatCommitAnalysisToBlockNote(
     content: [{ type: 'text', text: '🔀 Pull Requests & Tickets', styles: {} }],
   });
 
-  // Group results by PR (unique PRs only)
-  const uniquePRs = new Map<number, typeof results[0]>();
-  for (const result of results) {
-    if (result.pullRequest) {
-      if (!uniquePRs.has(result.pullRequest.id)) {
-        uniquePRs.set(result.pullRequest.id, result);
-      }
-    }
+  const envChangesByPath = indexEnvChangesByPath(envChanges);
+  const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
+
+  for (const result of uniquePrResults(results)) {
+    await appendPullRequestBlocks(
+      blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+    );
   }
 
-  const envChangesByPath = new Map<string, { fileName: string; newValue: string }>();
-  if (envChanges) {
-    for (const change of envChanges) {
-      if (change.filePath && change.fileName && change.newValue) {
-        envChangesByPath.set(change.filePath, { fileName: change.fileName, newValue: change.newValue });
-      }
-    }
+  return { blocks, mentionedUserIds: [...mentionedUserIds] };
+}
+
+// Builds the "🔥 Hotfix PRs" section. Returns an empty block list when there are
+// no hotfix PRs so callers can drop the section entirely.
+async function buildHotfixSectionBlocks(
+  results: PrResult[],
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  metadata: CommitAnalysisCanvasMetadata,
+): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
+  const prResults = uniquePrResults(results);
+  if (prResults.length === 0) {
+    return { blocks: [], mentionedUserIds: [] };
   }
 
-  // Group migration links by PR (commit) to avoid cross-contamination
-  // A file like schema.prisma can appear in multiple PRs, each with different commit IDs
-  const migrationLinksByCommit = new Map<string, Map<string, string>>();
-  if (migrationLinks) {
-    for (const link of migrationLinks) {
-      // Extract commit ID from the diffUrl
-      const commitMatch = link.diffUrl.match(/commits\/([a-f0-9]+)/);
-      if (commitMatch) {
-        const commitId = commitMatch[1];
-        if (!migrationLinksByCommit.has(commitId)) {
-          migrationLinksByCommit.set(commitId, new Map());
-        }
-        migrationLinksByCommit.get(commitId)!.set(link.filePath, link.diffUrl);
-      }
-    }
+  const blocks: BlockNoteBlock[] = [];
+  const mentionedUserIds = new Set<string>();
+  const lookupUserByEmail = makeUserLookup();
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 2 },
+    content: [{ type: 'text', text: HOTFIX_HEADING_TEXT, styles: {} }],
+  });
+
+  // metadata.deployedCommitId/newCommitId here carry the hotfix delta range
+  // (frozen release head → new branch head).
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: `${prResults.length} hotfix PR${prResults.length === 1 ? '' : 's'} merged after release`, styles: { italic: true } },
+      { type: 'text', text: ` (${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)})`, styles: { code: true } },
+    ],
+  });
+
+  const envChangesByPath = indexEnvChangesByPath(envChanges);
+  const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
+
+  for (const result of prResults) {
+    await appendPullRequestBlocks(
+      blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+    );
   }
 
-  for (const [, result] of uniquePRs) {
-    if (!result.pullRequest) continue;
+  return { blocks, mentionedUserIds: [...mentionedUserIds] };
+}
 
-    const pr = result.pullRequest;
+// -------------------------------------------------------------------------
+// Hotfix-section slicing on stored content (idempotent upserts)
+// -------------------------------------------------------------------------
+function findHotfixHeadingIndex(blocks: BlockNoteBlock[]): number {
+  return blocks.findIndex(
+    (b) =>
+      b?.type === 'heading' &&
+      Array.isArray(b.content) &&
+      b.content.some((c: any) => c?.type === 'text' && c.text === HOTFIX_HEADING_TEXT),
+  );
+}
+function extractHotfixSection(blocks: BlockNoteBlock[]): BlockNoteBlock[] {
+  const i = findHotfixHeadingIndex(blocks);
+  return i < 0 ? [] : blocks.slice(i);
+}
+function stripHotfixSection(blocks: BlockNoteBlock[]): BlockNoteBlock[] {
+  const i = findHotfixHeadingIndex(blocks);
+  return i < 0 ? blocks : blocks.slice(0, i);
+}
 
-    // PR Title as heading
-    blocks.push({
-      id: uuidv4(),
-      type: 'heading',
-      props: { level: 3 },
-      content: [
-        { type: 'text', text: `PR #${pr.id}: `, styles: { bold: true } },
-        { type: 'text', text: pr.title, styles: {} },
-      ],
+// -------------------------------------------------------------------------
+// Persistence
+// -------------------------------------------------------------------------
+async function fireCanvasSideEffectsAndIndex(
+  canvasId: string,
+  createdByUserId: string,
+  isInsert: boolean,
+): Promise<void> {
+  const user = await db.user.findUnique({
+    where: { id: createdByUserId },
+    select: { id: true, email: true, workspaceId: true, role: true },
+  });
+  if (!user || !user.workspaceId) {
+    throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+  }
+  if (isInsert) {
+    // Email is globally unique in orgMember, single lookup is sufficient
+    const orgMember = await db.orgMember.findUnique({ where: { email: user.email } });
+    if (!orgMember) {
+      throw new Error(`User ${createdByUserId} is not a member of any organization`);
+    }
+    const canvasHandler = new CanvasSideEffectHandler({
+      userID: user.id,
+      workspaceId: user.workspaceId,
+      role: user.role,
+      memberId: orgMember.memberId,
+      orgRole: orgMember.role,
     });
+    canvasHandler.onInsert({ entityId: canvasId, entityType: 'canvases', operation: 'insert' })
+      .catch(err => logger.error('[CanvasService] Canvas side-effect handler error:', err));
+  }
 
-    blocks.push({
-      id: uuidv4(),
-      type: 'paragraph',
-      content: [
-        { type: 'text', text: 'URL: ', styles: { bold: true } },
-        { type: 'link', href: pr.url, content: [{ type: 'text', text: pr.url, styles: {} }] },
-      ],
+  try {
+    await vespaQueue.addJob({
+      schema: fileSchema,
+      docId: canvasId,
+      jobType: 'feed',
+      userId: createdByUserId,
+      workspaceId: user.workspaceId,
+      app: SubApp.CANVAS,
     });
+  } catch (vespaError) {
+    logger.error(`[CanvasService] Failed to queue Vespa job for commit analysis canvas ${canvasId}:`, vespaError);
+  }
+}
 
-    // Author - with mention if user found
-    const authorUser = metadata.workspaceId
-      ? await lookupUserByEmail(pr.author.emailAddress, metadata.workspaceId)
-      : null;
-    const authorContent: BlockNoteInlineContent[] = [
-      { type: 'text', text: 'Author: ', styles: { bold: true } },
-    ];
+// Find the single existing release-analysis canvas for a conversation.
+async function findExistingAnalysisCanvas(
+  conversationId: string | undefined,
+  channelId: string | undefined,
+) {
+  if (!conversationId) return null;
+  return prisma.canvas.findFirst({
+    where: {
+      ...(channelId ? { channelId } : {}),
+      AND: [
+        { metadata: { path: ['source'], equals: 'commit_analysis' } },
+        { metadata: { path: ['conversationId'], equals: conversationId } },
+      ],
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+}
 
-    if (authorUser) {
-      authorContent.push({
-        type: 'mention',
-        props: {
-          userId: authorUser.userId,
-          username: authorUser.username,
-          userEmail: authorUser.userEmail,
-          userPicture: authorUser.userPicture,
+type CanvasSection = 'main' | 'hotfix';
+
+export interface UpsertCommitAnalysisCanvasArgs {
+  section: CanvasSection;
+  results: CommitAnalysisResult[];
+  affectedApplications: AffectedApplicationInfo[];
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined;
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined;
+  createdByUserId: string;
+  metadata: CommitAnalysisCanvasMetadata;
+}
+
+/**
+ * Create-or-update the SINGLE release-analysis canvas for a release conversation.
+ *
+ * One canvas per release: the canvas is located by (source='commit_analysis' +
+ * conversationId) and updated in place — no new canvas is minted on re-run or on
+ * a hotfix sync.
+ *
+ * - section='main'  rebuilds everything above the hotfix section and PRESERVES
+ *   any existing "🔥 Hotfix PRs" blocks.
+ * - section='hotfix' rebuilds ONLY the hotfix section and PRESERVES the existing
+ *   main blocks. An empty hotfix delta removes the section.
+ *
+ * Returns the canvas id (stable across updates), or null on failure.
+ */
+export async function upsertCommitAnalysisCanvas(
+  args: UpsertCommitAnalysisCanvasArgs,
+): Promise<string | null> {
+  const { section, results, affectedApplications, envChanges, migrationLinks, createdByUserId, metadata } = args;
+
+  // Serialize the re-entrant find-then-update/create (Re-run + webhook) so
+  // concurrent runs don't double-create or clobber the canvas. Fails open.
+  const lockKey = metadata.conversationId
+    ? `lock:release-analysis-canvas:${metadata.conversationId}`
+    : null;
+  const lock = lockKey ? await acquireLock(lockKey, { waitTimeoutMs: 30_000, ttlSeconds: 120 }) : null;
+  if (lockKey && !lock) {
+    logger.warn(`[CanvasService] Proceeding without lock ${lockKey} — held past wait window`);
+  }
+
+  try {
+    const now = new Date();
+    const existing = await findExistingAnalysisCanvas(metadata.conversationId, metadata.channelId);
+
+    let content: BlockNoteBlock[];
+    let mentionedUserIds: string[];
+
+    if (section === 'hotfix') {
+      const hotfix = await buildHotfixSectionBlocks(results, envChanges, migrationLinks, metadata);
+      if (existing) {
+        const existingBlocks = (existing.content as unknown as BlockNoteBlock[]) ?? [];
+        content = [...stripHotfixSection(existingBlocks), ...hotfix.blocks];
+      } else {
+        // No canvas yet (hotfix arrived before any main analysis) — start from a
+        // minimal main scaffold so the section has context.
+        const scaffold = await buildMainAnalysisBlocks(
+          [], [], undefined, undefined, metadata, analysisCanvasTitle(metadata, now),
+        );
+        content = [...scaffold.blocks, ...hotfix.blocks];
+      }
+      mentionedUserIds = hotfix.mentionedUserIds;
+    } else {
+      const title = existing?.title || analysisCanvasTitle(metadata, now);
+      const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title);
+      const preservedHotfix = existing
+        ? extractHotfixSection((existing.content as unknown as BlockNoteBlock[]) ?? [])
+        : [];
+      content = [...main.blocks, ...preservedHotfix];
+      mentionedUserIds = main.mentionedUserIds;
+    }
+
+    if (existing) {
+      const prevMeta = (existing.metadata as Record<string, unknown>) || {};
+      const prevMentions = Array.isArray(prevMeta.mentionedUserIds) ? (prevMeta.mentionedUserIds as string[]) : [];
+      await prisma.canvas.update({
+        where: { id: existing.id },
+        data: {
+          content: content as any,
+          lastEditedBy: createdByUserId,
+          lastEditedAt: now,
+          updatedAt: now,
+          metadata: {
+            ...prevMeta,
+            source: 'commit_analysis',
+            workspace: metadata.workspace,
+            repoSlug: metadata.repoSlug,
+            commitCount: results.length,
+            mentionedUserIds: [...new Set([...prevMentions, ...mentionedUserIds])],
+            // Only the main section owns the release range — a hotfix update
+            // must not overwrite it with the hotfix delta range.
+            ...(section === 'main' && {
+              deployedCommitId: metadata.deployedCommitId,
+              newCommitId: metadata.newCommitId,
+            }),
+            ...(metadata.conversationId && { conversationId: metadata.conversationId }),
+            ...(metadata.projectId && { projectId: metadata.projectId }),
+          },
         },
       });
-      // Track mentioned user for notifications
-      mentionedUserIds.add(authorUser.userId);
-    } else {
-      // display username if not found
-      authorContent.push({ type: 'text', text: pr.author.displayName, styles: {} });
+      logger.info(`[CanvasService] Updated release analysis canvas ${existing.id} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
+      await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
+      return existing.id;
     }
 
-    blocks.push({
-      id: uuidv4(),
-      type: 'paragraph',
-      content: authorContent,
+    // Create a fresh canvas (first analysis for this conversation).
+    const canvasId = await persistNewAnalysisCanvas({
+      content,
+      mentionedUserIds,
+      commitCount: results.length,
+      createdByUserId,
+      metadata,
+      now,
     });
-
-    // Ticket info if present
-    if (result.ticket && metadata.channelId) {
-      const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${result.ticket.id}&conversationId=${metadata.conversationId || ''}`;
-      blocks.push({
-        id: uuidv4(),
-        type: 'paragraph',
-        content: [
-          { type: 'text', text: 'Ticket: ', styles: { bold: true } },
-          { type: 'link', href: ticketUrl, content: [{ type: 'text', text: `${result.ticket.xyneId}`, styles: {} }] },
-          { type: 'text', text: ` - ${result.ticket.title} (${result.ticket.status})`, styles: {} },
-        ],
-      });
-    }
-
-    // Display env changes for this PR
-    const prEnvChanges = result.filePaths.filter(fp => envChangesByPath.has(fp));
-    if (prEnvChanges.length > 0) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'paragraph',
-        content: [{ type: 'text', text: 'Environment Changes:', styles: { bold: true } }],
-      });
-
-      const prEnvChangeList = prEnvChanges
-        .map((filePath) => envChangesByPath.get(filePath))
-        .filter((c): c is { fileName: string; newValue: string } => !!c);
-      const envVarList = parseEnvChanges(prEnvChangeList);
-
-      for (const item of envVarList) {
-        blocks.push({
-          id: uuidv4(),
-          type: 'bulletListItem',
-          content: [
-            { type: 'text', text: item.name, styles: { code: true } },
-            { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
-          ],
-        });
-      }
-    }
-
-    // Look up migration links specific to this PR's commit
-    const prMigrationLinks = migrationLinksByCommit.get(result.commitId);
-    const prMigrationChanges = prMigrationLinks
-      ? result.filePaths.filter(fp => prMigrationLinks.has(fp))
-      : [];
-
-    if (prMigrationChanges.length > 0) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'paragraph',
-        content: [{ type: 'text', text: 'Migration Changes:', styles: { bold: true } }],
-      });
-
-      for (const filePath of prMigrationChanges) {
-        const fileName = filePath.split('/').pop() || filePath;
-        const diffUrl = prMigrationLinks!.get(filePath);
-        blocks.push({
-          id: uuidv4(),
-          type: 'bulletListItem',
-          content: [
-            { type: 'link', href: diffUrl!, content: [{ type: 'text', text: 'View Diff → ', styles: {} }] },
-            { type: 'text', text: fileName, styles: { code: true } },
-          ],
-        });
-      }
-    }
-
-    // Spacing
-    blocks.push({
-      id: uuidv4(),
-      type: 'paragraph',
-      content: [],
-    });
+    logger.info(`[CanvasService] Created release analysis canvas ${canvasId} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
+    return canvasId;
+  } catch (error) {
+    logger.error('[CanvasService] Failed to upsert commit analysis canvas:', error);
+    return null;
+  } finally {
+    await releaseLock(lock);
   }
-  return { blocks, mentionedUserIds: [...mentionedUserIds] };
+}
+
+function analysisCanvasTitle(metadata: CommitAnalysisCanvasMetadata, now: Date): string {
+  const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return `📦 Release Analysis: ${metadata.workspace}/${metadata.repoSlug} - ${dateStr}`;
+}
+
+// Shared new-canvas persistence (row + participant + side effects) for both entry points.
+async function persistNewAnalysisCanvas(args: {
+  content: unknown;
+  mentionedUserIds: string[];
+  commitCount: number;
+  createdByUserId: string;
+  metadata: CommitAnalysisCanvasMetadata;
+  now: Date;
+}): Promise<string> {
+  const { content, mentionedUserIds, commitCount, createdByUserId, metadata, now } = args;
+  const canvasId = uuidv4();
+  const finalTitle = analysisCanvasTitle(metadata, now);
+
+  // Canvas rows carry the denormalized tenant key; resolve it from the creator
+  // before insert (matches main's XYNE-17656 tenant stamping).
+  const creator = await db.user.findUnique({
+    where: { id: createdByUserId },
+    select: { workspaceId: true },
+  });
+  if (!creator || !creator.workspaceId) {
+    throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+  }
+
+  await prisma.canvas.create({
+    data: {
+      id: canvasId,
+      title: finalTitle,
+      content: content as any,
+      workspaceId: creator.workspaceId,
+      createdBy: createdByUserId,
+      visibility: CanvasVisibility.PUBLIC,
+      isTemplate: false,
+      isCollaborative: false,
+      lastEditedBy: createdByUserId,
+      lastEditedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      channelId: metadata.channelId || null,
+      metadata: {
+        source: 'commit_analysis',
+        workspace: metadata.workspace,
+        repoSlug: metadata.repoSlug,
+        deployedCommitId: metadata.deployedCommitId,
+        newCommitId: metadata.newCommitId,
+        commitCount,
+        affectedApplicationCount: metadata.affectedApplicationCount,
+        migrationCount: metadata.migrationCount,
+        envChangeCount: metadata.envChangeCount,
+        mentionedUserIds,
+        ...(metadata.projectId && { projectId: metadata.projectId }),
+        ...(metadata.conversationId && { conversationId: metadata.conversationId }),
+      },
+    },
+  });
+
+  await prisma.canvasParticipant.create({
+    data: {
+      id: uuidv4(),
+      canvasId,
+      workspaceId: creator.workspaceId,
+      userId: createdByUserId,
+      role: CanvasRole.VIEWER,
+      joinedAt: now,
+      updatedAt: now,
+    },
+  });
+
+  await fireCanvasSideEffectsAndIndex(canvasId, createdByUserId, true);
+  return canvasId;
+}
+
+/**
+ * Legacy create-only entry point. Used by the sub-ticket update path, which
+ * posts into a DIFFERENT (parent) conversation and intentionally gets its own
+ * canvas. The main release + hotfix flows use upsertCommitAnalysisCanvas.
+ */
+export async function createCommitAnalysisCanvas(
+  results: CommitAnalysisResult[],
+  affectedApplications: AffectedApplicationInfo[],
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  createdByUserId: string,
+  metadata: CommitAnalysisCanvasMetadata
+): Promise<string | null> {
+  try {
+    const now = new Date();
+    const { blocks: content, mentionedUserIds } = await buildMainAnalysisBlocks(
+      results, affectedApplications, envChanges, migrationLinks, metadata, analysisCanvasTitle(metadata, now),
+    );
+
+    const canvasId = await persistNewAnalysisCanvas({
+      content,
+      mentionedUserIds,
+      commitCount: results.length,
+      createdByUserId,
+      metadata,
+      now,
+    });
+    logger.info(
+      `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
+    );
+    return canvasId;
+  } catch (error) {
+    logger.error('[CanvasService] Failed to create commit analysis canvas:', error);
+    return null;
+  }
 }

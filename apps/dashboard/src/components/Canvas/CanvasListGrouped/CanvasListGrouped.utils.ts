@@ -8,10 +8,13 @@ export interface CanvasListGroupedProps {
   selectedCanvasId?: string | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
   isPersonalSectionCollapsed: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   excludeCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
+  includeArchived?: boolean;
+  onlyArchived?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
   searchQuery?: string;
 }
@@ -53,7 +56,10 @@ export function sortByName<T>(items: T[], getName: (item: T) => string): T[] {
 }
 
 export function sortCanvases(canvases: Canvas[]): Canvas[] {
-  return sortByName(canvases, canvas => canvas.title || 'Untitled');
+  return [...canvases].sort(
+    (a, b) =>
+      b.updatedAt - a.updatedAt || (a.title || 'Untitled').localeCompare(b.title || 'Untitled'),
+  );
 }
 
 export function matchesGroupedCanvasSearch(

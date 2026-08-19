@@ -1,4 +1,4 @@
-import { BaseTicketType } from "./types";
+import { BaseTicketType } from "../zero/types.js";
 
 export const ClassifiableTicketTypes = Object.values(BaseTicketType).filter(
     (type) => type !== BaseTicketType.Release

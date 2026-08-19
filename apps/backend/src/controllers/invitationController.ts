@@ -5,17 +5,19 @@
 
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { ProjectType, Status } from '@prisma/client';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
+import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { getEncryptionProvider } from '@/services/encryption';
 
 /**
  * Extract the hostname from an Origin header value.
@@ -59,6 +61,7 @@ export async function buildInvitationLink(params: {
   const path = `invite?workspaceId=${workspaceId}&invitationId=${invitationId}`;
   return `${baseUrl}/launch?path=${encodeURIComponent(path)}`;
 }
+import { createId } from '@paralleldrive/cuid2';
 
 export class InvitationController {
   /**
@@ -464,10 +467,13 @@ export class InvitationController {
       await organizationDomainService.assertCanCreateOrgForEmail(normalizedOwnerEmail);
 
       // Reject if the owner email is already an active member of any org
-      const existingMembership = await prisma.orgMember.findFirst({
-        where: { email: normalizedOwnerEmail, leftAt: null },
-        select: { orgId: true },
-      });
+      // Checks membership of ANY org, not just the caller's.
+      const existingMembership = await withWorkspaceScope(() =>
+        prisma.orgMember.findFirst({
+          where: { email: normalizedOwnerEmail, leftAt: null },
+          select: { orgId: true },
+        }),
+      );
       if (existingMembership) {
         res.status(409).json({
           error: `${ownerEmail.trim()} is already a member of an organisation`,
@@ -475,10 +481,22 @@ export class InvitationController {
         return;
       }
 
+      const orgId = createId();
+      try {
+        await getEncryptionProvider().initializeOrg(orgId);
+      } catch (error) {
+        logger.error('Failed to initialize org encryption before invitation bootstrap', {
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
       // All creation steps in one transaction — rollback automatically on any failure
       const { org, workspace } = await prisma.$transaction(async tx => {
         const org = await tx.organization.create({
           data: {
+            orgId,
             name: orgName.trim(),
             createdBy: invitedBy,
             status: Status.ACTIVE,
@@ -494,6 +512,12 @@ export class InvitationController {
             workspaceType: WorkspaceType.ENTERPRISE,
             joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           },
+        });
+
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
         });
 
         // DM project required for every workspace
@@ -513,8 +537,16 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             workspaceId: workspace.id,
-            role: 'ADMIN',
+            role: WorkspaceRole.ADMIN,
           },
+        });
+
+        // Seed general channel + default project + board/stages
+        await createCommunityWorkspaceDefaults({
+          db: tx,
+          workspaceId: workspace.id,
+          workspaceName: workspaceName.trim(),
+          createdBy: invitedBy,
         });
 
         // Add owner as org_member (email-only — no User record yet)
@@ -522,7 +554,7 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             email: normalizedOwnerEmail,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             invitedBy: req.user?.email ?? undefined,
           },
         });
@@ -542,7 +574,7 @@ export class InvitationController {
       // Create invitation outside the transaction (sends email — non-DB side-effect)
       const invitation = await invitationService.createInvitation({
         email: normalizedOwnerEmail,
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         workspaceId: workspace.id,
         orgId: org.orgId,
         invitedBy,
@@ -568,9 +600,9 @@ export class InvitationController {
         });
 
         // 2. Delete org member
-        await prisma.orgMember.delete({ 
-          where: { email: normalizedOwnerEmail } 
-        });
+        await withWorkspaceScope(() =>
+          prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } }),
+        );
         
         // 3. Delete workspace-organization link
         await prisma.workspaceOrganization.delete({ 

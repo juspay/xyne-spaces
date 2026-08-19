@@ -169,9 +169,12 @@ export function ComposerCollectionPicker({
         title='Select collections'
         className={cn(
           'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
-          collections.length > 0
+          // Accent only while something is actually scoped — idle matches the
+          // neighbouring ToolbarButtons so the row reads as one set. Files count
+          // as a selection too: this picker sets both.
+          collections.length > 0 || fileScopes.length > 0
             ? 'bg-secondary text-[#7C3AED]'
-            : 'text-[#7C3AED] hover:bg-secondary',
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
         )}
         data-track-category='XyneAI'
         data-track-name='OPEN_COLLECTION_SELECTOR'

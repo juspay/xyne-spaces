@@ -64,7 +64,7 @@ export type StepKind = (typeof StepKindValues)[keyof typeof StepKindValues];
 export interface OperatorMeta {
   value: string;
   label: string;
-  valueType: 'string' | 'number' | 'boolean' | 'none';
+  valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag';
 }
 
 export interface TriggerCatalogItem {
@@ -228,15 +228,93 @@ export interface Automation {
   automationSeriesId: string | null;
 }
 
-export interface AutomationRun {
+export interface DeskLabelRulesPayload {
+  channelId: string;
+  labelName: string;
+  color?: string;
+  labelId?: string;
+  name?: string;
+  emailFilters?: Record<string, unknown>;
+  keepInInbox?: boolean;
+}
+
+export interface DeskLabelRulesPage {
+  automations: Automation[];
+  counts: {
+    total: number;
+    active: number;
+  };
+  pagination: {
+    limit: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
+export function createDeskLabelRules(
+  payload: DeskLabelRulesPayload,
+): Promise<{ automations: Automation[]; created: boolean }> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ automations: Automation[]; created: boolean }>>(
+      '/automations/desk-label-rules',
+      payload,
+    ),
+  );
+}
+
+export function fetchDeskLabelRules(opts: {
+  channelId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<DeskLabelRulesPage> {
+  const params = new URLSearchParams();
+  params.set('channelId', opts.channelId);
+  if (opts.cursor) params.set('cursor', opts.cursor);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<DeskLabelRulesPage>>(
+      `/automations/desk-label-rules${qs ? `?${qs}` : ''}`,
+    ),
+  );
+}
+
+export function setDeskLabelRuleStatus(
+  id: string,
+  status: 'ACTIVE' | 'DISABLED',
+): Promise<{ automation: Automation }> {
+  return unwrap(
+    apiInstance.patch<SuccessEnvelope<{ automation: Automation }>>(
+      `/automations/desk-label-rules/${encodeURIComponent(id)}`,
+      { status },
+    ),
+  );
+}
+
+export function archiveAutomation(
+  id: string,
+): Promise<{ automation?: Automation; message?: string }> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ automation?: Automation; message?: string }>>(
+      `/automations/${encodeURIComponent(id)}`,
+    ),
+  );
+}
+
+/** Row shape returned by the runs list — no context blobs. */
+export interface AutomationRunSummary {
   id: string;
   automationId: string;
   status: AutomationRunStatus;
-  triggerData: Record<string, unknown>;
-  context: Record<string, unknown>;
   error: string | null;
   startedAt: string;
   completedAt: string | null;
+}
+
+/** Returned by the run-detail endpoint only. */
+export interface AutomationRun extends AutomationRunSummary {
+  triggerData: Record<string, unknown>;
+  context: Record<string, unknown>;
 }
 
 export interface SaveResult {
@@ -360,7 +438,7 @@ export function releaseAutomationTemplate(attachmentId: string): Promise<{ remov
 
 // ─── Runs API (REST — replaces Zero queries for runs) ────────────────────
 export interface RunsListPage {
-  runs: AutomationRun[];
+  runs: AutomationRunSummary[];
   nextCursor: string | null;
 }
 

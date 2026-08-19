@@ -3,7 +3,7 @@ import type { UserMemoryRecord } from "xyne-claw-shared";
 
 // Mock the LiteLLM transport so we script the tool-call `arguments` per test.
 const fetchMock = vi.fn();
-vi.mock("../src/litellm-retry.js", () => ({
+vi.mock("@xyne/litellm-client", () => ({
   fetchLiteLLMWithRetry: fetchMock,
 }));
 
@@ -101,14 +101,14 @@ test("kept + dropped verdicts with correct dropReasons and 1:1 kept↔candidates
   expect(trace.rawResponse).toContain("owns the curator pipeline");
 });
 
-test("empty-or-too-long and malformed drop reasons", async () => {
+test("empty and malformed candidates are dropped while long candidates are kept", async () => {
   const longText = "x".repeat(1_600);
   fetchMock.mockResolvedValue(
     okResponse(
       JSON.stringify({
         candidates: [
           { text: "   ", subsystem: "style", signalScore: 0.9, groundedOnIds: ["r1"] }, // empty
-          { text: longText, subsystem: "style", signalScore: 0.9, groundedOnIds: ["r1"] }, // too long
+          { text: longText, subsystem: "style", signalScore: 0.9, groundedOnIds: ["r1"] }, // long but valid
           "not-an-object", // malformed
         ],
       }),
@@ -116,10 +116,11 @@ test("empty-or-too-long and malformed drop reasons", async () => {
   );
 
   const { candidates, trace } = await run([rec("r1")]);
-  expect(candidates).toHaveLength(0);
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]?.text).toBe(longText);
   expect(trace.emitted).toHaveLength(3);
-  expect(trace.emitted[0]).toMatchObject({ verdict: "dropped", dropReason: "empty-or-too-long" });
-  expect(trace.emitted[1]).toMatchObject({ verdict: "dropped", dropReason: "empty-or-too-long" });
+  expect(trace.emitted[0]).toMatchObject({ verdict: "dropped", dropReason: "empty" });
+  expect(trace.emitted[1]).toMatchObject({ verdict: "kept", text: longText });
   expect(trace.emitted[2]).toMatchObject({ verdict: "dropped", dropReason: "malformed" });
 });
 
@@ -153,4 +154,43 @@ test("candidates return value is unchanged vs the kept emitted entries", async (
   // matching what the returned candidate carries.
   expect(kept[0]!.groundedOnIds).toEqual(candidates[0]!.groundedOnIds);
   expect(candidates[0]!.groundedOnIds).toEqual(["r1"]);
+});
+
+test("accepts a 200-record batch without truncating the grounding set", async () => {
+  fetchMock.mockResolvedValue(
+    okResponse(
+      JSON.stringify({
+        candidates: [
+          {
+            text: "The user follows a recurring acknowledgement pattern",
+            subsystem: "style",
+            signalScore: 0.9,
+            groundedOnIds: ["r199"],
+          },
+        ],
+      }),
+    ),
+  );
+
+  const records = Array.from({ length: 200 }, (_, i) => rec(`r${i}`, `message ${i}`));
+  const { candidates } = await run(records);
+
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]!.groundedOnIds).toEqual(["r199"]);
+});
+
+test("accepts up to 100 candidates and hard-caps excess model output", async () => {
+  const emitted = Array.from({ length: 101 }, (_, i) => ({
+    text: `Concrete grounded fact ${i}`,
+    subsystem: "projects",
+    signalScore: 0.9,
+    groundedOnIds: ["r1"],
+  }));
+  fetchMock.mockResolvedValue(okResponse(JSON.stringify({ candidates: emitted })));
+
+  const { candidates, trace } = await run([rec("r1")]);
+
+  expect(candidates).toHaveLength(100);
+  expect(trace.emitted).toHaveLength(100);
+  expect(candidates.at(-1)?.text).toBe("Concrete grounded fact 99");
 });

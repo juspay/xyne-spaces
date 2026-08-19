@@ -12,18 +12,22 @@ interface RecordingStoreSnapshot {
 }
 
 export type RecordingStoreEvent =
-  | { type: 'requestAutoStart' }
+  | { type: 'requestAutoStart'; conversationId?: string; channelId?: string }
+  | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';
       sttModel?: 'google' | 'azure' | 'deepgram';
       defaultLayout?: RecordingLayout;
+      conversationId?: string;
+      channelId?: string;
     }
   | {
       type: 'recordingStarted';
       room: unknown;
       externalId: string;
-      channelId: string;
+      channelId: string | null;
+      notesCanvasId: string;
       startTime: number;
       defaultLayout?: RecordingLayout;
     }
@@ -35,8 +39,10 @@ export type RecordingStoreEvent =
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
   | { type: 'clearTranscripts' }
+  | { type: 'markMoment'; moment: RecordingState['markedMoments'][number] }
   | { type: 'setNotesCanvas'; canvasId: string; title?: string }
   | { type: 'setNotesCanvasTitle'; title: string }
+  | { type: 'setTitle'; title: string }
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
   | { type: 'agentLeftUnexpectedly' };
@@ -68,6 +74,16 @@ export function sendRecordingEvent(event: RecordingStoreEvent): void {
 /** Read the current recording status imperatively (e.g. inside an event handler) without subscribing. */
 export function getRecordingStatus(): RecordingState['status'] {
   return store.getSnapshot().context.status;
+}
+
+/** Stop whatever is in flight because the page or the machine is going away. */
+export function stopRecordingForTeardown(): void {
+  const status = getRecordingStatus();
+  if (status === 'starting') {
+    sendRecordingEvent({ type: 'requestStop' });
+  } else if (status === 'recording' || status === 'paused') {
+    sendRecordingEvent({ type: 'stopRecording' });
+  }
 }
 
 export interface UseTranscriptStreamReturn {

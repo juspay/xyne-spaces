@@ -1,4 +1,5 @@
 import Bull from 'bull';
+import { NotificationStatus } from '@xyne/shared';
 import {
   NotificationJobData,
   MobilePushJobData
@@ -15,7 +16,6 @@ import {
   getCallJobs
 } from '@/services/otel';
 import { repositories } from '@/database/repositories';
-import { NotificationStatus } from '@prisma/client';
 
 // Utility function
 function getMessageTypeFromEvent(eventType: string | undefined): 'dm' | 'channel' {

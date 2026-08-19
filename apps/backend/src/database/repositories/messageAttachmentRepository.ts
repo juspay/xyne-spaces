@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
+import { MessageAttachment } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 
 export interface CreateMessageAttachmentInput {
   entityId: string; // Message ID or Ticket ID
@@ -278,6 +279,18 @@ export class MessageAttachmentRepository {
       },
       orderBy: { createdAt: 'asc' }
     });
+  }
+
+  async hasEmailAttachment(emailId: string): Promise<boolean> {
+    const attachment = await this.db.messageAttachment.findFirst({
+      where: {
+        entityId: emailId,
+        entityType: AttachmentEntityType.EMAIL,
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+    return attachment !== null;
   }
 
   async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any

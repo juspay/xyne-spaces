@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Popover } from '@juspay/blend-design-system';
 import Tooltip from '../Tooltip/Tooltip';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
@@ -9,6 +9,7 @@ import { emojiService } from '../../../services/Emoji/emojiService';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
 import { OverlayPortal } from '../OverlayPortal';
+import { EmojiPickerPreview } from '../../EmojiPickerPreview/EmojiPickerPreview';
 
 type AddCustomEmojiModalProps = {
   open: boolean;
@@ -17,6 +18,14 @@ type AddCustomEmojiModalProps = {
   isLoading?: boolean;
   error?: string | undefined;
 };
+
+/** Matches uploadSingle({ maxBytes }) on POST /emojis in apps/backend/src/routes/emojis.ts. */
+const MAX_EMOJI_BYTES = 256 * 1024;
+
+const formatBytes = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+    : `${Math.round(bytes / 1024)}KB`;
 
 export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
   open,
@@ -27,28 +36,47 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
+  const [fileError, setFileError] = useState<string | undefined>();
+
+  // Reset once the parent closes the modal, so the next open starts clean.
+  useEffect(() => {
+    if (open) return;
+    setFile(null);
+    setName('');
+    setFileError(undefined);
+  }, [open]);
 
   if (!open) return null;
 
+  const handleFileChange = (input: HTMLInputElement): void => {
+    const selected = input.files?.[0] ?? null;
+
+    if (selected && selected.size > MAX_EMOJI_BYTES) {
+      // Clear the input so re-picking the same file fires onChange again.
+      input.value = '';
+      setFile(null);
+      setFileError(`That image is ${formatBytes(selected.size)}. Maximum size is 256KB.`);
+      return;
+    }
+
+    setFileError(undefined);
+    setFile(selected);
+  };
+
+  // The upload is async; leave the modal open so a failure is visible. The parent
+  // closes it on success.
   const handleSave = (): void => {
     if (!file || !name) return;
     onSave({ file, name });
-    handleClose();
-  };
-
-  const handleClose = (): void => {
-    setFile(null);
-    setName('');
-    onClose();
   };
 
   return (
-    <OverlayPortal className='flex items-center justify-center bg-black/40' onEscape={handleClose}>
+    <OverlayPortal className='flex items-center justify-center bg-black/40' onEscape={onClose}>
       <div className='w-full max-w-[520px] mx-4 rounded-lg bg-background text-foreground shadow-xl'>
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b'>
           <h2 className='text-lg font-semibold'>Add emoji</h2>
-          <button onClick={handleClose}>
+          <button onClick={onClose}>
             <X className='h-5 w-5 text-muted-foreground hover:text-foreground' />
           </button>
         </div>
@@ -81,7 +109,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
                   type='file'
                   accept='image/png,image/jpeg,image/gif'
                   className='hidden'
-                  onChange={e => setFile(e.target.files?.[0] ?? null)}
+                  onChange={e => handleFileChange(e.target)}
                 />
               </label>
             </div>
@@ -101,13 +129,15 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
           </div>
 
           {/* Error message */}
-          {error && <div className='p-3 bg-red-50 text-red-600 rounded text-sm'>{error}</div>}
+          {(fileError ?? error) && (
+            <div className='p-3 bg-red-50 text-red-600 rounded text-sm'>{fileError ?? error}</div>
+          )}
         </div>
 
         {/* Footer */}
         <div className='flex justify-end gap-3 px-6 py-4 border-t'>
           <button
-            onClick={handleClose}
+            onClick={onClose}
             disabled={isLoading}
             className='px-4 py-2 rounded hover:bg-accent disabled:opacity-40'
           >
@@ -136,6 +166,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   const [uploadError, setUploadError] = useState<string | undefined>();
 
   const { data: customEmojis, refetch } = useCustomEmojis();
+  const pickerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
 
@@ -197,7 +228,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         avoidCollisions
         showCloseButton={false}
       >
-        <div className='w-[350px]' data-testid='emoji-picker'>
+        <div className='w-[350px]' data-testid='emoji-picker' ref={pickerRef}>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
             theme={emojiPickerTheme}
@@ -213,19 +244,20 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
             previewConfig={{ showPreview: false }}
           />
 
-          {/* Add Emoji Button */}
-          <button
-            type='button'
-            className='flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent'
-            onClick={() => {
-              setEmojiOpen(false);
-              setShowAddEmoji(true);
-              setUploadError(undefined);
-            }}
-          >
-            <span>➕</span>
-            <span>Add Emoji</span>
-          </button>
+          {/* Footer: hovered emoji preview, falling back to the Add Emoji button */}
+          <EmojiPickerPreview containerRef={pickerRef} customEmojis={customEmojis}>
+            <button
+              type='button'
+              className='rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent/50'
+              onClick={() => {
+                setEmojiOpen(false);
+                setShowAddEmoji(true);
+                setUploadError(undefined);
+              }}
+            >
+              Add Emoji
+            </button>
+          </EmojiPickerPreview>
         </div>
       </Popover>
 

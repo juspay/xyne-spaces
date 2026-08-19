@@ -15,7 +15,9 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUser } from '../../../hooks/useUsers';
-import { AccessType, UserStatus } from '@xyne/shared';
+import { usePermissions } from '../../../hooks/usePermissions';
+import { useAuth } from '../../../hooks/useAuth';
+import { AccessType, UserStatus, WorkspaceRole } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { userActivationApi } from '../../../api/userActivationApi';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -59,6 +61,30 @@ export const ResourceAccessModal = ({
 
   // Fetch user's current access for all resources
   const [userAccess] = useCachedQuery(queries.getResourceAccessForUser({ userId: userId ?? '' }));
+
+  // Workspace admins/owners can edit every resource; everyone else can only edit resources
+  // they hold WRITE or ADMIN on (see editableResourceNames below).
+  const { user } = useAuth();
+  const isWorkspaceAdminOrOwner =
+    (user?.role as WorkspaceRole) === WorkspaceRole.ADMIN ||
+    (user?.role as WorkspaceRole) === WorkspaceRole.OWNER;
+
+  // The current (viewing) user's own permissions. A resource row is only editable when the
+  // viewer holds WRITE or ADMIN on that resource; otherwise the dropdown is disabled and
+  // shows a "no access" label, since the viewer can't meaningfully see/manage it.
+  const viewerPermissions = usePermissions();
+  const editableResourceNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const permission of viewerPermissions) {
+      if (
+        permission.accessType === AccessType.WRITE ||
+        permission.accessType === AccessType.ADMIN
+      ) {
+        names.add(permission.resourceName);
+      }
+    }
+    return names;
+  }, [viewerPermissions]);
 
   // Local state for access changes
   const [accessState, setAccessState] = useState<Record<string, AccessType | 'NONE'>>({});
@@ -374,39 +400,48 @@ export const ResourceAccessModal = ({
                     )}
                   </div>
                   <div className='w-[140px] shrink-0'>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          className='h-7 w-full justify-between text-xs'
-                          disabled={loading}
-                        >
-                          <span className='truncate'>
-                            {accessTypeOptions.find(
-                              opt =>
-                                String(opt.value) === String(accessState[resource.id] || 'NONE'),
-                            )?.label || 'Access'}
-                          </span>
-                          <ChevronDown className='ml-1 h-3 w-3 shrink-0 opacity-50' />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='start' className='w-[140px]'>
-                        {accessTypeOptions.map(option => (
-                          <DropdownMenuItem
-                            key={option.value}
-                            onClick={() =>
-                              handleAccessChange(resource.id, option.value as AccessType | 'NONE')
-                            }
-                            className='text-xs'
+                    {isWorkspaceAdminOrOwner || editableResourceNames.has(resource.name) ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='h-7 w-full justify-between text-xs'
+                            disabled={loading}
                           >
-                            <span className='flex-1'>{option.label}</span>
-                            {String(accessState[resource.id] || 'NONE') ===
-                              String(option.value) && <Check className='h-3 w-3' />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                            <span className='truncate'>
+                              {accessTypeOptions.find(
+                                opt =>
+                                  String(opt.value) === String(accessState[resource.id] || 'NONE'),
+                              )?.label || 'Access'}
+                            </span>
+                            <ChevronDown className='ml-1 h-3 w-3 shrink-0 opacity-50' />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='start' className='w-[140px]'>
+                          {accessTypeOptions.map(option => (
+                            <DropdownMenuItem
+                              key={option.value}
+                              onClick={() =>
+                                handleAccessChange(resource.id, option.value as AccessType | 'NONE')
+                              }
+                              className='text-xs'
+                            >
+                              <span className='flex-1'>{option.label}</span>
+                              {String(accessState[resource.id] || 'NONE') ===
+                                String(option.value) && <Check className='h-3 w-3' />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
+                      <div
+                        className='flex h-7 w-full items-center justify-center rounded-md border border-dashed border-border text-[10px] font-medium text-muted-foreground'
+                        title="You don't have access to manage this resource"
+                      >
+                        Permission Denied
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

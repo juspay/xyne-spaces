@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
+import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
+import { DatabaseClient } from '@/database/client';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
@@ -293,10 +295,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantUserResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -304,9 +307,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeUserResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -942,10 +945,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantGroupResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -953,9 +957,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeGroupResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -977,6 +981,70 @@ export class UserManagementController {
     } catch (error) {
       logger.error('Error updating group permissions:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Save the current user's questionnaire response.
+   */
+  saveQuestionnaireResponse = async (
+    req: Request & { user?: { id: string; workspaceId?: string } },
+    res: Response,
+  ): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { questionnaireType, payload } = req.body as {
+        questionnaireType?: unknown;
+        payload?: unknown;
+      };
+
+      if (typeof questionnaireType !== 'string' || !questionnaireType.trim()) {
+        res.status(400).json({ error: 'questionnaireType is required' });
+        return;
+      }
+
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        res.status(400).json({ error: 'payload must be an object' });
+        return;
+      }
+
+      const type = questionnaireType.trim();
+      const questionnairePayload = payload as Prisma.InputJsonValue;
+      const prisma = DatabaseClient.getInstance();
+      const saved = await prisma.questionnaireResponse.upsert({
+        where: {
+          workspaceId_questionnaireType_userId: {
+            workspaceId,
+            questionnaireType: type,
+            userId,
+          },
+        },
+        update: {
+          payload: questionnairePayload,
+          updatedAt: new Date(),
+        },
+        create: {
+          workspaceId,
+          userId,
+          questionnaireType: type,
+          payload: questionnairePayload,
+        },
+      });
+
+      res.status(200).json({
+        id: saved.id,
+        questionnaireType: saved.questionnaireType,
+        payload: saved.payload,
+      });
+    } catch (error) {
+      logger.error('Error saving questionnaire response:', error);
+      res.status(500).json({ error: 'Failed to save questionnaire response' });
     }
   };
 
@@ -1048,10 +1116,9 @@ export class UserManagementController {
       }
 
       const metadata = await storageService.getFileMetadata(gcsPath);
-      const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
-      res.setHeader('Content-Type', contentType);
+      setSafeInlineImageHeaders(res, metadata.contentType || 'image/png');
       res.setHeader('Content-Length', fileSize);
       // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
       res.setHeader('Cache-Control', 'public, max-age=31536000');

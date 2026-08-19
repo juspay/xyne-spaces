@@ -288,6 +288,7 @@ export class WorkspaceIdBackfillController {
         summary.activities = await WorkspaceIdBackfillController.backfillActivities(options);
       }
 
+
       res.status(200).json({
         success: true,
         message: options.dryRun ? 'Dry run completed' : 'Backfill completed',

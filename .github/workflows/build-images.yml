@@ -1,0 +1,142 @@
+name: Build Images
+
+# Build-only, manual-only: validates the app images build. Does NOT push yet
+# (push: false); publish wiring is sketched at the bottom.
+# - Inputs: ref picker (any branch/tag) + image (all / backend / dashboard / xyne-claw).
+# - Access: only usernames in the IMAGE_BUILDERS Actions variable may run it.
+# - amd64 only, matching the internal Jenkins pipeline (arm64 would need QEMU and
+#   OOMs tsc/vite on the 16 GB runner; amd64 still runs on arm64 via emulation).
+# - Build context is the repo root (.) — Dockerfiles COPY root manifests.
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to build
+        type: choice
+        default: all
+        options:
+          - all
+          - backend
+          - dashboard
+          - xyne-claw
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Cheap gate: authorize the launcher + resolve the matrix before heavy builds.
+  prepare:
+    name: Authorize + resolve images
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Restrict to allowed image builders
+        env:
+          ALLOWED: ${{ vars.IMAGE_BUILDERS }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "${ALLOWED}" ]; then
+            echo "::error::vars.IMAGE_BUILDERS is not set. Add an Actions variable with the comma-separated GitHub usernames allowed to build images."
+            exit 1
+          fi
+          # Case-insensitive; tolerant of comma/space separators.
+          actor_lc="$(printf '%s' "${ACTOR}" | tr 'A-Z' 'a-z')"
+          match=0
+          IFS=', ' read -r -a list <<< "${ALLOWED}"
+          for u in "${list[@]}"; do
+            [ -z "$u" ] && continue
+            if [ "$(printf '%s' "$u" | tr 'A-Z' 'a-z')" = "${actor_lc}" ]; then
+              match=1; break
+            fi
+          done
+          if [ "$match" -ne 1 ]; then
+            echo "::error::${ACTOR} is not authorized to build images. Allowed: ${ALLOWED}"
+            exit 1
+          fi
+          echo "Authorized: ${ACTOR}"
+
+      - name: Resolve build matrix from input
+        id: set
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          case "${IMAGE}" in
+            all)                          names='["backend","dashboard","xyne-claw"]' ;;
+            backend|dashboard|xyne-claw)  names="[\"${IMAGE}\"]" ;;
+            *) echo "::error::Unknown image '${IMAGE}'"; exit 1 ;;
+          esac
+          echo "matrix={\"name\":${names}}" >> "$GITHUB_OUTPUT"
+          echo "Building: ${names}"
+
+  build:
+    name: Build ${{ matrix.name }} image
+    needs: prepare
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # tsc / vite need a larger V8 heap (mirrors ci.yml).
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image (amd64, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.name }}/Dockerfile
+          push: false
+          platforms: linux/amd64
+          # dashboard bakes the commit into the client bundle; others need no args.
+          build-args: ${{ matrix.name == 'dashboard' && format('SOURCE_COMMIT={0}', github.sha) || '' }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Build ${{ matrix.name }} image"
+            echo ""
+            echo "- **Dockerfile:** \`apps/${{ matrix.name }}/Dockerfile\`"
+            echo "- **Platform:** linux/amd64"
+            echo "- **Pushed:** no (build-only)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+# ---------------------------------------------------------------------------
+# When you decide WHERE to publish (e.g. ghcr.io), the push wiring is:
+#
+#   permissions:
+#     contents: read
+#     packages: write          # for GHCR
+#
+#   build:
+#     environment: release-publish   # ADD an approval gate for publishing
+#     steps:
+#       - uses: docker/login-action@v3
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}
+#       - uses: docker/metadata-action@v5   # generates release-*/sha-*/latest tags
+#         id: meta
+#         with:
+#           images: ghcr.io/${{ github.repository_owner }}/xyne-spaces-${{ matrix.name }}
+#       - uses: docker/build-push-action@v6
+#         with:
+#           push: true
+#           tags: ${{ steps.meta.outputs.tags }}
+#           platforms: linux/amd64   # add linux/arm64 here (+ setup-qemu) only if
+#                                     # native ARM images are needed at publish time
+#           ...
+# The IMAGE_BUILDERS gate still restricts WHO can run it; the environment adds a
+# human approval step specifically for the push.
+# ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import {
 } from '../utils/responseProcessor';
 import { executeFuzzyFallback } from '../utils/fallback';
 import { highlightText } from '../utils/highlight';
+import { config as appConfig } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
@@ -414,6 +415,7 @@ export class SearchService {
           wsId,
           sort,
           isExactMatch,
+          rankProfile,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -465,6 +467,9 @@ export class SearchService {
         false,
         {}
       );
+      // When enabled, effectiveWorkspaceId is passed to YqlBuilder so the top-level
+      // `workspaceId contains @ws` guard scopes the `user`/`transcript` branches to the
+      // caller's workspace. The flag is controlled remotely via Superposition.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
         false,
@@ -570,7 +575,40 @@ export class SearchService {
         });
       }
 
-       if (process.env.NODE_ENV === 'development') {
+      
+      if (appConfig.deskTicketDebug) {
+        const hitIdentities = response.root?.children?.filter((child: any) =>
+          !String(child.id ?? '').startsWith('group:')
+        ).map((child: any) => {
+          const [, , hitSchema, , hitDocId] = String(child.id ?? '').split(':');
+        
+          const matchFeatures = (child.fields?.matchfeatures ?? {}) as Record<string, unknown>;
+          const scores = Object.fromEntries(
+            Object.entries(matchFeatures).filter(([, v]) => typeof v === 'number')
+          );
+          return {
+            docId: child.fields?.docId ?? hitDocId,
+            schema: hitSchema ?? child.fields?.sddocname,
+            xyneId: child.fields?.xyneId,
+            threadId: child.fields?.threadId,
+            relevance: child.relevance,
+            scores,
+          };
+        }) || [];
+
+        this.logger.info(
+          `[DESK_DEBUG_SEARCH] ${JSON.stringify({
+            searchId,
+            userId,
+            apps: app.join(','),
+            rankProfile,
+            hitCount: hitIdentities.length,
+            hits: hitIdentities,
+          })}`
+        );
+      }
+
+      if (process.env.NODE_ENV === 'development') {
         // Log only specific fields
         const simplifiedResults = response.root?.children?.map((child: any) => ({
           id: child.fields?.docId,

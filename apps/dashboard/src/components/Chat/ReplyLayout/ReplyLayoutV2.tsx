@@ -5,6 +5,7 @@ import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { formatRelativeTime } from '../../../utils/dateUtils';
 import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndicators';
 import { parseRepliesMd } from '@xyne/shared';
+import { useTwinDraftBadge } from '../TwinReplyDraft/TwinDraftBadgeContext';
 
 const ReplyLayoutV2: React.FC<{
   replies: ThreadData;
@@ -30,6 +31,20 @@ const ReplyLayoutV2: React.FC<{
   messageId,
 }) => {
   const { channelId } = useParams<{ channelId: string }>();
+  const twinBadge = useTwinDraftBadge(replies?.conversation?.conversationId);
+  const showTwinDraft = !isThreadOpen && !!twinBadge;
+
+  // A thread-linked "take notes" recording sets conversation.callId while
+  // ACTIVE (mirrors how a regular in-thread call does) and clears it when it
+  // ends — see noteTakerCallRepository. conversation.metadata.isHeadlessRecording
+  // is stamped/cleared alongside it, so both checks read directly off this
+  // already-subscribed conversation row — no separate per-thread-row query.
+  const activeCallId = replies?.conversation?.callId;
+  const conversationMetadata = replies?.conversation?.metadata as
+    | { isHeadlessRecording?: boolean }
+    | null
+    | undefined;
+  const isRecordingActive = !!activeCallId && conversationMetadata?.isHeadlessRecording === true;
 
   // For showInChannel messages, show "View newer replies" only if there are newer replies in the parent thread
   // parentReplyCount is the current reply count in the original thread
@@ -50,7 +65,12 @@ const ReplyLayoutV2: React.FC<{
   if (showInChannel && !isCallMessage) return null;
 
   const hasDraft = draft || hasDraftAttachments;
-  if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen)) return null;
+  if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen) && !showTwinDraft)
+    return null;
+
+  const zeroReplyDraftCount = (hasDraft ? 1 : 0) + (showTwinDraft ? 1 : 0);
+  const inlineDraftCount = (draft && !isThreadOpen ? 1 : 0) + (showTwinDraft ? 1 : 0);
+  const draftWord = (n: number): string => `${n} draft${n > 1 ? 's' : ''}`;
 
   const repliesData = parseRepliesMd(replies.conversation?.replies_md);
   const repliers = repliesData.repliers;
@@ -76,14 +96,26 @@ const ReplyLayoutV2: React.FC<{
         {/* Replier Avatars */}
         {repliers.length > 0 && <AvatarGroup userIds={repliers} size='sm' count={3} />}
         {!replies || replies.replyCount === 0 ? (
-          <div className='flex items-center gap-1 font-medium text-primary'>
-            <PencilIcon size={10} />
-            {'1 draft'}
-          </div>
+          zeroReplyDraftCount > 0 ? (
+            <div className='flex items-center gap-1 font-medium text-primary'>
+              <PencilIcon size={10} />
+              {draftWord(zeroReplyDraftCount)}
+            </div>
+          ) : null
         ) : (
           <span className='font-medium text-foreground'>
-            {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}{' '}
-            {draft && !isThreadOpen && ' and 1 draft'}
+            {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}
+            {inlineDraftCount > 0 && ` and ${draftWord(inlineDraftCount)}`}
+          </span>
+        )}
+
+        {isRecordingActive && (
+          <span className='flex items-center gap-1 shrink-0 font-medium text-status-failure'>
+            <span className='relative flex size-1.5'>
+              <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-status-failure opacity-75' />
+              <span className='relative inline-flex rounded-full size-1.5 bg-status-failure' />
+            </span>
+            Recording
           </span>
         )}
 

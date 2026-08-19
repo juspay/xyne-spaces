@@ -50,9 +50,22 @@ interface UserProfileProps {
   userId: string;
   className?: string;
   isOwnProfile: boolean;
+  /**
+   * Header layout. 'stacked' (default) centers the avatar above the name /
+   * team / status block — used by the routed profile sidebar. 'inline' places
+   * the avatar beside that block — used by the profile modal on non-chat pages.
+   */
+  headerLayout?: 'stacked' | 'inline';
 }
 
-export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isOwnProfile }) => {
+export const UserProfile: React.FC<UserProfileProps> = ({
+  userId,
+  className,
+  isOwnProfile,
+  headerLayout = 'stacked',
+}) => {
+  const isInlineHeader = headerLayout === 'inline';
+  const headerAvatarSize: 'xl' | 'big' = isInlineHeader ? 'xl' : 'big';
   const zero = useZero();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -327,9 +340,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   return (
     <div className={cn('bg-background rounded-lg shadow-sm border border-border', className)}>
       {/* Header Section */}
-      <div className='pt-2 px-6 pb-6 flex flex-col items-center'>
+      <div
+        className={cn(
+          'pt-2 px-6 pb-6',
+          isInlineHeader ? 'flex flex-row items-center gap-5' : 'flex flex-col items-center',
+        )}
+      >
         {/* Picture Upload Section */}
-        <div className='relative mb-8'>
+        <div className={cn('relative', isInlineHeader ? 'mb-0 shrink-0' : 'mb-8')}>
           {isOwnProfile ? (
             <div
               className='relative group cursor-pointer'
@@ -340,7 +358,12 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
               role='button'
               tabIndex={0}
             >
-              <Avatar userId={user.id} size='big' className='rounded-xl' showActiveStatus={true} />
+              <Avatar
+                userId={user.id}
+                size={headerAvatarSize}
+                className='rounded-xl'
+                showActiveStatus={true}
+              />
               <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity'>
                 <Camera className='size-8 text-white' />
               </div>
@@ -356,11 +379,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
               />
             </div>
           ) : (
-            <Avatar userId={user.id} size='big' className='rounded-xl' showActiveStatus={true} />
+            <Avatar
+              userId={user.id}
+              size={headerAvatarSize}
+              className='rounded-xl'
+              showActiveStatus={true}
+            />
           )}
         </div>
 
-        <div className='w-full'>
+        <div className={cn(isInlineHeader ? 'flex-1 min-w-0' : 'w-full')}>
           <div className='flex items-center gap-2 mb-1'>
             <h2
               className={`text-2xl font-semibold ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
@@ -411,6 +439,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : userProfile?.team ? (
             <div className='flex items-center gap-2 mt-1'>
               <div className='text-lg text-muted-foreground'>{userProfile.team}</div>
+              {isOwnProfile && (
+                <button
+                  onClick={() => handleStartEdit('team', userProfile.team)}
+                  className='text-muted-foreground hover:text-muted-foreground'
+                  title='Edit team name'
+                >
+                  <Edit2 className='size-3' />
+                </button>
+              )}
             </div>
           ) : isOwnProfile ? (
             <button

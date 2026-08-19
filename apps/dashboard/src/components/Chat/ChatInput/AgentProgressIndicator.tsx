@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { type CSSProperties, type ReactElement, useCallback, useEffect } from 'react';
 import { Square } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,7 +62,11 @@ export function AgentProgressIndicator({
         new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
       );
     } catch (err) {
-      console.error('[AgentProgressIndicator] cancel failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AgentProgressIndicator] cancel failed:'),
+        error: err,
+      });
       toast.error('Failed to stop agent', {
         description: 'Only the person who started it can stop.',
       });
@@ -71,7 +76,7 @@ export function AgentProgressIndicator({
   if (agents.length === 0) return null;
 
   return (
-    <div className='flex items-center gap-2 h-5 bg-background'>
+    <div className='mb-2 flex items-center gap-2 h-5 bg-background'>
       <div className='flex flex-wrap gap-3 text-[11px] text-muted-foreground flex-1 min-w-0'>
         {agents.map(a => (
           <span key={a.agentUserId ?? a.agentSlug ?? 'agent'} style={rowStyle}>

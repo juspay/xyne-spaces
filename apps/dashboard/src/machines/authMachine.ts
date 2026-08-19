@@ -12,9 +12,14 @@ import {
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
 } from '@xyne/shared';
 
-export const PENDING_COMMUNITY_WORKSPACE_ID_KEY = 'pending_community_workspace_id';
-export const PENDING_COMMUNITY_WORKSPACE_NAME_KEY = 'pending_community_workspace_name';
-export const ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY = 'enterprise_workspace_login_intent';
+export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
+export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllDatabases } from '@rocicorp/zero';
 
 export interface User {
   id: string;
@@ -70,6 +75,7 @@ type AuthEvent =
   | { type: 'GOOGLE_SIGNIN' }
   | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'EMAIL_SIGNIN' }
+  | { type: 'EMAIL_REGISTER' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
@@ -87,10 +93,11 @@ export type AuthState =
   | 'authenticated'
   | 'unauthenticated'
   | 'authenticating'
+  | 'registering'
   | 'loggingOut'
   | 'validatingSession'
   | 'processingOAuthCallback'
-  | 'joiningCommunityWorkspace'
+  | 'joiningWorkspace'
   | 'communityJoinRequested'
   | 'redirectingToInvitation'
   | 'testAuthenticating';
@@ -178,20 +185,8 @@ const createClearedContext = (): AuthContext => ({
   enterpriseJoinTarget: null,
 });
 
-const hasEnterpriseWorkspaceLoginIntent = (): boolean =>
-  localStorage.getItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY) === 'true';
-
-const getEnterpriseAwareWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
-  const workspaces = output?.workspaces || [];
-  if (!hasEnterpriseWorkspaceLoginIntent()) {
-    return workspaces;
-  }
-
-  return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
-};
-
-const clearEnterpriseWorkspaceLoginIntent = (): void => {
-  localStorage.removeItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY);
+const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
+  return output?.workspaces || [];
 };
 
 export const authMachine = createMachine(
@@ -276,7 +271,7 @@ export const authMachine = createMachine(
                 const output = event.output as OAuthCallbackOutput | undefined;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   invitations: output?.invitations || [],
                   pendingUserData: output?.pendingUserData || null,
                   error: null,
@@ -285,15 +280,15 @@ export const authMachine = createMachine(
             },
             {
               // A community workspace was selected before OAuth; join it before enterprise auto-login.
-              target: 'joiningCommunityWorkspace',
-              guard: 'hasPendingCommunityWorkspace',
+              target: 'joiningWorkspace',
+              guard: 'hasPendingWorkspace',
               actions: assign(({ context, event }) => {
                 const output = event.output as OAuthCallbackOutput | undefined;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
-                  selectedWorkspaceId: localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY),
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
                   error: null,
                 };
               }),
@@ -336,7 +331,7 @@ export const authMachine = createMachine(
                 const output = event.output as OAuthCallbackOutput | undefined;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: output?.autoLoginWorkspace || null,
                   error: null,
@@ -353,7 +348,7 @@ export const authMachine = createMachine(
                 const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: lastWorkspaceId,
                   error: null,
@@ -368,7 +363,7 @@ export const authMachine = createMachine(
                 const output = event.output as OAuthCallbackOutput | undefined;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   error: null,
                 };
@@ -428,7 +423,7 @@ export const authMachine = createMachine(
             target: 'creatingOrg',
           },
           JOIN_COMMUNITY_WORKSPACE: {
-            target: 'joiningCommunityWorkspace',
+            target: 'joiningWorkspace',
             actions: assign(({ context, event }) => ({
               ...context,
               selectedWorkspaceId: (
@@ -442,9 +437,9 @@ export const authMachine = createMachine(
           },
         },
       },
-      joiningCommunityWorkspace: {
+      joiningWorkspace: {
         invoke: {
-          src: 'joinCommunityWorkspace',
+          src: 'joinWorkspace',
           input: ({ context }) => ({ workspaceId: context.selectedWorkspaceId! }),
           onDone: [
             {
@@ -453,8 +448,8 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 const joinRequest = output?.communityJoinRequest;
-                localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-                localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+                localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+                localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
                 return {
                   ...context,
                   error: null,
@@ -487,8 +482,8 @@ export const authMachine = createMachine(
                       }
                     }
                   }
-                  localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-                  localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+                  localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+                  localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
                   return {
                     user: output?.user || context.user,
                     error: null,
@@ -523,7 +518,7 @@ export const authMachine = createMachine(
             })),
           },
           JOIN_COMMUNITY_WORKSPACE: {
-            target: 'joiningCommunityWorkspace',
+            target: 'joiningWorkspace',
             actions: assign(({ context, event }) => ({
               ...context,
               selectedWorkspaceId: (
@@ -571,7 +566,8 @@ export const authMachine = createMachine(
                     }
                   }
                 }
-                clearEnterpriseWorkspaceLoginIntent();
+                localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+                localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
                 return {
                   user: output?.user || context.user,
                   error: null,
@@ -595,7 +591,7 @@ export const authMachine = createMachine(
       creatingOrg: {
         on: {
           JOIN_COMMUNITY_WORKSPACE: {
-            target: 'joiningCommunityWorkspace',
+            target: 'joiningWorkspace',
             actions: assign(({ context, event }) => ({
               ...context,
               selectedWorkspaceId: (
@@ -650,7 +646,8 @@ export const authMachine = createMachine(
                     }
                   }
                 }
-                clearEnterpriseWorkspaceLoginIntent();
+                localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+                localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
                 return {
                   user: output?.user || context.user,
                   error: null,
@@ -676,8 +673,8 @@ export const authMachine = createMachine(
           src: 'validateSession',
           onDone: [
             {
-              target: 'joiningCommunityWorkspace',
-              guard: 'hasPendingCommunityWorkspaceAfterSessionValidation',
+              target: 'joiningWorkspace',
+              guard: 'hasPendingWorkspaceAfterSessionValidation',
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 if (output?.user?.id) {
@@ -687,7 +684,7 @@ export const authMachine = createMachine(
                 return {
                   ...context,
                   user: output?.user || context.user,
-                  selectedWorkspaceId: localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY),
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
                   selfDmChannelId: output?.selfDmChannelId ?? null,
@@ -797,6 +794,9 @@ export const authMachine = createMachine(
           EMAIL_SIGNIN: {
             target: 'authenticating',
           },
+          EMAIL_REGISTER: {
+            target: 'registering',
+          },
           SESSION_VALIDATED: {
             target: 'authenticated',
             actions: {
@@ -805,15 +805,15 @@ export const authMachine = createMachine(
           },
           OAUTH_CALLBACK_COMPLETE: [
             {
-              guard: 'hasPendingCommunityWorkspace',
-              target: 'joiningCommunityWorkspace',
+              guard: 'hasPendingWorkspace',
+              target: 'joiningWorkspace',
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
-                  selectedWorkspaceId: localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY),
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
                 };
@@ -828,7 +828,7 @@ export const authMachine = createMachine(
                 const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: lastWorkspaceId,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
@@ -843,7 +843,7 @@ export const authMachine = createMachine(
                 const output = (event as XStateEvent).output;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
@@ -891,15 +891,15 @@ export const authMachine = createMachine(
           },
           OAUTH_CALLBACK_COMPLETE: [
             {
-              guard: 'hasPendingCommunityWorkspace',
-              target: 'joiningCommunityWorkspace',
+              guard: 'hasPendingWorkspace',
+              target: 'joiningWorkspace',
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
-                  selectedWorkspaceId: localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY),
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
                 };
@@ -914,7 +914,7 @@ export const authMachine = createMachine(
                 const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: lastWorkspaceId,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
@@ -929,7 +929,7 @@ export const authMachine = createMachine(
                 const output = (event as XStateEvent).output;
                 return {
                   ...context,
-                  workspaces: getEnterpriseAwareWorkspaces(output),
+                  workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
@@ -966,6 +966,90 @@ export const authMachine = createMachine(
             actions: [
               'clearSessionCookies',
               { type: 'notifySignOut', params: { reason: 'User canceled sign-in' } },
+              assign(() => createClearedContext()),
+            ],
+          },
+        },
+      },
+      registering: {
+        on: {
+          OAUTH_CALLBACK_COMPLETE: [
+            {
+              guard: 'hasPendingWorkspace',
+              target: 'joiningWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasLastActiveWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasWorkspaces',
+              target: 'selectingWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+          ],
+          AUTH_ERROR: {
+            target: 'unauthenticated',
+            actions: {
+              type: 'setError',
+            },
+          },
+          CLEAR_ERROR: {
+            actions: {
+              type: 'clearError',
+            },
+          },
+          LOGOUT: {
+            target: 'unauthenticated',
+            actions: [
+              'clearSessionCookies',
+              { type: 'notifySignOut', params: { reason: 'User canceled registration' } },
               assign(() => createClearedContext()),
             ],
           },
@@ -1039,15 +1123,10 @@ export const authMachine = createMachine(
         const pendingInvitationId = localStorage.getItem('pending_invitation_id');
         return !!pendingInvitationId;
       },
-      hasPendingCommunityWorkspace: ({ event }) => {
-        if (hasEnterpriseWorkspaceLoginIntent()) {
-          localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-          localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
-          return false;
-        }
+      hasPendingWorkspace: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         if (!e.output?.pendingUserData?.email) return false;
-        return !!localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
+        return !!localStorage.getItem(PENDING_WORKSPACE_ID_KEY);
       },
       isCommunityJoinRequest: ({ event }) => {
         const e = event as {
@@ -1058,15 +1137,10 @@ export const authMachine = createMachine(
           e.output?.communityJoinRequest?.status === CommunityJoinResultStatus.REQUEST_REJECTED
         );
       },
-      hasPendingCommunityWorkspaceAfterSessionValidation: ({ event }) => {
-        if (hasEnterpriseWorkspaceLoginIntent()) {
-          localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-          localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
-          return false;
-        }
+      hasPendingWorkspaceAfterSessionValidation: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         if (!e.output?.user?.id) return false;
-        return !!localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
+        return !!localStorage.getItem(PENDING_WORKSPACE_ID_KEY);
       },
       hasLastActiveWorkspace: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
@@ -1074,13 +1148,13 @@ export const authMachine = createMachine(
         if (!email) return false;
         const lastWorkspaceId = getLastActiveWorkspaceId(email);
         if (!lastWorkspaceId) return false;
-        return getEnterpriseAwareWorkspaces(e.output).some(
+        return getWorkspaces(e.output).some(
           (workspace: Workspace) => workspace.id === lastWorkspaceId,
         );
       },
       hasWorkspaces: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
-        return getEnterpriseAwareWorkspaces(e.output).length > 0;
+        return getWorkspaces(e.output).length > 0;
       },
       hasAutoLoginWorkspace: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
@@ -1092,8 +1166,13 @@ export const authMachine = createMachine(
         clearPersistedSession();
         localStorage.removeItem('user_id');
         localStorage.removeItem('user_email');
-        clearEnterpriseWorkspaceLoginIntent();
+        localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+        localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1143,12 +1222,6 @@ export const authMachine = createMachine(
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
           }
-          if (hasEnterpriseWorkspaceLoginIntent()) {
-            loginParams.set('enterpriseLogin', 'true');
-            if (!invitationId && !isElectron) {
-              loginParams.set('redirect_to', `${window.location.origin}/auth`);
-            }
-          }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/auth/login${loginQuery ? `?${loginQuery}` : ''}`;
 
@@ -1193,12 +1266,6 @@ export const authMachine = createMachine(
           }
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
-          }
-          if (hasEnterpriseWorkspaceLoginIntent()) {
-            loginParams.set('enterpriseLogin', 'true');
-            if (!invitationId && !isElectron) {
-              loginParams.set('redirect_to', `${window.location.origin}/auth`);
-            }
           }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/v2/auth/microsoft/login${loginQuery ? `?${loginQuery}` : ''}`;
@@ -1270,6 +1337,9 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        await dropAllDatabases();
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -1369,35 +1439,79 @@ export const authMachine = createMachine(
           throw new Error('Failed to login to workspace');
         }
       }),
-      joinCommunityWorkspace: fromPromise(async ({ input }: { input: { workspaceId: string } }) => {
+      joinWorkspace: fromPromise(async ({ input }: { input: { workspaceId: string } }) => {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        headers['x-request-id'] = uuidv4();
+        if (logger.zeroClientId) {
+          headers['x-client-id'] = logger.zeroClientId;
+        }
+        if (logger.zeroClientGroupId) {
+          headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
+        }
+        const userEmail = logger.emailId;
+        if (userEmail) {
+          headers['x-user-email'] = userEmail;
+        }
+
         try {
-          const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-          };
-          headers['x-request-id'] = uuidv4();
-          if (logger.zeroClientId) {
-            headers['x-client-id'] = logger.zeroClientId;
-          }
-          if (logger.zeroClientGroupId) {
-            headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
-          }
-          const userEmail = logger.emailId;
-          if (userEmail) {
-            headers['x-user-email'] = userEmail;
+          const typeResponse = await axios.get(
+            `${API_BASE_URL}/public/workspace-type?workspaceId=${encodeURIComponent(input.workspaceId)}`,
+          );
+          const workspaceType = (typeResponse.data as { workspaceType?: string })?.workspaceType;
+
+          if (workspaceType === WorkspaceType.COMMUNITY) {
+            const response = await axios.post(
+              `${API_BASE_URL}/community/${input.workspaceId}/join`,
+              {},
+              { withCredentials: true, headers },
+            );
+
+            const data = response.data as {
+              user?: User;
+              status?: CommunityJoinResultStatusType;
+              isNewUser?: boolean;
+              selfDmChannelId?: string;
+              landingChannelId?: string | null;
+              joinRequest?: {
+                id: string;
+                status: string;
+                isExisting?: boolean;
+              };
+            };
+            if (data.user) {
+              return {
+                user: data.user,
+                isNewUser: data.isNewUser ?? false,
+                selfDmChannelId: data.selfDmChannelId,
+                landingChannelId: data.landingChannelId ?? null,
+              };
+            }
+            if (
+              (data.status === CommunityJoinResultStatus.REQUEST_PENDING ||
+                data.status === CommunityJoinResultStatus.REQUEST_REJECTED) &&
+              data.joinRequest
+            ) {
+              return {
+                communityJoinRequest: {
+                  requestId: data.joinRequest.id,
+                  status: data.status,
+                  isExisting: data.joinRequest.isExisting,
+                },
+              };
+            }
+            throw new Error('Community workspace join failed: No user data');
           }
 
           const response = await axios.post(
-            `${API_BASE_URL}/community/${input.workspaceId}/join`,
-            {},
-            {
-              withCredentials: true,
-              headers,
-            },
+            `${API_BASE_URL}/auth/login-workspace`,
+            { workspaceId: input.workspaceId },
+            { withCredentials: true, headers },
           );
 
           const data = response.data as {
-            user?: User;
-            status?: CommunityJoinResultStatusType;
+            user: User;
             isNewUser?: boolean;
             selfDmChannelId?: string;
             landingChannelId?: string | null;
@@ -1415,28 +1529,13 @@ export const authMachine = createMachine(
               landingChannelId: data.landingChannelId ?? null,
             };
           }
-          if (
-            (data.status === CommunityJoinResultStatus.REQUEST_PENDING ||
-              data.status === CommunityJoinResultStatus.REQUEST_REJECTED) &&
-            data.joinRequest
-          ) {
-            return {
-              communityJoinRequest: {
-                requestId: data.joinRequest.id,
-                status: data.status,
-                isExisting: data.joinRequest.isExisting,
-              },
-            };
-          }
-          throw new Error('Community workspace join failed: No user data');
+          throw new Error('Login to workspace failed: No user data');
         } catch (error) {
           if (axios.isAxiosError(error)) {
             const errorData = error.response?.data as { error?: string; message?: string };
-            throw new Error(
-              errorData?.message || errorData?.error || 'Failed to join community workspace',
-            );
+            throw new Error(errorData?.message || errorData?.error || 'Failed to join workspace');
           }
-          throw new Error('Failed to join community workspace');
+          throw new Error('Failed to join workspace');
         }
       }),
       createOrg: fromPromise(

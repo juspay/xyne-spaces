@@ -1,4 +1,5 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
+import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
@@ -14,6 +15,9 @@ import {
   MessageSquareMore,
   Smartphone,
   Phone,
+  Share2,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -35,11 +39,11 @@ import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
+import { DeskType } from '@xyne/shared';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
-type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
 type CallSource = 'OZONETEL';
 type Visibility = 'public' | 'private';
 
@@ -58,34 +62,40 @@ const DESK_SOURCES: ReadonlyArray<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
-    value: 'EMAIL',
+    value: DeskType.EMAIL,
     label: 'Personal mailbox',
     description: 'Connect a dedicated inbox via OAuth',
     icon: Mail,
   },
   {
-    value: 'DL',
+    value: DeskType.DL,
     label: 'Distribution list',
     description: 'Route a DL through the shared mailbox',
     icon: Mails,
   },
   {
-    value: 'SLACK',
+    value: DeskType.SLACK,
     label: 'Slack channel',
     description: 'Connect a Slack channel to create tickets from messages',
     icon: MessageSquareMore,
   },
   {
-    value: 'APP',
+    value: DeskType.APP,
     label: 'Xyne App',
     description: 'Connect an external system through a Xyne App over APIs',
     icon: Smartphone,
   },
   {
-    value: 'CALL',
+    value: DeskType.CALL,
     label: 'Call desk',
     description: 'Create a call-first desk that can be used in workspace Ozonetel routing',
     icon: Phone,
+  },
+  {
+    value: DeskType.SOCIAL_MEDIA,
+    label: 'Social media',
+    description: 'Create support tickets from Google Play reviews',
+    icon: Share2,
   },
 ];
 
@@ -94,6 +104,32 @@ interface EligibleApp {
   appId: string;
   name: string;
   description: string | null;
+  deskCount: number;
+}
+
+interface GooglePlayApplicationInput {
+  displayName: string;
+  packageName: string;
+}
+
+interface GooglePlayApplicationRow extends GooglePlayApplicationInput {
+  id: string;
+}
+
+function createGooglePlayApplication(): GooglePlayApplicationRow {
+  return { id: crypto.randomUUID(), displayName: '', packageName: '' };
+}
+
+function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput[]): boolean {
+  if (applications.length === 0) return false;
+  const packageNames = applications.map(application => application.packageName);
+  return (
+    applications.every(
+      application =>
+        application.displayName.trim().length > 0 &&
+        ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName),
+    ) && new Set(packageNames).size === packageNames.length
+  );
 }
 
 interface AddChannelFormProps {
@@ -101,12 +137,13 @@ interface AddChannelFormProps {
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
       deskType?: DeskType;
       callSource?: CallSource;
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      applications?: GooglePlayApplicationInput[];
     },
   ) => void;
   onCancel: () => void;
@@ -129,10 +166,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
-  const [deskType, setDeskType] = useState<DeskType>('EMAIL');
+  const [deskType, setDeskType] = useState<DeskType>(DeskType.EMAIL);
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
+  const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
+    createGooglePlayApplication(),
+  ]);
   const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
@@ -146,7 +186,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       );
       return res.data.channels;
     },
-    enabled: requireConnector && deskType === 'SLACK',
+    enabled: requireConnector && deskType === DeskType.SLACK,
   });
 
   const { data: eligibleAppsData, isLoading: isLoadingEligibleApps } = useQuery({
@@ -156,7 +196,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       const res = await apiInstance.get<{ apps: EligibleApp[] }>('/integrations/app-desk/apps');
       return res.data.apps;
     },
-    enabled: requireConnector && deskType === 'APP',
+    enabled: requireConnector && deskType === DeskType.APP,
   });
 
   const { data: workspaceMailbox } = useQuery({
@@ -167,7 +207,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const { data: ozonetelConfig } = useQuery({
     queryKey: ['workspace-ozonetel-config'],
     queryFn: () => getOzonetelConfig(),
-    enabled: requireConnector && deskType === 'CALL',
+    enabled: requireConnector && deskType === DeskType.CALL,
   });
 
   const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
@@ -233,14 +273,19 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         return;
       }
       if (requireConnector) {
-        if (deskType === 'EMAIL' && !selectedConnector) return;
+        if (deskType === DeskType.EMAIL && !selectedConnector) return;
         if (
-          deskType === 'DL' &&
+          deskType === DeskType.DL &&
           (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))
         )
           return;
-        if (deskType === 'SLACK' && !selectedSlackChannelId) return;
-        if (deskType === 'APP' && !selectedInstalledAppId) return;
+        if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
+        if (deskType === DeskType.APP && !selectedInstalledAppId) return;
+        if (
+          deskType === DeskType.SOCIAL_MEDIA &&
+          (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
+        )
+          return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -254,39 +299,51 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         }
         onSubmit?.(promoteData);
       } else if (requireConnector) {
-        if (deskType === 'SLACK') {
+        if (deskType === DeskType.SLACK) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'SLACK',
-            deskType: 'SLACK',
+            deskType: DeskType.SLACK,
             slackChannelId: selectedSlackChannelId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'APP') {
+        } else if (deskType === DeskType.APP) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'APP',
-            deskType: 'APP',
+            deskType: DeskType.APP,
             installedAppId: selectedInstalledAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'DL') {
+        } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'SOCIAL_MEDIA',
+            deskType: DeskType.SOCIAL_MEDIA,
+            applications: googlePlayApplications.map(application => ({
+              displayName: application.displayName.trim(),
+              packageName: application.packageName,
+            })),
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === DeskType.DL) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'EMAIL',
-            deskType: 'DL',
+            deskType: DeskType.DL,
             dlEmail: dlEmailInput,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'CALL') {
+        } else if (deskType === DeskType.CALL) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'CALL',
-            deskType: 'CALL',
+            deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
@@ -295,7 +352,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             ...value,
             connector: selectedConnector,
             channelType: 'EMAIL',
-            deskType: 'EMAIL',
+            deskType: DeskType.EMAIL,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         }
@@ -329,13 +386,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     nameValue.length < 2 ||
     nameValue.length > 80 ||
     !projectIdValue ||
-    (requireConnector && deskType === 'EMAIL' && !selectedConnector) ||
+    (requireConnector && deskType === DeskType.EMAIL && !selectedConnector) ||
     (requireConnector &&
-      deskType === 'DL' &&
+      deskType === DeskType.DL &&
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
-    (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
-    (requireConnector && deskType === 'APP' && !selectedInstalledAppId) ||
-    (requireConnector && deskType === 'CALL' && !ozonetelConfig?.configured) ||
+    (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
+    (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
+    (requireConnector &&
+      deskType === DeskType.SOCIAL_MEDIA &&
+      (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
+    (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
   const submitDisabledReason = ((): string | null => {
@@ -344,15 +404,32 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
     if (!projectIdValue) return 'Please select a project';
     if (requireConnector) {
-      if (deskType === 'EMAIL' && !selectedConnector)
+      if (deskType === DeskType.EMAIL && !selectedConnector)
         return 'Please select an email provider (Google or Microsoft)';
-      if (deskType === 'DL') {
+      if (deskType === DeskType.DL) {
         if (!workspaceMailbox?.configured) return 'Workspace shared mailbox is not configured';
         if (!dlEmailInput) return 'Please enter a distribution list email';
         if (!isValidDlEmail(dlEmailInput)) return dlEmailError ?? 'Invalid distribution list email';
       }
-      if (deskType === 'SLACK' && !selectedSlackChannelId) return 'Please select a Slack channel';
-      if (deskType === 'CALL' && !ozonetelConfig?.configured)
+      if (deskType === DeskType.SLACK && !selectedSlackChannelId)
+        return 'Please select a Slack channel';
+      if (deskType === DeskType.SOCIAL_MEDIA) {
+        if (googlePlayApplications.some(application => !application.displayName.trim()))
+          return 'Please enter a display name for every application';
+        if (
+          googlePlayApplications.some(
+            application => !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName),
+          )
+        )
+          return 'Enter a valid Android package name for every application';
+        if (
+          new Set(googlePlayApplications.map(application => application.packageName)).size !==
+          googlePlayApplications.length
+        )
+          return 'Android package names must be unique';
+        if (!boardIdValue) return 'Please select a board';
+      }
+      if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
         return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
     return null;
@@ -442,7 +519,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     setDlEmailInput('');
     setSelectedSlackChannelId('');
     setSelectedInstalledAppId('');
-    if (value !== 'EMAIL') setSelectedConnector(null);
+    if (value !== DeskType.EMAIL) setSelectedConnector(null);
   };
   const selectedSource = DESK_SOURCES.find(s => s.value === deskType);
 
@@ -486,8 +563,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {/* DL Selection (when deskType === 'DL') */}
-      {requireConnector && deskType === 'DL' && (
+      {/* DL Selection (when deskType === DeskType.DL) */}
+      {requireConnector && deskType === DeskType.DL && (
         <div className='space-y-2'>
           {!workspaceMailbox?.configured ? (
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
@@ -536,7 +613,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {requireConnector && deskType === 'CALL' && (
+      {requireConnector && deskType === DeskType.CALL && (
         <div className='space-y-2'>
           <label htmlFor='call-source-select' className='text-sm font-medium text-foreground'>
             Call source <span className='text-muted-foreground'>*</span>
@@ -574,7 +651,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Slack Channel Selection */}
-      {requireConnector && deskType === 'SLACK' && (
+      {requireConnector && deskType === DeskType.SLACK && (
         <div className='space-y-2'>
           <label htmlFor='slack-channel-select' className='text-sm font-medium text-foreground'>
             Slack Channel <span className='text-muted-foreground'>*</span>
@@ -634,7 +711,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Xyne App Selection */}
-      {requireConnector && deskType === 'APP' && (
+      {requireConnector && deskType === DeskType.APP && (
         <div className='space-y-2'>
           <label htmlFor='app-desk-select' className='text-sm font-medium text-foreground'>
             Xyne App <span className='text-muted-foreground'>*</span>
@@ -654,8 +731,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <div className='font-medium'>No eligible apps found</div>
                 <div className='text-xs text-muted-foreground mt-1'>
                   An app must be installed with the <span className='font-mono'>desk:write</span>{' '}
-                  permission and not already back another desk. Set this up in{' '}
-                  <span className='font-medium'>Xyne Apps</span> first.
+                  permission. Set this up in <span className='font-medium'>Xyne Apps</span> first.
                 </div>
               </div>
             </div>
@@ -674,20 +750,166 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                           {app.description}
                         </span>
                       )}
+                      {!!app.deskCount && (
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          backs {app.deskCount} desk{app.deskCount === 1 ? '' : 's'}
+                        </span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className='text-xs text-muted-foreground'>
-                Apps already backing a desk are hidden. One app backs one desk.
+                One app can back multiple desks. Your app receives the{' '}
+                <span className='font-mono'>channelId</span> on every event to tell them apart.
               </p>
             </>
           )}
         </div>
       )}
 
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && (
+        <div className='space-y-4'>
+          <div className='space-y-2'>
+            <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
+              Source <span className='text-muted-foreground'>*</span>
+            </label>
+            <Select value='GOOGLE_PLAY' disabled>
+              <SelectTrigger id='social-provider' className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className='space-y-3'>
+            <div className='flex items-center justify-between'>
+              <div className='text-sm font-medium text-foreground'>
+                Google Play applications <span className='text-muted-foreground'>*</span>
+              </div>
+              <button
+                type='button'
+                onClick={() =>
+                  setGooglePlayApplications(applications => [
+                    ...applications,
+                    createGooglePlayApplication(),
+                  ])
+                }
+                disabled={googlePlayApplications.length >= 20}
+                className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
+                data-track-category='ADD_CHANNEL_FORM'
+                data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
+              >
+                <Plus className='size-4' />
+                Add application
+              </button>
+            </div>
+            {googlePlayApplications.map((application, index) => {
+              const duplicatePackage =
+                Boolean(application.packageName) &&
+                googlePlayApplications.some(
+                  (candidate, candidateIndex) =>
+                    candidateIndex !== index && candidate.packageName === application.packageName,
+                );
+              const invalidPackage =
+                Boolean(application.packageName) &&
+                !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
+              return (
+                <div
+                  key={application.id}
+                  className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
+                >
+                  <div className='flex items-center justify-between'>
+                    <span className='text-sm font-medium text-foreground'>
+                      Application {index + 1}
+                    </span>
+                    {googlePlayApplications.length > 1 && (
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setGooglePlayApplications(applications =>
+                            applications.filter(
+                              (_, applicationIndex) => applicationIndex !== index,
+                            ),
+                          )
+                        }
+                        className='text-muted-foreground hover:text-destructive'
+                        aria-label={`Remove application ${index + 1}`}
+                        data-track-category='ADD_CHANNEL_FORM'
+                        data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
+                      >
+                        <Trash2 className='size-4' />
+                      </button>
+                    )}
+                  </div>
+                  <div className='space-y-2'>
+                    <label
+                      htmlFor={`google-play-app-name-${index}`}
+                      className='text-sm text-foreground'
+                    >
+                      App display name
+                    </label>
+                    <Input
+                      id={`google-play-app-name-${index}`}
+                      value={application.displayName}
+                      onChange={event =>
+                        setGooglePlayApplications(applications =>
+                          applications.map((candidate, applicationIndex) =>
+                            applicationIndex === index
+                              ? { ...candidate, displayName: event.target.value }
+                              : candidate,
+                          ),
+                        )
+                      }
+                      placeholder='Xyne'
+                      autoComplete='off'
+                    />
+                  </div>
+                  <div className='space-y-2'>
+                    <label
+                      htmlFor={`android-package-name-${index}`}
+                      className='text-sm text-foreground'
+                    >
+                      Android package name
+                    </label>
+                    <Input
+                      id={`android-package-name-${index}`}
+                      value={application.packageName}
+                      onChange={event =>
+                        setGooglePlayApplications(applications =>
+                          applications.map((candidate, applicationIndex) =>
+                            applicationIndex === index
+                              ? { ...candidate, packageName: event.target.value.trim() }
+                              : candidate,
+                          ),
+                        )
+                      }
+                      placeholder='com.example.app'
+                      autoComplete='off'
+                      aria-invalid={invalidPackage || duplicatePackage}
+                    />
+                    {invalidPackage && (
+                      <p className='text-sm text-destructive'>Enter a valid package name.</p>
+                    )}
+                    {duplicatePackage && (
+                      <p className='text-sm text-destructive'>
+                        This package name has already been added.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <p className='text-xs text-muted-foreground'>
+              One Google authorization will be used for every application in this channel.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Connector Selection (for personal mailbox desks) */}
-      {requireConnector && deskType === 'EMAIL' && (
+      {requireConnector && deskType === DeskType.EMAIL && (
         <div className='space-y-2'>
           <div className='text-sm font-medium text-foreground'>
             Email Provider <span className='text-muted-foreground'>*</span>

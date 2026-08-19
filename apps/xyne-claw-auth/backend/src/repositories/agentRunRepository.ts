@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "../db.js";
+import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
 
@@ -61,7 +61,7 @@ const LOCK_NAMESPACE = "agent_run";
 
 async function withSessionWriteLock<T>(
   sessionId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  fn: (tx: AppTransactionClient) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(
     async (tx) => {
@@ -544,7 +544,7 @@ export const agentRunRepository = {
 
   /**
    * Conversation-keyed variant for the write-action approval paths
-   * (app-callback / flow-action), which execute a user-credential write at
+   * (flow-action), which executes a user-credential write at
    * APPROVAL time and only know conversationId + agentSlug (no sessionId — and
    * the executing `writeUserId` may differ from the run's asker, so the
    * queue-time mark can miss it). Marks the most recent run of the

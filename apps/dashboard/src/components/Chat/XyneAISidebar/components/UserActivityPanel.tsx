@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useState, useCallback, useEffect } from 'react';
 import { ArrowLeft, X, Settings } from 'lucide-react';
@@ -188,7 +189,11 @@ export const UserActivityPanel = ({
         await refresh();
         await refreshAliases();
       } catch (error) {
-        console.error('Error saving alias:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error saving alias:'),
+          error: error,
+        });
       }
     },
     [configDialog, createAlias, updateAlias, refresh, refreshAliases],
@@ -215,7 +220,11 @@ export const UserActivityPanel = ({
         await refresh();
         await refreshAliases();
       } catch (error) {
-        console.error('Error deleting alias:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error deleting alias:'),
+          error: error,
+        });
       }
     },
     [deleteAlias, refresh, refreshAliases],

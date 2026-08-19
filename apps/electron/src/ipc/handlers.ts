@@ -16,7 +16,21 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
+import {
+  isPillSender,
+  isRecordingPillEnabled,
+  setRecordingPillTheme,
+} from '../services/recording-pill-window';
+import { isTrayVisible, setTrayVisible } from '../services/tray';
+import {
+  focusMainWindow,
+  markRendererReady,
+  resumeRecordingFromOutside,
+  setOverlayMinimized,
+  setRecordingPillEnabled,
+  stopRecording,
+  syncRecordingState,
+} from '../services/recording-controller';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
@@ -108,7 +122,7 @@ function isPreviewSenderTrusted(event: IpcMainEvent): boolean {
   return trusted;
 }
 
-// XYNE Issues 348/393/396 (CWE-862): the privileged handlers gated with this
+// The privileged handlers gated with this
 // helper act on the authenticated session — wipe cookies, set telemetry
 // identity, write persisted settings. Only honor them from the trusted main
 // window's top-level frame, so a sub-frame, webview, or untrusted origin cannot
@@ -126,6 +140,23 @@ function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     errorLogger.warn('[ipc] Blocked privileged IPC from untrusted sender');
   }
   return trusted;
+}
+
+function isAppWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  const trusted =
+    !!frame && frame.parent === null && !!BrowserWindow.fromWebContents(event.sender);
+  if (!trusted) {
+    errorLogger.warn('[ipc] Blocked UI-preference IPC from untrusted sender');
+  }
+  return trusted;
+}
+
+function broadcastToAppWindows(channel: string, value: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send(channel, value);
+  }
 }
 
 // XYNE-16859 Issue 24: the error-report screen/mic capture handlers can enumerate
@@ -170,7 +201,7 @@ export function setupIpcHandlers(): void {
   // browserPanelActor OPEN event.
   ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (event, url: string) => {
     if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    // XYNE Issue 348: only sync auth cookies for first-party Xyne origins.
+    // Only sync auth cookies for first-party Xyne origins.
     let host: string;
     try {
       host = new URL(url).hostname.toLowerCase();
@@ -207,7 +238,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('set-user-email', (event, email: string) => {
     if (!isMainWindowSender(event)) return;
-    // XYNE Issue 393: validate the email format before applying it to logger
+    // Validate the email format before applying it to logger
     // identity so a compromised renderer cannot poison telemetry.
     if (
       typeof email === 'string' &&
@@ -528,49 +559,108 @@ export function setupIpcHandlers(): void {
 
   // Meeting popup actions
   ipcMain.on('meeting-popup:dismiss', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_DISMISSED, {}, 'MeetingDetector');
     // Just close the popup — do NOT show/focus the main window
     hideMeetingPopup();
   });
 
   ipcMain.on('meeting-popup:start-recording', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
       // Navigate and auto-start recording without stealing focus from the meeting
       mainWindow.webContents.send('navigate-to', '/recordings');
       mainWindow.webContents.send('meeting:start-recording');
     }
-    // Delay close so the popup can show the recording-started state for 3 seconds,
-    // then show the persistent recording pill
-    const recordingStartTime = Date.now();
+    // Delay close so the popup can show the recording-started state for 3 seconds
     hideMeetingPopupAfter(3000);
-    setTimeout(() => showRecordingPill(recordingStartTime), 3000);
   });
 
   // Stop recording from the persistent floating pill — focus the app, navigate to
   // /recordings, and fire requestStop so RecordingsScreen shows the title modal
-  ipcMain.on('recording-pill:stop-recording', () => {
-    const mainWindow = getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send('navigate-to', '/recordings');
-      mainWindow.webContents.send('meeting:stop-recording');
-    }
-    hideRecordingPill();
+  ipcMain.on('recording-pill:stop-recording', (event) => {
+    if (!isPillSender(event)) return;
+    stopRecording('pill');
+  });
+  ipcMain.on('recording-pill:open-app', (event) => {
+    if (!isPillSender(event)) return;
+    focusMainWindow();
+    setOverlayMinimized(false);
   });
 
-  // Cancel just closes the pill — recording continues unaffected
-  ipcMain.on('recording-pill:cancel-recording', () => {
-    hideRecordingPill();
+  ipcMain.on('recording-pill:resume-recording', (event) => {
+    if (!isPillSender(event)) return;
+    resumeRecordingFromOutside('pill');
   });
 
-  // Renderer notifies main that recording stopped (e.g. user stopped manually in UI)
-  ipcMain.on('recording-pill:recording-stopped', () => {
-    hideRecordingPill();
+  ipcMain.handle('tray:get-visible', () => isTrayVisible());
+
+  ipcMain.on('tray:set-visible', (event, visible: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setTrayVisible(!!visible);
+    broadcastToAppWindows('tray:visible-changed', isTrayVisible());
+  });
+
+  ipcMain.handle('recording-pill:get-enabled', () => isRecordingPillEnabled());
+
+  ipcMain.on('recording-pill:set-enabled', (event, enabled: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setRecordingPillEnabled(!!enabled);
+    broadcastToAppWindows('recording-pill:enabled-changed', isRecordingPillEnabled());
+  });
+
+  ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setOverlayMinimized(!!isMinimized);
+  });
+
+  ipcMain.on(
+    'recording:state-changed',
+    (
+      event,
+      state: {
+        active: boolean;
+        startTime?: number;
+        paused?: boolean;
+        pauseStartedAt?: number | null;
+        accumulatedPausedMs?: number;
+      },
+    ) => {
+      if (!isMainWindowSender(event)) return;
+      markRendererReady();
+      syncRecordingState(!!state?.active, state?.startTime, {
+        paused: !!state?.paused,
+        pauseStartedAt: state?.pauseStartedAt ?? null,
+        accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
+      });
+    },
+  );
+
+  ipcMain.on('app:theme-changed', (event, theme: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    if (theme !== 'light' && theme !== 'dark') return;
+    setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('recording:renderer-ready', (event) => {
+    if (!isMainWindowSender(event)) return;
+    markRendererReady();
+  });
+
+  ipcMain.on('recording-pill:recording-stopped', (event) => {
+    if (!isMainWindowSender(event)) return;
+    syncRecordingState(false);
   });
 
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
+    Logger.info(
+      enabled
+        ? ElectronEvent.MEETING_DETECTION_ENABLED
+        : ElectronEvent.MEETING_DETECTION_DISABLED,
+      { enabled },
+      'MeetingDetector',
+    );
     if (enabled) {
       meetingDetectorService.start();
     } else {

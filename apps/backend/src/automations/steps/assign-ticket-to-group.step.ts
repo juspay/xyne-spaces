@@ -1,11 +1,11 @@
 import { z } from 'zod';
+import { ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { DatabaseClient } from '@/database/client';
-import { ActivityType } from '@prisma/client';
 
 const AssignTicketToGroupConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -44,22 +44,44 @@ export class AssignTicketToGroupStep extends BaseActionStep<
     const groupId = config.groupId as string;
     const prisma = DatabaseClient.getInstance();
 
-    const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { userGroupId: true } });
+    const prev = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { userGroupId: true, assignedTo: true },
+    });
+    const updatedBy = context.automation.createdById;
     const assignedUserId = await ticketAssignmentService.assignTicketToGroup({
       ticketId,
       groupId,
-      actorId: context.automation.createdById,
+      actorId: updatedBy,
     });
 
     await prisma.ticketActivity.create({
       data: {
         ticketId,
-        updatedBy: context.automation.createdById,
+        updatedBy,
         workspaceId: context.automation.workspaceId,
         activityType: ActivityType.USER_GROUP_ID,
         value: { field: 'userGroupId', oldValue: prev?.userGroupId ?? null, newValue: groupId, isAutomation: true },
       },
     });
+
+    if (assignedUserId && assignedUserId !== prev?.assignedTo) {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId,
+          updatedBy,
+          workspaceId: context.automation.workspaceId,
+          activityType: ActivityType.ASSIGNED_TO,
+          value: {
+            field: 'assignedTo',
+            oldValue: prev?.assignedTo ?? null,
+            newValue: assignedUserId,
+            reason: 'Automation group assignment',
+            isAutomation: true,
+          },
+        },
+      });
+    }
 
     return { ticketId, groupId, assignedUserId: assignedUserId ?? null };
   }

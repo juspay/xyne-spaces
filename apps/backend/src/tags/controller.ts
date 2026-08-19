@@ -4,6 +4,7 @@ import { TagServiceError, tagService } from './service';
 import { invalidateTagConfigCache } from './pipeline';
 import { enqueueTagVespaRefeed } from './vespaSync';
 import type {
+  ConfirmTagBody,
   CreateTagBody,
   CreateTagsConfigBody,
   DeleteTagBody,
@@ -55,6 +56,52 @@ export async function listTags(req: Request, res: Response) {
   } catch (error) {
     logger.error('[TAG][CTRL] List tags failed:', error);
     return res.status(500).json({ error: 'Failed to list tags' });
+  }
+}
+
+/**
+ * Bulk-resolve Tag ids to their display values. Used to resolve
+ * id-referencing arrays (e.g. Call.labels) back to display text without
+ * exposing raw Tag ids in the UI.
+ */
+export async function getTagsByIds(req: Request, res: Response) {
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  const { ids } = req.query;
+  const idList = typeof ids === 'string' ? ids.split(',').map(id => id.trim()).filter(Boolean) : [];
+  if (idList.length === 0) {
+    return res.json({ tags: [] });
+  }
+
+  try {
+    const tags = await tagService.getTagsByIds(idList, workspaceId);
+    return res.json({ tags: tags.map(t => ({ id: t.id, tag: t.tag, method: t.method })) });
+  } catch (error) {
+    logger.error('[TAG][CTRL] Get tags by ids failed:', error);
+    return res.status(500).json({ error: 'Failed to resolve tags' });
+  }
+}
+
+/**
+ * Confirm an AI-suggested Tag (flip its method from llm to manual in place).
+ * Used by "AI suggestion" tick/cross UIs — accepting keeps the same tag id.
+ */
+export async function confirmTag(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
+  const { tagId } = req.body as ConfirmTagBody;
+
+  try {
+    const confirmed = await tagService.confirmTag(tagId, workspaceId, userId);
+    void enqueueTagVespaRefeed(confirmed.sourceType, confirmed.sourceId);
+    return res.json({ tag: confirmed });
+  } catch (error) {
+    logger.error('[TAG][CTRL] Confirm tag failed:', error);
+    const { status, message } = mapServiceError(error);
+    return res.status(status).json({ error: message });
   }
 }
 

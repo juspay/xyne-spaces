@@ -1,14 +1,17 @@
 import { Request, Response } from 'express';
 import { OrganizationRepository, CreateOrganizationInput } from '../database/repositories/organizationRepository';
 import { UserRepository } from '../database/repositories/users';
-import { OrgRole, ProjectType } from '@prisma/client';
 import { DatabaseClient } from '../database/client';
+import { withWorkspaceScope } from '../database/tenant/context';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
+import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { getEncryptionProvider } from '@/services/encryption';
+import { createId } from '@paralleldrive/cuid2';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -164,55 +167,88 @@ export class OrganizationController {
         return;
       }
 
-      // 1. Create organization
-      const orgData: CreateOrganizationInput = {
-        name: name.trim(),
-        description: description?.trim(),
-        createdBy: userId,
-      };
-      const organization = await this.organizationRepository.create(orgData);
+      const orgId = createId();
+      try {
+        await getEncryptionProvider().initializeOrg(orgId);
+      } catch (error) {
+        logger.error('Failed to initialize org encryption before organization creation', {
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
 
-      // 2. Create workspace for the org
-      const workspace = await db.workspace.create({
-        data: {
-          orgId: organization.orgId,
-          name: workspaceName.trim(),
+      const { organization, workspace } = await db.$transaction(async (tx) => {
+        const orgData: CreateOrganizationInput = {
+          name: name.trim(),
+          description: description?.trim(),
           createdBy: userId,
-          status: 'ACTIVE',
-          workspaceType: WorkspaceType.ENTERPRISE,
-          joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-        },
-      });
+        };
+        const organization = await tx.organization.create({
+          data: {
+            orgId,
+            name: orgData.name,
+            description: orgData.description,
+            createdBy: orgData.createdBy,
+          },
+        });
 
-      // 3. Create DM project for the workspace (required by the system)
-      await db.project.create({
-        data: {
-          name: 'Direct Messages',
-          code: 'DM',
-          description: 'DM project for direct message channels',
-          type: ProjectType.DM,
+        const workspace = await tx.workspace.create({
+          data: {
+            orgId: organization.orgId,
+            name: workspaceName.trim(),
+            createdBy: userId,
+            status: Status.ACTIVE,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
+          },
+        });
+
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
+
+        await tx.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project for direct message channels',
+            type: ProjectType.DM,
+            workspaceId: workspace.id,
+            createdBy: userId,
+          },
+        });
+
+        await tx.workspaceOrganization.create({
+          data: {
+            orgId: organization.orgId,
+            workspaceId: workspace.id,
+            role: WorkspaceRole.ADMIN,
+          },
+        });
+
+        await createCommunityWorkspaceDefaults({
+          db: tx,
           workspaceId: workspace.id,
+          workspaceName: workspace.name,
           createdBy: userId,
-        },
-      });
+        });
 
-      // 4. Link workspace to organization
-      await db.workspaceOrganization.create({
-        data: {
-          orgId: organization.orgId,
-          workspaceId: workspace.id,
-          role: 'ADMIN',
-        },
-      });
+        // Provisioning writes the owner row for the newly created org, not the caller's own.
+        await withWorkspaceScope(() =>
+          tx.orgMember.create({
+            data: {
+              orgId: organization.orgId,
+              email: ownerEmail.trim().toLowerCase(),
+              role: OrgRole.OWNER,
+              invitedBy: userId,
+            },
+          }),
+        );
 
-      // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
-      await db.orgMember.create({
-        data: {
-          orgId: organization.orgId,
-          email: ownerEmail.trim().toLowerCase(),
-          role: OrgRole.OWNER,
-          invitedBy: userId,
-        },
+        return { organization, workspace };
       });
 
       await organizationDomainService.createDomainMappingForOrg({
@@ -224,7 +260,7 @@ export class OrganizationController {
       // 6. Create and send invitation to the workspace
       const invitation = await invitationService.createInvitation({
         email: ownerEmail.trim().toLowerCase(),
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         workspaceId: workspace.id,
         invitedBy: userId,
         orgId: organization.orgId,
@@ -389,7 +425,7 @@ export class OrganizationController {
       }
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
+      const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
       if (!validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',
@@ -408,6 +444,12 @@ export class OrganizationController {
       const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
       if (!currentUserMembership || !['OWNER', 'ADMIN'].includes(currentUserMembership.role)) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
+        return;
+      }
+
+      // Only an existing OWNER may add a member with the OWNER role.
+      if (role === 'OWNER' && currentUserMembership.role !== 'OWNER') {
+        res.status(403).json({ error: 'Only an owner can assign the OWNER role' });
         return;
       }
 
@@ -447,7 +489,7 @@ export class OrganizationController {
       
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
+      const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
       if (!role || !validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',
@@ -466,6 +508,18 @@ export class OrganizationController {
       const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
       if (!currentUserMembership || !['OWNER', 'ADMIN'].includes(currentUserMembership.role)) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
+        return;
+      }
+
+      // Only an existing OWNER may grant the OWNER role; an ADMIN cannot promote anyone
+      // (including themselves) to OWNER.
+      if (role === 'OWNER' && currentUserMembership.role !== 'OWNER') {
+        res.status(403).json({ error: 'Only an owner can assign the OWNER role' });
+        return;
+      }
+      // A member may not change their own role.
+      if (targetUserId === userId && role !== currentUserMembership.role) {
+        res.status(403).json({ error: 'You cannot change your own role' });
         return;
       }
 

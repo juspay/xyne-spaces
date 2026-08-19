@@ -154,6 +154,27 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         undefined,
         signal,
       );
+
+      // Guard: a fresh start REPLACES the whole window with only this summary
+      // (firstKeptEntryId = FRESH_START_SENTINEL makes buildSessionContext yield
+      // just `[summary]`). If the summarizer returned an EMPTY summary — e.g. an
+      // oversized single-shot request whose output budget was spent on reasoning
+      // or truncated, or a provider that returned no text block — committing it
+      // would ERASE the entire context, and the next turn would see an empty
+      // summary and stop. Never commit an empty fresh-start summary: fall back to
+      // pi-native compaction, which keeps the window intact (safe; at worst we
+      // re-compact next turn).
+      const summaryText = (result as { summary?: string } | undefined)?.summary?.trim();
+      if (!summaryText) {
+        metric.count("agent_compaction", { kind: "fresh_start_empty" });
+        log.error(
+          `[compaction] Fresh start produced an EMPTY summary ` +
+          `(${keptCount} msgs ~${keptTokens} tok est) — refusing to drop the ` +
+          `window; falling back to pi-native compaction to preserve context.`,
+        );
+        return; // let default compaction proceed (keeps the messages)
+      }
+
       metric.count("agent_compaction", { kind: "fresh_start" });
       log.info(
         `[compaction] Fresh start: pi would have kept the whole window ` +

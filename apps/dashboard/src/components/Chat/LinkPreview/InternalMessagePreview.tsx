@@ -17,6 +17,11 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { RecordingShareContent } from '../../ui/MessageBubble/RecordingShareContent';
+import {
+  useRecordingShareMessage,
+  type ResolvedRecordingShareMessage,
+} from '../../ui/MessageBubble/recordingShareMessage';
 interface InternalMessagePreviewProps {
   metadata: InternalMessageLinkMetadata;
   onClose?: () => void;
@@ -278,6 +283,7 @@ const TextPreview: React.FC<{
   isDeleted?: boolean | undefined;
   isDM: boolean;
   nestedLinkPreview?: Record<string, unknown> | undefined;
+  recordingShare?: ResolvedRecordingShareMessage | null;
   onNavigate: (event?: React.MouseEvent | React.KeyboardEvent) => void;
   onClose?: (() => void) | undefined;
 }> = ({
@@ -289,6 +295,7 @@ const TextPreview: React.FC<{
   isDeleted,
   isDM,
   nestedLinkPreview,
+  recordingShare,
   onNavigate,
   onClose,
 }) => (
@@ -314,6 +321,16 @@ const TextPreview: React.FC<{
 
       {isDeleted ? (
         <p className='mb-1 text-[13px] italic text-muted-foreground'>This message was deleted.</p>
+      ) : recordingShare ? (
+        <RecordingShareContent
+          recordingShare={recordingShare}
+          className='mb-1 flex min-w-0 flex-col gap-1'
+          renderNote={noteHtml => (
+            <div className='line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
+              {getInlinePreviewText(noteHtml)}
+            </div>
+          )}
+        />
       ) : (
         <div className='mb-1 line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
           {inlinePreviewText}
@@ -351,6 +368,7 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
 
   const formattedTime = formatRelativeTimestamp(new Date(timestamp));
   const inlinePreviewText = getInlinePreviewText(content);
+  const recordingShare = useRecordingShareMessage(content);
   const isDM = isDMChannel(channelScopeType as ChannelScopeType);
   const showAttachments = !isDeleted && hasAttachment && attachments && attachments.length > 0;
 
@@ -423,6 +441,7 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
       isDeleted={isDeleted}
       isDM={isDM}
       nestedLinkPreview={nestedLinkPreview}
+      recordingShare={recordingShare}
       onNavigate={handleNavigate}
       onClose={onClose}
     />
