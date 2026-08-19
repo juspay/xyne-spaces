@@ -1,3 +1,11 @@
+## [1.199.2](https://github.com/juspay/xyne-spaces/compare/v1.199.1...v1.199.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* scribe label handling and older recording layout ([#698](https://github.com/juspay/xyne-spaces/issues/698)) ([8f372f8](https://github.com/juspay/xyne-spaces/commit/8f372f8b5640ccd63679fabe8869bf751e8d68c2))
+* short transcript summary ([#753](https://github.com/juspay/xyne-spaces/issues/753)) ([43d78f7](https://github.com/juspay/xyne-spaces/commit/43d78f74c6ce31ece54fdbd4a99a974109bbb489))
+
 ## [1.199.1](https://github.com/juspay/xyne-spaces/compare/v1.199.0...v1.199.1) (2026-08-19)
 
 
