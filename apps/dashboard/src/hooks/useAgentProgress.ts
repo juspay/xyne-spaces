@@ -244,5 +244,22 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
 
   const clearAll = (): void => setActive(new Map());
 
-  return { agents: Array.from(active.values()), clearAll };
+  // Collapse entries that belong to the SAME agent before handing them to the
+  // pill. The Map is keyed by `agentUserId ?? agentSlug`, so one logical agent
+  // can occupy two slots — e.g. a rehydrate entry that didn't collide with the
+  // live socket entry, or two app-user identities posting progress for the same
+  // slug. Without this, `agents.map(...)` renders the same "xyne · Working on
+  // it…" pill twice side-by-side, which reads as duplicated text. Dedupe on a
+  // stable identity (slug first, userId fallback) and keep the freshest entry.
+  const dedupedAgents = ((): ActiveAgent[] => {
+    const bySlug = new Map<string, ActiveAgent>();
+    for (const a of active.values()) {
+      const identity = a.agentSlug ?? a.agentUserId ?? 'agent';
+      const existing = bySlug.get(identity);
+      if (!existing || a.at >= existing.at) bySlug.set(identity, a);
+    }
+    return Array.from(bySlug.values());
+  })();
+
+  return { agents: dedupedAgents, clearAll };
 }
