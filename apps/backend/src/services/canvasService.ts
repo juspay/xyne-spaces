@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
+import { canvasUrl } from '@/utils/appUrls';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -302,11 +303,7 @@ export async function createKnowledgeCanvas(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
-  const path = workspaceId
-    ? `/${workspaceId}/chat/canvas/${canvasId}`
-    : `/chat/canvas/${canvasId}`;
-  return `${frontendUrl}${path}`;
+  return canvasUrl(canvasId, workspaceId);
 }
 
 type LooseInline = { type?: string; text?: string; props?: Record<string, unknown>; styles?: unknown };
