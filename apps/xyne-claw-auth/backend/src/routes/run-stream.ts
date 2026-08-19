@@ -1594,6 +1594,13 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onPlan: (_sid, todos) => {
         stream.sendEvent("plan", { todos });
       },
+      onUiWidget: (_sid, widget) => {
+        if (widget.type === "plan") {
+          stream.sendEvent("plan", { todos: widget.payload.todos });
+        } else {
+          stream.sendEvent("ui-widget", { widget });
+        }
+      },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
         // noVNC link as a Spaces channel message. Replaying that POST keeps

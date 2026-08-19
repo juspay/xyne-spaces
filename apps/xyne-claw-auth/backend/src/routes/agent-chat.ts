@@ -2966,6 +2966,15 @@ async function runAgentChatViaSse(
             onPlan: (_sid, todos) => {
               pendingStreams.get(callbackId)?.sendEvent("plan", { todos });
             },
+            onUiWidget: (_sid, widget) => {
+              // Keep the existing plan event stable for current clients while
+              // exposing the generic envelope for every other widget type.
+              if (widget.type === "plan") {
+                pendingStreams.get(callbackId)?.sendEvent("plan", { todos: widget.payload.todos });
+              } else {
+                pendingStreams.get(callbackId)?.sendEvent("ui-widget", { widget });
+              }
+            },
             onDebug: (_sid, debugEvent) => {
               pendingStreams.get(callbackId)?.sendEvent("debug", { debugEvent });
             },

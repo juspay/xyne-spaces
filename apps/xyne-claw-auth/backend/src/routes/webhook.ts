@@ -110,9 +110,9 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTicketProposalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, isUiWidget } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
-import type { TwinDelivery } from "xyne-claw-shared";
+import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
 const clog = createLogger("webhook");
@@ -1209,6 +1209,9 @@ export async function fetchConversationHistory(
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
+type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -1332,7 +1335,7 @@ async function postWriteApprovalAction(args: {
   const spacesAppId = ctx.spacesAppId ?? "";
   const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
 
-  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+  const cardAction = {
     serverType: pendingActionPayload.serverType,
     tool: pendingActionPayload.tool,
     params,
@@ -1341,7 +1344,24 @@ async function postWriteApprovalAction(args: {
     agentSlug,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  }), spacesAppId);
+  };
+
+  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  const writeFlow = withSpacesAppId(
+    pendingActionPayload.tool === "spaces-create-ticket" && ticketTitle
+      ? buildTicketProposalFlow({
+          title: ticketTitle,
+          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
+            ? { priority: params["priority"] as TicketCardPriority }
+            : {}),
+          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
+          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
+            ? { assigneeId: params["assignedTo"] }
+            : {}),
+        }, cardAction)
+      : buildWriteApprovalFlow(actionDesc, cardAction),
+    spacesAppId,
+  );
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field
@@ -6487,42 +6507,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     // ── Post question buttons in thread ──
-    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
+    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; questions?: import("xyne-claw-shared").UserQuestion[]; question?: string; options?: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
-      const { signAction: signUserAnswer } = await import("./mcp.js");
+      let postedQuestionSets = 0;
       for (const q of pendingQuestions) {
-        const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
-          questionId: q.questionId,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          userId: ctx.senderId,
-        }), ctx.spacesAppId);
-        // XYNE-55135: bind the card's identity + routing fields with an HMAC at
-        // creation time. The transport signature only proves Spaces forwarded
-        // the body unmodified; it cannot prove these fields equal what the agent
-        // posted, because Spaces forwards client-controlled flowJSON.data.
-        // flow-action re-derives and verifies this exact payload on click.
-        questionFlow.data = {
-          ...(questionFlow.data ?? {}),
-          signature: signUserAnswer({
-            actionType: "user-answer",
-            questionId: q.questionId,
-            userId: ctx.senderId,
-            agentSlug: ctx.agentSlug ?? "",
-            spacesAppId: ctx.spacesAppId ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }),
-        };
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow: questionFlow,
-          userId: ctx.spacesAppUserId,
-        }, token);
+        const questions = q.questions?.length ? q.questions : q.question && q.options?.length ? [{ id: "q1", question: q.question, type: "single_choice" as const, options: q.options }] : undefined;
+        if (!questions) continue;
+        const posted = await renderUiWidget(sessionId, {
+          id: `question:${q.questionId}`,
+          type: "question",
+          operation: "create",
+          payload: { questionId: q.questionId, questions },
+        }, ctx.conversationId, ctx.agentSlug, ctx);
+        if (posted) postedQuestionSets += 1;
       }
-      log.info(`Posted ${pendingQuestions.length} question(s) in thread ${ctx.conversationId}`);
+      log.info(`Delivered ${postedQuestionSets} question set fallback(s) in thread ${ctx.conversationId}`);
     }
 
     // ── Post /goal suggestion FlowUI card in thread ──
@@ -6799,7 +6798,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   }
 });
 
-// ── Plan card render (todo-write → kind:"plan" progress event) ──────────────
+// ── Plan card render (todo-write → ui-widget progress event) ────────────────
 // Post the live todo checklist once, then updateMessage it IN PLACE on every
 // subsequent todo-write. Renders are serialized per session so a burst of
 // todo-writes can't double-post the card before planMessageId is stored.
@@ -6824,7 +6823,7 @@ async function doRenderPlanCard(
   // Per-agent opt-out (agent.config.postTodos === false): suppress the live
   // plan/todo card in the Spaces thread for agents whose owner turned this off.
   // Absent/true preserves the default (post), so existing agents are unchanged.
-  // This is the ONE choke point every kind:"plan" emitter funnels through
+  // This is the ONE choke point every plan ui-widget funnels through
   // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
   // single guard here covers every emitter and every dispatch surface. Read
   // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
@@ -7331,6 +7330,124 @@ router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) =
   });
 });
 
+// ── Unified tool-authored UI widgets ───────────────────────────────────────
+//
+// The claw runtime transports typed domain payloads only. This is the single
+// choke point that resolves Spaces routing, signs interactive actions, builds
+// Flow JSON, and chooses create vs update behavior. A future widget adds one
+// shared union variant and one branch here; HTTP/SSE plumbing stays unchanged.
+const UI_WIDGET_DELIVERY_TTL_SECONDS = 24 * 60 * 60;
+const UI_WIDGET_CLAIM_TTL_SECONDS = 30;
+
+function uiWidgetDeliveryKey(sessionId: string, widgetId: string): string {
+  return `ui-widget-delivery:${sessionId}:${widgetId}`;
+}
+
+async function acquireCreateWidget(sessionId: string, widgetId: string): Promise<string | null> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const token = crypto.randomUUID();
+    const acquired = await redis.set(key, `posting:${token}`, "EX", UI_WIDGET_CLAIM_TTL_SECONDS, "NX");
+    if (acquired === "OK") return token;
+    const state = await redis.get(key);
+    if (state === "delivered") return null;
+    // A final-callback fallback can race the live event. Wait for the first
+    // renderer to commit instead of posting a duplicate card.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for widget delivery claim (${widgetId})`);
+}
+
+async function finishCreateWidget(sessionId: string, widgetId: string, token: string, delivered: boolean): Promise<void> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  const current = await redis.get(key);
+  if (current !== `posting:${token}`) return;
+  if (delivered) {
+    await redis.set(key, "delivered", "EX", UI_WIDGET_DELIVERY_TTL_SECONDS);
+  } else {
+    await redis.del(key);
+  }
+}
+
+async function renderUiWidget(
+  sessionId: string,
+  widget: UiWidget,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+  knownContext?: SessionContext,
+): Promise<boolean> {
+  if (widget.type === "plan") {
+    await renderPlanCard(sessionId, widget.payload.todos, conversationId, agentSlug);
+    return true;
+  }
+
+  const claim = await acquireCreateWidget(sessionId, widget.id);
+  if (!claim) return false;
+  let delivered = false;
+  try {
+    const ctx = knownContext ?? await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+    if (!ctx || !ctx.channelId || !ctx.appToken) return false;
+    // Static/live artifacts historically render only for conversation replies;
+    // clarification questions also support approval-mode agent runs.
+    if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
+    const log = createLogger("webhook/ui-widget", ctx.traceId ?? sessionId.slice(0, 8));
+    let flow;
+
+    switch (widget.type) {
+      case "question": {
+        const { questionId, questions } = widget.payload;
+        if (!questionId || questions.length === 0) return false;
+        const { signAction } = await import("./mcp.js");
+        flow = withSpacesAppId(buildUserQuestionFlow(questions, {
+          questionId,
+          agentSlug: ctx.agentSlug ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), ctx.spacesAppId);
+        flow.data = {
+          ...(flow.data ?? {}),
+          signature: signAction({
+            actionType: "user-answer",
+            questionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
+        break;
+      }
+      case "code":
+        if (!widget.payload.code.trim()) return false;
+        flow = withSpacesAppId(buildCodeFlow(widget.payload.code, widget.payload.language), ctx.spacesAppId);
+        break;
+      case "diff":
+        if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return false;
+        flow = withSpacesAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch), ctx.spacesAppId);
+        break;
+      case "chart":
+        flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
+        break;
+    }
+
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, ctx.appToken);
+    delivered = true;
+    log.info(`Posted ${widget.type} UI widget ${widget.id} in thread ${ctx.conversationId}`);
+    return true;
+  } finally {
+    await finishCreateWidget(sessionId, widget.id, claim, delivered).catch(() => {});
+  }
+}
+
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
@@ -7378,16 +7495,54 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   if (!sessionId) return;
 
-  // Plan/todo card: claw's todo-write tool fires kind:"plan" with the full
-  // todo list. Render (first time) or update-in-place the live checklist in
-  // the thread. Serialized per session; best-effort — never blocks the ack.
-  if ((req.body as { kind?: string }).kind === "plan") {
-    // A todo-write proves the run is still active — keep the recovery TTL alive
-    // too (normal tool-progress events do this below; plan events return early).
+  const body = req.body as Record<string, unknown>;
+  let widget: UiWidget | null = isUiWidget(body["widget"]) ? body["widget"] : null;
+
+  // Rolling-deploy compatibility: accept the widget-specific progress shapes
+  // emitted by older claw pods and normalize them into the unified contract.
+  // New widget types never add another transport branch here.
+  if (!widget && body["kind"] === "plan" && Array.isArray(body["todos"])) {
+    widget = { id: "plan", type: "plan", operation: "upsert", payload: { todos: body["todos"] as Todo[] } };
+  } else if (!widget && body["kind"] === "code" && typeof body["code"] === "string") {
+    widget = {
+      id: `legacy-code:${crypto.randomUUID()}`,
+      type: "code",
+      operation: "create",
+      payload: { code: body["code"], ...(typeof body["language"] === "string" ? { language: body["language"] } : {}) },
+    };
+  } else if (!widget && body["kind"] === "diff" && typeof body["path"] === "string" && typeof body["patch"] === "string") {
+    widget = {
+      id: `legacy-diff:${crypto.randomUUID()}`,
+      type: "diff",
+      operation: "create",
+      payload: { path: body["path"], patch: body["patch"] },
+    };
+  } else if (!widget && body["kind"] === "chart") {
+    const caption = typeof body["caption"] === "string" && body["caption"].trim() ? body["caption"].trim() : undefined;
+    if ((body["type"] === "line" || body["type"] === "area") && Array.isArray(body["series"])) {
+      const series = body["series"].map((row) => row as { x: string; y: number; series?: string });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], series, ...(caption ? { caption } : {}) },
+      };
+    } else if ((body["type"] === "bar" || body["type"] === "pie" || body["type"] === "donut") && Array.isArray(body["points"])) {
+      const points = body["points"].map((point) => point as { label: string; value: number });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], points, ...(caption ? { caption } : {}) },
+      };
+    }
+  }
+
+  if (widget && !isUiWidget(widget)) widget = null;
+  if (widget) {
     void touchRunRecovery(sessionId).catch(() => {});
-    const todos = ((req.body as { todos?: unknown }).todos ?? []) as Todo[];
-    renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
-      clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
+    void renderUiWidget(sessionId, widget, conversationId, agentSlug).catch((err) =>
+      clog.warn(`[webhook/progress] ${widget?.type ?? "unknown"} widget failed for ${sessionId}:`, err instanceof Error ? err.message : err),
     );
     return;
   }
