@@ -455,7 +455,7 @@ export class UserService {
   /**
    * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<(User & { orgMember?: { memberId: string; role: string } | null }) | null> {
+  async getUserById(userId: string): Promise<(User & { orgMember: { memberId: string; role: string } }) | null> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -466,14 +466,19 @@ export class UserService {
       }
       
       // Fetch org member separately since there's no explicit relation
-      const orgMember = user.orgMemberId ? await this.prisma.orgMember.findUnique({
+      const orgMember = await this.prisma.orgMember.findUnique({
         where: { memberId: user.orgMemberId },
         select: {
           memberId: true,
           role: true,
         },
-      }) : null;
-      
+      });
+
+      if (!orgMember) {
+        logger.warn(`getUserById: orgMember not found for user ${userId}`);
+        return null;
+      }
+
       return {
         ...user,
         orgMember,
