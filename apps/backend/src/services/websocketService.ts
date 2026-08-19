@@ -622,7 +622,7 @@ class WebSocketService {
     try {
       const { userId, userName, userEmail } = socket;
 
-      logger.info(`🔍 [TYPING-DEBUG] Socket ${socket.id} - User ${userName} (${userEmail}) [ID: ${userId}] started typing in session: ${sessionId}`);
+      logger.info(`[TYPING-DEBUG] Socket ${socket.id} - User [ID: ${userId}] started typing in session: ${sessionId}`);
 
       // Create typing user object
       const typingUser: TypingUser = {
@@ -657,7 +657,7 @@ class WebSocketService {
       // Use Redis-only for all typing events (both same-pod and cross-pod)
       await typingService.broadcastTypingUpdate(sessionId, allTypingUsers, isChannel, 'typing_start');
 
-      logger.info(`Typing users in ${sessionId}: ${allTypingUsers.map(u => u.userName).join(', ')}`);
+      logger.info(`Typing users in ${sessionId}: ${allTypingUsers.length} user(s)`);
     } catch (error) {
       logger.error('Error handling typing start:', error);
     }
@@ -665,9 +665,9 @@ class WebSocketService {
 
   private async handleTypingStop(socket: AuthenticatedSocket, sessionId: string): Promise<void> {
     try {
-      const { userId, userName } = socket;
+      const { userId } = socket;
 
-      logger.info(`User ${userName} stopped typing in session: ${sessionId}`);
+      logger.info(`User [ID: ${userId}] stopped typing in session: ${sessionId}`);
 
       // Determine if this is a channel or conversation
       const isChannel = await this.isChannelSession(sessionId);
@@ -695,7 +695,7 @@ class WebSocketService {
       // Use Redis-only for all typing events (both same-pod and cross-pod)
       await typingService.broadcastTypingUpdate(sessionId, allTypingUsers, isChannel, 'typing_stop');
 
-      logger.info(`Typing users in ${sessionId}: ${allTypingUsers.map(u => u.userName).join(', ')}`);
+      logger.info(`Typing users in ${sessionId}: ${allTypingUsers.length} user(s)`);
     } catch (error) {
       logger.error('Error handling typing stop:', error);
     }

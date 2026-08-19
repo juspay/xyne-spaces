@@ -369,7 +369,6 @@ export class EmailController {
         event: 'email_sent',
         type,
         channelName: channel.name,
-        userEmail: req.user?.email,
       });
 
       // 6. Save reply in database
@@ -1113,7 +1112,6 @@ export class EmailController {
           type: 'COMPOSE',
           channelName: channel.name,
           ticketId: ticket.id,
-          userEmail: req.user?.email,
         });
 
         return res.status(200).json({

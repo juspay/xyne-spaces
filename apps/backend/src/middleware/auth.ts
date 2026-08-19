@@ -614,7 +614,6 @@ export class AuthMiddleware {
       // Generate a new custom JWT token for the user
       logger.info(`[AUTH] refreshTokenBySession generating custom token`, {
         userId: session.user.id,
-        email: session.user.email,
       });
       
       const customToken = jwtService.generateToken({
@@ -638,7 +637,6 @@ export class AuthMiddleware {
 
       logger.info(`[AUTH] refreshTokenBySession completed successfully`, {
         userId: session.user.id,
-        email: session.user.email,
       });
       return { success: true, customToken };
     } catch (error) {

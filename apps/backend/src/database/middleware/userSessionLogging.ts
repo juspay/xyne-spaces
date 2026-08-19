@@ -52,7 +52,7 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
     const operation = params.action.toUpperCase();
     const result = await next(params);
     const affectedRows = getAffectedRows(params.action, result);
-    const identifiers = await resolveLogIdentifiers(prisma, params.args?.data, params.args?.where, result, context?.emailId);
+    const identifiers = await resolveLogIdentifiers(prisma, params.args?.data, params.args?.where, result);
 
     if (params.action === 'delete' || params.action === 'deleteMany') {
       logDeleteOperation(

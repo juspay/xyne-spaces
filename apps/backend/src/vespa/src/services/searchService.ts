@@ -476,7 +476,7 @@ export class SearchService {
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-      this.logger.info(`Payload: ${JSON.stringify(payload)}`);
+      this.logger.info(`Payload built (${JSON.stringify(payload).length} bytes)`);
       if (captureDebug) {
         captureDebug({
           stage: "exact",
@@ -536,7 +536,7 @@ export class SearchService {
         response,
         async () => {
           const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-          this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
+          this.logger.info(`Fuzzy Search Payload built (${JSON.stringify(fuzzyPayload).length} bytes)`);
           if (captureDebug) {
             captureDebug({
               stage: "fuzzy-fallback",
