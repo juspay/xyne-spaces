@@ -44,12 +44,9 @@ export interface ReferenceTicketActivityValue {
 /**
  * Subticket Activity Value - used for ActivityType.SUBTICKET_CREATED
  *
- * `subTicketAction` discriminates the three ways a sub-ticket row comes and goes,
- * the same way ReferenceTicketActivityValue's `action` does for related tickets. It
- * is deliberately NOT called `action`: the dashboard merges every activity value
- * shape into one intersection type, so a second `action` with a different union
- * would narrow both to their overlap. Rows written before this field existed carry
- * no value; readers must treat that as 'created'.
+ * `subTicketAction` mirrors ReferenceTicketActivityValue's `action`, but cannot share
+ * the name: the dashboard merges all activity value shapes into one intersection type,
+ * so a second `action` would narrow both to their overlap. Absent means 'created'.
  */
 export interface SubticketActivityValue {
   subTicketAction?: 'created' | 'linked' | 'unlinked';

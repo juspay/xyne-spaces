@@ -4278,12 +4278,9 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Client-optimistic twin of apps/backend/src/zero/mutators.ts subTicket.linkExisting.
-    //
-    // Mirrors the server's structural guards the way the `create` twin above does, so
-    // an illegal link is rejected before it renders instead of flashing into the
-    // Sub-Tickets list and rolling back a round trip later. The server stays the
-    // authority: it additionally enforces workspace and channel access, and writes the
+    // Client-optimistic twin of subTicket.linkExisting. Mirrors the server's structural
+    // guards (as the `create` twin above does) so an illegal link is rejected before it
+    // renders. The server additionally enforces workspace/channel access and writes the
     // activity and system message.
     linkExisting: defineMutator(
       z.object({
@@ -4364,9 +4361,8 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Client-optimistic twin of apps/backend/src/zero/mutators.ts subTicket.unlink.
-    // Drops the parent -> sub-ticket edge and the sub_tickets row with it. The linked
-    // ticket itself is never touched.
+    // Client-optimistic twin of subTicket.unlink. Drops the edge and the sub_tickets
+    // row with it; the linked ticket itself is never touched.
     unlink: defineMutator(
       z.object({
         mappingId: z.string(),

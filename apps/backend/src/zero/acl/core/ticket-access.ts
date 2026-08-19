@@ -2,17 +2,11 @@ import { ChannelVisibility } from '@xyne/shared';
 import { zql } from '../../queries';
 
 /**
- * "Can this user see this ticket" as a ZQL predicate.
+ * "Can this user see this ticket" as a ZQL predicate: the channel is PRIVATE with the
+ * user as participant, or PUBLIC in a project the user has a public channel in.
  *
- * A ticket is reachable when its conversation's channel is either PRIVATE with the
- * user as a participant, or PUBLIC inside a project the user already has a public
- * channel in.
- *
- * This lived inline in SubTicketsACL.canUpdate. It is shared now because reads
- * inside a Zero mutator are NOT filtered by the read ACLs — `zql` there is the bare
- * builder — so any mutator that reads a ticket the caller named must apply the
- * predicate itself or it becomes a way to pull data out of a channel the caller
- * cannot open. Keeping one copy stops the mutator and the ACL from drifting apart.
+ * Shared out of SubTicketsACL.canUpdate because reads inside a Zero mutator are NOT
+ * filtered by the read ACLs, so mutators must apply it themselves.
  */
 export function accessibleTicketQuery(
   ticketId: string,

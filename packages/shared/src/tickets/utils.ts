@@ -18,19 +18,11 @@ export const stringFromFormValue = (value: unknown): string | null =>
 
 /**
  * Whether sub-ticket links on a board are the user's to make and break by hand.
+ * FLOW and RELEASE boards build their mappings automatically and key idempotency off
+ * them, so hand-editing corrupts a run.
  *
- * FLOW boards materialise their sub-tickets from a flow run
- * (services/subTicketService.ts), and RELEASE boards from commit analysis
- * (database/repositories/applicationRepository.ts) — that code keys idempotency off
- * the very mappings a hand-edit would add or remove, and `application_release_tickets`
- * / `release_events` reference `sub_tickets.id` with no FK to protect them. So the
- * "Add existing sub-ticket" picker and the unlink control stay off both.
- *
- * Deliberately an ALLOW-list, so an unknown board type answers false. The dashboard
- * asks this while `boardData` is still loading, and a deny-list would answer true for
- * `undefined` — rendering Unlink on a FLOW or RELEASE board for as long as that query
- * took, where the optimistic twin would really delete the rows before the server
- * refused. A board type added later fails closed for the same reason.
+ * An ALLOW-list on purpose: callers ask this while boardData is still loading, and a
+ * deny-list would answer true for `undefined`. Unknown board types fail closed.
  */
 export const isManualSubTicketBoard = (boardType?: BoardType | null): boolean =>
   boardType === BoardType.DEFAULT || boardType === BoardType.NON_LINEAR;
@@ -38,25 +30,15 @@ export const isManualSubTicketBoard = (boardType?: BoardType | null): boolean =>
 const LINKED_SUB_TICKET_NAMESPACE = 'edffd0e4-129b-4f8a-9f73-c1a077f74433';
 
 /**
- * Id of the `sub_tickets` row representing "ticket `mappedTicketId` is a sub-ticket".
+ * Id of the `sub_tickets` row for "mappedTicketId is a sub-ticket of ticketId".
  *
- * Derived from the pair rather than minted per click so two racing pushes for the same
- * link write the SAME row. Zero compiles `tx.mutate.<table>.insert` to
- * `INSERT ... ON CONFLICT (<pk>) DO NOTHING`, so the loser's insert is a harmless
- * no-op that converges on the winner's row instead of creating a second row for the
- * same child — which is what would make the `.one()`/`findFirst` lookups on
- * mappedTicketId ambiguous.
+ * Derived from the pair so two racing links converge on ONE row: Zero compiles inserts
+ * to `ON CONFLICT (pk) DO NOTHING`, making the loser's insert a harmless no-op.
  *
- * The MAPPING id is deliberately NOT derived. Because inserts are ON CONFLICT DO
- * NOTHING on the primary key, deriving it too would make the loser's mapping insert
- * silently succeed as well, and it would sail on to write a duplicate activity, a
- * duplicate system message and a duplicate notification. A random mapping id means
- * the loser instead violates the `ticket_sub_ticket_mappings(ticketId, subTicketId)`
- * unique index, which rolls its whole transaction back — the behaviour that index was
- * added for.
- *
- * Deriving is still deterministic in the sense the mutator guidelines care about: the
- * optimistic client twin and the server compute the same value from the same args.
+ * The mapping id is deliberately NOT derived — that would make the loser's mapping
+ * insert silently succeed too, and it would go on to write a duplicate activity and
+ * notification. A random one instead violates the (ticketId, subTicketId) unique index
+ * and rolls the whole transaction back.
  */
 export const linkedSubTicketId = (ticketId: string, mappedTicketId: string): string =>
   uuidv5(`linked-subticket:${ticketId}:${mappedTicketId}`, LINKED_SUB_TICKET_NAMESPACE);

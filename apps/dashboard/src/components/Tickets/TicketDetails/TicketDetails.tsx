@@ -1363,15 +1363,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets, parentSubTicketsDetails] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // A sub_tickets row only makes this ticket somebody's child while it still has a
-  // mapping. Counting rows alone would keep a ticket wedged as "already a sub-ticket"
-  // after it was unlinked, or behind a stray row from any other writer.
-  //
-  // The result array is [] both before and after the query resolves, so readiness has
-  // to come from the result details rather than from the array being undefined.
-  // 'unknown' is the only genuinely-still-loading state; treating 'error' as unresolved
-  // too would hide the picker for good on a query that never succeeds, where falling
-  // through to the server's own guard is the better failure.
+  // A row only makes this ticket somebody's child while it still has a mapping —
+  // counting rows alone would leave it wedged as "already a sub-ticket" after unlink.
+  // The array is [] both before and after resolving, so readiness comes from the
+  // details; 'error' counts as resolved so a failed query cannot hide the picker.
   const hasResolvedParentSubTickets = parentSubTicketsDetails.type !== 'unknown';
   const isSubTicketOfAnotherTicket = (parentSubTickets ?? []).some(
     parentSubTicket => (parentSubTicket.ticketMappings?.length ?? 0) > 0,
@@ -1945,13 +1940,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // FLOW and RELEASE boards build their sub-ticket mappings automatically, so both
-  // the picker and the unlink control stay off there.
   const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
 
-  // Own search state for this picker. The Related Tickets picker below keeps its own
-  // separate state; sharing one set of values between the two meant closing or
-  // typing in either blanked the other's results.
+  // Own search state — the Related Tickets picker below keeps its own.
   const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
   const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
@@ -1960,8 +1951,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     isActive: isAddSubTicketMenuOpen,
   });
 
-  // Close the picker and drop its results whenever we move to another ticket — the
-  // component is reused across tickets rather than remounted.
+  // The component is reused across tickets rather than remounted.
   useEffect(() => {
     setIsAddSubTicketMenuOpen(false);
     setIsLinkingSubTicket(false);
@@ -1972,8 +1962,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setIsAddSubTicketMenuOpen(open);
   }, []);
 
-  // Everything already hanging off this ticket anywhere in the loaded tree, so a
-  // ticket that is a child two levels down is not offered again as a direct child.
+  // Everything already in the loaded tree, so a deeper child is not offered again.
   const linkedSubTicketMappedIds = useMemo(() => {
     const ids = new Set<string>();
     loadedSubTickets.forEach(st => {
@@ -2011,8 +2000,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             timestamp: Date.now(),
             ticketId: ticket.id,
             mappedTicketId,
-            // Denormalized fallback only — the row renders from the linked ticket
-            // itself. xyneId first, matching what SubTicketModal stores.
+            // Fallback only — the row renders from the linked ticket itself.
             subTicketTitle: candidate?.xyneId || candidate?.title || 'Subticket',
           }),
         )
@@ -3030,12 +3018,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-    // Only a link to an existing ticket can be unlinked, and only on a DIRECT child:
-    // `canManageSubTicketLinks` describes the board of the ticket on screen, which is
-    // the parent of depth-0 rows only. A nested row hangs off a different ticket that
-    // may sit on a board where links are machine-owned, and the server would refuse.
-    // A drafted sub-ticket that was never materialised holds its own content, so it is
-    // removed by other means.
+    // Direct children only: canManageSubTicketLinks describes the board on screen,
+    // which is the parent for depth-0 rows alone. Drafted sub-tickets hold their own
+    // content and are removed by other means.
     const canUnlink = Boolean(mappedTicketId) && canManageSubTicketLinks && node.depth === 0;
     const isUnlinking = unlinkingMappingIds.has(node.mappingId);
 
@@ -3186,11 +3171,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  // Off entirely on boards whose sub-tickets are machine-owned, on a ticket that is
-  // itself a sub-ticket (the Create Sub-Ticket button below carries the explanation),
-  // and until that query has actually resolved — rendering it during the load window
-  // would offer a link the server is about to refuse. `isLinkingSubTicket` only ever
-  // dims it briefly, and handleLinkSubTicket drops the click regardless.
+  // Hidden on machine-owned boards, on a ticket that is itself a sub-ticket (the
+  // Create Sub-Ticket button carries the explanation), and until that query resolves.
   const addSubTicketPicker =
     !canManageSubTicketLinks || !hasResolvedParentSubTickets || !canCreateNestedSubTicket ? null : (
       <div
