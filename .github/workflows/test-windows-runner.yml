@@ -1,11 +1,14 @@
 name: Test Windows Self-Hosted Runner
 
 on:
+  push:
+    branches:
+      - fix/test-local-runner
   workflow_dispatch:
 
 jobs:
   test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     steps:
       - name: Print hostname
         shell: pwsh
