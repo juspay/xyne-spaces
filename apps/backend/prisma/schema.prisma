@@ -929,7 +929,8 @@ model QuestionnaireResponse {
   updatedAt         DateTime @updatedAt
 
   @@unique([workspaceId, questionnaireType, userId])
-  @@unique([questionnaireType, email])
+  @@unique([email, questionnaireType])
+  @@index([userId])
   @@map("questionnaire_responses")
   @@schema("non_zero")
 }
