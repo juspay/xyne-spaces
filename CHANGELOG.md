@@ -1,3 +1,10 @@
+## [1.195.1](https://github.com/juspay/xyne-spaces/compare/v1.195.0...v1.195.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* disable toggle if user unavaiable, showing no one available for assignment in user group dropdown ([#695](https://github.com/juspay/xyne-spaces/issues/695)) ([8762a7c](https://github.com/juspay/xyne-spaces/commit/8762a7c6f94c09d01e06efa8b70620b6f64122c0))
+
 ## [1.195.0](https://github.com/juspay/xyne-spaces/compare/v1.194.0...v1.195.0) (2026-08-19)
 
 
