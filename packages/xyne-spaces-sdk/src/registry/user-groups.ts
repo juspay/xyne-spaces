@@ -68,6 +68,17 @@ export const userGroupsOperations = {
   ),
 
   /**
+   * Per-member workload weightings for a group.
+   * Maps to: Zero query 'getUserWorkloadMappings'
+   *
+   * Feeds the same assignment routing as `listAssignmentStates`: availability says
+   * who *can* take work, this says how much each of them is carrying.
+   */
+  listWorkloadMappings: query<{ userGroupId: string }, unknown[]>(
+    'getUserWorkloadMappings'
+  ),
+
+  /**
    * One user's assignment state across their groups.
    * Maps to: Zero query 'getUserAssignmentStatesByUserId'
    */

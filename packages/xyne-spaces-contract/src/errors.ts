@@ -148,11 +148,3 @@ export interface ApiErrorBody {
 export function isErrorCode(value: string): value is ErrorCode {
   return (ERROR_CODES as readonly string[]).includes(value);
 }
-
-export function statusForCode(code: ErrorCode): number {
-  return ERROR_CATALOG[code].status;
-}
-
-export function isRetryable(code: ErrorCode): boolean {
-  return ERROR_CATALOG[code].retryable;
-}

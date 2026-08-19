@@ -8,6 +8,12 @@
   ],
   "exclusions": [
     {
+      "name": "activeSlashCommandArtifacts",
+      "kind": "query",
+      "reason": "deferred:in-app banner feed",
+      "note": "Takes no arguments and is scoped entirely to ctx.userID/workspaceId \u2014 it drives the slash-command artifact banner in the product UI. No standalone value for an API client; revisit if artifacts become addressable."
+    },
+    {
       "name": "activities.markThreadActivitiesAsRead",
       "kind": "mutator",
       "reason": "superseded-by:activities.markThreadActivitiesAsReadV2",

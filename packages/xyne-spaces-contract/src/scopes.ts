@@ -7,9 +7,8 @@
  *
  * The 13 Slack-style app-permission scopes seeded by
  * `apps/backend/scripts/seed-app-permissions.ts` remain the vocabulary for the
- * legacy `/api/apps/*` surface. `LEGACY_SCOPE_EQUIVALENTS` records the overlap
- * so a single grant screen can explain both; no new tokens are issued with the
- * legacy names.
+ * legacy `/api/apps/*` surface. Those names are frozen and never minted for SDK
+ * tokens.
  */
 
 export const RESOURCE_FAMILIES = [
@@ -117,21 +116,3 @@ export function isScope(value: string): value is Scope {
   return (ALL_SCOPES as readonly string[]).includes(value);
 }
 
-/**
- * Overlap with the legacy `/api/apps/*` permission vocabulary. Informational —
- * the legacy names are frozen and never minted for SDK tokens.
- */
-export const LEGACY_SCOPE_EQUIVALENTS: Readonly<Record<string, Scope>> = {
-  'channels:read': 'spaces.channels:read',
-  'chat:write': 'spaces.messages:write',
-  'im:write': 'spaces.messages:write',
-  'tickets:read': 'spaces.tickets:read',
-  'tickets:write': 'spaces.tickets:write',
-  'desk:read': 'spaces.tickets:read',
-  'desk:write': 'spaces.tickets:write',
-  'email:read': 'spaces.email:read',
-  'calls:write': 'spaces.calls:write',
-  'files:read': 'spaces.attachments:read',
-  'users:read': 'spaces.users:read',
-  'usergroups:read': 'spaces.users:read',
-};

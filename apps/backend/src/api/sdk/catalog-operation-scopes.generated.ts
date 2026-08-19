@@ -270,6 +270,7 @@ export const catalogOperationScopes = {
   'getUserProfilesByIds': { kind: 'query', scopes: ['spaces.users:read'] },
   'getUsers': { kind: 'query', scopes: ['spaces.users:read'] },
   'getUsersV2': { kind: 'query', scopes: ['spaces.users:read'] },
+  'getUserWorkloadMappings': { kind: 'query', scopes: ['spaces.users:read'] },
   'getWorkflowForTicket': { kind: 'query', scopes: ['spaces.tickets:read'] },
   'getWorkspaceById': { kind: 'query', scopes: ['spaces.admin'] },
   'getWorkspaceInstalledApps': { kind: 'query', scopes: ['spaces.admin'] },

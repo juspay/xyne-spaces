@@ -14,8 +14,6 @@ export {
   ERROR_CODES,
   ERROR_CATALOG,
   isErrorCode,
-  statusForCode,
-  isRetryable,
   type ErrorCode,
   type ErrorDefinition,
   type ErrorDetail,
@@ -27,7 +25,6 @@ export {
   ALL_SCOPES,
   SCOPE_CATALOG,
   ADMIN_SCOPE,
-  LEGACY_SCOPE_EQUIVALENTS,
   readScope,
   writeScope,
   isScope,
@@ -42,8 +39,6 @@ export {
 export {
   searchQuerySchema,
   searchSchemaQuerySchema,
-  VESPA_SCHEMAS,
-  type SearchQuery,
 } from './schemas/search.js';
 
 export {
