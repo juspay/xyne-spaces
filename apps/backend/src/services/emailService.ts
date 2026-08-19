@@ -52,6 +52,7 @@ import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
@@ -1137,12 +1138,8 @@ export class EmailService {
 
     if (!configuredBoardId) {
       logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to ChannelBoardMapping`);
-      const mapping = await this.prisma.channelBoardMapping.findFirst({
-        where: { channelId },
-        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: { board: { select: { id: true } } },
-      });
-      configuredBoardId = mapping?.board.id;
+      const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+      configuredBoardId = resolved?.boardId;
     }
 
     if (!configuredBoardId) {
@@ -2146,13 +2143,9 @@ export class EmailService {
       boardId =
         preference?.boardId ?? externalSource?.boardId ?? undefined;
       if (!boardId) {
-        const mapping = await this.prisma.channelBoardMapping.findFirst({
-          where: { channelId },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: { board: { select: { id: true, projectId: true } } },
-        });
-        boardId = mapping?.board.id;
-        projectId = mapping?.board.projectId ?? undefined;
+        const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+        boardId = resolved?.boardId;
+        projectId = resolved?.projectId ?? undefined;
       }
       if (!boardId) {
         throw new Error(

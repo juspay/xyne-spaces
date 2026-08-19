@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { resolveChannelDefaultBoard } from '../../utils/channelDefaultBoard';
 import { ExternalEntityType, MessageDirection, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { WebClient } from '@slack/web-api';
@@ -629,13 +630,10 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     return;
   }
 
-  // Derive projectId from the channel's default (or oldest) board mapping
-  const defaultMapping = await db.channelBoardMapping.findFirst({
-    where: { channelId: channel.id },
-    orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-    include: { board: { select: { projectId: true } } },
-  });
-  const derivedProjectId = defaultMapping?.board.projectId ?? null;
+  // Derive projectId from the channel's default board (ChannelBoardMapping first,
+  // legacy channel.projectId as fallback).
+  const resolvedBoard = await resolveChannelDefaultBoard(db, channel.id);
+  const derivedProjectId = resolvedBoard?.projectId ?? null;
 
   if (!derivedProjectId) {
     if (ENABLE_NOTIFICATIONS && messageTs) {

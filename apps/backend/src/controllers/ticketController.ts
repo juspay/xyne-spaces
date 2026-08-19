@@ -44,6 +44,7 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
@@ -472,19 +473,15 @@ export class TicketController {
           }
           req.body.projectId = board.projectId;
         } else {
-          // No explicit board configured — fall back to the channel's oldest board
-          // mapping and derive projectId from board.projectId, never from channel.projectId.
-          const mapping = await db.channelBoardMapping.findFirst({
-            where: { channelId: channel.id },
-            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-            include: { board: { select: { projectId: true } } },
-          });
-          const mappedProjectId = mapping?.board?.projectId;
-          if (!mappedProjectId) {
+          // No explicit board configured — resolve the channel's default board
+          // (ChannelBoardMapping first, legacy channel.projectId as fallback) and
+          // derive projectId from that board, never from channel.projectId directly.
+          const resolved = await resolveChannelDefaultBoard(db, channel.id);
+          if (!resolved?.projectId) {
             res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
             return;
           }
-          req.body.projectId = mappedProjectId;
+          req.body.projectId = resolved.projectId;
         }
         req.body.tags = [
           SUPPORT_TAG,
