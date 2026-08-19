@@ -115,6 +115,7 @@ function redirectToDesk(
     if (params.packageName) query.set('socialMediaPackage', params.packageName);
   } else {
     query.set('socialMediaOAuth', 'success');
+    query.set('socialMediaProvider', 'google-play');
   }
   const path = buildSupportPath(params.workspaceId, params.channelId, query);
   res.redirect(postOAuthRedirect(getFrontendUrl(req), path, params.platform ?? 'web'));
