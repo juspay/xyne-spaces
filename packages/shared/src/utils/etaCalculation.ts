@@ -175,19 +175,31 @@ export function calculateETADeadline(
   current = moveToNextWorkingDay(current, config);
   current = skipWeekends(current, config);
 
-  // Calculate full working days needed
-  const fullDaysNeeded = Math.floor(remainingHours / workingHoursPerDay);
-  if (fullDaysNeeded > 0) {
-    let workingDaysAdded = 0;
-    while (workingDaysAdded < fullDaysNeeded) {
-      current = moveToNextWorkingDay(current, config);
-      workingDaysAdded++;
+  // Consume full working days one at a time, leaving remainingHours in
+  // (0, workingHoursPerDay]. Stopping the loop here (rather than advancing
+  // past every full day and handling only a strictly-partial remainder,
+  // as before) keeps exact multi-day estimates pinned to the end of the
+  // actual last working day instead of the start of the day after it -
+  // consistent with how a single exact day is already pinned above.
+  let dayIterations = 0;
+  const MAX_DAY_ITERATIONS = 1000; // Safety limit for very large/bogus estimates
+  while (remainingHours > workingHoursPerDay) {
+    if (dayIterations >= MAX_DAY_ITERATIONS) {
+      throw new Error(
+        'Maximum iterations reached in calculateETADeadline - possible infinite loop'
+      );
     }
-    remainingHours -= fullDaysNeeded * workingHoursPerDay;
+    remainingHours -= workingHoursPerDay;
+    current = moveToNextWorkingDay(current, config);
+    dayIterations++;
   }
 
-  // Handle remaining partial day
-  if (remainingHours > 0) {
+  if (remainingHours === workingHoursPerDay) {
+    // Estimate exactly fills this day - pin to end of working day.
+    const istForCalc = utcToIST(current);
+    istForCalc.setUTCHours(config.end, 0, 0, 0);
+    current = istToUTC(istForCalc);
+  } else if (remainingHours > 0) {
     const istForPartial = utcToIST(current);
     const totalMinutesNeeded = remainingHours * 60;
     istForPartial.setUTCMinutes(istForPartial.getUTCMinutes() + totalMinutesNeeded);

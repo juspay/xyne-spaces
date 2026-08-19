@@ -1,9 +1,16 @@
+import type { Prisma } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
-import { ActivityType } from '@xyne/shared';
+import {
+  ActivityType,
+  parseBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+  BoardType,
+} from '@xyne/shared';
 import {
   getUsersToNotifyForTicket,
   getTicketBotActorId,
@@ -13,6 +20,21 @@ import {
   TicketWithStageInfo,
   OPEN_STATUSES,
 } from '@/utils/etaNotificationUtils';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import {
+  evaluatePlanningRisk,
+  buildRiskTransitionActivityIntents,
+  dispatchEtaNotifications,
+  etaSignalsFromResult,
+  isEtaManagementKillSwitchActive,
+} from '@/services/etaManagement';
+
+interface TicketForReconciliation extends TicketWithStageInfo {
+  boardId: string;
+  userGroupId: string | null;
+  statusV2: string;
+  metadata: unknown;
+}
 
 // Window for initial breach notification (30 minutes)
 const BREACH_WINDOW_MS = 30 * 60 * 1000;
@@ -83,7 +105,7 @@ class StageEtaDeadlineWorker {
     }
   }
 
-  private async getOpenTickets(now: Date): Promise<TicketWithStageInfo[]> {
+  private async getOpenTickets(now: Date): Promise<TicketForReconciliation[]> {
     // Get today at midnight for date comparison
     const todayMidnight = new Date(now);
     todayMidnight.setHours(0, 0, 0, 0);
@@ -107,20 +129,25 @@ class StageEtaDeadlineWorker {
         stageName: true,
         eta: true,
         workspaceId: true,
+        boardId: true,
+        userGroupId: true,
+        statusV2: true,
+        metadata: true,
       },
     });
   }
 
   private async checkAndNotifyForStageEta(
-    tickets: TicketWithStageInfo[],
+    tickets: TicketForReconciliation[],
     now: Date
   ): Promise<void> {
-    // Get active stage entries for these tickets
+    // Fetch the FULL active-visit set once (no stageEta filter) and branch below into
+    // "overdue" (stageEta <= now, existing breach-reminder logic) vs. "planning-risk"
+    // (stageEta > now, new reconciliation) - avoids a second query over the same rows.
     const activeStageEntries = await db.ticketStageEta.findMany({
       where: {
         ticketId: { in: tickets.map(t => t.id) },
         stageLeftAt: null,
-        stageEta: { lte: now },
       },
     });
 
@@ -136,7 +163,16 @@ class StageEtaDeadlineWorker {
     const ticketMap = new Map(tickets.map(t => [t.id, t]));
     const stageMap = new Map(stages.map(s => [s.id, s]));
 
-    const entryBatches = chunkArray(activeStageEntries, STAGE_ETA_REMINDER_BATCH_SIZE);
+    const overdueEntries = activeStageEntries.filter(e => e.stageEta.getTime() <= now.getTime());
+    const planningRiskCandidateEntries = activeStageEntries.filter(
+      e => e.stageEta.getTime() > now.getTime(),
+    );
+
+    if (!isEtaManagementKillSwitchActive()) {
+      await this.reconcilePlanningRisk(planningRiskCandidateEntries, ticketMap, stageMap, now);
+    }
+
+    const entryBatches = chunkArray(overdueEntries, STAGE_ETA_REMINDER_BATCH_SIZE);
 
     for (let batchIndex = 0; batchIndex < entryBatches.length; batchIndex += 1) {
       const entryBatch = entryBatches[batchIndex]!;
@@ -212,6 +248,162 @@ class StageEtaDeadlineWorker {
         await sleep(STAGE_ETA_REMINDER_BATCH_DELAY_MS);
       }
     }
+  }
+
+  /**
+   * Scheduled counterpart to the immediate planning-risk evaluation wired into every ticket
+   * mutation path (services/etaManagement). Catches risk that appears purely from time
+   * passing, with no new mutation event - e.g. a ticket due date that quietly falls behind
+   * the current stage deadline while nothing else about the ticket changes. Read-only with
+   * respect to `Ticket.eta`/forecasts: it only ever updates the persisted planning-risk
+   * state, never extends a due date (PRD §12.2).
+   */
+  private async reconcilePlanningRisk(
+    entries: Array<{
+      id: string;
+      ticketId: string;
+      stageId: string;
+      stageEta: Date;
+      stageEnteredAt: Date;
+    }>,
+    ticketMap: Map<string, TicketForReconciliation>,
+    stageMap: Map<string, { id: string; name: string; eta: number | null }>,
+    now: Date,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+
+    const boardIds = [
+      ...new Set(
+        entries
+          .map(e => ticketMap.get(e.ticketId)?.boardId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const boards = await db.board.findMany({
+      where: { id: { in: boardIds } },
+      select: { id: true, boardType: true, metadata: true },
+    });
+    const boardMap = new Map(boards.map(b => [b.id, b]));
+
+    const metrics = { detected: 0, reopened: 0, resolved: 0, skippedStale: 0, evaluated: 0 };
+    const startedAt = Date.now();
+
+    const batches = chunkArray(entries, STAGE_ETA_REMINDER_BATCH_SIZE);
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+      const batch = batches[batchIndex]!;
+
+      for (const entry of batch) {
+        const ticket = ticketMap.get(entry.ticketId);
+        if (!ticket) continue;
+
+        const board = boardMap.get(ticket.boardId);
+        // Flow boards are deferred this release; detection must not synthesize forecasts/
+        // visits there. Non-linear/Release boards are fine here since we only ever compare
+        // the ticket's OWN active visit deadline against its due date - no route needed.
+        if (!board || board.boardType === BoardType.FLOW) continue;
+
+        // Guard against a stale/orphaned open entry left over from a stage transition that
+        // didn't close it (same check the overdue branch above applies) - only evaluate risk
+        // against the entry that matches the ticket's actual current stage.
+        const stage = stageMap.get(entry.stageId);
+        if (!stage || stage.name !== ticket.stageName) continue;
+
+        const boardEtaManagement = parseBoardEtaManagement(board.metadata);
+        const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+        const deadlineTracked = entry.stageEta.getTime() !== entry.stageEnteredAt.getTime();
+
+        metrics.evaluated += 1;
+        const decision = evaluatePlanningRisk({
+          ticketId: ticket.id,
+          activeStageVisitId: entry.id,
+          stageDeadline: entry.stageEta,
+          deadlineTracked,
+          ticketDue: ticket.eta,
+          ticketStatus: ticket.statusV2,
+          boardConfigVersion: boardEtaManagement.configVersion,
+          now,
+          currentRisk: currentTicketEtaManagement.planningRisk,
+          isTerminal: false, // OPEN_STATUSES excludes COMPLETED/CANCELLED already
+        });
+
+        if (decision.transitionKind === 'UNCHANGED') continue;
+
+        // Idempotency: re-read immediately before writing so a slower/retried run can't
+        // clobber a newer state that the immediate (mutation-triggered) evaluation path -
+        // or a faster worker retry - already wrote since we read `ticket.metadata` above.
+        const freshTicket = await db.ticket.findUnique({
+          where: { id: ticket.id },
+          select: { metadata: true },
+        });
+        const freshRisk = parseTicketEtaManagement(freshTicket?.metadata).planningRisk;
+        if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
+          metrics.skippedStale += 1;
+          continue;
+        }
+
+        const mergedMetadata = mergeTicketEtaManagement(freshTicket?.metadata, {
+          planningRisk: decision.nextState,
+        });
+
+        await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, async () => {
+          await db.ticket.update({
+            where: { id: ticket.id },
+            data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+          });
+
+          const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+          const intents = buildRiskTransitionActivityIntents(decision, {
+            currentStageId: entry.stageId,
+            oldEta: ticket.eta ? ticket.eta.getTime() : null,
+            boardConfigVersion: boardEtaManagement.configVersion,
+            trigger: 'RECONCILIATION',
+            systemReason: 'Hourly reconciliation detected a planning-risk state change',
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+          for (const intent of intents) {
+            await recordTicketTimelineEvent({
+              activity: {
+                ticketId: ticket.id,
+                updatedBy: systemActorId,
+                activityType: intent.activityType,
+                value: intent.value as Prisma.InputJsonValue,
+                workspaceId: ticket.workspaceId,
+                channelId: ticket.channelId,
+              },
+            });
+          }
+
+          // No notifications while paused (PRD §6.9) - state above is still updated.
+          if (ticket.statusV2 !== 'PAUSED') {
+            await dispatchEtaNotifications(
+              etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),
+              {
+                ticketId: ticket.id,
+                createdBy: ticket.createdBy ?? systemActorId,
+                assignedTo: ticket.assignedTo,
+                ticketUserGroupId: ticket.userGroupId,
+                boardId: ticket.boardId,
+                actorId: systemActorId,
+              },
+            );
+          }
+        });
+
+        if (decision.transitionKind === 'DETECTED') metrics.detected += 1;
+        else if (decision.transitionKind === 'REOPENED') metrics.reopened += 1;
+        else if (decision.transitionKind === 'RESOLVED') metrics.resolved += 1;
+      }
+
+      if (batchIndex < batches.length - 1) {
+        await sleep(STAGE_ETA_REMINDER_BATCH_DELAY_MS);
+      }
+    }
+
+    logger.info('[STAGE-ETA-DEADLINE-WORKER] Planning-risk reconciliation complete', {
+      ...metrics,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   async shutdown(): Promise<void> {
