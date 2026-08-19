@@ -8921,24 +8921,6 @@ export const mutators = defineMutators({
         }
       },
     ),
-    // Delete a label from the catalog and cascade-remove all its conversation mappings.
-    // Only the owner (createdBy) may delete their label.
-    deleteLabel: defineMutator(
-      z.object({ labelId: z.string() }),
-      async ({ tx, ctx, args: { labelId } }) => {
-        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-        if (!label) throw new Error('Label not found');
-        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-        const mappings = await tx.run(
-          zql.conversation_label_mappings.where('labelId', labelId),
-        );
-        for (const mapping of mappings) {
-          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-        }
-        await tx.mutate.conversation_labels.delete({ id: labelId });
-      },
-    ),
   },
   // Thread types — what kind of thread this is, as a stringified JSON array on the
   // conversation row. The caller sends the FULL desired set: the column is one value, so a
