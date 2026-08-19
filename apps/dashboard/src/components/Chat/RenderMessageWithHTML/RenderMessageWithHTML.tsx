@@ -37,7 +37,6 @@ import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
 import { openLink } from '../../../utils/openLink';
-import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';

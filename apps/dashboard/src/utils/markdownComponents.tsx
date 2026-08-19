@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { logger, Event } from './logger';
 import { openLink } from './openLink';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
