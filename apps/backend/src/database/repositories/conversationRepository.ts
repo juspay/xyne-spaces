@@ -1,33 +1,17 @@
 import { randomUUID } from 'crypto';
-import { serializeInitialMessageMd, MessageType, ATTACHMENT_WITHHELD_TEXT } from '@xyne/shared';
+import { serializeInitialMessageMd, MessageType } from '@xyne/shared';
 
-export interface CopyConversationsOptions {
-  includeAttachments?: boolean;
-}
+import { BaseRepository } from './base';
+import { Conversation } from '@prisma/client';
+import { QueryOptions } from '@/types/database';
 
 const sourceMetadata = (metadata: unknown): Record<string, unknown> =>
   metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? (metadata as Record<string, unknown>)
     : {};
 
-const ATTACHMENT_WITHHELD_HTML = `<p class="m-0 leading-6">${ATTACHMENT_WITHHELD_TEXT}</p>`;
-
-const hasVisibleText = (content: string): boolean =>
-  content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
-
-const contentForCopy = (
-  message: { content: string; hasAttachment: boolean },
-  includeAttachments: boolean
-): string =>
-  !includeAttachments && message.hasAttachment && !hasVisibleText(message.content)
-    ? ATTACHMENT_WITHHELD_HTML
-    : message.content;
-
 const toMessageType = (value: string): MessageType =>
   (Object.values(MessageType) as string[]).includes(value) ? (value as MessageType) : MessageType.USER;
-import { BaseRepository } from './base';
-import { Conversation, Message, MessageAttachment } from '@prisma/client';
-import { QueryOptions } from '@/types/database';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -295,122 +279,12 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
-  private async attachFilesToCopy(
-    targetConversationId: string,
-    sourceMessages: Message[],
-    attachmentsByMessage: Map<string, MessageAttachment[]>,
-    workspaceId: string
-  ): Promise<number> {
-    const carriesFiles = sourceMessages.some(
-      message => (attachmentsByMessage.get(message.messageId) ?? []).length > 0
-    );
-    if (!carriesFiles) {
-      return 0;
-    }
-
-    const targetConversation = await this.db.conversation.findUnique({
-      where: { conversationId: targetConversationId }
-    });
-    if (!targetConversation) {
-      return 0;
-    }
-
-    const copiedMessages = await this.db.message.findMany({
-      where: { conversationId: targetConversationId, isDeleted: false },
-      orderBy: { createdAt: 'asc' }
-    });
-
-    // Copies preserve createdAt and insertion order, so positional pairing is exact.
-    // A length mismatch means the copy drifted; skip rather than mis-attach files.
-    if (copiedMessages.length !== sourceMessages.length) {
-      return 0;
-    }
-
-    await this.db.$transaction(async tx => {
-      for (const [index, source] of sourceMessages.entries()) {
-        const target = copiedMessages[index];
-        const files = attachmentsByMessage.get(source.messageId) ?? [];
-        if (!target || files.length === 0) {
-          continue;
-        }
-
-        await tx.messageAttachment.createMany({
-          data: files.map(attachment => ({
-            entityType: attachment.entityType,
-            entityId: target.messageId,
-            workspaceId,
-            storageProvider: attachment.storageProvider,
-            originalFilename: attachment.originalFilename,
-            mimetype: attachment.mimetype,
-            size: attachment.size,
-            width: attachment.width,
-            height: attachment.height,
-            uploadedByUserId: attachment.uploadedByUserId,
-            url: attachment.url,
-            createdBy: attachment.createdBy,
-            metadata: attachment.metadata ?? undefined,
-            conversationId: targetConversationId,
-            thumbnailUrl: attachment.thumbnailUrl,
-            uploadStatus: attachment.uploadStatus
-          }))
-        });
-
-        await tx.message.update({
-          where: { messageId: target.messageId },
-          data: { hasAttachment: true, content: source.content }
-        });
-
-        if (target.messageId === targetConversation.initialMessageId) {
-          await tx.conversation.update({
-            where: { conversationId: targetConversationId },
-            data: {
-              initial_message_md: serializeInitialMessageMd({
-                messageId: target.messageId,
-                conversationId: targetConversationId,
-                workspaceId,
-                senderId: source.senderId,
-                content: source.content,
-                msgType: toMessageType(source.msgType),
-                hasAttachment: true,
-                edited: source.edited,
-                isDeleted: false,
-                showInChannel: source.showInChannel,
-                visibleTo: source.visibleTo,
-                createdAt: source.createdAt.getTime(),
-                metadata: source.metadata ? JSON.stringify(source.metadata) : null,
-                nudgeCount: null,
-                isSent: true,
-                reactions_md: null,
-                link_preview_md: null,
-                childConversationId: null
-              })
-            }
-          });
-        }
-      }
-
-      await tx.conversation.update({
-        where: { conversationId: targetConversationId },
-        data: {
-          metadata: {
-            ...sourceMetadata(targetConversation.metadata),
-            copiedWithAttachments: true
-          }
-        }
-      });
-    });
-
-    return 1;
-  }
-
   async copyConversationsToChannel(
     sourceChannelId: string,
     targetChannelId: string,
     workspaceId: string,
-    createdAfter?: Date | null,
-    options: CopyConversationsOptions = {}
+    createdAfter?: Date | null
   ): Promise<number> {
-    const includeAttachments = options.includeAttachments ?? false;
     const conversations = await this.db.conversation.findMany({
       where: {
         channelId: sourceChannelId,
@@ -436,12 +310,11 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       messagesByConversation.set(message.conversationId, bucket);
     }
 
-    const attachments =
-      includeAttachments && messages.length
-        ? await this.db.messageAttachment.findMany({
-            where: { entityId: { in: messages.map(m => m.messageId) }, isDeleted: false }
-          })
-        : [];
+    const attachments = messages.length
+      ? await this.db.messageAttachment.findMany({
+          where: { entityId: { in: messages.map(m => m.messageId) }, isDeleted: false }
+        })
+      : [];
     const attachmentsByMessage = new Map<string, typeof attachments>();
     for (const attachment of attachments) {
       const bucket = attachmentsByMessage.get(attachment.entityId) ?? [];
@@ -461,32 +334,20 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
 
     const existingCopies = await this.db.conversation.findMany({
       where: { channelId: targetChannelId },
-      select: { conversationId: true, metadata: true }
+      select: { metadata: true }
     });
-    const alreadyCopied = new Map<string, { conversationId: string; withAttachments: boolean }>();
+    const alreadyCopied = new Set<string>();
     for (const row of existingCopies) {
-      const meta = row.metadata as { copiedFrom?: unknown; copiedWithAttachments?: unknown } | null;
+      const meta = row.metadata as { copiedFrom?: unknown } | null;
       if (typeof meta?.copiedFrom === 'string') {
-        alreadyCopied.set(meta.copiedFrom, {
-          conversationId: row.conversationId,
-          withAttachments: meta.copiedWithAttachments === true
-        });
+        alreadyCopied.add(meta.copiedFrom);
       }
     }
 
     let copied = 0;
 
     for (const conversation of conversations) {
-      const existing = alreadyCopied.get(conversation.conversationId);
-      if (existing) {
-        if (includeAttachments && !existing.withAttachments) {
-          copied += await this.attachFilesToCopy(
-            existing.conversationId,
-            messagesByConversation.get(conversation.conversationId) ?? [],
-            attachmentsByMessage,
-            workspaceId
-          );
-        }
+      if (alreadyCopied.has(conversation.conversationId)) {
         continue;
       }
 
@@ -515,9 +376,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         conversationId: newConversationId,
         workspaceId,
         senderId: sourceInitialMessage.senderId,
-        content: contentForCopy(sourceInitialMessage, includeAttachments),
+        content: sourceInitialMessage.content,
         msgType: toMessageType(sourceInitialMessage.msgType),
-        hasAttachment: includeAttachments && sourceInitialMessage.hasAttachment,
+        hasAttachment: sourceInitialMessage.hasAttachment,
         edited: sourceInitialMessage.edited,
         isDeleted: false,
         showInChannel: sourceInitialMessage.showInChannel,
@@ -548,8 +409,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
             initial_message_md: initialMessageMd,
             metadata: {
               ...sourceMetadata(conversation.metadata),
-              copiedFrom: conversation.conversationId,
-              copiedWithAttachments: includeAttachments
+              copiedFrom: conversation.conversationId
             }
           }
         });
@@ -560,9 +420,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
             conversationId: newConversationId,
             senderId: message.senderId,
             workspaceId,
-            content: contentForCopy(message, includeAttachments),
+            content: message.content,
             msgType: message.msgType,
-            hasAttachment: includeAttachments && message.hasAttachment,
+            hasAttachment: message.hasAttachment,
             edited: message.edited,
             showInChannel: message.showInChannel,
             visibleTo: message.visibleTo,

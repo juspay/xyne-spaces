@@ -1,7 +1,6 @@
 import React from 'react';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
-import { Check, Paperclip } from 'lucide-react';
-import { ATTACHMENT_WITHHELD_TEXT, type HistoryScopeMode } from '@xyne/shared';
+import type { HistoryScopeMode } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
 import type { AddPeopleHistoryStepProps } from './AddPeopleForm.types';
@@ -19,8 +18,6 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
   onCustomDateChange,
   cutoffChosen,
   joinsExistingConversation,
-  includeAttachments,
-  onIncludeAttachmentsChange,
   previewGroups,
   hasPreviewItems,
   embedded,
@@ -35,78 +32,55 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
 
       {joinsExistingConversation && (
         <div className='rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground'>
-          You already have a conversation with this group. Your messages will be added to it.
+          You already have a group conversation with these people. These messages are added to it —
+          a new conversation is not created.
         </div>
       )}
 
-      <div className='space-y-2'>
-        <RadioGroupPrimitive.Root
-          value={scopeMode}
-          onValueChange={value => onScopeModeChange(value as HistoryScopeMode)}
-          aria-label='Conversation history'
-          className='space-y-2'
-        >
-          {HISTORY_SCOPE_OPTIONS.map(option => {
-            const isSelected = option.mode === scopeMode;
+      <RadioGroupPrimitive.Root
+        value={scopeMode}
+        onValueChange={value => onScopeModeChange(value as HistoryScopeMode)}
+        aria-label='Conversation history'
+        className='space-y-2'
+      >
+        {HISTORY_SCOPE_OPTIONS.map(option => {
+          const isSelected = option.mode === scopeMode;
 
-            return (
-              <div key={option.mode} className='space-y-2'>
-                <RadioGroupPrimitive.Item
-                  value={option.mode}
-                  className='flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-                  data-track-category='ADD_CHAT_PARTICIPANTS'
-                  data-track-name='SELECT_HISTORY_SCOPE'
+          return (
+            <div key={option.mode} className='space-y-2'>
+              <RadioGroupPrimitive.Item
+                value={option.mode}
+                className='flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+                data-track-category='ADD_CHAT_PARTICIPANTS'
+                data-track-name='SELECT_HISTORY_SCOPE'
+              >
+                <span
+                  className={cn(
+                    'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                    isSelected ? 'border-primary' : 'border-border',
+                  )}
                 >
-                  <span
-                    className={cn(
-                      'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-                      isSelected ? 'border-primary' : 'border-border',
-                    )}
-                  >
-                    {isSelected && <span className='h-2 w-2 rounded-full bg-primary' />}
-                  </span>
-                  <span className='text-sm text-foreground'>{option.label}</span>
-                </RadioGroupPrimitive.Item>
+                  {isSelected && <span className='h-2 w-2 rounded-full bg-primary' />}
+                </span>
+                <span className='text-sm text-foreground'>{option.label}</span>
+              </RadioGroupPrimitive.Item>
 
-                {option.requiresDate && isSelected && (
-                  <input
-                    type='date'
-                    value={customDate}
-                    max={todayInputValue()}
-                    onChange={event => onCustomDateChange(event.target.value)}
-                    className='ml-7 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground'
-                    aria-label='Custom history start date'
-                    data-track-category='ADD_CHAT_PARTICIPANTS'
-                    data-track-name='SELECT_CUSTOM_HISTORY_DATE'
-                  />
-                )}
-              </div>
-            );
-          })}
-        </RadioGroupPrimitive.Root>
-
-        {scopeMode !== 'none' && (
-          <button
-            type='button'
-            role='checkbox'
-            aria-checked={includeAttachments}
-            onClick={() => onIncludeAttachmentsChange(!includeAttachments)}
-            className='flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-            data-track-category='ADD_CHAT_PARTICIPANTS'
-            data-track-name='TOGGLE_INCLUDE_ATTACHMENTS'
-          >
-            <span
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border',
-                includeAttachments ? 'border-primary bg-primary' : 'border-border',
+              {option.requiresDate && isSelected && (
+                <input
+                  type='date'
+                  value={customDate}
+                  max={todayInputValue()}
+                  onChange={event => onCustomDateChange(event.target.value)}
+                  className='ml-7 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground'
+                  aria-label='Custom history start date'
+                  data-track-category='ADD_CHAT_PARTICIPANTS'
+                  data-track-name='SELECT_CUSTOM_HISTORY_DATE'
+                />
               )}
-            >
-              {includeAttachments && <Check className='size-3 text-primary-foreground' />}
-            </span>
-            <span className='text-sm text-foreground'>Include files and attachments</span>
-          </button>
-        )}
-      </div>
+            </div>
+          );
+        })}
+      </RadioGroupPrimitive.Root>
 
       {scopeMode !== 'none' && (
         <div>
@@ -133,49 +107,30 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                       <div className='h-px flex-1 bg-border' />
                     </div>
 
-                    {group.items.map(conversation => {
-                      const attachments = conversation.initialMessageAttachments ?? [];
-                      const text = toPreviewText(conversation.initialMessage?.content);
-                      const withheldOnly = !includeAttachments && attachments.length > 0 && !text;
-
-                      return (
-                        <div key={conversation.conversationId} className='flex gap-2'>
-                          <Avatar
-                            userId={conversation.initialMessage?.senderId ?? null}
-                            size='md'
-                            showActiveStatus={false}
-                          />
-                          <div className='min-w-0 flex-1'>
-                            <div className='flex items-baseline gap-2'>
-                              <span className='text-sm font-semibold text-foreground'>
-                                {conversation.initialMessage?.sender?.displayName ||
-                                  conversation.initialMessage?.sender?.name ||
-                                  'Unknown'}
-                              </span>
-                              <span className='text-xs text-muted-foreground'>
-                                {formatMessageTime(conversation.createdAt)}
-                              </span>
-                            </div>
-                            <p className='whitespace-pre-wrap break-words text-sm text-foreground/80'>
-                              {withheldOnly ? ATTACHMENT_WITHHELD_TEXT : text}
-                            </p>
-
-                            {includeAttachments &&
-                              attachments.map(attachment => (
-                                <div
-                                  key={attachment.id}
-                                  className='mt-1 flex items-center gap-1.5 text-xs text-muted-foreground'
-                                >
-                                  <Paperclip className='size-3 shrink-0' aria-hidden />
-                                  <span className='truncate'>
-                                    {attachment.originalFilename ?? 'Attachment'}
-                                  </span>
-                                </div>
-                              ))}
+                    {group.items.map(conversation => (
+                      <div key={conversation.conversationId} className='flex gap-2'>
+                        <Avatar
+                          userId={conversation.initialMessage?.senderId ?? null}
+                          size='md'
+                          showActiveStatus={false}
+                        />
+                        <div className='min-w-0 flex-1'>
+                          <div className='flex items-baseline gap-2'>
+                            <span className='text-sm font-semibold text-foreground'>
+                              {conversation.initialMessage?.sender?.displayName ||
+                                conversation.initialMessage?.sender?.name ||
+                                'Unknown'}
+                            </span>
+                            <span className='text-xs text-muted-foreground'>
+                              {formatMessageTime(conversation.createdAt)}
+                            </span>
                           </div>
+                          <p className='whitespace-pre-wrap break-words text-sm text-foreground/80'>
+                            {toPreviewText(conversation.initialMessage?.content)}
+                          </p>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>

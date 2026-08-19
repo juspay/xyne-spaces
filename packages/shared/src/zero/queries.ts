@@ -609,8 +609,7 @@ export const queries = defineQueries({
               ),
             )
             .related('sender'),
-        )
-        .related('initialMessageAttachments');
+        );
     },
   ),
   channelConversationsV2: defineQuery(

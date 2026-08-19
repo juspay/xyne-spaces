@@ -32,15 +32,9 @@ export interface HistoryScopeOption {
   requiresDate?: boolean;
 }
 
-export interface PreviewAttachment {
-  readonly id: string;
-  readonly originalFilename?: string | null | undefined;
-}
-
 export interface PreviewMessage {
   readonly conversationId: string;
   readonly createdAt: number;
-  readonly initialMessageAttachments?: readonly PreviewAttachment[] | undefined;
   readonly initialMessage?:
     | {
         readonly senderId?: string | null | undefined;
@@ -70,8 +64,6 @@ export interface AddPeopleHistoryStepProps {
   onCustomDateChange: (value: string) => void;
   cutoffChosen: boolean;
   joinsExistingConversation: boolean;
-  includeAttachments: boolean;
-  onIncludeAttachmentsChange: (value: boolean) => void;
   previewGroups: PreviewGroup[];
   hasPreviewItems: boolean;
   embedded: boolean;

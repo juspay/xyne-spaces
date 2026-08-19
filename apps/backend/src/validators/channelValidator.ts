@@ -24,7 +24,6 @@ export const AddGroupDmParticipantsSchema = z
   .object({
     userIds: z.array(z.string().min(1)).min(1, { message: 'At least one user is required' }),
     historyScope: HistoryScopeSchema.optional(),
-    includeAttachments: z.boolean().optional(),
     includeHistory: z.boolean().optional(),
   })
   .refine(data => data.historyScope !== undefined || data.includeHistory !== undefined, {

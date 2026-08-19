@@ -31,7 +31,6 @@ import {
   ActivityClassification,
   ActivityClassificationJobType, ChannelType, ChannelRole,
   normalizeHistoryScope,
-  normalizeIncludeAttachments,
   type AddGroupDmParticipantsRequest,
   type AddGroupDmParticipantsResponse,
 } from '@xyne/shared';
@@ -2459,7 +2458,6 @@ export class ChannelController {
         workspaceId,
         userIds: body.userIds,
         historyScope: normalizeHistoryScope(body),
-        includeAttachments: normalizeIncludeAttachments(body),
       });
 
       if (result.addedParticipants.length > 0) {

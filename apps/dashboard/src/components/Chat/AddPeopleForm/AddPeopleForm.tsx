@@ -39,7 +39,6 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   const [step, setStep] = useState<AddPeopleStep>('people');
   const [scopeMode, setScopeMode] = useState<HistoryScopeMode>('today');
   const [customDate, setCustomDate] = useState<string>('');
-  const [includeAttachments, setIncludeAttachments] = useState(true);
   const [confirmingFullHistory, setConfirmingFullHistory] = useState(false);
   const { isMobile } = usePlatform();
   const zero = useZero();
@@ -94,11 +93,8 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   }, [step, isDirectConversation, joinsExistingConversation, onContextChange]);
 
   const addParticipantsMutation = useMutation({
-    mutationFn: (payload: {
-      userIds: string[];
-      historyScope: HistoryScope;
-      includeAttachments: boolean;
-    }) => channelService.addGroupDmParticipants(channelId, payload),
+    mutationFn: (payload: { userIds: string[]; historyScope: HistoryScope }) =>
+      channelService.addGroupDmParticipants(channelId, payload),
     onSuccess: response => {
       onSuccess?.();
       void navigate(`/chat/dir/${response.channelId}`);
@@ -140,7 +136,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         setConfirmingFullHistory(true);
         return;
       }
-      addParticipantsMutation.mutate({ userIds, historyScope: scope, includeAttachments });
+      addParticipantsMutation.mutate({ userIds, historyScope: scope });
       return;
     }
 
@@ -215,7 +211,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           data-testid='add-people-confirm'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='ADD_PEOPLE_SUBMIT'
-          data-track-metadata={JSON.stringify({ selectedUsers, scopeMode, includeAttachments })}
+          data-track-metadata={JSON.stringify({ selectedUsers, scopeMode })}
         >
           Done
         </Button>
@@ -252,7 +248,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           data-testid='add-people-confirm-full-history'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='CONFIRM_FULL_HISTORY'
-          data-track-metadata={JSON.stringify({ selectedUsers, includeAttachments })}
+          data-track-metadata={JSON.stringify({ selectedUsers })}
         >
           Confirm
         </Button>
@@ -270,8 +266,6 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         cutoffChosen={cutoffChosen}
         joinsExistingConversation={joinsExistingConversation}
         dimmed={confirmingFullHistory}
-        includeAttachments={includeAttachments}
-        onIncludeAttachmentsChange={setIncludeAttachments}
         previewGroups={previewGroups}
         hasPreviewItems={previewGroups.length > 0}
         embedded={embedded}

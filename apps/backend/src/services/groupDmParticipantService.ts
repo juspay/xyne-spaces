@@ -21,7 +21,6 @@ export interface AddGroupDmParticipantsParams {
   workspaceId: string;
   userIds: string[];
   historyScope: HistoryScope;
-  includeAttachments: boolean;
 }
 
 export interface AddedParticipant {
@@ -58,8 +57,7 @@ export class GroupDmParticipantService {
   async addParticipants(
     params: AddGroupDmParticipantsParams,
   ): Promise<AddGroupDmParticipantsResult> {
-    const { channelId, currentUserId, workspaceId, userIds, historyScope, includeAttachments } =
-      params;
+    const { channelId, currentUserId, workspaceId, userIds, historyScope } = params;
     const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
     if (!dmProjectId) {
       throw new AppError('DM project not found for workspace', 500);
@@ -113,13 +111,7 @@ export class GroupDmParticipantService {
 
     if (existingGroupDM) {
       const conversationsCopied = carriesHistory
-        ? await this.copyHistory(
-            channelId,
-            existingGroupDM.id,
-            workspaceId,
-            cutoff,
-            includeAttachments,
-          )
+        ? await this.copyHistory(channelId, existingGroupDM.id, workspaceId, cutoff)
         : 0;
 
       return {
@@ -155,7 +147,7 @@ export class GroupDmParticipantService {
     }
 
     const conversationsCopied = carriesHistory
-      ? await this.copyHistory(channelId, newChannel.id, workspaceId, cutoff, includeAttachments)
+      ? await this.copyHistory(channelId, newChannel.id, workspaceId, cutoff)
       : 0;
 
     return {
@@ -212,21 +204,18 @@ export class GroupDmParticipantService {
     targetChannelId: string,
     workspaceId: string,
     cutoff: Date | null,
-    includeAttachments: boolean,
   ): Promise<number> {
     const copied = await this.conversationRepository.copyConversationsToChannel(
       sourceChannelId,
       targetChannelId,
       workspaceId,
       cutoff,
-      { includeAttachments },
     );
 
     logger.info('group_dm_history_copied', {
       sourceChannelId,
       targetChannelId,
       cutoff: cutoff?.toISOString() ?? null,
-      includeAttachments,
       copied,
     });
 

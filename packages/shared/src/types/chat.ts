@@ -9,7 +9,6 @@ export type HistoryScope =
 export interface AddGroupDmParticipantsRequest {
   userIds: string[];
   historyScope?: HistoryScope;
-  includeAttachments?: boolean;
   /** @deprecated use historyScope */
   includeHistory?: boolean;
 }
@@ -39,12 +38,6 @@ export function normalizeHistoryScope(input: {
 
 export function scopeCarriesHistory(scope: HistoryScope): boolean {
   return scope.mode !== 'none';
-}
-
-export const ATTACHMENT_WITHHELD_TEXT = '[file not shared]';
-
-export function normalizeIncludeAttachments(input: { includeAttachments?: boolean }): boolean {
-  return input.includeAttachments ?? true;
 }
 
 export function historyScopeToCutoff(scope: HistoryScope): Date | null {

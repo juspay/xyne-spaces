@@ -597,8 +597,7 @@ export const queries: AnyQueryRegistry = defineQueries({
               or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
             )
             .related('sender')
-        )
-        .related('initialMessageAttachments');
+        );
     }
   ),
   channelConversationsV2: defineQuery(
