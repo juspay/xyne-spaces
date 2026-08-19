@@ -3457,9 +3457,28 @@ export const queries = defineQueries({
       return zql.conversation_labels.where('channelId', channelId).orderBy('name', 'asc');
     },
   ),
+
+  conversationLabelsByChannelIdV2: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
+    ({ args: { channelId } }) => {
+      return zql.conversation_labels.where('channelId', channelId).orderBy('name', 'asc');
+    },
+  ),
   // Labels applied to a single conversation (for chips on the email thread view).
   conversationLabelMappingsByConversationId: defineQuery(
     z.object({ conversationId: z.string() }),
+    ({ args: { conversationId } }) => {
+      return zql.conversation_label_mappings
+        .where('conversationId', conversationId)
+        .orderBy('labelName', 'asc');
+    },
+  ),
+  conversationLabelMappingsByConversationIdV2: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { conversationId } }) => {
       return zql.conversation_label_mappings
         .where('conversationId', conversationId)
@@ -3470,6 +3489,16 @@ export const queries = defineQueries({
   myTicketMailbox: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.ticket_user_mailbox.where('ticketId', ticketId);
   }),
+  myTicketMailboxV2: defineQuery(
+    z.object({
+      ticketId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_user_mailbox.where('ticketId', ticketId);
+    },
+  ),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
