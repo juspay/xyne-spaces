@@ -22,7 +22,8 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification } from '@xyne/shared';
+import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -2258,6 +2259,68 @@ class NotificationService {
       );
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket reassignment notification:', error);
+    }
+  }
+
+  /**
+   * Notifies the group's subscribed members (user_group_mappings.isNotified)
+   * that no one could be assigned because every eligible candidate is at or
+   * above the group's maxWorkload cap. Not tied to a specific ticket — fires
+   * from the assignment engine itself, not a DB side-effect handler, since a
+   * blocked assignment writes nothing for a handler to react to.
+   */
+  async sendMaxWorkloadReachedNotification(
+    userGroupId: string,
+    groupName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const actionUrl = `/${workspaceId}/user-groups/${userGroupId}/assignment-config`;
+      const title = 'Max workload reached';
+      const message = `${groupName} is at max workload — no one was available for a new ticket.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.MAX_WORKLOAD_REACHED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          // Activities tab entry is written unconditionally, same as
+          // ticket-assignments-handler.ts — it's a persistent record, not a
+          // push, so a user's desktop/mobile notification preferences (below)
+          // shouldn't hide that this happened.
+          await activityService.createActivity({
+            userId,
+            actorId: userId,
+            actorAction: 'max_workload_reached',
+            actionSource: 'user_group',
+            actionSourceId: userGroupId,
+            classification: ActivityClassification.FYI,
+          });
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.MAX_WORKLOAD_REACHED,
+            relatedEntityType: 'user_group',
+            relatedEntityId: userGroupId,
+            actionUrl,
+            workspaceId,
+            metadata: { userGroupId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send max workload reached notification:', error);
     }
   }
 
