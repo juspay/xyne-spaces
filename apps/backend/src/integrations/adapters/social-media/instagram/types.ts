@@ -18,7 +18,7 @@ export interface InstagramWebhookMessaging {
       payload: { url: string };
     }>;
   };
-  /** Set by flow.ts for message_edit events with num_edit > 0 — signals transformer to update existing email body rather than insert. */
+  /** Set by flow.ts for message_edit events with num_edit > 0 — signals transformer to update existing message body rather than insert. */
   isContentUpdate?: boolean;
 }
 

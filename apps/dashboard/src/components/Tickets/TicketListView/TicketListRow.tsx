@@ -248,7 +248,11 @@ export const TicketListRow = ({
         {emailCount > 0 && (
           <span
             className='inline-flex h-[18px] min-w-[28px] items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground'
-            title={isSocialMedia ? `${emailCount} message${emailCount === 1 ? '' : 's'}` : `${emailCount} email${emailCount === 1 ? '' : 's'}`}
+            title={
+              isSocialMedia
+                ? `${emailCount} message${emailCount === 1 ? '' : 's'}`
+                : `${emailCount} email${emailCount === 1 ? '' : 's'}`
+            }
           >
             {emailCount}
           </span>
@@ -376,7 +380,11 @@ export const TicketListRow = ({
       >
         <Tooltip
           delayDuration={500}
-          content={isSocialMedia ? `Latest message: ${formatDateTime(dueDate)}` : `Latest email: ${formatDateTime(dueDate)}`}
+          content={
+            isSocialMedia
+              ? `Latest message: ${formatDateTime(dueDate)}`
+              : `Latest email: ${formatDateTime(dueDate)}`
+          }
           side='top'
         >
           <span

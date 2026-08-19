@@ -765,7 +765,7 @@ export const TicketListView = function TicketListView({
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
-            deskType={deskType}
+            {...(deskType !== undefined && { deskType })}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
@@ -963,9 +963,11 @@ export const TicketListView = function TicketListView({
                 )}
               >
                 <span className='min-w-0 truncate'>
-                  {isSocialMedia && column.key === 'emails' ? 'Messages'
-                    : isSocialMedia && column.key === 'latestEmail' ? 'Latest message'
-                    : column.label}
+                  {isSocialMedia && column.key === 'emails'
+                    ? 'Messages'
+                    : isSocialMedia && column.key === 'latestEmail'
+                      ? 'Latest message'
+                      : column.label}
                 </span>
               </div>
             ))}

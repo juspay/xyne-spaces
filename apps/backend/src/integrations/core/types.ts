@@ -251,7 +251,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs, Google Play). */
+  /** Optional: provider reply sender for non-email Desk interactions. */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 
