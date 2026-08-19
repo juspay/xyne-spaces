@@ -232,8 +232,18 @@ export async function verifySpacesSignature(
   // signature" and every Spaces flow-action approval 401s. The HMAC
   // authenticity check above still runs on BOTH hops; only the replay-set
   // record/check is skipped for trusted s2s callers.
+  // Flow-action callbacks (X-Xyne-Event: flow_action) are exempt from
+  // signature-replay dedup: their signed body is intentionally STABLE (the same
+  // approval re-clicks/retries hash identically), and double-execution is
+  // already prevented downstream — flow-action.ts re-verifies a per-action HMAC
+  // signature and the plan/skill/agent-tools apply paths consume the card
+  // atomically ("already used"). Replay-rejecting them here is redundant AND is
+  // exactly what hard-blocks approvals ("duplicate signature"). Detected at the
+  // edge by the header; the internal /flow/action proxy hop carries the s2s key
+  // (its mount is requireStrictS2S) and is covered by isInternalReverify.
+  const isFlowAction = req.headers["x-xyne-event"] === "flow_action";
   const isInternalReverify = s2sKeyMatches(req.headers["x-s2s-key"]);
-  if (!isInternalReverify) {
+  if (!isInternalReverify && !isFlowAction) {
     const redisVerdict = await checkSignatureReplayRedis(received);
     if (redisVerdict === "replay") {
       verificationFailure("replayed_signature", "duplicate signature");
