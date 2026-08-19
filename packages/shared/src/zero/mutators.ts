@@ -4277,6 +4277,50 @@ export const mutators = defineMutators({
         });
       },
     ),
+    // Client-optimistic twin of apps/backend/src/zero/mutators.ts subTicket.linkExisting.
+    // Links an EXISTING ticket as a sub-ticket via mappedTicketId. Server mutator
+    // enforces dedupe/nesting guards and writes the activity + system message.
+    linkExisting: defineMutator(
+      z.object({
+        subTicketId: z.string(),
+        mappingId: z.string(),
+        timestamp: z.number(),
+        ticketId: z.string(),
+        mappedTicketId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { subTicketId, mappingId, timestamp, ticketId, mappedTicketId },
+      }) => {
+        const mappedTicket = await tx.run(zql.tickets.where('id', mappedTicketId).one());
+        const title = mappedTicket?.title || mappedTicket?.xyneId || 'Subticket';
+
+        // Sub-ticket already pointing at the existing ticket.
+        await tx.mutate.sub_tickets.insert({
+          id: subTicketId,
+          title,
+          description: null,
+          mappedTicketId,
+          createdBy: ctx.userID,
+          updatedBy: ctx.userID,
+          conversationId: mappedTicket?.conversationId ?? null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          stageProgression: null,
+          assignedTo: null,
+          workspaceId: ctx.workspaceId,
+        });
+
+        // Parent -> sub-ticket hierarchy mapping.
+        await tx.mutate.ticket_sub_ticket_mappings.insert({
+          workspaceId: ctx.workspaceId,
+          id: mappingId,
+          ticketId,
+          subTicketId,
+        });
+      },
+    ),
     update: defineMutator(
       z.object({
         subTicketId: z.string(),

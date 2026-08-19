@@ -84,6 +84,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import {
   formatIncomingReferenceLabel,
   formatReferenceLabel,
@@ -1082,6 +1083,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const [projectTickets, setProjectTickets] = useState<VespaProjectTicket[] | null>(null);
   const [isAddTicketMenuOpen, setIsAddTicketMenuOpen] = useState(false);
+  const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLoadingProjectTickets, setIsLoadingProjectTickets] = useState(false);
   const [isLoadingMoreProjectTickets, setIsLoadingMoreProjectTickets] = useState(false);
   const [projectTicketHasMore, setProjectTicketHasMore] = useState(false);
@@ -1179,7 +1181,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if ((!isAddTicketMenuOpen && !isAddSubTicketMenuOpen) || !ticket?.projectId) {
       return;
     }
 
@@ -1189,10 +1191,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [
+    isAddTicketMenuOpen,
+    isAddSubTicketMenuOpen,
+    loadProjectTicketsPage,
+    ticket?.projectId,
+    projectTicketSearch,
+  ]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
+  }, []);
+
+  const handleAddSubTicketMenuOpenChange = useCallback((open: boolean): void => {
+    setIsAddSubTicketMenuOpen(open);
+    if (!open) {
+      setProjectTicketSearch('');
+    }
   }, []);
 
   const handleAddTicketMenuSearchChange = useCallback((searchValue: string): void => {
@@ -1921,6 +1936,54 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const linkedSubTicketMappedIds = useMemo(() => {
+    const ids = new Set<string>();
+    subTickets.forEach(st => {
+      if (st.mappedTicketId) ids.add(st.mappedTicketId);
+    });
+    return ids;
+  }, [subTickets]);
+
+  const subTicketPickerOptions = useMemo<SelectorOption[]>(() => {
+    return (projectTickets ?? [])
+      .filter(candidate => candidate.id !== ticketId && !linkedSubTicketMappedIds.has(candidate.id))
+      .map(candidate => ({
+        value: candidate.id,
+        label: candidate.title || candidate.xyneId || candidate.id,
+        subtitle: candidate.xyneId || candidate.id,
+        icon: null,
+      }));
+  }, [projectTickets, ticketId, linkedSubTicketMappedIds]);
+
+  const handleLinkSubTicket = useCallback(
+    (mappedTicketId: string | null): void => {
+      if (!mappedTicketId || !ticket?.id) return;
+      setIsAddSubTicketMenuOpen(false);
+      setProjectTicketSearch('');
+      const subTicketId = uuidv4();
+      const mappingId = uuidv4();
+      void zero
+        .mutate(
+          mutators.subTicket.linkExisting({
+            subTicketId,
+            mappingId,
+            timestamp: Date.now(),
+            ticketId: ticket.id,
+            mappedTicketId,
+          }),
+        )
+        .server.then(result => {
+          if (result.type === 'error') {
+            toast.error(result.error.message || 'Failed to link sub-ticket');
+          }
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to link sub-ticket');
+        });
+    },
+    [ticket?.id, zero],
+  );
 
   // Early return if no ticket data - after all hooks
   if (!ticket) {
@@ -3008,6 +3071,32 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       </React.Fragment>
     );
   };
+
+  const addSubTicketPicker =
+    boardData?.boardType === BoardType.FLOW || !canCreateNestedSubTicket ? null : (
+      <div
+        className='mt-3 rounded-lg border border-border px-3 py-2 flex items-center'
+        data-testid='add-sub-ticket-picker'
+      >
+        <EntitySelector
+          options={subTicketPickerOptions}
+          selectedValue={null}
+          onSelect={value => handleLinkSubTicket(value)}
+          placeholder='+ Add existing sub-ticket'
+          searchPlaceholder='Search by ticket ID or name'
+          isOpen={isAddSubTicketMenuOpen}
+          onOpenChange={handleAddSubTicketMenuOpenChange}
+          onSearchChange={handleAddTicketMenuSearchChange}
+          onScrollEnd={handleAddTicketMenuScrollEnd}
+          hasMore={projectTicketHasMore}
+          isLoading={isLoadingProjectTickets && (!projectTickets || projectTickets.length === 0)}
+          disableClientFiltering={true}
+          width='100%'
+          noBorder
+          testId='add-sub-ticket-selector'
+        />
+      </div>
+    );
 
   const createSubTicketButton =
     boardData?.boardType === BoardType.FLOW ? null : (
@@ -4557,6 +4646,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
               )}
               {createSubTicketButton}
+              {addSubTicketPicker}
             </div>
           </div>
         </div>
