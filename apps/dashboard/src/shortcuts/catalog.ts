@@ -113,7 +113,7 @@ export const shortcuts = {
   'recording.start': {
     keys: 'mod+alt+x',
     scope: 'global',
-    description: 'Start recording',
+    description: 'Start or stop recording',
     category: 'Recording',
     priority: 50,
     preventDefault: true,
