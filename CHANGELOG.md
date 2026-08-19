@@ -1,3 +1,10 @@
+## [1.196.0](https://github.com/juspay/xyne-spaces/compare/v1.195.4...v1.196.0) (2026-08-19)
+
+
+### Features
+
+* ONETEAM-2202 auto label desk ([#32](https://github.com/juspay/xyne-spaces/issues/32)) ([ce1044d](https://github.com/juspay/xyne-spaces/commit/ce1044dc1240e9a7af3d100c026702a94c850011))
+
 ## [1.195.4](https://github.com/juspay/xyne-spaces/compare/v1.195.3...v1.195.4) (2026-08-19)
 
 
