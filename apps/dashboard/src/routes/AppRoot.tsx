@@ -1316,7 +1316,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'releaseManager',
-                element: <ReleaseManagerView />,
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC'>
+                    <ReleaseManagerView />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'listProjects/:projectId',
