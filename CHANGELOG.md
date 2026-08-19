@@ -1,3 +1,10 @@
+## [1.195.3](https://github.com/juspay/xyne-spaces/compare/v1.195.2...v1.195.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* replace ExternalSourceRepository with ChannelExternalSourceResolver in EmailService ([#538](https://github.com/juspay/xyne-spaces/issues/538)) ([beb6b7b](https://github.com/juspay/xyne-spaces/commit/beb6b7b559b262fc778ec48634cbc02fb81109fe))
+
 ## [1.195.2](https://github.com/juspay/xyne-spaces/compare/v1.195.1...v1.195.2) (2026-08-19)
 
 
