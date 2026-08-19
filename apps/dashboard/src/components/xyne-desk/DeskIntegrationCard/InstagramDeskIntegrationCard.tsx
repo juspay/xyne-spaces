@@ -1,7 +1,10 @@
 import { ReactElement } from 'react';
 import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { useChannelIntegrationInfo, clearChannelConnectedEmailCache } from '../../../hooks/useChannelConnectedEmail';
+import {
+  useChannelIntegrationInfo,
+  clearChannelConnectedEmailCache,
+} from '../../../hooks/useChannelConnectedEmail';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { DeskConnectionCard } from './DeskConnectionCard';
 
@@ -14,7 +17,8 @@ export const InstagramDeskIntegrationCard = ({
   channelId,
   canManage,
 }: InstagramDeskIntegrationCardProps): ReactElement | null => {
-  const { isConnected, hasSource, sourceType, connectedLabel } = useChannelIntegrationInfo(channelId);
+  const { isConnected, hasSource, sourceType, connectedLabel } =
+    useChannelIntegrationInfo(channelId);
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
   if (sourceType !== 'instagram' || !hasSource) return null;
@@ -54,7 +58,9 @@ export const InstagramDeskIntegrationCard = ({
         window.location.href = authUrl;
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start reconnect — please try again.');
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to start reconnect — please try again.',
+      );
       throw err;
     }
   };

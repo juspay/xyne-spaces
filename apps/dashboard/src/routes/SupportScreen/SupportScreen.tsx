@@ -1535,10 +1535,14 @@ const SupportScreen = (): ReactElement => {
       const socialMediaErrorMessages: Record<string, string> = {
         instagram_account_mismatch: mismatchMessage,
         instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
-        instagram_account_already_connected: 'This Instagram account is already connected to another channel.',
+        instagram_account_already_connected:
+          'This Instagram account is already connected to another channel.',
         instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
       };
-      toast.error(socialMediaErrorMessages[errorCode ?? ''] ?? 'Instagram connection error. Please try again.');
+      toast.error(
+        socialMediaErrorMessages[errorCode ?? ''] ??
+          'Instagram connection error. Please try again.',
+      );
       setSearchParams(
         prev => {
           const p = new URLSearchParams(prev);
@@ -2059,7 +2063,7 @@ const SupportScreen = (): ReactElement => {
         void startInstagramOAuth({
           name: rest.name,
           projectId: rest.projectId,
-          boardId: rest.boardId,
+          ...(rest.boardId !== undefined && { boardId: rest.boardId }),
           ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
           visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
           platform: isElectron ? 'electron' : 'web',
@@ -3882,7 +3886,9 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
-                        deskType={channelPreference?.deskType}
+                        {...(channelPreference?.deskType !== undefined && {
+                          deskType: channelPreference.deskType,
+                        })}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={handleChannelBoardIdResolved}

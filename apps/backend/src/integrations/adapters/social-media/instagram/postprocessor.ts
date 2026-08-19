@@ -3,38 +3,35 @@ import { BasePostprocessor } from '@/integrations/core/basePostprocessor';
 import type { PostprocessContext } from '@/integrations/core/types';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { syncSocialMediaTicketCustomFields } from '../ticketCustomFields';
 import { logger } from '@/utils/logger';
 
 const TAG = '[InstagramPostprocessor]';
 
 export class InstagramPostprocessor extends BasePostprocessor {
   async process(context: PostprocessContext): Promise<void> {
-    const fields = context.normalizedData.ticketCustomFields;
-    if (!fields?.length) return;
+    // Auto-create form field definitions on the board if missing, then write values.
+    // Uses the same shared helper as Google Play so field definitions are never
+    // missing due to manual admin setup.
+    try {
+      await syncSocialMediaTicketCustomFields(context);    
+    } catch (error) {
+      logger.error(`${TAG} Failed to sync ticket custom fields`, {
+        sourceId: context.sourceId,
+        conversationId: context.conversationId,
+        error,
+      });
+    }
+
+    // Reopen logic only applies to new inbound DMs (ticketCustomFields present),
+    // not to content-update edits.
+    if (!context.normalizedData.ticketCustomFields?.length) return;
 
     const ticket = await db.ticket.findFirst({
       where: { conversationId: context.conversationId },
       select: { id: true, boardId: true, statusV2: true, stageName: true },
     });
-    if (!ticket) {
-      logger.warn(`${TAG} Ticket not found for custom fields`, {
-        conversationId: context.conversationId,
-      });
-      return;
-    }
-
-    await repositories.forms
-      .upsertTicketFormFields(
-        ticket.id,
-        ticket.boardId,
-        fields.map(({ fieldName, value }) => ({ fieldName, value })),
-      )
-      .catch((err: unknown) => {
-        logger.warn(`${TAG} Could not upsert ticket custom fields`, {
-          ticketId: ticket.id,
-          error: err,
-        });
-      });
+    if (!ticket) return;
 
     // Reopen ticket if it was resolved/cancelled when this new DM arrived.
     const isResolved =

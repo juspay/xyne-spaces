@@ -60,6 +60,8 @@ export function InstagramCustomerHistory({ channelId, conversationId, onTicketCl
         type='button'
         onClick={() => setExpanded(v => !v)}
         className='flex items-center gap-2 w-full px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors'
+        data-track-category='InstagramCustomerHistory'
+        data-track-name='ToggleCustomerHistory'
       >
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>Previous conversations</span>
@@ -76,6 +78,8 @@ export function InstagramCustomerHistory({ channelId, conversationId, onTicketCl
               type='button'
               onClick={() => onTicketClick(t.xyneId)}
               className='flex flex-col gap-0.5 w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors group'
+              data-track-category='InstagramCustomerHistory'
+              data-track-name='OpenPreviousTicket'
             >
               <div className='flex items-center gap-2 min-w-0'>
                 <span className='text-xs font-mono text-muted-foreground shrink-0'>{t.xyneId}</span>

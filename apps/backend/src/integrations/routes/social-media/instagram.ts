@@ -151,7 +151,7 @@ router.post(
 );
 
 // POST /:channelId/instagram/reconnect
-// Re-initiates Facebook Login for an existing (disconnected) Instagram channel.
+// Re-initiates Instagram Login for an existing (disconnected) Instagram channel.
 // Looks up the channel's existing settings so the user doesn't have to re-enter them.
 router.post(
   '/:channelId/instagram/reconnect',
@@ -221,7 +221,7 @@ router.post(
 );
 
 // GET /instagram/oauth/callback
-// Facebook redirects here after user grants permissions
+// Instagram redirects here after user grants permissions
 router.get(
   '/instagram/oauth/callback',
   async (req: Request, res: Response): Promise<void> => {
@@ -280,6 +280,23 @@ router.get(
       };
       const encryptedCredentials = encrypt(JSON.stringify(credentials));
       const sourceName = `instagram-${igUserId}`;
+
+      // Revalidate that the user who initiated OAuth still belongs to the workspace.
+      // The state was consumed from Redis (10-min TTL) — in that window the user
+      // could have been removed. Without this check, stale state creates DB rows
+      // (channel, channelParticipant, emailChannelPreference) owned by a ghost userId.
+      const initiatingUser = await db.user.findFirst({
+        where: { id: state.userId, workspaceId: state.workspaceId, leftAt: null },
+        select: { id: true },
+      });
+      if (!initiatingUser) {
+        logger.warn(`${TAG} OAuth callback rejected — initiating user no longer in workspace`, {
+          userId: state.userId,
+          workspaceId: state.workspaceId,
+        });
+        res.status(400).json({ error: 'User no longer in workspace' });
+        return;
+      }
 
       // Subscribe to webhooks. Without this, DMs will not create tickets.
       // Non-fatal — we still complete OAuth — but log at error so failures are visible.
@@ -508,7 +525,14 @@ router.post(
       }
 
       // Verify the HMAC-SHA256 signature before trusting the payload.
-      const payload = metaGraphClient.verifySignedRequest(signedRequest, config.META_IG_APP_SECRET || config.META_APP_SECRET);
+      // Fail closed: reject immediately if no app secret is configured — an empty
+      // secret would let any attacker compute a passing HMAC.
+      const appSecret = config.META_IG_APP_SECRET || config.META_APP_SECRET;
+      if (!appSecret) {
+        res.status(500).json({ error: 'Server misconfiguration: app secret not set' });
+        return;
+      }
+      const payload = metaGraphClient.verifySignedRequest(signedRequest, appSecret);
       if (!payload) {
         res.status(401).json({ error: 'Invalid signed_request signature' });
         return;
