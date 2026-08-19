@@ -441,12 +441,17 @@ router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const record = agent as unknown as Record<string, unknown>;
     const viewerId = getRequesterId(req);
-    let full = s2sKeyMatches(req.headers["x-s2s-key"]);
-    if (!full && viewerId) {
+    let canEdit = s2sKeyMatches(req.headers["x-s2s-key"]);
+    if (!canEdit && viewerId) {
       const access = await getAgentEditAccess(viewerId, req.params.slug, getOrgId(req)).catch(() => null);
-      full = Boolean(access?.canEdit) || (await isClawAdmin(viewerId));
+      canEdit = Boolean(access?.canEdit) || (await isClawAdmin(viewerId));
     }
-    res.json({ success: true, data: full ? sanitizeAgent(record) : lightAgentProjection(record) });
+    // Any org viewer may READ the full agent: sanitizeAgent scrubs the only
+    // inline secrets (signingSecret/spacesAppToken), and provider/MCP creds live
+    // behind their own ACL'd endpoints. Read-only is enforced by the write
+    // routes, NOT by hiding fields — so return the full shape (non-admins get a
+    // complete read-only view) plus a canEdit flag for the UI to gate editing.
+    res.json({ success: true, data: { ...sanitizeAgent(record), canEdit } });
   } catch (err) {
     log.error("[agents] get error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
