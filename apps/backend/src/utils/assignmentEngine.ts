@@ -286,7 +286,7 @@ export async function evaluateAssignmentRule(
   }
 
   // Get workload mappings and board scores for boards in this user group
-  let [allWorkloadMappings, allBoardScores] = await Promise.all([
+  let [allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     withWorkspaceScope(() =>
       repositories.userWorkloadMapping.findMany({
         where: {
@@ -298,7 +298,10 @@ export async function evaluateAssignmentRule(
     repositories.boardComplexityScore.findMany({
       where: { userGroupId },
     }),
+    repositories.userGroups.findById(userGroupId),
   ]);
+
+  const maxWorkload = userGroup?.maxWorkload ?? null;
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -399,11 +402,19 @@ export async function evaluateAssignmentRule(
   let selectedUser: AssignmentCandidate | undefined = undefined;
   let excludedCandidate: AssignmentCandidate | undefined = undefined;
 
+  let cappedCount = 0;
   for (const candidate of candidates) {
-    const { maxTickets, userTickets } = candidate.details || {};
+    const { maxTickets, userTickets, weightedActiveTasks } = candidate.details || {};
     // -1 means unlimited, so only skip if maxTickets >= 0 and user has exceeded the limit
     if (typeof maxTickets === 'number' && maxTickets >= 0 && userTickets > maxTickets) {
       continue; // skip, above maxTickets
+    }
+
+    // Group-level workload cap: compare against raw weighted load (never the
+    // cold-start-adjusted value, which is queue position rather than real work).
+    if (maxWorkload !== null && (weightedActiveTasks ?? 0) >= maxWorkload) {
+      cappedCount++;
+      continue;
     }
 
     if (excludeUserId && candidate.userId === excludeUserId) {
@@ -413,6 +424,12 @@ export async function evaluateAssignmentRule(
 
     selectedUser = candidate;
     break;
+  }
+
+  if (!selectedUser && cappedCount > 0) {
+    logger.info(
+      `[Assignment] ${cappedCount}/${candidates.length} candidates at or above maxWorkload ${maxWorkload} for userGroupId: ${userGroupId} — no assignment`,
+    );
   }
 
   // If no valid candidate found after filtering, and we skipped the excluded user,
@@ -496,9 +513,15 @@ export async function evaluateAssignmentRule(
     // Exclude excludeUserId from fallback assignment and pick the next-best candidate when possible.
     let fallbackExcludedCandidate: AssignmentCandidate | undefined = undefined;
 
+    let fallbackCappedCount = 0;
     for (const candidate of fallbackCandidates) {
-      const { maxTickets, userTickets } = candidate.details || {};
+      const { maxTickets, userTickets, weightedActiveTasks } = candidate.details || {};
       if (typeof maxTickets === 'number' && maxTickets >= 0 && userTickets > maxTickets) {
+        continue;
+      }
+
+      if (maxWorkload !== null && (weightedActiveTasks ?? 0) >= maxWorkload) {
+        fallbackCappedCount++;
         continue;
       }
 
@@ -519,6 +542,11 @@ export async function evaluateAssignmentRule(
     }
 
     if (!selectedUser) {
+      if (fallbackCappedCount > 0) {
+        logger.info(
+          `[Assignment] ${fallbackCappedCount}/${fallbackCandidates.length} fallback candidates at or above maxWorkload ${maxWorkload} for userGroupId: ${userGroupId} — no assignment`,
+        );
+      }
       return { reason: 'NO_ON_CALL_USERS' };
     }
   }
@@ -552,6 +580,7 @@ interface SharedContext {
   expertiseMap:             Map<string, UserExpertiseMapping>;
   userGroupMappingByUserId: Map<string, UserGroupMapping>;
   usePercentageForBoard:    boolean;
+  maxWorkload:              number | null;
   totalTicketsOnBoard:      number;
 }
 
@@ -566,7 +595,7 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, totalTicketsOnBoard } = ctx;
+  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, totalTicketsOnBoard } = ctx;
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
@@ -634,9 +663,15 @@ async function pickBest(
   const selectFrom = (candidates: AssignmentCandidate[]): AssignmentResult => {
     candidates.sort((a, b) => a.score - b.score);
     let excluded: AssignmentCandidate | undefined;
+    let cappedCount = 0;
     for (const c of candidates) {
-      const { maxTickets, userTickets } = c.details ?? {};
+      const { maxTickets, userTickets, weightedActiveTasks } = c.details ?? {};
       if (typeof maxTickets === 'number' && maxTickets >= 0 && (userTickets ?? 0) > maxTickets) continue;
+      // Group-level workload cap: raw weighted load, not the cold-start-adjusted value.
+      if (maxWorkload !== null && (weightedActiveTasks ?? 0) >= maxWorkload) {
+        cappedCount++;
+        continue;
+      }
       if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && c.userId === excludeUserId) {
         excluded = c;
         continue;
@@ -644,6 +679,11 @@ async function pickBest(
       return { assignedUserId: c.userId };
     }
     if (excluded) return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
+    if (cappedCount > 0) {
+      logger.info(
+        `[Assignment] ${cappedCount}/${candidates.length} candidates at or above maxWorkload ${maxWorkload} for ${assignmentType} — no assignment`,
+      );
+    }
     return { reason: 'NO_ON_CALL_USERS' };
   };
 
@@ -696,14 +736,17 @@ export async function evaluateAllRoles(
     }
   }
 
-  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
+  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
     withWorkspaceScope(() =>
       repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
+    repositories.userGroups.findById(userGroupId),
   ]);
+
+  const maxWorkload = userGroup?.maxWorkload ?? null;
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -759,6 +802,7 @@ export async function evaluateAllRoles(
     expertiseMap,
     userGroupMappingByUserId,
     usePercentageForBoard,
+    maxWorkload,
     totalTicketsOnBoard,
   };
 
@@ -847,14 +891,17 @@ export async function evaluateRoleSlots(
     }
   }
 
-  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
+  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
     withWorkspaceScope(() =>
       repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
+    repositories.userGroups.findById(userGroupId),
   ]);
+
+  const maxWorkload = userGroup?.maxWorkload ?? null;
 
   if (projectBoardIds) {
     allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
@@ -890,6 +937,7 @@ export async function evaluateRoleSlots(
     expertiseMap,
     userGroupMappingByUserId,
     usePercentageForBoard,
+    maxWorkload,
     totalTicketsOnBoard,
   };
 

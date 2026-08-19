@@ -54,6 +54,12 @@ export interface AssignmentScoreRow<U> {
   hasExpertise: boolean;
   /** Engine score for the selected board; null when no board is selected. */
   score: number | null;
+  /**
+   * True when weightedActiveTasks (raw, not effective) is at or above
+   * user_groups.maxWorkload. Mirrors the engine's hard cap — at capacity, this
+   * member is skipped for new assignments. Always false when no cap is set.
+   */
+  isAtCapacity: boolean;
 }
 
 /** boardId → weight (defaults to 1 when a board has no complexity score row). */
@@ -114,6 +120,8 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
   boards: readonly BoardLike[];
   selectedBoardId: string | null;
+  /** user_groups.maxWorkload — group-level cap, or null/undefined when unlimited. */
+  maxWorkload?: number | null;
 }): AssignmentScoreRow<U>[] {
   const {
     users,
@@ -123,6 +131,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     userGroupMappings,
     boards,
     selectedBoardId,
+    maxWorkload,
   } = params;
 
   const weightByBoard = buildWeightByBoard(boardComplexityScores);
@@ -160,6 +169,10 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
       const currentPct = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
       const percentDiff = usePercentageForBoard ? percentage - currentPct : 0;
       const score = selectedBoardId ? effectiveActiveTasks - expertiseBonus - percentDiff : null;
+      // Cap check mirrors the engine: raw weightedActiveTasks, never the
+      // cold-start-adjusted value (the offset is queue position, not real work).
+      const isAtCapacity =
+        maxWorkload !== null && maxWorkload !== undefined && weightedActiveTasks >= maxWorkload;
       return {
         user,
         userTickets,
@@ -169,6 +182,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         effectiveActiveTasks,
         hasExpertise,
         score,
+        isAtCapacity,
       };
     })
     .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));

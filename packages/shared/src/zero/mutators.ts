@@ -4401,6 +4401,7 @@ export const mutators = defineMutators({
         alias: z.string().optional(),
         description: z.string().optional(),
         reassignOnUnavailable: z.boolean().optional(),
+        maxWorkload: z.number().int().positive().nullable().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4416,6 +4417,7 @@ export const mutators = defineMutators({
           alias,
           description,
           reassignOnUnavailable,
+          maxWorkload,
           userResponsibilityUpdates,
           userRoleUpdates,
           timestamp,
@@ -4427,6 +4429,7 @@ export const mutators = defineMutators({
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
           ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+          ...(maxWorkload !== undefined && { maxWorkload }),
           updatedAt: timestamp,
         });
 
