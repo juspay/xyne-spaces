@@ -29,8 +29,8 @@ const IG_AUTH_BASE = 'https://www.instagram.com';
 const startSchema = z.object({
   name: z.string().trim().min(1).max(120),
   projectId: z.string().min(1),
-  boardId: z.string().min(1).optional(),
-  assigneeUserGroupId: z.string().min(1).optional(),
+  boardId: z.preprocess(v => (typeof v === 'string' ? v.trim() || undefined : undefined), z.string().min(1).optional()),
+  assigneeUserGroupId: z.preprocess(v => (typeof v === 'string' ? v.trim() || undefined : undefined), z.string().min(1).optional()),
   visibility: z.enum(['PUBLIC', 'PRIVATE', 'public', 'private']).default('PUBLIC'),
   platform: z.enum(['web', 'electron']).default('web'),
 });
@@ -56,14 +56,14 @@ function redirectToDesk(
   },
 ): void {
   const query = new URLSearchParams(
-    params.error ? { socialMediaError: params.error } : { socialMediaOAuth: 'success' },
+    params.error ? { socialMediaError: params.error } : { socialMediaOAuth: 'success', socialMediaProvider: 'instagram' },
   );
   const path = buildSupportPath(params.workspaceId, params.channelId, query);
   res.redirect(postOAuthRedirect(getFrontendUrl(req), path, params.platform ?? 'web'));
 }
 
 // POST /instagram/oauth/start
-// Initiates Facebook Login with instagram_manage_messages permission
+// Initiates Instagram Business Login with instagram_business_basic,instagram_business_manage_messages
 router.post(
   '/instagram/oauth/start',
   authV2Middleware.authenticate,
@@ -71,6 +71,7 @@ router.post(
     try {
       const parsed = startSchema.safeParse(req.body);
       if (!parsed.success) {
+        logger.warn(`${TAG} Validation failed`, { issues: parsed.error.issues, body: req.body });
         res.status(400).json({ error: 'Valid channel name and project are required' });
         return;
       }

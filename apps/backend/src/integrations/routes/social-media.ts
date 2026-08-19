@@ -34,10 +34,12 @@ router.post(
         where: { conversationId: req.params.conversationId, workspaceId },
         select: { channelId: true },
       });
-      if (
-        !conversation ||
-        !(await canAccessSocialMediaChannel(conversation.channelId, req.user!.id, workspaceId))
-      ) {
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const access = await canAccessSocialMediaChannel(conversation.channelId, req.user!.id, workspaceId);
+      if (!access) {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }

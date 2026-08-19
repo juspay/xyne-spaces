@@ -41,9 +41,11 @@ export class InstagramFlow extends BaseFlow {
         // message_edit with num_edit=0 is Meta's delivery of a new message when only
         // the message_edits webhook field is subscribed at the account level.
         const edit = messaging.message_edit as { mid?: string; num_edit?: number } | undefined;
-        if (edit?.mid !== undefined && edit.num_edit === 0) {
-          const ts = (messaging.timestamp as number | undefined) ?? Date.now();
-          // Try to get full message details via API (works in production).
+        if (edit?.mid !== undefined) {
+          const isContentUpdate = edit.num_edit !== 0;
+          // Keep timestamp in seconds so transformer.ts multiplies by 1000 once,
+          // consistent with the standard message path above.
+          const tsRaw = (messaging.timestamp as number | undefined) ?? Math.floor(Date.now() / 1000);
           const fetched = accessToken
             ? await metaGraphClient.getMessage(accessToken, edit.mid)
             : null;
@@ -51,14 +53,15 @@ export class InstagramFlow extends BaseFlow {
             const senderId = fetched.from.id;
             // Skip messages sent by the business itself (outbound DMs)
             if (businessIgUserId && senderId === businessIgUserId) continue;
-            const senderUsername = (accessToken && businessIgUserId)
+            const senderUsername = (!isContentUpdate && accessToken && businessIgUserId)
               ? (await metaGraphClient.getSenderUsername(accessToken, businessIgUserId, senderId)) ?? undefined
               : undefined;
             messages.push({
               sender: { id: senderId, username: senderUsername },
               recipient: { id: fetched.to?.data?.[0]?.id ?? entry.id },
-              timestamp: ts,
+              timestamp: tsRaw,
               message: { mid: fetched.id, text: fetched.message },
+              isContentUpdate,
             });
           }
         }
