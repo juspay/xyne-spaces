@@ -19,7 +19,7 @@
  */
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { gcsService } from "./gcsService.js";
+import { gcsService } from "./storageService.js";
 import { createLogger } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
@@ -237,6 +237,7 @@ async function mergeProjectDay(
   project: {
     projectId: string;
     projectCode: string;
+    workspaceId: string;
     mergeAgent: string;
   },
   day: string,
@@ -244,6 +245,7 @@ async function mergeProjectDay(
   const run = await prisma.kbRun.create({
     data: {
       kind: "MERGE",
+      workspaceId: project.workspaceId,
       projectId: project.projectId,
       projectCode: project.projectCode,
       subject: day,
@@ -424,6 +426,7 @@ export async function runKbMerge(day: string, onlyProjectCode?: string): Promise
       {
         projectId: project.projectId,
         projectCode: project.projectCode,
+        workspaceId: project.workspaceId,
         mergeAgent: project.mergeAgentSlug ?? DEFAULT_MERGE_AGENT,
       },
       day,

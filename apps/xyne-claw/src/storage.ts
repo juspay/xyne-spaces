@@ -222,14 +222,11 @@ export async function gcsUploadFindings(
   if (!client) return false;
   const objectPath = `${FINDINGS_PREFIX}/dt=${day}/${projectCode}/${sessionId}.jsonl`;
   try {
-    await client
-      .bucket(BUCKET)
-      .file(objectPath)
-      .save(Buffer.from(jsonl, "utf8"), {
-        resumable: false,
-        timeout: GCS_TIMEOUT_MS,
-        contentType: "application/x-ndjson",
-      });
+    await client.uploadFileV2(Buffer.from(jsonl, "utf8"), {
+      path: objectPath,
+      contentType: "application/x-ndjson",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
     log.info(`[gcs] findings written to ${objectPath}`);
     return true;
   } catch (err) {

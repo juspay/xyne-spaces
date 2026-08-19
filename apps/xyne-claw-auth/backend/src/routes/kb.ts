@@ -451,6 +451,10 @@ kbRouter.post(
       where: { channelId: body.channelId },
       create: {
         channelId: body.channelId,
+        // Copied from the project rather than taken from the body: the channel's
+        // tenant is whatever its project's is, and a caller-supplied value could
+        // file it under a workspace that cannot see it.
+        workspaceId: project.workspaceId,
         projectId: body.projectId,
         name: body.name ?? body.channelId,
         visibility: body.visibility ?? "PUBLIC",

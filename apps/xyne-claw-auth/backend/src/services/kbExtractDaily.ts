@@ -525,6 +525,7 @@ async function runWindow(target: ExtractTarget, window: Window): Promise<boolean
   const run = await prisma.kbRun.create({
     data: {
       kind: "EXTRACT",
+      workspaceId: target.workspaceId,
       projectId: target.project.id,
       projectCode: target.project.code,
       subject: target.channelName,

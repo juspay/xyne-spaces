@@ -2409,6 +2409,11 @@ model KbProject {
 /// rather than something inferred from logs.
 model KbChannel {
   channelId String @id
+  /// Denormalized tenant key, copied from the owning KbProject on insert. A
+  /// channel belongs to exactly one project and a project to one workspace, so
+  /// this never diverges — it is here so every query can be tenant-scoped
+  /// without joining back through kb_projects.
+  workspaceId String
   projectId String
   project   KbProject @relation(fields: [projectId], references: [projectId], onDelete: Cascade)
 
@@ -2436,6 +2441,7 @@ model KbChannel {
   lastError String?
 
   @@index([projectId, included])
+  @@index([workspaceId, included])
   @@map("kb_channels")
 }
 
@@ -2456,6 +2462,12 @@ model KbRun {
 
   /// EXTRACT | MERGE | RECONCILE
   kind String
+
+  /// Denormalized tenant key, copied from the project this run is for.
+  /// Deliberately a plain column, not a relation: a run record outlives its
+  /// subject (see the note above about the removed KbChannel cascade), so it
+  /// must stay tenant-scopable even after the project row is gone.
+  workspaceId String
 
   projectId   String
   projectCode String
@@ -2489,5 +2501,6 @@ model KbRun {
   @@index([projectCode, kind, startedAt])
   @@index([kind, status])
   @@index([channelId, startedAt])
+  @@index([workspaceId, kind, startedAt])
   @@map("kb_runs")
 }

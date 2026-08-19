@@ -141,6 +141,7 @@ async function selectSlice(projectCode: string, entities: Entity[]): Promise<Ent
 interface ReconcileProject {
   projectId: string;
   projectCode: string;
+  workspaceId: string;
   agentSlug: string;
 }
 
@@ -197,6 +198,7 @@ async function reconcileOne(
   const run = await prisma.kbRun.create({
     data: {
       kind: "RECONCILE",
+      workspaceId: project.workspaceId,
       projectId: project.projectId,
       projectCode: project.projectCode,
       subject,
@@ -299,6 +301,7 @@ export async function runKbReconcile(projectCode: string, onlyEntity?: string): 
   const target: ReconcileProject = {
     projectId: project.projectId,
     projectCode: project.projectCode,
+    workspaceId: project.workspaceId,
     agentSlug: project.reconcileAgentSlug ?? DEFAULT_RECONCILE_AGENT,
   };
 

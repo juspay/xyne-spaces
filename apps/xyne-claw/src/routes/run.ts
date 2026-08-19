@@ -109,7 +109,7 @@ import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
 import type { KbTarget } from "../kb-tools.js";
 import { FindingCollector, createEmitFindingTool, type FindingScope } from "../finding-tools.js";
 import { DEFAULT_FINDING_VOCABULARY, type FindingVocabulary } from "xyne-claw-shared";
-import { gcsUploadFindings } from "../gcs.js";
+import { gcsUploadFindings } from "../storage.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
