@@ -31,6 +31,15 @@ describe("webhook signature replay guard", () => {
     expect(guard).toContain("redisVerdict === null");
   });
 
+  it("exempts flow_action callbacks from replay dedup (owner-directed unblock)", () => {
+    // Flow-action signatures are intentionally stable and are protected against
+    // double-execution downstream (per-action HMAC + atomic card consume), so a
+    // re-clicked/retried approval must not be replay-rejected as a duplicate.
+    const guard = src.slice(src.indexOf("const isFlowAction"), src.indexOf("next();"));
+    expect(guard).toContain('req.headers["x-xyne-event"] === "flow_action"');
+    expect(guard).toContain("if (!isInternalReverify && !isFlowAction)");
+  });
+
   it("skips the replay dedup for internal s2s re-verification (the proxy hop)", () => {
     // A single approval is signature-verified twice in one chain: /webhook edge
     // (external, no s2s key) then /flow/action (proxied WITH the s2s key). The
@@ -39,7 +48,7 @@ describe("webhook signature replay guard", () => {
     // flow-action approval 401s. Gate: replay runs only when NOT an s2s caller.
     const guard = src.slice(src.indexOf("const isInternalReverify"), src.indexOf("next();"));
     expect(guard).toContain("s2sKeyMatches(req.headers[\"x-s2s-key\"])");
-    expect(guard).toContain("if (!isInternalReverify)");
+    expect(guard).toContain("!isInternalReverify");
     // The HMAC authenticity check must NOT be inside the skip — only the replay
     // record/check is gated. (The match comparison lives above this slice.)
     expect(guard).toContain("checkSignatureReplayRedis");
