@@ -1,3 +1,4 @@
+import { parseSpacesEncryptionKeyRing } from "./spaces-encryption-key-ring.js";
 import { createHmac } from "node:crypto";
 import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
 
@@ -49,33 +50,10 @@ export const CONFIG = {
   // names, or rows written under a missing id cannot be read. SPACES_ENCRYPTION_KEY
   // is registered as "legacy" to match the id Spaces gives unversioned rows.
   // Empty ring when unset; the backfill short-circuits with a clear error.
-  spacesEncryptionKeys: ((): ReadonlyMap<string, Buffer> => {
-    const ring = new Map<string, Buffer>();
-    const legacy = process.env["SPACES_ENCRYPTION_KEY"];
-    if (legacy) ring.set("legacy", Buffer.from(legacy, "hex"));
-
-    const extra = process.env["SPACES_ENCRYPTION_KEYS"];
-    if (extra && extra.trim()) {
-      let parsed: Record<string, string>;
-      try {
-        parsed = JSON.parse(extra) as Record<string, string>;
-      } catch {
-        throw new Error(
-          'SPACES_ENCRYPTION_KEYS must be a JSON object of { "keyId": "hexKey" }',
-        );
-      }
-      for (const [keyId, hex] of Object.entries(parsed)) {
-        const buf = Buffer.from(hex, "hex");
-        if (buf.length !== 32) {
-          throw new Error(
-            `SPACES_ENCRYPTION_KEYS["${keyId}"] must be 32 bytes (64 hex characters)`,
-          );
-        }
-        ring.set(keyId, buf);
-      }
-    }
-    return ring;
-  })(),
+  spacesEncryptionKeys: parseSpacesEncryptionKeyRing(
+    process.env["SPACES_ENCRYPTION_KEY"],
+    process.env["SPACES_ENCRYPTION_KEYS"],
+  ),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is

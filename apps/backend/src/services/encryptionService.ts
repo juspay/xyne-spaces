@@ -1,36 +1,22 @@
 /**
- * Encryption Service
- * AES-256-CBC encryption/decryption for sensitive data.
+ * Rotation-aware AES-256-CBC encryption service.
  *
- * Rotation-aware: supports a versioned ciphertext format and a key ring so that
- * at-rest encryption keys (Class B) can be rotated without downtime.
+ * Legacy ciphertext:
+ *   iv:ciphertext
  *
- *   Legacy format:    "<iv>:<ciphertext>"                (2 colon-parts)
- *   Versioned format: "v2:<keyId>:<iv>:<ciphertext>"     (4 colon-parts)
+ * Versioned ciphertext:
+ *   v2:keyId:iv:ciphertext
  *
- * decrypt() understands BOTH formats, so old rows keep decrypting while new
- * rows can be written under a new key. encrypt() only emits the versioned
- * format when a write key is explicitly activated via ENCRYPTION_ACTIVE_KEY_ID;
- * otherwise it emits the byte-for-byte legacy format keyed on ENCRYPTION_KEY,
- * so simply shipping this code changes nothing on disk.
+ * ENCRYPTION_KEY stores the legacy key.
  *
- * Rotation phases (see the Class B rotation strategy):
- *   Phase 0  Deploy this code to every consumer. No env change -> decrypt is
- *            key-aware everywhere, encrypt still emits legacy. Zero data change.
- *   Phase 1  Add the new key to ENCRYPTION_KEYS and set ENCRYPTION_ACTIVE_KEY_ID.
- *            New writes become "v2:<newKeyId>:..."; old rows still decrypt.
- *   Phase 2  Backfill re-encrypts every stored row under the active key.
- *   Phase 3  Drop the retired key from ENCRYPTION_KEYS once no row references it.
+ * ENCRYPTION_KEYS is an ordered JSON array:
+ *   [{"id":"k1","key":"64-hex"},{"id":"k2","key":"64-hex"}]
  *
- * Environment variables:
- *   ENCRYPTION_KEY             (existing) 64 hex chars. Always registered under
- *                              keyId "legacy" and used for legacy-format rows.
- *   ENCRYPTION_KEYS            (optional) JSON object { "<keyId>": "<64-hex>" }
- *                              of additional keys available for decryption and
- *                              as candidate write keys.
- *   ENCRYPTION_ACTIVE_KEY_ID   (optional) keyId to encrypt NEW data with. Must
- *                              exist in the ring. When unset, encrypt() stays on
- *                              the legacy format/key (no behavioural change).
+ * The final array entry is the active writer. All entries remain available
+ * for decryption. If the array is absent or empty, writes remain legacy.
+ *
+ * To preload a future key without activating it, place it before the current
+ * final entry. Move it to the end only after every reader has received it.
  */
 
 import crypto from 'crypto';
@@ -50,12 +36,66 @@ let cachedRing: KeyRing | null = null;
 /**
  * Parse a 32-byte (64 hex char) key. Rejects anything that is not AES-256 sized.
  */
-function parseHexKey(raw: string, label: string): Buffer {
-  const keyBuffer = Buffer.from(raw, 'hex');
-  if (keyBuffer.length !== 32) {
-    throw new Error(`${label} must be 32 bytes (64 hex characters)`);
+function parseHexKey(raw: unknown, label: string): Buffer {
+  if (typeof raw !== 'string' || !/^[0-9a-fA-F]{64}$/.test(raw)) {
+    throw new Error(label + ' must be 32 bytes (64 hex characters)');
   }
-  return keyBuffer;
+
+  return Buffer.from(raw, 'hex');
+}
+
+function parseOrderedKeys(raw: string): Array<{ id: string; key: string }> {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      'ENCRYPTION_KEYS must be an ordered JSON array ' + 'of objects with id and key fields'
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      'ENCRYPTION_KEYS must be an ordered JSON array ' + 'of objects with id and key fields'
+    );
+  }
+
+  const seen = new Set<string>();
+
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('ENCRYPTION_KEYS[' + index + '] must be an object');
+    }
+
+    const entry = value as {
+      id?: unknown;
+      key?: unknown;
+    };
+
+    if (typeof entry.id !== 'string') {
+      throw new Error('ENCRYPTION_KEYS[' + index + '].id must be a string');
+    }
+
+    const id = entry.id.trim();
+
+    if (!id || id !== entry.id || id.includes(':') || id === VERSION_TAG || id === LEGACY_KEY_ID) {
+      throw new Error('Invalid key id at ENCRYPTION_KEYS[' + index + ']');
+    }
+
+    if (seen.has(id)) {
+      throw new Error('Duplicate encryption key id "' + id + '"');
+    }
+
+    seen.add(id);
+
+    parseHexKey(entry.key, 'ENCRYPTION_KEYS[' + index + '].key');
+
+    return {
+      id,
+      key: entry.key as string,
+    };
+  });
 }
 
 /**
@@ -63,45 +103,33 @@ function parseHexKey(raw: string, label: string): Buffer {
  * process; tests can force a rebuild with _resetKeyRingCache().
  */
 function loadKeyRing(): KeyRing {
-  if (cachedRing) return cachedRing;
+  if (cachedRing) {
+    return cachedRing;
+  }
 
   const keys = new Map<string, Buffer>();
 
-  // The existing single key is always registered as "legacy" so every existing
-  // ("<iv>:<ct>") row keeps decrypting unchanged.
   const legacy = process.env.ENCRYPTION_KEY;
+
   if (legacy) {
     keys.set(LEGACY_KEY_ID, parseHexKey(legacy, 'ENCRYPTION_KEY'));
   }
 
-  // Additional named keys for rotation.
-  const extra = process.env.ENCRYPTION_KEYS;
-  if (extra && extra.trim()) {
-    let parsed: Record<string, string>;
-    try {
-      parsed = JSON.parse(extra);
-    } catch {
-      throw new Error('ENCRYPTION_KEYS must be a JSON object of { "keyId": "hexKey" }');
-    }
-    for (const [keyId, hex] of Object.entries(parsed)) {
-      if (!keyId || keyId === VERSION_TAG || keyId.includes(':')) {
-        throw new Error(
-          `Invalid keyId "${keyId}" in ENCRYPTION_KEYS (must be non-empty and contain no ':', and not equal "${VERSION_TAG}")`,
-        );
-      }
-      keys.set(keyId, parseHexKey(hex, `ENCRYPTION_KEYS["${keyId}"]`));
-    }
+  const configured = process.env.ENCRYPTION_KEYS;
+
+  const orderedKeys = configured && configured.trim() ? parseOrderedKeys(configured) : [];
+
+  for (const entry of orderedKeys) {
+    keys.set(entry.id, parseHexKey(entry.key, 'ENCRYPTION_KEYS key "' + entry.id + '"'));
   }
 
-  const activeKeyId = process.env.ENCRYPTION_ACTIVE_KEY_ID?.trim() || null;
-  if (activeKeyId && !keys.has(activeKeyId)) {
-    throw new Error(
-      `ENCRYPTION_ACTIVE_KEY_ID="${activeKeyId}" is not present in the key ring. ` +
-        `Register it in ENCRYPTION_KEYS, or set it to "${LEGACY_KEY_ID}" (ENCRYPTION_KEY).`,
-    );
-  }
+  const activeKeyId = orderedKeys.length > 0 ? orderedKeys[orderedKeys.length - 1].id : null;
 
-  cachedRing = { keys, activeKeyId };
+  cachedRing = {
+    keys,
+    activeKeyId,
+  };
+
   return cachedRing;
 }
 
@@ -116,7 +144,7 @@ function getKey(keyId: string): Buffer {
     throw new Error(
       keyId === LEGACY_KEY_ID
         ? 'ENCRYPTION_KEY not found in environment variables'
-        : `No encryption key registered for keyId "${keyId}"`,
+        : `No encryption key registered for keyId "${keyId}"`
     );
   }
   return key;
@@ -175,7 +203,7 @@ export function decrypt(encryptedData: string): string {
     ciphertextHex = parts[1];
   } else {
     throw new Error(
-      'Invalid encrypted data format. Expected "IV:ciphertext" or "v2:keyId:IV:ciphertext"',
+      'Invalid encrypted data format. Expected "IV:ciphertext" or "v2:keyId:IV:ciphertext"'
     );
   }
 
