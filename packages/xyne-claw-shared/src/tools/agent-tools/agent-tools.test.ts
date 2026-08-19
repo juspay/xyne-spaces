@@ -91,6 +91,25 @@ describe("tool schemas", () => {
       expect(tools.description).toMatch(/replace/i);
     }
   });
+
+  it("offers surgical prompt edits on both update tools", () => {
+    // Mirrors update-skill: long prompts get truncated as tool arguments, so
+    // anchored {oldText, newText} edits are the safe path and full replacement
+    // is small-prompts-only. Both the schema and the description the model
+    // reads must carry the contract.
+    for (const tool of [updateAgentTool, updateSubagentTool]) {
+      const edits = tool.inputSchema.properties["promptEdits"] as {
+        description: string;
+        items: { required: string[] };
+      };
+      expect(edits.items.required).toEqual(["oldText", "newText"]);
+      expect(edits.description).toMatch(/exactly/i);
+      expect(edits.description).toMatch(/mutually exclusive/i);
+      const prompt = tool.inputSchema.properties["systemPrompt"] as { description: string };
+      expect(prompt.description).toMatch(/small prompts only/i);
+      expect(tool.description).toMatch(/promptEdits/);
+    }
+  });
 });
 
 describe("create-mcp carries the no-credentials policy", () => {
