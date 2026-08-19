@@ -1,3 +1,10 @@
+## [1.195.4](https://github.com/juspay/xyne-spaces/compare/v1.195.3...v1.195.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* Resolve the issue where canvas data is not persisting … ([#716](https://github.com/juspay/xyne-spaces/issues/716)) ([b28823a](https://github.com/juspay/xyne-spaces/commit/b28823a0c41c93f44f300b4509e3aff7e06a89c2))
+
 ## [1.195.3](https://github.com/juspay/xyne-spaces/compare/v1.195.2...v1.195.3) (2026-08-19)
 
 
