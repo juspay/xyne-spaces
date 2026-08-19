@@ -19,7 +19,7 @@ import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
-import { findRemotePresenter } from '../ParticipantGrid/sortParticipants';
+import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
@@ -256,8 +256,8 @@ export function MiniCallView({
     p => p.identity === focusedScreenShareIdentity,
   );
 
-  const remoteParticipant = useMemo(
-    () => findRemotePresenter(participants, localParticipantId),
+  const presentationParticipant = useMemo(
+    () => findPresentationParticipant(participants, localParticipantId),
     [participants, localParticipantId],
   );
 
@@ -451,7 +451,7 @@ export function MiniCallView({
         <PresentationModeOverlay
           callId={callId}
           isOpen={isPresentationMode}
-          participant={remoteParticipant ?? null}
+          participant={presentationParticipant ?? null}
           aiController={aiController}
           requestedAiController={requestedAiController}
           onExit={() => setIsPresentationMode(false)}
@@ -675,7 +675,7 @@ export function MiniCallView({
       <PresentationModeOverlay
         callId={callId}
         isOpen={isPresentationMode}
-        participant={remoteParticipant ?? null}
+        participant={presentationParticipant ?? null}
         aiController={aiController}
         requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}
