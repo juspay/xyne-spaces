@@ -10,6 +10,7 @@ import { Switch } from '../../ui/Switch';
 import Input from '../../ui/Input/Input';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { MultiSelect } from '../../ui/MultiSelect';
 import { Tooltip } from '../../ui/Tooltip';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
@@ -72,6 +73,11 @@ export const AssignmentConfigScreen = ({
     Map<string, { onCall: boolean; isActive: boolean }>
   >(new Map());
   const [localExpertise, setLocalExpertise] = useState<Map<string, boolean>>(new Map());
+  const [localIsNotified, setLocalIsNotified] = useState<Map<string, boolean>>(new Map());
+  // Bulk-enable-by-role picker for Notify: selecting roles here only turns
+  // matching members' local isNotified ON (never off) — no persisted state of
+  // its own, purely a shortcut into localIsNotified.
+  const [selectedNotifyRoleIds, setSelectedNotifyRoleIds] = useState<string[]>([]);
   const [localPercentage, setLocalPercentage] = useState<Map<string, number>>(new Map());
   const [localMaxTickets, setLocalMaxTickets] = useState<Map<string, number>>(new Map());
   const [localBoardWeight, setLocalBoardWeight] = useState<number>(1);
@@ -141,6 +147,21 @@ export const AssignmentConfigScreen = ({
         .filter((user): user is User => Boolean(user)) || []
     );
   }, [userGroupMembers, usersById]);
+
+  // Distinct roles actually present among this group's members (role comes nested
+  // via getUserGroupMembers' .related('role')). Members on the legacy
+  // `responsibility` enum (no roleId) don't have a role row and are excluded —
+  // only reachable via the manual per-user toggle.
+  const availableNotifyRoles = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const mapping of userGroupMembers ?? []) {
+      const role = (mapping as { role?: { id?: string; name?: string } | null }).role;
+      if (role?.id && role.name) {
+        byId.set(role.id, role.name);
+      }
+    }
+    return Array.from(byId.entries()).map(([id, name]) => ({ id, name }));
+  }, [userGroupMembers]);
 
   // Effective mappings: use pending changes if available (for instant UI feedback before save)
   const effectiveUserGroupMembers = useMemo(() => {
@@ -230,6 +251,7 @@ export const AssignmentConfigScreen = ({
     }
     if (userAssignmentStates && userGroupMembers && userGroupMembers.length > 0) {
       const statesMap = new Map<string, { onCall: boolean; isActive: boolean }>();
+      const notifiedMap = new Map<string, boolean>();
       for (const mapping of userGroupMembers) {
         const state = userAssignmentStates.find(
           (s: UserAssignmentState) => s.userId === mapping.userId,
@@ -238,8 +260,10 @@ export const AssignmentConfigScreen = ({
           onCall: state?.onCall || false,
           isActive: state?.isActiveForAssignment === true,
         });
+        notifiedMap.set(mapping.userId, mapping.isNotified === true);
       }
       setLocalUserStates(statesMap);
+      setLocalIsNotified(notifiedMap);
     }
   }, [userAssignmentStates, userGroupMembers, justSaved]);
 
@@ -331,6 +355,39 @@ export const AssignmentConfigScreen = ({
       }
       setLocalUserStates(newStates);
       setHasChanges(true);
+    }
+  };
+
+  const handleToggleIsNotified = (userId: string): void => {
+    const newNotified = new Map(localIsNotified);
+    const currentValue = newNotified.get(userId) ?? false;
+    newNotified.set(userId, !currentValue);
+    setLocalIsNotified(newNotified);
+    setHasChanges(true);
+  };
+
+  // Bulk-enable Notify for every current member whose role is in
+  // selectedNotifyRoleIds. Additive only — never turns anyone off, so it can't
+  // silently undo a manual opt-in from someone outside the selected roles.
+  const handleApplyNotifyRoles = (): void => {
+    if (selectedNotifyRoleIds.length === 0) return;
+    const newNotified = new Map(localIsNotified);
+    let enabledCount = 0;
+    for (const mapping of userGroupMembers ?? []) {
+      const roleId = (mapping as { role?: { id?: string } | null }).role?.id;
+      if (roleId && selectedNotifyRoleIds.includes(roleId) && !newNotified.get(mapping.userId)) {
+        newNotified.set(mapping.userId, true);
+        enabledCount++;
+      }
+    }
+    setLocalIsNotified(newNotified);
+    if (enabledCount > 0) {
+      setHasChanges(true);
+      toast.success(
+        `Enabled Notify for ${enabledCount} member${enabledCount === 1 ? '' : 's'}. Click Save changes to apply.`,
+      );
+    } else {
+      toast.info('Everyone in the selected roles is already enabled.');
     }
   };
 
@@ -593,12 +650,14 @@ export const AssignmentConfigScreen = ({
         ? Array.from(pendingSetMappings.entries()).map(([userId, onCallSetNumbers]) => ({
             userId,
             onCallSetNumbers: localAutoRotationEnabled ? onCallSetNumbers : [],
+            isNotified: localIsNotified.get(userId) ?? false,
           }))
         : (userGroupMembers ?? []).map(m => ({
             userId: m.userId,
             onCallSetNumbers: localAutoRotationEnabled
               ? ((m.onCallSetNumbers as number[] | undefined) ?? [1])
               : [],
+            isNotified: localIsNotified.get(m.userId) ?? false,
           }));
 
       const stateIds = userStates.reduce(
@@ -771,6 +830,18 @@ export const AssignmentConfigScreen = ({
             )}
           </div>
         </td>
+        <td className='px-6 py-4 whitespace-nowrap text-center align-middle'>
+          <div className='flex items-center justify-center h-full'>
+            <Switch
+              checked={localIsNotified.get(user.id) ?? false}
+              onCheckedChange={() => handleToggleIsNotified(user.id)}
+              data-track-event='change'
+              data-track-category='UserGroup'
+              data-track-name='ToggleIsNotified'
+              data-track-metadata={JSON.stringify({ userId: user.id })}
+            />
+          </div>
+        </td>
         {selectedBoardId && (
           <>
             <td className='px-6 py-4 whitespace-nowrap text-center'>
@@ -844,40 +915,45 @@ export const AssignmentConfigScreen = ({
           )}
         </div>
         <div className='overflow-hidden rounded-2xl border border-border bg-card'>
-          <table className='min-w-full table-fixed divide-y divide-border'>
-            <thead className='bg-muted/50'>
-              <tr>
-                <th className={cn(TABLE_HEAD_CELL, 'w-[40%] text-left')}>User</th>
-                <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>On-Call</th>
-                <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Active</th>
-                {selectedBoardId && (
-                  <>
-                    <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Expertise</th>
-                    {localUsePercentage && (
-                      <>
-                        <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>% Share</th>
-                        <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Max Tickets</th>
-                      </>
-                    )}
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {setUsers.length > 0 ? (
-                setUsers.map(renderUserRow)
-              ) : (
+          <div className='overflow-x-auto'>
+            <table className='min-w-full table-fixed divide-y divide-border'>
+              <thead className='bg-muted/50'>
                 <tr>
-                  <td
-                    colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
-                    className='px-6 py-4 text-center text-sm text-muted-foreground'
-                  >
-                    No users in this set
-                  </td>
+                  <th className={cn(TABLE_HEAD_CELL, 'w-[32%] text-left')}>User</th>
+                  <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>On-Call</th>
+                  <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Active</th>
+                  <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Notify</th>
+                  {selectedBoardId && (
+                    <>
+                      <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Expertise</th>
+                      {localUsePercentage && (
+                        <>
+                          <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>% Share</th>
+                          <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>
+                            Max Tickets
+                          </th>
+                        </>
+                      )}
+                    </>
+                  )}
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className='divide-y divide-border'>
+                {setUsers.length > 0 ? (
+                  setUsers.map(renderUserRow)
+                ) : (
+                  <tr>
+                    <td
+                      colSpan={selectedBoardId ? (localUsePercentage ? 7 : 5) : 4}
+                      className='px-6 py-4 text-center text-sm text-muted-foreground'
+                    >
+                      No users in this set
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
@@ -1209,6 +1285,43 @@ export const AssignmentConfigScreen = ({
                 </div>
               )}
 
+              {/* Bulk-enable Notify by role */}
+              {availableNotifyRoles.length > 0 && (
+                <div className='rounded-2xl border border-border bg-card p-4'>
+                  <div className='mb-3'>
+                    <h2 className='text-sm font-semibold text-foreground'>Enable Notify by role</h2>
+                    <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                      Pick one or more roles to turn on Notify for everyone currently in that role.
+                      This only turns Notify on — it never turns it off, and you can still adjust
+                      individual members below before saving.
+                    </p>
+                  </div>
+                  <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
+                    <div className='flex-1'>
+                      <MultiSelect
+                        options={availableNotifyRoles.map(role => ({
+                          value: role.id,
+                          label: role.name,
+                        }))}
+                        selectedValues={selectedNotifyRoleIds}
+                        onChange={setSelectedNotifyRoleIds}
+                        placeholder='Select roles...'
+                      />
+                    </div>
+                    <Button
+                      variant='outline'
+                      onClick={handleApplyNotifyRoles}
+                      disabled={selectedNotifyRoleIds.length === 0}
+                      data-track-event='click'
+                      data-track-category='UserGroup'
+                      data-track-name='ApplyNotifyByRole'
+                    >
+                      Apply
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* User Assignment Table - Grouped by Set when rotation is enabled */}
               {localAutoRotationEnabled ? (
                 // Render users grouped by set
@@ -1218,54 +1331,59 @@ export const AssignmentConfigScreen = ({
               ) : (
                 // Render flat user list when rotation is disabled
                 <div className='overflow-hidden rounded-2xl border border-border bg-card'>
-                  <table className='min-w-full divide-y divide-border'>
-                    <thead className='bg-muted/50'>
-                      <tr>
-                        <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
-                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>On-Call</th>
-                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Active</th>
-                        {selectedBoardId && (
-                          <>
-                            <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
-                              Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
-                            </th>
-                            {localUsePercentage && (
-                              <>
-                                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
-                                  % Share
-                                  <span
-                                    className={cn(
-                                      'mt-1 block text-xs font-normal normal-case tracking-normal',
-                                      totalPercentage === 100
-                                        ? 'text-status-success'
-                                        : 'text-status-failure',
-                                    )}
-                                  >
-                                    Total: {totalPercentage}%
-                                  </span>
-                                </th>
-                                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Max Tickets</th>
-                              </>
-                            )}
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className='divide-y divide-border'>
-                      {users.map(renderUserRow)}
-                      {users.length === 0 && (
+                  <div className='overflow-x-auto'>
+                    <table className='min-w-full divide-y divide-border'>
+                      <thead className='bg-muted/50'>
                         <tr>
-                          <td
-                            colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
-                            className='px-6 py-8 text-center text-[13px] text-muted-foreground'
-                          >
-                            This group has no members yet. Add people to the group to configure
-                            assignment.
-                          </td>
+                          <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
+                          <th className={cn(TABLE_HEAD_CELL, 'text-center')}>On-Call</th>
+                          <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Active</th>
+                          <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Notify</th>
+                          {selectedBoardId && (
+                            <>
+                              <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                                Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
+                              </th>
+                              {localUsePercentage && (
+                                <>
+                                  <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                                    % Share
+                                    <span
+                                      className={cn(
+                                        'mt-1 block text-xs font-normal normal-case tracking-normal',
+                                        totalPercentage === 100
+                                          ? 'text-status-success'
+                                          : 'text-status-failure',
+                                      )}
+                                    >
+                                      Total: {totalPercentage}%
+                                    </span>
+                                  </th>
+                                  <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                                    Max Tickets
+                                  </th>
+                                </>
+                              )}
+                            </>
+                          )}
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className='divide-y divide-border'>
+                        {users.map(renderUserRow)}
+                        {users.length === 0 && (
+                          <tr>
+                            <td
+                              colSpan={selectedBoardId ? (localUsePercentage ? 7 : 5) : 4}
+                              className='px-6 py-8 text-center text-[13px] text-muted-foreground'
+                            >
+                              This group has no members yet. Add people to the group to configure
+                              assignment.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 

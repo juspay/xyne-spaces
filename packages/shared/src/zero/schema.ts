@@ -405,6 +405,7 @@ export const userGroupMappingTable = table('user_group_mappings')
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
     startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
