@@ -1,26 +1,26 @@
- name: Test Self-Hosted Runner
+name: Test Self-Hosted Runner
 
-  on:
-    push:
-      branches:
-        - fix/test-local-runner
-        - feature/self-hosted-runner-test
-    workflow_dispatch:
+on:
+  push:
+    branches:
+      - fix/test-local-runner
+      - feature/self-hosted-runner-test
+  workflow_dispatch:
 
-  jobs:
-    test:
-      runs-on: [self-hosted, Windows, X64]
-      steps:
-        - name: Print hostname
-          run: hostname
+jobs:
+  test:
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - name: Print hostname
+        run: hostname
 
-        - name: Print current user
-          run: whoami
+      - name: Print current user
+        run: whoami
 
-        - name: Print OS
-          run: |
-            (Get-CimInstance Win32_OperatingSystem).Caption
-            [System.Environment]::OSVersion.VersionString
+      - name: Print OS
+        run: |
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          [System.Environment]::OSVersion.VersionString
 
-        - name: Success message
-          run: Write-Output "Self-hosted runner is working successfully!"
+      - name: Success message
+        run: Write-Output "Self-hosted runner is working successfully!"
