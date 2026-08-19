@@ -147,7 +147,10 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
               value={mode}
               onChange={value => setMode(value as BulkTicketMode)}
             >
-              <Radio value={BulkTicketMode.ALL_PARENTS} subtext='Every line becomes its own ticket.'>
+              <Radio
+                value={BulkTicketMode.ALL_PARENTS}
+                subtext='Every line becomes its own ticket.'
+              >
                 Independent tickets
               </Radio>
               <Radio
@@ -187,7 +190,9 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
                 className='min-h-[160px] font-mono text-sm'
               />
               <p className='text-xs text-muted-foreground flex items-center justify-between'>
-                <span>{parsedItems.length} ticket{parsedItems.length === 1 ? '' : 's'} parsed</span>
+                <span>
+                  {parsedItems.length} ticket{parsedItems.length === 1 ? '' : 's'} parsed
+                </span>
                 <span>Maximum {MAX_BULK_TICKETS}</span>
               </p>
             </div>
@@ -196,8 +201,16 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
               <Button variant='outline' onClick={handleClose} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={handleSubmit} disabled={!canSubmit || isSubmitting} loading={isSubmitting}>
-                {isSubmitting ? 'Queuing...' : `Create ${parsedItems.length} ticket${parsedItems.length === 1 ? '' : 's'}`}
+              <Button
+                onClick={() => {
+                  void handleSubmit();
+                }}
+                disabled={!canSubmit || isSubmitting}
+                loading={isSubmitting}
+              >
+                {isSubmitting
+                  ? 'Queuing...'
+                  : `Create ${parsedItems.length} ticket${parsedItems.length === 1 ? '' : 's'}`}
               </Button>
             </div>
           </>
