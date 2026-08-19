@@ -172,6 +172,43 @@ export interface SearchArea {
   embeddingFields?: string[];
 }
 
+/**
+ * Entities resolved by the nightly entity-extraction worker (xyne-spaces
+ * backend: writeEntitiesToVespa in services/entityExtraction/channelSource.ts).
+ * It writes the SAME three columns onto both `ticket` and `chat_message` docs,
+ * so both areas share these defs.
+ *
+ * Only ONE of the three columns is exposed — `entityNames` (index + attribute +
+ * bm25, token match on the canonical registry name). The other two are withheld
+ * on purpose:
+ *   - `entityIds` IS matchable (attribute, fast-search) but there is no way for
+ *     the agent to learn an entity id: the registry lives in the xyne-spaces
+ *     Postgres and claw has no tool that returns ids, so an id filter could only
+ *     ever be hallucinated. Expose it once something hands the agent real ids.
+ *   - `entitySurfaceForms` is `indexing: summary` ONLY in both .sd files — not
+ *     matchable at all, so filtering on it would silently match nothing.
+ *
+ * entityNames is array<string> → containsAny (matches if ANY element hits).
+ * containsAny is the ONLY operator exposed. `nin` is deliberately withheld until
+ * the entity backfill lands: extraction only ever ran forward from its rollout,
+ * so most docs have EMPTY entity arrays, and `!(entityNames contains "X")` would
+ * match every un-extracted doc — presenting "not yet processed" as "does not
+ * mention X". That reads as a confident negative and is wrong at scale. Add nin
+ * back once the backfill is complete.
+ *
+ * It is multi-valued, so it must NOT be added to allowedGroupByFields (the
+ * module-load guard below rejects grouping an array — one doc lands in one group
+ * per element).
+ */
+const entityFields = (subject: string): FieldDef[] => [
+  strField(
+    "entityName",
+    `Canonical name of an entity mentioned in the ${subject} (e.g. a product, customer or service), token-matched. Positive match only: a doc without this entity may simply not have been through extraction yet, so absence is NOT evidence the ${subject} is unrelated.`,
+    ["containsAny"],
+    "entityNames",
+  ),
+];
+
 const chatFields = (tsField: string): FieldDef[] => [
   strField("conversationId", "Conversation/thread id.", ["in"], "threadId"),
   strField("channelId", "Channel the message belongs to.", ["contains", "in"]),
@@ -180,6 +217,7 @@ const chatFields = (tsField: string): FieldDef[] => [
   strField("messageType", "Message type (USER/BOT/SYSTEM/FORWARDED).", ["in", "nin"]),
   boolField("isDM", "Set true for messages in a direct-message (1:1) channel.", "isIm"),
   boolField("isGroupDM", "Set true for messages in a group-DM channel.", "isMpim"),
+  ...entityFields("message's thread"),
   dateField("createdDate", "Message creation date (dd/mm/yy, IST).", tsField),
 ];
 
@@ -266,6 +304,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("xyneId", "Human ticket id, e.g. XYNE-13292 (what people cite).", ["in", "contains"]),
       strField("ticketId", "Internal ticket doc id — prefer xyneId for the human-facing id.", ["in"], "docId"),
       strField("conversationId", "Ticket conversation/thread id.", ["in"], "convId"),
+      ...entityFields("ticket"),
       dateField("createdDate", "Ticket creation date (dd/mm/yy, IST).", "createdAtTimestamp"),
     ],
     // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
