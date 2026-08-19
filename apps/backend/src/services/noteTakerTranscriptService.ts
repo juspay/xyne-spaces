@@ -431,7 +431,7 @@ class NoteTakerTranscriptService {
       });
     const titlePromise = call.title
       ? Promise.resolve(null)
-      : transcriptService.generateCallTitle(formattedTranscript, callId).catch((err) => {
+      : transcriptService.generateRecordingTitle(formattedTranscript, callId).catch((err) => {
             logger.error(`[${callId}] generate_title_threw`, {
               path: 'note_taker',
               error: err,

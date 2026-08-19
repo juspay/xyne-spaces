@@ -20,6 +20,7 @@ import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics
 import { executeCallLlmWithRetry, executeStreamingLlmRequest } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
+import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
@@ -114,6 +115,11 @@ CRITICAL RULES:
 - One sentence summarizing the main topic (max 50 characters)
 - No quotes, no labels, no bullet points, no explanations
 - Write in plain, natural language
+
+INSUFFICIENT TRANSCRIPT:
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange — treat it as enough to identify a topic and generate a real title as normal. Do not bail out just because a call was short.
+- Only when the transcript is truly that tiny, output EXACTLY this and nothing else: Not enough content
 
 BRAND NAME CORRECTION:
 - The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
@@ -1105,8 +1111,12 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate a short AI title from transcript with explicit retry loop.
    */
-  async generateCallTitle(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
+  async generateCallTitle(
+    transcript: string,
+    callId?: string,
+    promptTemplate = CALL_TITLE_PROMPT,
+  ): Promise<string | null> {
+    const prompt = promptTemplate.replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
       () => this.createAgent(callId),
@@ -1120,6 +1130,15 @@ Output ONLY the processed transcript, nothing else.`;
     }
 
     return extracted.content.substring(0, 50);
+  }
+
+  /**
+   * Generate a short AI title for a headless recording (Xyne Scribe) — same
+   * retry/extraction path as `generateCallTitle`, but using the recording-
+   * specific prompt so recording and regular-call title wording can diverge.
+   */
+  async generateRecordingTitle(transcript: string, callId?: string): Promise<string | null> {
+    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT);
   }
 
   /**
