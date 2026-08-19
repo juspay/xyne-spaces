@@ -7222,6 +7222,7 @@ export function createMutators(
           alias: z.string().optional(),
           description: z.string().optional(),
           reassignOnUnavailable: z.boolean().optional(),
+          maxWorkload: z.number().int().positive().nullable().optional(),
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
@@ -7236,6 +7237,7 @@ export function createMutators(
             alias,
             description,
             reassignOnUnavailable,
+            maxWorkload,
             userResponsibilityUpdates,
             userRoleUpdates,
             timestamp,
@@ -7276,6 +7278,7 @@ export function createMutators(
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
             ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+            ...(maxWorkload !== undefined && { maxWorkload }),
             updatedAt: timestamp,
           });
 

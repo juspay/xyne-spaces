@@ -29,6 +29,8 @@ interface VisibilityTabProps {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
+  /** user_groups.maxWorkload — shown only when set (non-null). */
+  maxWorkload: number | null | undefined;
 }
 
 /**
@@ -45,7 +47,10 @@ export function VisibilityTab({
   boardComplexityScores,
   expertiseMappings,
   userGroupMappings,
+  maxWorkload,
 }: VisibilityTabProps): ReactElement {
+  const hasMaxWorkload = maxWorkload !== null && maxWorkload !== undefined;
+
   const scoreRows = useMemo(
     () =>
       computeAssignmentScores({
@@ -56,6 +61,7 @@ export function VisibilityTab({
         userGroupMappings,
         boards,
         selectedBoardId,
+        maxWorkload: maxWorkload ?? null,
       }),
     [
       users,
@@ -65,6 +71,7 @@ export function VisibilityTab({
       userGroupMappings,
       boards,
       selectedBoardId,
+      maxWorkload,
     ],
   );
 
@@ -104,6 +111,16 @@ export function VisibilityTab({
         </div>
       </div>
 
+      {hasMaxWorkload && (
+        <div className='rounded-2xl border border-border bg-card p-4'>
+          <p className='text-[13px] leading-[1.5] text-foreground'>
+            Max workload: <span className='font-medium'>{maxWorkload}</span>. Members at or above
+            this weighted load won&apos;t receive new tickets. If everyone is at capacity, no one is
+            assigned.
+          </p>
+        </div>
+      )}
+
       {/* Per-user tickets + score */}
       <div className='overflow-hidden rounded-2xl border border-border bg-card'>
         <table className='min-w-full divide-y divide-border'>
@@ -118,12 +135,19 @@ export function VisibilityTab({
               {hasAnyStartOffset && (
                 <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Cold-Start Offset</th>
               )}
+              {hasMaxWorkload && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Capacity</th>}
               {selectedBoardId && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
             </tr>
           </thead>
           <tbody className='divide-y divide-border'>
             {scoreRows.map(row => (
-              <tr key={row.user.id} className='transition-colors hover:bg-muted/50'>
+              <tr
+                key={row.user.id}
+                className={cn(
+                  'transition-colors hover:bg-muted/50',
+                  row.isAtCapacity && 'bg-destructive/5',
+                )}
+              >
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='flex items-center'>
                     <Avatar userId={row.user.id} size='sm' showActiveStatus={false} />
@@ -146,6 +170,15 @@ export function VisibilityTab({
                     {row.startOffset > 0 ? `+${row.startOffset}` : '—'}
                   </td>
                 )}
+                {hasMaxWorkload && (
+                  <td className='px-6 py-4 whitespace-nowrap text-center text-sm'>
+                    {row.isAtCapacity ? (
+                      <span className='font-medium text-destructive'>At capacity</span>
+                    ) : (
+                      <span className='text-muted-foreground'>—</span>
+                    )}
+                  </td>
+                )}
                 {selectedBoardId && (
                   <td className='px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-foreground'>
                     {row.score !== null ? row.score.toFixed(2) : '—'}
@@ -156,7 +189,12 @@ export function VisibilityTab({
             {scoreRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + (hasAnyStartOffset ? 1 : 0) + (selectedBoardId ? 1 : 0)}
+                  colSpan={
+                    3 +
+                    (hasAnyStartOffset ? 1 : 0) +
+                    (hasMaxWorkload ? 1 : 0) +
+                    (selectedBoardId ? 1 : 0)
+                  }
                   className='px-6 py-8 text-center text-[13px] text-muted-foreground'
                 >
                   No members to show.

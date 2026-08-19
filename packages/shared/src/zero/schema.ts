@@ -526,6 +526,7 @@ export const userGroupTable = table('user_groups')
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),

@@ -57,6 +57,7 @@ export const AssignmentConfigScreen = ({
   const [hasChanges, setHasChanges] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [percentageError, setPercentageError] = useState<string | null>(null);
+  const [maxWorkloadError, setMaxWorkloadError] = useState<string | null>(null);
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
@@ -77,6 +78,10 @@ export const AssignmentConfigScreen = ({
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
   const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
+  // Max workload cap: toggle drives whether a value is sent at all (off => null).
+  // `maxWorkloadInput` is the raw text so the field can be briefly empty while typing.
+  const [localMaxWorkloadEnabled, setLocalMaxWorkloadEnabled] = useState<boolean>(false);
+  const [maxWorkloadInput, setMaxWorkloadInput] = useState<string>('');
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
     RotationInterval.WEEKLY,
   );
@@ -275,11 +280,15 @@ export const AssignmentConfigScreen = ({
       setLocalAutoRotationEnabled(userGroup.autoRotationEnabled ?? false);
       setLocalRotationInterval(userGroup.rotationInterval ?? RotationInterval.WEEKLY);
       setLocalReassignOnUnavailable(userGroup.reassignOnUnavailable ?? false);
+      const savedMaxWorkload = userGroup.maxWorkload ?? null;
+      setLocalMaxWorkloadEnabled(savedMaxWorkload !== null);
+      setMaxWorkloadInput(savedMaxWorkload !== null ? String(savedMaxWorkload) : '');
     }
   }, [
     userGroup?.autoRotationEnabled,
     userGroup?.rotationInterval,
     userGroup?.reassignOnUnavailable,
+    userGroup?.maxWorkload,
   ]);
 
   const boards = useMemo(() => allBoards || [], [allBoards]);
@@ -440,6 +449,25 @@ export const AssignmentConfigScreen = ({
     currentMaxSet,
   ]);
 
+  // Same sanitising as board weight: digits only, no leading zeros, positive integer.
+  // Upper bound is left open — workload is weighted, so a legitimate cap can be large.
+  const handleMaxWorkloadChange = (value: string): void => {
+    const sanitizedValue = value.replace(/[^0-9]/g, '');
+    if (sanitizedValue === '') {
+      setMaxWorkloadInput('');
+      setHasChanges(true);
+      return;
+    }
+    const withoutLeadingZeros = sanitizedValue.replace(/^0+/, '');
+    if (withoutLeadingZeros === '') {
+      setMaxWorkloadInput('');
+      setHasChanges(true);
+      return;
+    }
+    setMaxWorkloadInput(withoutLeadingZeros);
+    setHasChanges(true);
+  };
+
   const handleBoardWeightChange = (value: string): void => {
     // Only allow digits, no negative sign or leading zeros except single '0'
     const sanitizedValue = value.replace(/[^0-9]/g, '');
@@ -511,6 +539,14 @@ export const AssignmentConfigScreen = ({
       }
     }
     setPercentageError(null);
+
+    // A max-workload cap that is switched on must carry a positive integer.
+    const parsedMaxWorkload = parseInt(maxWorkloadInput, 10);
+    if (localMaxWorkloadEnabled && (isNaN(parsedMaxWorkload) || parsedMaxWorkload < 1)) {
+      setMaxWorkloadError('Enter a max workload of 1 or more, or turn the limit off.');
+      return;
+    }
+    setMaxWorkloadError(null);
 
     setIsSaving(true);
     try {
@@ -608,16 +644,23 @@ export const AssignmentConfigScreen = ({
         );
       }
 
-      // Also update reassign-on-unavailable setting
+      // Also update group-level settings (reassign-on-unavailable, max workload)
       const reassignOnUnavailableChanged =
         localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
 
-      if (reassignOnUnavailableChanged) {
+      // null clears the cap; the mutator skips the field entirely when undefined.
+      const nextMaxWorkload = localMaxWorkloadEnabled ? parsedMaxWorkload : null;
+      const maxWorkloadChanged = nextMaxWorkload !== (userGroup?.maxWorkload ?? null);
+
+      if (reassignOnUnavailableChanged || maxWorkloadChanged) {
         pendingServerResults.push(
           zero.mutate(
             mutators.userGroup.update({
               userGroupId,
-              reassignOnUnavailable: localReassignOnUnavailable,
+              ...(reassignOnUnavailableChanged && {
+                reassignOnUnavailable: localReassignOnUnavailable,
+              }),
+              ...(maxWorkloadChanged && { maxWorkload: nextMaxWorkload }),
               timestamp: Date.now(),
             }),
           ).server,
@@ -1003,6 +1046,70 @@ export const AssignmentConfigScreen = ({
                 </div>
               </div>
 
+              {/* Max workload cap */}
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-sm font-semibold text-foreground'>Max workload</h2>
+                  <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                    Cap how much work one member can hold at once, counted as the sum of their open
+                    tickets multiplied by each board&apos;s weight.
+                  </p>
+                </div>
+
+                <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
+                  <div className='min-w-0'>
+                    <span className='block text-[13px] font-medium text-foreground'>
+                      Limit workload per member
+                    </span>
+                    <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                      When a member reaches this limit they stop receiving new tickets. If everyone
+                      is at the limit, no one is assigned. Off means no limit.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={localMaxWorkloadEnabled}
+                    onCheckedChange={checked => {
+                      setLocalMaxWorkloadEnabled(checked);
+                      if (!checked) {
+                        setMaxWorkloadInput('');
+                        setMaxWorkloadError(null);
+                      }
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
+
+                {localMaxWorkloadEnabled && (
+                  <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
+                    <label
+                      htmlFor='max-workload'
+                      className='text-[13px] font-medium text-foreground'
+                    >
+                      Workload limit
+                    </label>
+                    <p className='text-xs leading-[1.4] text-muted-foreground'>
+                      Weighted total, not a ticket count. On a board with weight 3, one ticket uses
+                      3 of this limit.
+                    </p>
+                    <Input
+                      type='text'
+                      inputMode='numeric'
+                      id='max-workload'
+                      value={maxWorkloadInput}
+                      onChange={e => handleMaxWorkloadChange(e.target.value)}
+                      placeholder='e.g. 20'
+                      className='mt-1 w-24 text-sm'
+                      data-track-event='change'
+                      data-track-category='UserGroups'
+                      data-track-name='SetMaxWorkload'
+                    />
+                    {maxWorkloadError && (
+                      <p className='text-[13px] text-destructive'>{maxWorkloadError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Board Filter */}
               <div className='rounded-2xl border border-border bg-card p-4'>
                 <div className='flex flex-col gap-2'>
@@ -1216,6 +1323,7 @@ export const AssignmentConfigScreen = ({
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
               userGroupMappings={userGroupMembers}
+              maxWorkload={userGroup?.maxWorkload ?? null}
             />
           )}
         </div>
