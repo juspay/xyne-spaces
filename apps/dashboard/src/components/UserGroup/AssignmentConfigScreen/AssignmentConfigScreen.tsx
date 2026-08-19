@@ -41,6 +41,11 @@ const ALL_BOARDS_VALUE = '__all_boards__';
 const TABLE_HEAD_CELL =
   'px-6 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground';
 
+const isPausedFromAssignment = (user: User | undefined): boolean => {
+  const until = user?.assignmentUnavailableUntil as number | undefined;
+  return until ? until > Date.now() : false;
+};
+
 export const AssignmentConfigScreen = ({
   userGroupId,
 }: AssignmentConfigScreenProps): ReactElement => {
@@ -280,6 +285,7 @@ export const AssignmentConfigScreen = ({
   const boards = useMemo(() => allBoards || [], [allBoards]);
 
   const handleToggleOnCall = (userId: string): void => {
+    if (isPausedFromAssignment(users.find(u => u.id === userId))) return;
     const currentState = localUserStates.get(userId);
     if (currentState) {
       const newStates = new Map(localUserStates);
@@ -295,6 +301,7 @@ export const AssignmentConfigScreen = ({
   };
 
   const handleToggleActiveForAssignment = (userId: string): void => {
+    if (isPausedFromAssignment(users.find(u => u.id === userId))) return;
     const currentState = localUserStates.get(userId);
     if (currentState) {
       const newStates = new Map(localUserStates);
@@ -661,12 +668,24 @@ export const AssignmentConfigScreen = ({
   const renderUserRow = (user: User): ReactElement => {
     const localState = getUserLocalState(user.id);
     const assignmentUnavailableUntil = user.assignmentUnavailableUntil as number | undefined;
-    const isUnavailable = assignmentUnavailableUntil
-      ? assignmentUnavailableUntil > Date.now()
-      : false;
+    const isUnavailable = isPausedFromAssignment(user);
     const unavailableTooltip = assignmentUnavailableUntil
       ? `Unavailable until ${formatExpiryTime(assignmentUnavailableUntil, false)}`
       : 'Unavailable for ticket assignment';
+    const pausedSwitchTooltip = assignmentUnavailableUntil
+      ? `Paused from ticket assignment until ${formatExpiryTime(assignmentUnavailableUntil, false)}. They can resume from Preferences > Availability.`
+      : 'Paused from ticket assignment. They can resume from Preferences > Availability.';
+
+    const renderAvailabilitySwitch = (checked: boolean, onToggle: () => void): ReactElement =>
+      isUnavailable ? (
+        <Tooltip content={pausedSwitchTooltip}>
+          <span className='inline-flex'>
+            <Switch checked={checked} onCheckedChange={onToggle} disabled />
+          </span>
+        </Tooltip>
+      ) : (
+        <Switch checked={checked} onCheckedChange={onToggle} />
+      );
 
     return (
       <tr key={user.id} className='transition-colors hover:bg-muted/50'>
@@ -690,18 +709,14 @@ export const AssignmentConfigScreen = ({
         </td>
         <td className='px-6 py-4 whitespace-nowrap text-center align-middle'>
           <div className='flex items-center justify-center h-full'>
-            <Switch
-              checked={localState.onCall}
-              onCheckedChange={() => handleToggleOnCall(user.id)}
-            />
+            {renderAvailabilitySwitch(localState.onCall, () => handleToggleOnCall(user.id))}
           </div>
         </td>
         <td className='px-6 py-4 whitespace-nowrap text-center align-middle'>
           <div className='flex items-center justify-center h-full'>
-            <Switch
-              checked={localState.isActive}
-              onCheckedChange={() => handleToggleActiveForAssignment(user.id)}
-            />
+            {renderAvailabilitySwitch(localState.isActive, () =>
+              handleToggleActiveForAssignment(user.id),
+            )}
           </div>
         </td>
         {selectedBoardId && (

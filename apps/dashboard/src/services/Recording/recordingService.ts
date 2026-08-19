@@ -133,6 +133,7 @@ export interface RecordingSharingResult {
 export interface RegenerateRecordingSummaryResult {
   summaryTemplateId: string;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean;
 }
 
 export interface ExportRecordingGoogleDocResult {
@@ -175,6 +176,7 @@ export interface RecordingDetail extends Recording {
   messageId: string | null;
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;

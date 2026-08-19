@@ -384,6 +384,7 @@ export class CallController {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
     let headlessNotesCanvasId: string | undefined;
+    let headlessDetailedSummaryCanvasId: string | undefined;
     // Tracks which stage was active when an error is thrown; used in catch log.
     let stage = 'setup';
 
@@ -427,6 +428,31 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
+        stage = 'detailed_summary_canvas_creation';
+        const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId(
+          'xyne-automatic',
+          req.user!.workspaceId!,
+        );
+        if (!xyneAutomaticBot) {
+          throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
+        }
+        const detailedSummaryCanvasId = await callDocumentService.createDetailedSummaryCanvas(
+          callExternalId,
+          '_Detailed summary will appear here once the recording ends._',
+          xyneAutomaticBot.id,
+          null,
+          null,
+          new Date(),
+          userId,
+          undefined,
+          undefined,
+          req.user!.workspaceId,
+        );
+        if (!detailedSummaryCanvasId) {
+          throw new Error('Failed to create detailed summary canvas');
+        }
+        headlessDetailedSummaryCanvasId = detailedSummaryCanvasId;
+
         // Thread-linked recording: validate the conversation up front (fail
         // fast with a 404 instead of creating a LiveKit room for nothing) and
         // stamp channelId/conversationId onto the room metadata. The actual
@@ -460,6 +486,7 @@ export class CallController {
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
+          detailedSummaryCanvasId,
           ...(channelId && conversationId ? { channelId, conversationId } : {}),
         });
 
@@ -496,6 +523,7 @@ export class CallController {
           roomLink,
           channelId: null,
           notesCanvasId,
+          detailedSummaryCanvasId,
           ...(conversationId ? { conversationId } : {}),
         });
         return;
@@ -742,6 +770,19 @@ export class CallController {
         } catch (cleanupError) {
           logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
             canvasId: headlessNotesCanvasId,
+            cleanupError,
+          });
+        }
+      }
+      if (headlessDetailedSummaryCanvasId) {
+        try {
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessDetailedSummaryCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessDetailedSummaryCanvasId } }),
+          ]);
+        } catch (cleanupError) {
+          logger.error(`[${callIdForLog}] headless_detailed_summary_canvas_cleanup_failed`, {
+            canvasId: headlessDetailedSummaryCanvasId,
             cleanupError,
           });
         }
@@ -1347,6 +1388,16 @@ export class CallController {
           detailedSummaryCanvasId:
             typeof callMetadata?.detailedSummaryCanvasId === 'string'
               ? callMetadata.detailedSummaryCanvasId
+              : null,
+          // Tri-state, not a plain boolean: `true`/`false` are recordings
+          // created after this flag existed (still generating vs done);
+          // `null` means the key is entirely absent from metadata (a
+          // recording from before this flag existed at all) — those already
+          // finished generating long ago, so the frontend treats `null` the
+          // same as `true` and only treats an explicit `false` as "not ready".
+          detailedSummaryReady:
+            typeof callMetadata?.detailedSummaryReady === 'boolean'
+              ? callMetadata.detailedSummaryReady
               : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
