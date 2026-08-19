@@ -246,7 +246,21 @@ export class AnalyticsRepository {
     return query;
   }
 
-  private async queryFilteredMessages(gte: string | null, lte: string | null, scopedWorkspaceId: string): Promise<FilteredMessage[]> {
+  private toIsoBounds(dateCondition: { gte?: Date; lte?: Date }): { gte: string | null; lte: string | null } {
+    return {
+      gte: dateCondition.gte ? dateCondition.gte.toISOString() : null,
+      lte: dateCondition.lte ? dateCondition.lte.toISOString() : null,
+    };
+  }
+
+  /**
+   * Shared FROM/WHERE fragment that defines the "valid message" set (real USER
+   * messages, workspace-scoped, excluding system channels, pre-import external
+   * source rows and EMAIL parent rows). Exposed as a single Prisma.Sql fragment
+   * so scalar aggregates (COUNT / COUNT DISTINCT / GROUP BY) can run in Postgres
+   * instead of shipping every matching row back to Node.
+   */
+  private validMessagesFrom(gte: string | null, lte: string | null, scopedWorkspaceId: string): Prisma.Sql {
     const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
 
     // Emit the date bounds as plain comparisons instead of
@@ -260,14 +274,7 @@ export class AnalyticsRepository {
     const gteClause = gte ? Prisma.sql`AND m."createdAt" >= ${gte}::timestamp` : Prisma.empty;
     const lteClause = lte ? Prisma.sql`AND m."createdAt" <= ${lte}::timestamp` : Prisma.empty;
 
-    const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
-      SELECT 
-        m."messageId", 
-        m."senderId", 
-        m."conversationId", 
-        c."channelId",
-        ch."scopeType" AS "channelScopeType",
-        m."createdAt"
+    return Prisma.sql`
       FROM "public"."messages_without_content" m
       INNER JOIN "public"."conversations" c 
         ON c."conversationId" = m."conversationId"
@@ -289,6 +296,19 @@ export class AnalyticsRepository {
           ch."type" = 'EMAIL'
           AND (c."parentMessageId" IS NULL OR m."messageId" = c."initialMessageId")
         )
+    `;
+  }
+
+  private async queryFilteredMessages(gte: string | null, lte: string | null, scopedWorkspaceId: string): Promise<FilteredMessage[]> {
+    const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
+      SELECT 
+        m."messageId", 
+        m."senderId", 
+        m."conversationId", 
+        c."channelId",
+        ch."scopeType" AS "channelScopeType",
+        m."createdAt"
+      ${this.validMessagesFrom(gte, lte, scopedWorkspaceId)}
     `);
 
     return messages;
@@ -494,24 +514,34 @@ export class AnalyticsRepository {
     const dateCondition = this.toDateCondition(dateFilter);
 
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-    const validMessageIds = validMessages.map(m => m.messageId);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    if (validMessageIds.length === 0) return 0;
-
+    // Aggregate entirely in Postgres: the valid-message set is a CTE that the
+    // attachment count JOINs against, so no message-id list is round-tripped
+    // through Node.
     const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      WITH valid_messages AS (
+        SELECT m."messageId"
+        ${this.validMessagesFrom(gte, lte, workspaceId)}
+      )
       SELECT COUNT(*)::int AS count
-      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+      ${this.chatAttachmentsJoin(workspaceId)}
     `);
 
     return count;
   }
 
-  private chatAttachmentsFrom(messageIds: string[], workspaceId: string): Prisma.Sql {
+  /**
+   * FROM/WHERE fragment for chat file attachments belonging to the caller's
+   * `valid_messages` CTE. Callers MUST define a `valid_messages` CTE exposing a
+   * `"messageId"` column. Replaces the old `entityId = ANY($ids)` round-trip
+   * with a JOIN so the message set never leaves Postgres.
+   */
+  private chatAttachmentsJoin(workspaceId: string): Prisma.Sql {
     return Prisma.sql`
       FROM "public"."message_attachments" a
-      WHERE a."entityId" = ANY(${messageIds}::text[])
-        AND a."entityType" = ${AttachmentEntityType.CHAT}
+      INNER JOIN valid_messages vm ON vm."messageId" = a."entityId"
+      WHERE a."entityType" = ${AttachmentEntityType.CHAT}
         AND a."workspaceId" = ${workspaceId}
         AND a."createdBy" NOT IN ('Unified Alerts', 'system')
     `;
@@ -755,20 +785,17 @@ export class AnalyticsRepository {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = this.toDateCondition(dateFilter);
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-    if (validMessages.length === 0) {
-      return 0;
-    }
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    // Count the distinct DEFAULT-scope channels the messages belong to. The scope
-    // rides along on each message, so no conversation/channel lookups by id list.
-    const activeChannelIds = new Set(
-      validMessages
-        .filter(m => m.channelScopeType === ChannelScopeType.DEFAULT)
-        .map(m => m.channelId)
-    );
+    // Count the distinct DEFAULT-scope channels the valid messages belong to
+    // directly in Postgres (COUNT DISTINCT) instead of building a Set in Node.
+    const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT COUNT(DISTINCT c."channelId")::int AS count
+      ${this.validMessagesFrom(gte, lte, workspaceId)}
+        AND ch."scopeType" = ${ChannelScopeType.DEFAULT}
+    `);
 
-    return activeChannelIds.size;
+    return count;
   }
 
   /**
@@ -1219,48 +1246,30 @@ export class AnalyticsRepository {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = this.toDateCondition(dateFilter);
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-    // userType : USER ensures we only count messages from real users, excluding bots
-    const userIds = new Set(await this.getUsersId(workspaceId));
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    // Aggregate message counts by senderId
-    const userMessageCount = new Map<string, number>();
-    validMessages.forEach(message => {
-      if (message.senderId && userIds.has(message.senderId)) {
-        userMessageCount.set(
-          message.senderId,
-          (userMessageCount.get(message.senderId) || 0) + 1
-        );
-      }
-    });
-
-    // Sort users by message count descending and take top N
-    const topUserIds = Array.from(userMessageCount.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([userId]) => userId);
-
-    // Fetch user details for the top senders
-    const users = await this.prisma.user.findMany({
-      where: {
-        id: { in: topUserIds },
-        workspaceId
-      },
-      select: {
-        id: true,
-        name: true
-      }
-    });
-
-    // Create a map of userId to userName for efficient lookup
-    const userMap = new Map(users.map(u => [u.id, u.name]));
-
-    // Build result with user names, maintaining the sort order
-    return topUserIds.map(userId => ({
-      userId,
-      userName: userMap.get(userId) || 'Unknown User',
-      messageCount: userMessageCount.get(userId) || 0
-    }));
+    // Group + rank + limit in Postgres. Joining `users` with userType = 'USER'
+    // preserves the "real users only, excludes bots" semantics the previous
+    // in-memory version enforced via getUsersId(). A stable id tiebreaker keeps
+    // the ranking deterministic across equal message counts.
+    return this.prisma.$queryRaw<{ userId: string; userName: string; messageCount: number }[]>(Prisma.sql`
+      WITH valid_messages AS (
+        SELECT m."senderId"
+        ${this.validMessagesFrom(gte, lte, workspaceId)}
+      )
+      SELECT
+        u."id" AS "userId",
+        u."name" AS "userName",
+        COUNT(*)::int AS "messageCount"
+      FROM valid_messages vm
+      INNER JOIN "public"."users" u
+        ON u."id" = vm."senderId"
+        AND u."userType" = ${UserType.USER}
+        AND u."workspaceId" = ${workspaceId}
+      GROUP BY u."id", u."name"
+      ORDER BY "messageCount" DESC, u."id" ASC
+      LIMIT ${limit}
+    `);
   }
 
   /**
@@ -1275,14 +1284,17 @@ export class AnalyticsRepository {
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-    const validMessageIds = validMessages.map(m => m.messageId);
-
-    // Get file attachments for valid (non-migrated) messages only
-    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
+    // Get file attachments for valid (non-migrated) messages only, joining the
+    // valid-message set as a CTE instead of round-tripping message ids.
+    const attachments = await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
+      WITH valid_messages AS (
+        SELECT m."messageId"
+        ${this.validMessagesFrom(gte, lte, workspaceId)}
+      )
       SELECT a."createdAt"
-      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+      ${this.chatAttachmentsJoin(workspaceId)}
     `);
 
     // Generate time buckets based on groupBy
