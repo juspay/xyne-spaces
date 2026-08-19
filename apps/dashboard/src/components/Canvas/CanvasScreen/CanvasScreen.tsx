@@ -102,6 +102,7 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
+import { CanvasEditorHeader } from '../CanvasEditorHeader';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -110,6 +111,7 @@ interface LocationState {
   channelId?: string;
   conversationId?: string;
   canvas?: Canvas;
+  focusTitle?: boolean;
 }
 
 interface CanvasScreenProps {
@@ -225,6 +227,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const latestHtmlRef = useRef<string>('');
   const hasPendingCollaborativeTimestampRef = useRef(false);
   const titleRef = useRef(currentTitle);
+  const titleAutoFocusCanvasIdRef = useRef<string | null>(null);
+  const titleAutoFocusConsumedCanvasIdRef = useRef<string | null>(null);
   const selectedCanvasRef = useRef(selectedCanvas);
   const isCreatingRef = useRef(isCreating);
   const isSavingRef = useRef(isSaving);
@@ -249,6 +253,23 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     previewVersionRef.current = previewVersion;
   }, [currentTitle, selectedCanvas, isCreating, isSaving, isEditingMessage, previewVersion]);
 
+  const handleCanvasTitleChange = useCallback((newTitle: string): void => {
+    setCurrentTitle(newTitle);
+    titleRef.current = newTitle;
+  }, []);
+
+  const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
+    if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
+    titleAutoFocusCanvasIdRef.current = targetCanvasId;
+  }, []);
+
+  const handleTitleAutoFocused = useCallback((): void => {
+    if (titleAutoFocusCanvasIdRef.current) {
+      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
+    }
+    titleAutoFocusCanvasIdRef.current = null;
+  }, []);
+
   useEffect(() => {
     previewVersionRef.current = null;
     setPreviewVersion(null);
@@ -265,6 +286,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     if (shouldUseState) {
       const isNewCanvas = initializedCanvasIdRef.current !== canvasFromState.id;
+      if (state?.focusTitle) {
+        queueTitleAutoFocus(canvasFromState.id);
+      }
       setSelectedCanvas(canvasFromState);
       if (isNewCanvas) {
         setCurrentTitle(canvasFromState.title);
@@ -290,23 +314,30 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         }[];
       };
 
-      if (selectedCanvasRef.current?.id === canvasData.id && !canvasData.participants) {
-        return;
-      }
+      const previousSelectedCanvas = selectedCanvasRef.current;
+      const resolvedCanvasData =
+        previousSelectedCanvas?.id === canvasData.id && !canvasData.participants
+          ? {
+              ...canvasData,
+              participants:
+                (previousSelectedCanvas as Canvas & { participants?: CanvasParticipant[] })
+                  .participants ?? [],
+            }
+          : canvasData;
 
-      const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
+      const userParticipant = resolvedCanvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
 
       if (!accessLevel) {
         const inheritedRoles = [
-          ...(canvasData.participants
+          ...(resolvedCanvasData.participants
             ?.filter(
               participant =>
                 Boolean(participant.userGroupId) &&
                 currentUserGroupIds.has(participant.userGroupId as string),
             )
             .map(participant => participant.role) ?? []),
-          ...(canvasData.participants
+          ...(resolvedCanvasData.participants
             ?.filter(
               participant =>
                 Boolean(participant.channelId) &&
@@ -322,10 +353,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       }
 
       const canvas: Canvas = {
-        ...canvasData,
+        ...resolvedCanvasData,
         ...(accessLevel ? { accessLevel } : {}),
       };
 
+      if (state?.focusTitle && canvas.id === canvasId) {
+        queueTitleAutoFocus(canvas.id);
+      }
       setSelectedCanvas(canvas);
 
       const isNewCanvas = initializedCanvasIdRef.current !== canvas.id;
@@ -367,6 +401,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     currentUserGroupIds,
     currentUserChannelIds,
     queryClient,
+    queueTitleAutoFocus,
   ]);
 
   useEffect(() => {
@@ -456,6 +491,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             accessLevel: CanvasRole.OWNER,
           };
 
+          queueTitleAutoFocus(newCanvasId);
           setSelectedCanvas(newCanvas);
           setCurrentTitle(title);
           titleRef.current = title;
@@ -471,7 +507,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           const canvasRoute = isOnChatCanvasPage
             ? `/chat/canvas/${newCanvasId}`
             : `${baseRoute}/canvas/${newCanvasId}`;
-          void navigate(canvasRoute, { replace: true, state: state });
+          void navigate(canvasRoute, {
+            replace: true,
+            state: {
+              ...(state ?? {}),
+              canvas: newCanvas,
+              focusTitle: true,
+            },
+          });
         } catch (error) {
           logger.error(Event.CANVAS_CREATE_FAILED, {
             error: error instanceof Error ? error.message : 'Unknown error',
@@ -503,6 +546,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     user?.id,
     baseRoute,
     isOnChatCanvasPage,
+    queueTitleAutoFocus,
   ]);
 
   const handleCreateCanvas = (): void => {
@@ -580,6 +624,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const canEdit =
     !selectedCanvas?.isArchived &&
+    !selectedCanvas?.channel?.isArchived &&
     (isCreating ||
       isEditingMessage ||
       isCreatingMessage ||
@@ -681,7 +726,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         }
       }
     },
-    [canvasId, z],
+    [z],
   );
 
   const getDefaultVersionCanvas = useCallback(() => selectedCanvasRef.current, []);
@@ -941,6 +986,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         minute: '2-digit',
       })
     : null;
+  const shouldFocusCanvasTitleOnMount = Boolean(
+    selectedCanvas?.id &&
+    titleAutoFocusCanvasIdRef.current === selectedCanvas.id &&
+    !previewVersion,
+  );
 
   // Handle Ask AI - Open XyneAI with canvas context using canvas id
   const handleAskAI = (): void => {
@@ -1103,9 +1153,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         data-testid='canvas-title-input'
                         style={APP_NO_DRAG_STYLE}
                         onChange={e => {
-                          const newTitle = e.target.value;
-                          setCurrentTitle(newTitle);
-                          titleRef.current = newTitle;
+                          handleCanvasTitleChange(e.target.value);
                         }}
                         readOnly={!canEdit}
                         onBlur={() => {
@@ -1473,78 +1521,98 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             )}
 
             {/* Canvas Editor */}
-            <div ref={canvasContentRef} className='flex-1 overflow-hidden'>
-              {isCreating && !selectedCanvas ? (
-                <div className='flex items-center justify-center h-full'>
-                  <div className='flex flex-col items-center gap-3'>
-                    <Loader2 className='w-8 h-8 animate-spin text-blue-600' />
-                    <span className='text-sm text-muted-foreground'>Creating canvas...</span>
-                  </div>
+            <div
+              ref={canvasContentRef}
+              className='flex flex-1 flex-col overflow-hidden bg-background'
+            >
+              {selectedCanvas?.id && (
+                <div className='canvas-editor-title-column shrink-0 pt-10 md:pt-12'>
+                  <CanvasEditorHeader
+                    canvas={selectedCanvas}
+                    workspaceId={user?.workspaceId}
+                    canEdit={canEdit && !previewVersion}
+                    title={currentTitle}
+                    focusTitleOnMount={shouldFocusCanvasTitleOnMount}
+                    onTitleChange={handleCanvasTitleChange}
+                    onTitleSave={handleTitleSave}
+                    onTitleAutoFocused={handleTitleAutoFocused}
+                  />
                 </div>
-              ) : previewVersion ? (
-                <CanvasEditor
-                  key={`preview-${previewVersion.id}`}
-                  ref={editorRef}
-                  content={displayedContent}
-                  editable={false}
-                  placeholder='Start writing your canvas...'
-                  channelId={selectedCanvas?.channelId || state?.channelId}
-                  canvasId={selectedCanvas?.id}
-                  canvasTitle={currentTitle}
-                  initialBlockIdToFocus={blockIdFromUrl}
-                  initialCommentThreadId={commentThreadIdFromUrl}
-                  onOpenCommentCountChange={setOpenCommentCount}
-                  canvasParticipants={canvasParticipants}
-                  canvasCreatedBy={selectedCanvas?.createdBy}
-                  currentUserRole={selectedCanvas?.accessLevel ?? null}
-                />
-              ) : selectedCanvas?.id &&
-                selectedCanvas.isCollaborative &&
-                !isEditingMessage &&
-                !isCreatingMessage ? (
-                <CollaborativeCanvasEditor
-                  key={selectedCanvas.id}
-                  ref={editorRef}
-                  canvasId={selectedCanvas.id}
-                  channelId={selectedCanvas.channelId || state?.channelId}
-                  title={currentTitle}
-                  editable={canEdit}
-                  placeholder='Start writing your canvas...'
-                  onFileUpload={handleFileUpload}
-                  onChange={handleCollaborativeContentChange}
-                  onCollaboratorsChange={handleCollaboratorsChange}
-                  initialLegacyContent={selectedCanvas.content}
-                  initialBlockIdToFocus={blockIdFromUrl}
-                  initialCommentThreadId={commentThreadIdFromUrl}
-                  onOpenCommentCountChange={setOpenCommentCount}
-                  autoFocus={!skipAutoFocus}
-                  canvasParticipants={canvasParticipants}
-                  canvasCreatedBy={selectedCanvas.createdBy}
-                  currentUserRole={selectedCanvas.accessLevel ?? null}
-                />
-              ) : (
-                <CanvasEditor
-                  key={selectedCanvas?.id || canvasId || 'new-canvas'}
-                  ref={editorRef}
-                  content={displayedContent}
-                  onChange={handleContentChange}
-                  onSave={handleSave}
-                  onFileUpload={handleFileUpload}
-                  editable={canEdit}
-                  placeholder='Start writing your canvas...'
-                  channelId={selectedCanvas?.channelId || state?.channelId}
-                  canvasId={selectedCanvas?.id}
-                  canvasTitle={currentTitle}
-                  onMentionInsert={handleMentionInsert}
-                  initialBlockIdToFocus={blockIdFromUrl}
-                  initialCommentThreadId={commentThreadIdFromUrl}
-                  onOpenCommentCountChange={setOpenCommentCount}
-                  autoFocus={!skipAutoFocus}
-                  canvasParticipants={canvasParticipants}
-                  canvasCreatedBy={selectedCanvas?.createdBy}
-                  currentUserRole={selectedCanvas?.accessLevel ?? null}
-                />
               )}
+
+              <div className='min-h-0 flex-1 overflow-hidden'>
+                {isCreating && !selectedCanvas ? (
+                  <div className='flex items-center justify-center h-full'>
+                    <div className='flex flex-col items-center gap-3'>
+                      <Loader2 className='w-8 h-8 animate-spin text-blue-600' />
+                      <span className='text-sm text-muted-foreground'>Creating canvas...</span>
+                    </div>
+                  </div>
+                ) : previewVersion ? (
+                  <CanvasEditor
+                    key={`preview-${previewVersion.id}`}
+                    ref={editorRef}
+                    content={displayedContent}
+                    editable={false}
+                    placeholder='Start writing your canvas...'
+                    channelId={selectedCanvas?.channelId || state?.channelId}
+                    canvasId={selectedCanvas?.id}
+                    canvasTitle={currentTitle}
+                    initialBlockIdToFocus={blockIdFromUrl}
+                    initialCommentThreadId={commentThreadIdFromUrl}
+                    onOpenCommentCountChange={setOpenCommentCount}
+                    canvasParticipants={canvasParticipants}
+                    canvasCreatedBy={selectedCanvas?.createdBy}
+                    currentUserRole={selectedCanvas?.accessLevel ?? null}
+                  />
+                ) : selectedCanvas?.id &&
+                  selectedCanvas.isCollaborative &&
+                  !isEditingMessage &&
+                  !isCreatingMessage ? (
+                  <CollaborativeCanvasEditor
+                    key={selectedCanvas.id}
+                    ref={editorRef}
+                    canvasId={selectedCanvas.id}
+                    channelId={selectedCanvas.channelId || state?.channelId}
+                    title={currentTitle}
+                    editable={canEdit}
+                    placeholder='Start writing your canvas...'
+                    onFileUpload={handleFileUpload}
+                    onChange={handleCollaborativeContentChange}
+                    onCollaboratorsChange={handleCollaboratorsChange}
+                    initialLegacyContent={selectedCanvas.content}
+                    initialBlockIdToFocus={blockIdFromUrl}
+                    initialCommentThreadId={commentThreadIdFromUrl}
+                    onOpenCommentCountChange={setOpenCommentCount}
+                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    canvasParticipants={canvasParticipants}
+                    canvasCreatedBy={selectedCanvas.createdBy}
+                    currentUserRole={selectedCanvas.accessLevel ?? null}
+                  />
+                ) : (
+                  <CanvasEditor
+                    key={selectedCanvas?.id || canvasId || 'new-canvas'}
+                    ref={editorRef}
+                    content={displayedContent}
+                    onChange={handleContentChange}
+                    onSave={handleSave}
+                    onFileUpload={handleFileUpload}
+                    editable={canEdit}
+                    placeholder='Start writing your canvas...'
+                    channelId={selectedCanvas?.channelId || state?.channelId}
+                    canvasId={selectedCanvas?.id}
+                    canvasTitle={currentTitle}
+                    onMentionInsert={handleMentionInsert}
+                    initialBlockIdToFocus={blockIdFromUrl}
+                    initialCommentThreadId={commentThreadIdFromUrl}
+                    onOpenCommentCountChange={setOpenCommentCount}
+                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    canvasParticipants={canvasParticipants}
+                    canvasCreatedBy={selectedCanvas?.createdBy}
+                    currentUserRole={selectedCanvas?.accessLevel ?? null}
+                  />
+                )}
+              </div>
             </div>
           </>
         ) : !canvasId ? (

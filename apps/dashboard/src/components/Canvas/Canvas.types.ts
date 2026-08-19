@@ -122,7 +122,16 @@ export interface Canvas {
   folder?: CanvasFolder | null;
   channel?: CanvasChannel | null;
   project?: CanvasProject | null;
+  labels?: CanvasLabel[];
   userStatuses?: CanvasUserStatus[];
+}
+
+export interface CanvasLabel {
+  id: string;
+  workspaceId?: string;
+  canvasId: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface CanvasUserStatus {

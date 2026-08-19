@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CopyDefault,
   FileText,
@@ -22,6 +22,8 @@ import { Dialog } from '../ui/Dialog';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
+import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
+import { canvasLabelsApi } from '../../api/canvasLabelsApi';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -95,10 +97,41 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [restLabels, setRestLabels] = useState<Canvas['labels'] | undefined>(undefined);
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const canToggleStar = !!onToggleStar;
+  const canvasWithRestLabels =
+    restLabels !== undefined ? { ...canvas, labels: restLabels } : canvas;
+  const canvasLabels = getCanvasLabels(canvasWithRestLabels);
+  const visibleLabels = canvasLabels.slice(0, 2);
+  const hiddenLabelCount = Math.max(0, canvasLabels.length - visibleLabels.length);
+
+  useEffect(() => {
+    if (Array.isArray(canvas.labels) || !canvas.id || canvas.id === 'new') {
+      setRestLabels(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    canvasLabelsApi
+      .getCanvasLabels([canvas.id])
+      .then(labelsByCanvasId => {
+        if (!cancelled) {
+          setRestLabels(labelsByCanvasId[canvas.id] ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRestLabels(undefined);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canvas.id, canvas.labels]);
 
   // The frame uses `file/file-text` for canvas rows. Public canvases keep the
   // globe so the (exceptional) shared state stays legible at a glance.
@@ -139,6 +172,28 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             {canvas.isArchived && (
               <span className='inline-flex h-4 shrink-0 items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium leading-none text-amber-700'>
                 Archived
+              </span>
+            )}
+            {visibleLabels.length > 0 && (
+              <span className='hidden min-w-0 shrink-0 items-center gap-1 lg:flex'>
+                {visibleLabels.map(label => (
+                  <span
+                    key={label.id}
+                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/70'
+                  >
+                    <span
+                      className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
+                        label.name,
+                      )}`}
+                    />
+                    <span className='truncate'>{label.name}</span>
+                  </span>
+                ))}
+                {hiddenLabelCount > 0 && (
+                  <span className='text-[11px] text-sidebar-foreground/50'>
+                    +{hiddenLabelCount}
+                  </span>
+                )}
               </span>
             )}
           </button>
