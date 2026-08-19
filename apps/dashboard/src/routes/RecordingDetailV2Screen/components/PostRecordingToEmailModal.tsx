@@ -91,7 +91,7 @@ const buildInitialEmailBody = async (recording: RecordingDetail): Promise<string
   const title = escapeHtml(recording.title?.trim() || 'this recording');
   const summary = await summaryHtmlForEmail(recording);
   const summarySection = summary
-    ? `<p><strong>Summary</strong></p>${summary}`
+    ? summary
     : '<p><strong>Summary</strong></p><p>Add the key discussion points, decisions, and owners here.</p>';
 
   return [
@@ -336,9 +336,22 @@ export const PostRecordingToEmailModal = ({
   const handleConnectGoogle = async (): Promise<void> => {
     setIsConnectingGoogle(true);
     try {
-      const returnPath = `${window.location.pathname}${window.location.search}`;
-      const authUrl = await recordingEmailService.connectGoogle(returnPath);
-      window.location.assign(authUrl);
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      const returnPath =
+        currentPath.startsWith('/') && !currentPath.startsWith('//') ? currentPath : '/recordings';
+      // In Electron the consent screen has to open in the system browser, and the backend
+      // needs to know so it can send the callback back through /launch (deep link) instead
+      // of leaving the user stranded on the web app.
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      const authUrl = await recordingEmailService.connectGoogle(
+        returnPath,
+        isElectron ? 'electron' : 'web',
+      );
+      if (isElectron) {
+        window.electronAPI?.openExternal(authUrl);
+      } else {
+        window.location.assign(authUrl);
+      }
     } catch (error) {
       const message =
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||

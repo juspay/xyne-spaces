@@ -1,6 +1,15 @@
 export const MAX_SCENES = 12;
 export const MAX_NARRATION_WORDS = 4_000;
 export const MAX_SCENE_NARRATION_CHARS = 2_000;
+export const MAX_ANIMATION_SOURCE_CHARS = 20_000;
+export const MAX_D2_STEPS = 8;
+
+/**
+ * Tail padding added to every segment after the narration/animation ends, in
+ * seconds. Kept here (not in the composer) so the timing math is pure and
+ * unit-testable without ffmpeg.
+ */
+export const SEGMENT_PAD_SECONDS = 0.8;
 
 export type TitleScene = { kind: "title"; narration: string };
 export type DiagramScene = { kind: "diagram"; mermaid: string; narration: string };
@@ -17,7 +26,48 @@ export type DiffScene = {
   narration: string;
 };
 export type BulletsScene = { kind: "bullets"; items: string[]; narration: string };
-export type VideoScene = TitleScene | DiagramScene | CodeScene | DiffScene | BulletsScene;
+/**
+ * A Manim animation scene. `source` is a full Manim (Community, Cairo
+ * renderer) Python script; `scene` is the Scene subclass to render. Both run
+ * inside the sealed studio sandbox — no repo, no network, no credentials —
+ * so untrusted model-authored Python never touches a privileged box. `scene`
+ * is interpolated into the manim command line, so it is restricted to a valid
+ * Python identifier; `source` is only ever written to a file, never shelled.
+ */
+export type ManimScene = {
+  kind: "manim";
+  source: string;
+  scene: string;
+  narration: string;
+};
+/**
+ * A D2 architecture/data-flow scene. `steps` is an ordered list of D2 board
+ * snapshots; each is rendered offline (d2 → SVG → rsvg-convert → PNG) and the
+ * boards are faded together into a progressive reveal. One step renders a
+ * single fade-in board. Every source is written to a file, never shelled.
+ */
+export type D2Scene = {
+  kind: "d2";
+  steps: string[];
+  narration: string;
+};
+export type VideoScene =
+  | TitleScene
+  | DiagramScene
+  | CodeScene
+  | DiffScene
+  | BulletsScene
+  | ManimScene
+  | D2Scene;
+
+export const ANIMATED_SCENE_KINDS: ReadonlySet<VideoScene["kind"]> = new Set([
+  "manim",
+  "d2",
+]);
+
+export function isAnimatedScene(scene: VideoScene): scene is ManimScene | D2Scene {
+  return ANIMATED_SCENE_KINDS.has(scene.kind);
+}
 
 export interface Storyboard {
   title: string;
@@ -110,15 +160,58 @@ function parseScene(value: unknown, index: number): VideoScene {
         narration: sceneNarration,
       };
     }
+    case "manim": {
+      const sceneClass = string(scene["scene"], `scenes[${index}].scene`, 200);
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(sceneClass)) {
+        throw new StoryboardValidationError(
+          `scenes[${index}].scene must be a valid Python class name (letters, digits, underscore; not starting with a digit)`,
+        );
+      }
+      return {
+        kind: "manim",
+        source: string(scene["source"], `scenes[${index}].source`, MAX_ANIMATION_SOURCE_CHARS),
+        scene: sceneClass,
+        narration: sceneNarration,
+      };
+    }
+    case "d2": {
+      const steps = scene["steps"];
+      if (!Array.isArray(steps) || steps.length === 0 || steps.length > MAX_D2_STEPS) {
+        throw new StoryboardValidationError(
+          `scenes[${index}].steps must contain between 1 and ${MAX_D2_STEPS} D2 sources`,
+        );
+      }
+      return {
+        kind: "d2",
+        steps: steps.map((step, stepIndex) =>
+          string(step, `scenes[${index}].steps[${stepIndex}]`, MAX_ANIMATION_SOURCE_CHARS),
+        ),
+        narration: sceneNarration,
+      };
+    }
     default:
       throw new StoryboardValidationError(
-        `scenes[${index}].kind must be title, diagram, code, diff, or bullets`,
+        `scenes[${index}].kind must be title, diagram, code, diff, bullets, manim, or d2`,
       );
   }
 }
 
 export function countWords(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
+}
+
+/**
+ * Narration-first timing, unified for static and animated scenes. Narration is
+ * never cut and (for animated scenes) the animation is never cut: the segment
+ * runs for the longer of the two plus a fixed tail. The composer freezes the
+ * animation's last frame and pads the audio with silence to fill this length.
+ */
+export function computeSegmentSeconds(narrationSeconds: number, animationSeconds = 0): number {
+  const base = Math.max(
+    Number.isFinite(narrationSeconds) ? narrationSeconds : 0,
+    Number.isFinite(animationSeconds) ? animationSeconds : 0,
+  );
+  return Number((base + SEGMENT_PAD_SECONDS).toFixed(3));
 }
 
 export function validateStoryboard(value: unknown): Storyboard {

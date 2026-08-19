@@ -8,10 +8,13 @@ export interface CanvasListGroupedProps {
   selectedCanvasId?: string | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
   isPersonalSectionCollapsed: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   excludeCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
+  includeArchived?: boolean;
+  onlyArchived?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
   searchQuery?: string;
 }

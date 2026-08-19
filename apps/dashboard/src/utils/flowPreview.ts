@@ -41,6 +41,8 @@ export function getFlowJsonPreviewText(content: string): string | null {
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
       .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
       .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as { title?: string; components?: unknown[] };
 

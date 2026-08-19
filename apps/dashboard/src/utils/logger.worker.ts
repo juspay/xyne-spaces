@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import type { EventType } from './logger';
+import type { LogEvent } from './logger';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -10,7 +10,7 @@ export interface LogEntry {
   emailId: string | null;
   timestamp: string;
   level: LogLevel;
-  event: EventType;
+  event: LogEvent;
   latency?: number | null;
   version: string;
   pageViewId?: string | null;
@@ -34,7 +34,7 @@ export interface WorkerMessage {
     clientSessionId?: string | undefined;
     emailId?: string | undefined;
     level?: LogLevel | undefined;
-    event?: EventType | undefined;
+    event?: LogEvent | undefined;
     extraFields?: Record<string, unknown> | undefined;
     consoleLog?: boolean | undefined;
     logs?: LogEntry[] | undefined;
@@ -167,10 +167,6 @@ class LoggerWorker {
         (logEntry as Record<string, unknown>)['pageUrl'] = this.pageUrl;
       }
 
-      if (payload.consoleLog) {
-        console.log(JSON.stringify(logEntry));
-      }
-
       if (
         this.consecutiveFailures >= LoggerWorker.DROP_FAILURE_THRESHOLD &&
         this.logs.length >= LoggerWorker.MAX_BUFFER_SIZE
@@ -255,8 +251,7 @@ class LoggerWorker {
         const url = this.loggerBaseUrl;
         await this.sendLogsWithRetry(url, logsToPush);
         this.consecutiveFailures = 0;
-      } catch (error) {
-        console.error('Failed to push logs after all retries:', error);
+      } catch {
         this.consecutiveFailures++;
 
         const combined = [...logsToPush, ...this.logs];
@@ -267,9 +262,6 @@ class LoggerWorker {
           const dropped = combined.length - LoggerWorker.MAX_BUFFER_SIZE;
           this.droppedLogsCount += dropped;
           this.logs = combined.slice(combined.length - LoggerWorker.MAX_BUFFER_SIZE);
-          console.warn(
-            `Dropped ${dropped} log entries after ${this.consecutiveFailures} consecutive flush failures (total dropped: ${this.droppedLogsCount}, buffer capped at ${LoggerWorker.MAX_BUFFER_SIZE})`,
-          );
         } else {
           this.logs = combined;
         }
@@ -290,23 +282,18 @@ class LoggerWorker {
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        console.log(`Sending logs to ${url} (attempt ${attempt + 1}/${this.maxRetries + 1})`);
-
         await axios.post(url, logs, {
           headers: {
             'Content-Type': 'application/json',
           },
         });
 
-        console.log('Logs successfully sent to /godel/events');
         return;
       } catch (error) {
         lastError = error;
-        console.error(`Attempt ${attempt + 1} failed:`, error);
 
         if (attempt < this.maxRetries) {
           const delayMs = Math.pow(2, attempt) * 60000;
-          console.log(`Retrying in ${delayMs}ms...`);
           await this.sleep(delayMs);
         }
       }

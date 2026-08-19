@@ -249,7 +249,7 @@ const ChatView = (): ReactElement => {
       <div
         ref={chatViewContainerRef}
         data-component='ChatView'
-        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
       >
         <Outlet />
       </div>
@@ -306,7 +306,7 @@ const ChatView = (): ReactElement => {
     <div
       ref={chatViewContainerRef}
       data-component='ChatView'
-      className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
+      className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
     >
       {isThreadSummaryActive && conversationId && channelId ? (
         // Thread Summary Mode — unchanged; ConversationPanelV2 is not rendered
@@ -314,7 +314,7 @@ const ChatView = (): ReactElement => {
         shouldStack ? (
           <>
             <ThreadMessages channelId={channelId} conversationId={conversationId} />
-            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+            <div className='absolute inset-0 bg-background z-10 rounded-2xl animate-slide-in-from-right'>
               <ThreadSummary
                 conversationId={conversationId}
                 channelName={channel?.['name'] || 'thread'}
@@ -432,7 +432,7 @@ const ChatView = (): ReactElement => {
 
           {/* Overlay secondary panel — slides over chat when viewport is narrow */}
           {showSecondaryPanel && shouldStack && !shouldStackThreadFromParent && (
-            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+            <div className='absolute inset-0 bg-background z-10 rounded-2xl animate-slide-in-from-right'>
               {secondaryPanelContent}
             </div>
           )}

@@ -20,6 +20,7 @@ import {
 } from '../../services/DynamicDashboard/dataSourcesAdminService';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
+import { CaCertificateField } from './CaCertificateField';
 import { SOURCE_TYPES, type SourceType } from './dataSources.constants';
 import {
   connectionSignature,
@@ -381,6 +382,8 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
               </span>
               Use SSL (Recommended for production)
             </label>
+
+            {form.ssl && <CaCertificateField value={form.ca} onChange={ca => setField('ca', ca)} />}
           </div>
         </div>
 

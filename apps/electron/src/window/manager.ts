@@ -123,6 +123,12 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
   );
 
+  // Mirrors 'open-in-browser-panel' so links sent to the external browser are
+  // logged too, not just the ones routed into the panel.
+  const notifyExternalOpen = (externalUrl: string): void => {
+    mainWindow?.webContents.send('link-opened-external', externalUrl);
+  };
+
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {
      try {
@@ -142,6 +148,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
 
       if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         shell.openExternal(url);
+        notifyExternalOpen(url);
         return { action: 'deny' };
       }
 
@@ -153,6 +160,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
         const wantExternal = prefExternal !== modifier;
         if (wantExternal) {
           shell.openExternal(url);
+          notifyExternalOpen(url);
         } else {
           mainWindow?.webContents.send('open-in-browser-panel', url);
         }
@@ -174,7 +182,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       return { action: 'allow' };
       
     } catch (error) {
-      console.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
       return { action: 'deny' };
     }
 });
@@ -203,12 +211,14 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
         return;
       }
 
       event.preventDefault();
       if (browserSettingsService.getSettings().openLinksExternally) {
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
       } else {
         mainWindow?.webContents.send('open-in-browser-panel', navUrl);
       }
@@ -217,7 +227,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     }
   });
 
-  console.log('✅ setWindowOpenHandler configured for main window');
+  log.info('✅ setWindowOpenHandler configured for main window');
 
 
   // Setup spellchecker context menu

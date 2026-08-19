@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
@@ -1156,11 +1157,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           return;
         }
 
-        console.warn('[TicketDetails] Failed to load Vespa project tickets', {
-          projectId: ticket.projectId,
-          offset,
-          query: normalizedQuery || '*',
-          error,
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[TicketDetails] Failed to load Vespa project tickets'),
+          context: [
+            {
+              projectId: ticket.projectId,
+              offset,
+              query: normalizedQuery || '*',
+              error,
+            },
+          ],
         });
 
         if (replace) {

@@ -69,7 +69,11 @@ const fetchUserFromSession = async (): Promise<User | null> => {
       return data.user;
     }
   } catch (error) {
-    console.error('[AUTH] Failed to fetch user via /auth/me after session bootstrap', error);
+    logger.error(LoggerEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[AUTH] Failed to fetch user via /auth/me after session bootstrap'),
+      error: error,
+    });
   }
 
   return null;
@@ -84,9 +88,14 @@ const hydrateNativeSession = async (sessionId: string | null | undefined): Promi
     return null;
   }
 
-  // eslint-disable-next-line no-console
-  console.info('[AUTH] Native session injected via cookie, attempting /auth/me fetch', {
-    sessionId,
+  logger.info(LoggerEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_info',
+    message: String('[AUTH] Native session injected via cookie, attempting /auth/me fetch'),
+    context: [
+      {
+        sessionId,
+      },
+    ],
   });
   return fetchUserFromSession();
 };
@@ -217,8 +226,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         registeredNativePushTokenRef.current = payload.token;
         pendingNativePushTokenRef.current = null;
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[AUTH] Failed to register native push token', error);
+        logger.error(LoggerEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AUTH] Failed to register native push token'),
+          error: error,
+        });
       }
     },
     [isMobile, requestNativePushToken, user],
@@ -226,7 +238,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     if (!isElectron) {
-      return (): void => {};
+      return (): void => undefined;
     }
 
     const bootstrapElectronSession = async (): Promise<void> => {
@@ -294,14 +306,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     reactNativeBridge.initialize();
-    // eslint-disable-next-line no-console
-    console.info('[AUTH] React Native WebView detected, wiring native auth bridge');
+    logger.info(LoggerEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_info',
+      message: String('[AUTH] React Native WebView detected, wiring native auth bridge'),
+    });
 
     const unsubscribeNativeReady = reactNativeBridge.on(
       NativeInboundMessageType.NATIVE_READY,
       () => {
-        // eslint-disable-next-line no-console
-        console.info('[AUTH] Native host reported ready');
+        logger.info(LoggerEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_info',
+          message: String('[AUTH] Native host reported ready'),
+        });
       },
     );
 
@@ -353,8 +369,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const lastToken = registeredNativePushTokenRef.current;
       if (lastToken) {
         void unregisterNativePushToken().catch(error => {
-          // eslint-disable-next-line no-console
-          console.error('[AUTH] Failed to unregister native push token', error);
+          logger.error(LoggerEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[AUTH] Failed to unregister native push token'),
+            error: error,
+          });
         });
         registeredNativePushTokenRef.current = null;
       }

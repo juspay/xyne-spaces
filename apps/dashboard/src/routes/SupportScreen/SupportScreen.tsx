@@ -187,6 +187,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -753,6 +754,7 @@ const SupportScreen = (): ReactElement => {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [autoLabelWizardOpen, setAutoLabelWizardOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
@@ -2084,6 +2086,15 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
+  const handleDeletedLabel = useCallback(
+    (labelId: string): void => {
+      if (selectedLabel?.id !== labelId) return;
+      setSelectedLabel(null);
+      setViewMode('list');
+    },
+    [selectedLabel?.id],
+  );
+
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
@@ -2236,6 +2247,7 @@ const SupportScreen = (): ReactElement => {
               channelId={c.id}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
+              onDeletedLabel={handleDeletedLabel}
             />
           </div>
         )}
@@ -2832,6 +2844,19 @@ const SupportScreen = (): ReactElement => {
                               }}
                             >
                               <div className='px-4 py-3 flex flex-col gap-3 border-b border-border'>
+                                <button
+                                  type='button'
+                                  onClick={() => {
+                                    setMoreFiltersOpen(false);
+                                    setAutoLabelWizardOpen(true);
+                                  }}
+                                  className='flex w-full items-center gap-2 rounded-md px-0 py-0.5 text-left text-sm text-foreground hover:text-foreground'
+                                  data-track-category='Support'
+                                  data-track-name='OpenAutoLabelWizard'
+                                >
+                                  <Tag className='size-3.5 text-muted-foreground' />
+                                  <span className='font-medium'>Auto-label…</span>
+                                </button>
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleMyTickets'
@@ -3503,6 +3528,14 @@ const SupportScreen = (): ReactElement => {
         tickets={mergeDialogTickets}
         onMerge={handleMergeSelectedTickets}
       />
+
+      {selectedChannelId && (
+        <AutoLabelWizard
+          open={autoLabelWizardOpen}
+          onOpenChange={setAutoLabelWizardOpen}
+          channelId={selectedChannelId}
+        />
+      )}
 
       {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
           Windows are laid out right-to-left (flex-row-reverse) so the newest

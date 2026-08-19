@@ -97,6 +97,9 @@ import { useSelf, useUser } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
+import { ThreadRecordingButton } from '../Call/ThreadRecordingButton/ThreadRecordingButton';
+import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
 type TabType = 'thread' | 'details' | 'files' | 'rca';
@@ -374,6 +377,10 @@ export const ThreadMessages = ({
   // Call participants modal state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
+  // Global recording status — used to guard the thread "Take notes" button
+  // against starting a second recording while one is already in progress.
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+
   // Navigation for thread summary
   const navigate = useNavigate();
   const location = useLocation();
@@ -622,7 +629,7 @@ export const ThreadMessages = ({
 
   const conversationTabContextValue = useMemo(
     () => ({
-      setActiveTab: (): void => {},
+      setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
     }),
@@ -817,6 +824,29 @@ export const ThreadMessages = ({
     setShowParticipantsModal(true);
   };
 
+  // Starts a headless (note-taker) recording anchored to this thread: posts
+  // one anchor message into the thread now and connects the mic in the
+  // background via the recording store directly (no navigation) — the user
+  // stays in the thread and can open /recordings/:callId later from the
+  // message that appears, or from the sidebar, whenever they want.
+  const handleStartRecordingFromThread = (): void => {
+    if (!derivedConversationId || !derivedChannelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: derivedConversationId,
+      channelId: derivedChannelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
+  };
+
   const handleTicketCreated = (): void => {
     toast.success('Success', {
       description: 'Ticket created successfully',
@@ -926,7 +956,10 @@ export const ThreadMessages = ({
       '_blank',
     );
     if (!newWindow) {
-      console.warn('Failed to open new window - popup may be blocked');
+      logger.warn(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to open new window - popup may be blocked'),
+      });
     } else {
       newWindow.focus();
     }
@@ -1034,6 +1067,21 @@ export const ThreadMessages = ({
                         hasActiveCall={hasActiveCallForConversation}
                         trackCategory='THREAD_PANEL'
                         trackName='INITIATE_CALL_FROM_THREAD'
+                        trackMetadata={{
+                          channelId: channel?.id,
+                          conversationId: derivedConversationId,
+                        }}
+                      />
+                    )}
+                    {/* Start Recording (Take Notes) Button */}
+                    {derivedConversationId && (
+                      <ThreadRecordingButton
+                        onStartRecording={handleStartRecordingFromThread}
+                        hasActiveRecording={
+                          recordingStatus !== 'idle' && recordingStatus !== 'error'
+                        }
+                        trackCategory='THREAD_PANEL'
+                        trackName='START_RECORDING_FROM_THREAD'
                         trackMetadata={{
                           channelId: channel?.id,
                           conversationId: derivedConversationId,
@@ -1210,6 +1258,16 @@ export const ThreadMessages = ({
                   hasActiveCall={hasActiveCallForConversation}
                   trackCategory='THREAD_PANEL'
                   trackName='INITIATE_CALL_FROM_THREAD'
+                  trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
+                />
+              )}
+              {/* Start Recording (Take Notes) Button */}
+              {derivedConversationId && (
+                <ThreadRecordingButton
+                  onStartRecording={handleStartRecordingFromThread}
+                  hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+                  trackCategory='THREAD_PANEL'
+                  trackName='START_RECORDING_FROM_THREAD'
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
@@ -1574,6 +1632,20 @@ export const ThreadMessages = ({
                       hasActiveCall={hasActiveCallForConversation}
                       trackCategory='THREAD_PANEL'
                       trackName='INITIATE_CALL_FROM_THREAD'
+                      trackMetadata={{
+                        channelId: channel?.id,
+                        conversationId: derivedConversationId,
+                      }}
+                    />
+                  )}
+
+                  {/* Start Recording (Take Notes) Button */}
+                  {derivedConversationId && !channel?.isArchived && (
+                    <ThreadRecordingButton
+                      onStartRecording={handleStartRecordingFromThread}
+                      hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+                      trackCategory='THREAD_PANEL'
+                      trackName='START_RECORDING_FROM_THREAD'
                       trackMetadata={{
                         channelId: channel?.id,
                         conversationId: derivedConversationId,
