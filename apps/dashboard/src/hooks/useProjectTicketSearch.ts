@@ -180,7 +180,7 @@ export const useProjectTicketSearch = ({
     setTickets(null);
     setNextOffset(0);
     setHasMore(false);
-    setIsLoading(false);
+    setIsLoading(Boolean(searchValue.trim()));
     setIsLoadingMore(false);
   }, []);
 
