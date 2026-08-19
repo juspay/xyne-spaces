@@ -25,6 +25,7 @@ import {
   ArrowRight,
   GitBranch,
   LockClose as Lock,
+  LinkBrokenSlant as Unlink,
 } from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -49,6 +50,8 @@ import {
   RCAStatus,
   LookupType,
   BoardType,
+  isManualSubTicketBoard,
+  linkedSubTicketId,
   ApproverType,
   ReenterMode,
   isFieldActive,
@@ -82,9 +85,11 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
+import { useProjectTicketSearch } from '../../../hooks/useProjectTicketSearch';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import {
   formatIncomingReferenceLabel,
   formatReferenceLabel,
@@ -125,6 +130,8 @@ type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
 
 interface SubTicketTreeNode {
   subTicket: SubTicketTreeSubTicket;
+  /** ticket_sub_ticket_mappings row id — the edge that `subTicket.unlink` removes. */
+  mappingId: string;
   parentTicketId: string;
   depth: number;
   children: SubTicketTreeNode[];
@@ -1321,9 +1328,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       const mappings = subTicketMappingsByParentTicketId.get(parentTicketId) ?? [];
 
       return mappings
-        .map(mapping => mapping.subTicket)
-        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined)
-        .map(subTicket => {
+        .filter(
+          (mapping): mapping is SubTicketTreeMapping & { subTicket: SubTicketTreeSubTicket } =>
+            mapping.subTicket !== null && mapping.subTicket !== undefined,
+        )
+        .map(mapping => {
+          const subTicket = mapping.subTicket;
           const mappedTicketId = subTicket.mappedTicketId ?? undefined;
           const canRenderChildren =
             mappedTicketId &&
@@ -1332,6 +1342,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
           return {
             subTicket,
+            mappingId: mapping.id,
             parentTicketId,
             depth,
             children: canRenderChildren
@@ -1360,6 +1371,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
+  // Gates the Create Sub-Ticket button, and mirrors subTicket.create's own guard
+  // (row existence, not mappings) so the button and the mutator agree.
+  // NOTE: linkExisting has no equivalent depth limit — linked sub-tickets may nest
+  // arbitrarily deep, so the picker below is deliberately NOT gated on this.
   const canCreateNestedSubTicket =
     (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
@@ -1928,6 +1943,124 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
+
+  // Own search state — the Related Tickets picker below keeps its own.
+  const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
+  const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
+  const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
+  const subTicketSearch = useProjectTicketSearch({
+    projectId: ticket?.projectId ?? undefined,
+    isActive: isAddSubTicketMenuOpen,
+  });
+
+  // The component is reused across tickets rather than remounted.
+  useEffect(() => {
+    setIsAddSubTicketMenuOpen(false);
+    setIsLinkingSubTicket(false);
+    setUnlinkingMappingIds(new Set());
+  }, [ticketId]);
+
+  const handleAddSubTicketMenuOpenChange = useCallback((open: boolean): void => {
+    setIsAddSubTicketMenuOpen(open);
+  }, []);
+
+  // Everything already in the loaded tree, so a deeper child is not offered again.
+  const linkedSubTicketMappedIds = useMemo(() => {
+    const ids = new Set<string>();
+    loadedSubTickets.forEach(st => {
+      if (st.mappedTicketId) ids.add(st.mappedTicketId);
+    });
+    return ids;
+  }, [loadedSubTickets]);
+
+  const subTicketPickerOptions = useMemo<SelectorOption[]>(() => {
+    // Direct parents only — deeper ancestors aren't loaded here, and the server's
+    // ancestor walk rejects those with a toast rather than silently linking a loop.
+    const parentIds = new Set(parentTicketIds);
+    return (subTicketSearch.tickets ?? [])
+      .filter(
+        candidate =>
+          candidate.id !== ticketId &&
+          !linkedSubTicketMappedIds.has(candidate.id) &&
+          !parentIds.has(candidate.id),
+      )
+      .map(candidate => ({
+        value: candidate.id,
+        label: candidate.title || candidate.xyneId || candidate.id,
+        subtitle: candidate.xyneId || candidate.id,
+        icon: null,
+      }));
+  }, [subTicketSearch.tickets, ticketId, linkedSubTicketMappedIds, parentTicketIds]);
+
+  const handleLinkSubTicket = useCallback(
+    (mappedTicketId: string | null): void => {
+      if (!mappedTicketId || !ticket?.id || isLinkingSubTicket) {
+        return;
+      }
+
+      const candidate = subTicketSearch.tickets?.find(entry => entry.id === mappedTicketId);
+      setIsAddSubTicketMenuOpen(false);
+      subTicketSearch.reset();
+      setIsLinkingSubTicket(true);
+
+      void zero
+        .mutate(
+          mutators.subTicket.linkExisting({
+            mappingId: uuidv4(),
+            timestamp: Date.now(),
+            ticketId: ticket.id,
+            mappedTicketId,
+            // Fallback only — the row renders from the linked ticket itself.
+            subTicketTitle: candidate?.xyneId || candidate?.title || 'Subticket',
+          }),
+        )
+        .server.then(result => {
+          if (result.type === 'error') {
+            toast.error(result.error.message || 'Failed to link sub-ticket');
+          }
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to link sub-ticket');
+        })
+        .finally(() => {
+          setIsLinkingSubTicket(false);
+        });
+    },
+    [isLinkingSubTicket, subTicketSearch, ticket?.id, zero],
+  );
+
+  const handleUnlinkSubTicket = useCallback(
+    (mappingId: string): void => {
+      if (unlinkingMappingIds.has(mappingId)) {
+        return;
+      }
+
+      setUnlinkingMappingIds(previous => new Set(previous).add(mappingId));
+
+      const clearInFlight = (): void => {
+        setUnlinkingMappingIds(previous => {
+          const next = new Set(previous);
+          next.delete(mappingId);
+          return next;
+        });
+      };
+
+      void zero
+        .mutate(mutators.subTicket.unlink({ mappingId, timestamp: Date.now() }))
+        .server.then(result => {
+          if (result.type === 'error') {
+            toast.error(result.error.message || 'Failed to unlink sub-ticket');
+          }
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to unlink sub-ticket');
+        })
+        .finally(clearInFlight);
+    },
+    [unlinkingMappingIds, zero],
+  );
 
   // Early return if no ticket data - after all hooks
   if (!ticket) {
@@ -2897,6 +3030,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+    // Mirrors subTicket.unlink: only a row this feature created is unlinkable, matched
+    // on its derived id rather than on the board, so moving the parent's board later
+    // cannot strand the link. Depth-independent — `node.parentTicketId` is the parent at
+    // THIS level, so a nested row is checked against, and unlinked from, its own parent.
+    const canUnlink =
+      Boolean(mappedTicketId) &&
+      subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
+    const isUnlinking = unlinkingMappingIds.has(node.mappingId);
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
@@ -2987,6 +3128,35 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </button>
               </Tooltip>
             )}
+            {canUnlink && (
+              <Tooltip content='Unlink sub-ticket'>
+                <button
+                  type='button'
+                  disabled={isUnlinking}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    isUnlinking
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'hover:bg-background hover:text-destructive',
+                  )}
+                  onClick={event => {
+                    event.stopPropagation();
+                    handleUnlinkSubTicket(node.mappingId);
+                  }}
+                  aria-label='Unlink sub-ticket'
+                  data-track-category='Tickets'
+                  data-track-name='UnlinkSubTicket'
+                  data-track-metadata={JSON.stringify({
+                    subTicketId: subTicket.id,
+                    mappingId: node.mappingId,
+                    mappedTicketId,
+                    depth: node.depth,
+                  })}
+                >
+                  <Unlink size={14} />
+                </button>
+              </Tooltip>
+            )}
             {boardStages && boardStages.length > 0 && (
               <div className='flex items-center gap-1.5'>
                 <TicketStageIcon progressPercentage={displayProgress} size={18} />
@@ -3015,6 +3185,37 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       </React.Fragment>
     );
   };
+
+  // Hidden only on machine-owned boards. A ticket that is itself a sub-ticket can still
+  // take sub-tickets of its own — trees nest; the server rejects anything that would
+  // close a loop.
+  const addSubTicketPicker = !canManageSubTicketLinks ? null : (
+    <div
+      className={cn(
+        'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
+        isLinkingSubTicket ? 'opacity-60 pointer-events-none' : undefined,
+      )}
+      data-testid='add-sub-ticket-picker'
+    >
+      <EntitySelector
+        options={subTicketPickerOptions}
+        selectedValue={null}
+        onSelect={value => handleLinkSubTicket(value)}
+        placeholder='+ Add existing sub-ticket'
+        searchPlaceholder='Search by ticket ID or name'
+        isOpen={isAddSubTicketMenuOpen}
+        onOpenChange={handleAddSubTicketMenuOpenChange}
+        onSearchChange={subTicketSearch.handleSearchChange}
+        onScrollEnd={subTicketSearch.handleScrollEnd}
+        hasMore={subTicketSearch.hasMore}
+        isLoading={subTicketSearch.isLoading}
+        disableClientFiltering={true}
+        width='100%'
+        noBorder
+        testId='add-sub-ticket-selector'
+      />
+    </div>
+  );
 
   const createSubTicketButton =
     boardData?.boardType === BoardType.FLOW ? null : (
@@ -4579,6 +4780,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
               )}
               {createSubTicketButton}
+              {addSubTicketPicker}
             </div>
           </div>
         </div>

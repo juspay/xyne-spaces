@@ -43,8 +43,13 @@ export interface ReferenceTicketActivityValue {
 
 /**
  * Subticket Activity Value - used for ActivityType.SUBTICKET_CREATED
+ *
+ * `subTicketAction` mirrors ReferenceTicketActivityValue's `action`, but cannot share
+ * the name: the dashboard merges all activity value shapes into one intersection type,
+ * so a second `action` would narrow both to their overlap. Absent means 'created'.
  */
 export interface SubticketActivityValue {
+  subTicketAction?: 'created' | 'linked' | 'unlinked';
   subTicketId?: string;
   subTicketTitle?: string;
   subTicketXyneId?: string;

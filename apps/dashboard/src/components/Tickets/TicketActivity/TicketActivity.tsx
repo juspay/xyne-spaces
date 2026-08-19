@@ -450,8 +450,16 @@ export const getActivityDescription = (
     case ActivityType.SUBTICKET_CREATED: {
       const subTicketXyneId =
         value?.subTicketXyneId || value?.subTicketId?.substring(0, 8).toUpperCase();
+      // Rows written before this field existed keep the original "created" copy.
+      const subTicketAction = value?.subTicketAction;
+      const description =
+        subTicketAction === 'linked'
+          ? 'linked subticket'
+          : subTicketAction === 'unlinked'
+            ? 'unlinked subticket'
+            : 'created subticket';
       return {
-        description: 'created subticket',
+        description,
         details: <span className='font-semibold'>{subTicketXyneId}</span>,
       };
     }
