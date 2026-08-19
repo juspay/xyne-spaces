@@ -27,84 +27,6 @@ export interface CallsTimeSeriesPoint {
   recordings: number; // Recording count for the bucket
 }
 
-// New optimized types for execution stats
-export interface ExecutionTimeStats {
-  p50: number;
-  p90: number;
-  p95: number;
-  p99: number;
-}
-
-export interface ExecutionStatsItem {
-  type: string;              // "BUG_WORKFLOW", "FEATURE_IMPLEMENTATION", etc.
-  executionCount: number;    // Total completed executions
-  successCount: number;      // Successful executions
-  failedCount: number;       // Failed executions
-  successRate: number;       // Percentage (0-100)
-  timeStats: ExecutionTimeStats;
-}
-
-export interface SuccessRateTimePoint {
-  date: string;              // "2024-11-01"
-  totalExecutions: number;
-  successfulExecutions: number;
-  successRate: number;       // Percentage (0-100)
-}
-
-export interface ExecutionStats {
-  overallTimeStats: ExecutionTimeStats;
-  successRateTimeSeries: SuccessRateTimePoint[];
-  workflowTypes: ExecutionStatsItem[];
-}
-
-export interface ExecutionStatusStats {
-  status: string;
-  count: number;
-  percentage: number;
-}
-
-export interface StepFailureStats {
-  stepName: string;
-  failures: number;
-  totalRuns: number;
-  rate: number;
-}
-
-export interface StepFunnelStats {
-  stepName: string;
-  stepOrder: number;
-  totalStarted: number;
-  totalCompleted: number;
-  completionRate: number;
-  dropoffRate: number;
-}
-
-export interface RecentActivityItem {
-  time: string;
-  event: string;
-}
-
-export interface WorkflowTypeOption {
-  value: string;
-  label: string;
-  description?: string;
-}
-
-export interface PRStatValue {
-  count: number
-  trend: string // e.g., "+22%", "-42%", "0%"
-}
-
-export interface PRStats {
-  xyneMerged: PRStatValue
-  xyneDeclined: PRStatValue
-  xyneOpen: PRStatValue
-  nonXyneMerged: PRStatValue
-  raised: PRStatValue
-  successRate: number
-  coverage: number
-}
-
 export interface PRStatsLegacy {
   xyneMerged: number
   xyneDeclined: number
@@ -391,6 +313,35 @@ export class AnalyticsRepository {
     return timeBuckets.map(bucketKey => ({
       date: bucketKey,
       value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Like {@link bucketCounts} but counts DISTINCT ids per bucket. `idOf` yields the
+   * value deduped within a bucket (null/undefined rows are skipped); `keyOf` yields
+   * the bucket key (a null key drops the row). Empty buckets are zero-filled.
+   */
+  private bucketDistinct<T>(
+    records: readonly T[],
+    timeBuckets: string[],
+    keyOf: (record: T) => string | null | undefined,
+    idOf: (record: T) => string | null | undefined,
+  ): { date: string; value: number }[] {
+    const bucketData = new Map<string, Set<string>>();
+    timeBuckets.forEach(bucket => bucketData.set(bucket, new Set<string>()));
+
+    records.forEach(record => {
+      const id = idOf(record);
+      if (id == null) return;
+      const bucketKey = keyOf(record);
+      if (bucketKey != null && bucketData.has(bucketKey)) {
+        bucketData.get(bucketKey)!.add(id);
+      }
+    });
+
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey)?.size || 0,
     })).sort((a, b) => a.date.localeCompare(b.date));
   }
 
@@ -709,70 +660,37 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, Set<string>>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, new Set<string>());
-    });
-
-    // Group valid message activities by time buckets
-    validMessageActivities.forEach(message => {
-      const userId = message.senderId;
-      const timestamp = message.createdAt;
-      if (userId && timestamp) {
-        const bucketKey = this.getBucketKey(timestamp, groupBy);
-        if (bucketData.has(bucketKey)) {
-          bucketData.get(bucketKey)!.add(userId);
-        }
-      }
-    });
-
-    // Group other activities by time buckets
-    const otherActivities = [
-      ...reactionUsers,
-      ...attachmentUsers,
-      ...ticketCreators,
-      ...ticketActivityUsers,
-      ...canvasCreators,
-      ...canvasParticipants
+    // Normalise every activity source to a common { userId, timestamp } shape so the
+    // aggregation is strongly typed instead of sniffing keys off a union at runtime.
+    const activities: { userId: string | null | undefined; timestamp: Date | null | undefined }[] = [
+      ...validMessageActivities.map(m => ({ userId: m.senderId, timestamp: m.createdAt })),
+      ...reactionUsers.map(r => ({ userId: r.userId, timestamp: r.createdAt })),
+      ...attachmentUsers.map(a => ({ userId: a.createdBy, timestamp: a.createdAt })),
+      ...ticketCreators.map(t => ({ userId: t.createdBy, timestamp: t.createdAt })),
+      ...ticketActivityUsers.map(t => ({ userId: t.updatedBy, timestamp: t.timestamp })),
+      ...canvasCreators.map(c => ({ userId: c.createdBy, timestamp: c.createdAt })),
+      ...canvasParticipants.map(c => ({ userId: c.userId, timestamp: c.updatedAt })),
     ];
-    otherActivities.forEach(activity => {
-      const userId = ('userId' in activity && activity.userId) ||
-                    ('createdBy' in activity && activity.createdBy) ||
-                    ('updatedBy' in activity && activity.updatedBy);
-      const timestamp = ('createdAt' in activity && activity.createdAt) ||
-                       ('updatedAt' in activity && activity.updatedAt) ||
-                       ('timestamp' in activity && activity.timestamp);
-      if (userId && timestamp) {
-        const bucketKey = this.getBucketKey(timestamp, groupBy);
-        if (bucketData.has(bucketKey)) {
-          bucketData.get(bucketKey)!.add(userId);
-        }
-      }
-    });
 
-    // Calculate unique users across entire period
-    const allUniqueUsers = new Set<string>();
-    validMessageActivities.forEach(message => {
-      if (message.senderId) allUniqueUsers.add(message.senderId);
-    });
-    otherActivities.forEach(activity => {
-      const userId = ('userId' in activity && activity.userId) ||
-                    ('createdBy' in activity && activity.createdBy) ||
-                    ('updatedBy' in activity && activity.updatedBy);
-      if (userId) allUniqueUsers.add(userId);
-    });
+    // Distinct users active per bucket. Rows without a user or timestamp are skipped,
+    // matching the previous `if (userId && timestamp)` guard.
+    const timeSeries = this.bucketDistinct(
+      activities,
+      timeBuckets,
+      a => (a.timestamp ? this.getBucketKey(a.timestamp, groupBy) : null),
+      a => a.userId,
+    );
 
-    // Convert time series to array format
-    const timeSeries = timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey)?.size || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    // Unique users across the whole period. A user counts even without a timestamp,
+    // preserving the previous total-count behaviour.
+    const uniqueUsers = new Set(
+      activities.map(a => a.userId).filter((id): id is string => id != null),
+    ).size;
 
     return {
-      uniqueUsers: allUniqueUsers.size,
-      timeSeries: timeSeries
+      uniqueUsers,
+      timeSeries,
     };
   }
 
@@ -819,27 +737,14 @@ export class AnalyticsRepository {
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, Set<string>>();
-
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, new Set<string>());
-    });
-
-    // Group valid channels by time buckets based on valid message activity
-    validMessages.forEach(message => {
-      if (message.channelScopeType !== ChannelScopeType.DEFAULT) return;
-      const bucketKey = this.getBucketKey(message.createdAt, groupBy);
-      if (bucketData.has(bucketKey)) {
-        bucketData.get(bucketKey)!.add(message.channelId);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey)?.size || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    // Distinct DEFAULT-scope channels active per bucket. Non-DEFAULT messages
+    // resolve to a null id and are skipped by bucketDistinct.
+    return this.bucketDistinct(
+      validMessages,
+      timeBuckets,
+      message => this.getBucketKey(message.createdAt, groupBy),
+      message => (message.channelScopeType === ChannelScopeType.DEFAULT ? message.channelId : null),
+    );
   }
 
   /**
