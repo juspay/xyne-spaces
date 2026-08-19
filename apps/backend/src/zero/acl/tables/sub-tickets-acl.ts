@@ -12,10 +12,9 @@ import { accessibleTicketQuery } from '../core/ticket-access';
 export class SubTicketsACL extends BaseACL<'sub_tickets'> {
 
   /**
-   * Pointing a sub-ticket at a ticket exposes that ticket's title/xyneId to everyone
-   * who can read the parent, so the caller must be able to see it. Applied on BOTH
-   * insert and update: `subTicket.linkExisting` sets mappedTicketId at insert time,
-   * which used to skip the check that only canUpdate performed.
+   * Pointing a sub-ticket at a ticket exposes that ticket's title to everyone who can
+   * read the parent. Applied on BOTH insert and update — linkExisting sets
+   * mappedTicketId at insert time, which used to skip this check.
    */
   private async verifyMappedTicketAccess(
     mappedTicketId: string,
@@ -121,16 +120,11 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   }
 
   /**
-   * Sub-tickets still cannot be deleted as a way of closing work — that is what the
-   * status change is for, and a drafted sub-ticket (mappedTicketId === null) holds
-   * the only copy of its own title/description.
+   * Sub-tickets still cannot be deleted to close work — use a status change.
    *
-   * The one exception is `subTicket.unlink` tidying up after itself: a row that
-   * merely POINTS at an existing ticket and no longer has any parent mapping is pure
-   * linkage carrying no content, and leaving it behind would keep the unlinked
-   * ticket looking like somebody's sub-ticket forever
-   * (queries.subTicketsByMappedTicketId). Deleting it destroys nothing — the ticket
-   * it pointed at is untouched.
+   * The one exception is `subTicket.unlink` tidying up: a row that merely points at an
+   * existing ticket and has no mapping left is pure linkage carrying no content, and
+   * leaving it behind would keep that ticket looking like somebody's sub-ticket.
    */
   async canDelete(args: DeleteID<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());

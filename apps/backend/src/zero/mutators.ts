@@ -6718,29 +6718,17 @@ export function createMutators(
           }
         },
       ),
-      // Link an EXISTING ticket as a sub-ticket of `ticketId`, and unlink it again.
-      //
-      // Shape follows `ticketReference.create`/`delete` — the other add/remove-a-link
-      // pair in this file. Only sub_tickets + ticket_sub_ticket_mappings are written,
-      // so a linked ticket shows under Sub-Tickets and never under Related Tickets
-      // (ticket_reference_mappings).
-      //
-      // Both refuse FLOW boards. FLOW sub-tickets are materialised by the flow run
-      // through services/subTicketService.ts, which keys its sub_tickets row by
-      // (rootTicketId, mappedTicketId) so one ticket legitimately has several rows —
-      // hand-editing those mappings would corrupt a run.
+      // Link an EXISTING ticket as a sub-ticket, and unlink it again. Writes only
+      // sub_tickets + ticket_sub_ticket_mappings, so links never show under Related
+      // Tickets. FLOW/RELEASE boards are refused — their mappings are machine-owned.
       linkExisting: defineMutator(
         z.object({
-          // Random per click, NOT derived: see linkedSubTicketId's note — it is what
-          // makes a racing duplicate violate the mappings unique index and roll back,
-          // rather than no-op its way through to a duplicate activity and notification.
+          // Random per click, unlike subTicketId — see linkedSubTicketId.
           mappingId: z.string(),
           timestamp: z.number(),
           ticketId: z.string(),
           mappedTicketId: z.string(),
-          // Denormalized display fallback for the sub_tickets row. Passed in rather
-          // than derived from a read so the optimistic client twin and the server
-          // write the same value — see docs/guidelines/zero/mutators.md.
+          // Display fallback for the row; passed in so both twins write the same value.
           subTicketTitle: z.string(),
         }),
         async ({ tx, args: { mappingId, timestamp, ticketId, mappedTicketId, subTicketTitle } }) => {
@@ -6762,27 +6750,19 @@ export function createMutators(
             throw new Error('Sub-tickets on this board are managed automatically');
           }
 
-          // The ticket being linked must be one the caller can actually see. Reads
-          // inside a mutator are NOT filtered by the read ACLs — `zql` here is the
-          // bare builder — so without this, linking would be a way to pull a private
-          // ticket's title and xyneId into a channel the caller can read, via the
-          // activity and system message written below.
+          // Reads here are NOT filtered by the read ACLs, so apply access explicitly —
+          // otherwise linking leaks a private ticket's title into the parent's timeline.
           const mappedTicket = await tx.run(accessibleTicketQuery(mappedTicketId, authData).one());
           if (!mappedTicket) {
             throw new Error('Ticket to link not found');
           }
-          // The picker only ever offers tickets from this ticket's project, so hold a
-          // hand-made call to the same rule rather than letting it build a sub-ticket
-          // tree that spans projects.
+          // The picker only offers same-project tickets; hold hand-made calls to it too.
           if (mappedTicket.projectId !== parentTicket.projectId) {
             throw new Error('A sub-ticket must belong to the same project');
           }
 
-          // Sub-ticket trees are one level deep. `create` only has to check the parent
-          // side because the row it makes has no children yet; linking an EXISTING
-          // ticket can break the invariant from either side, so check both.
-          // All rows, not `.one()`: a ticket can legitimately sit behind more than one
-          // sub_tickets row, and only the ones that still hold a mapping make it a child.
+          // Trees stay one level deep. `create` checks only the parent side because its
+          // new row has no children; an existing ticket can break it from either side.
           const parentAsSubTickets = await tx.run(
             zql.sub_tickets.where('mappedTicketId', ticketId).related('ticketMappings'),
           );
@@ -6797,10 +6777,8 @@ export function createMutators(
             throw new Error('Cannot link a ticket that already has sub-tickets');
           }
 
-          // One parent per linked ticket, so a ticket is behind exactly one
-          // sub_tickets row and the `.one()`/`findFirst` lookups on mappedTicketId
-          // elsewhere (ticket.update, ticket.updateAssignment,
-          // vespa-injection/core/mapper.ts) stay unambiguous.
+          // One parent per linked ticket, so the `.one()`/`findFirst` lookups on
+          // mappedTicketId elsewhere stay unambiguous.
           const existingSubTickets = await tx.run(
             zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings'),
           );
@@ -6821,9 +6799,7 @@ export function createMutators(
             mappedTicketId,
             createdBy: authData.sub,
             updatedBy: authData.sub,
-            // The PARENT's conversation, matching what subTicket.create's callers pass
-            // and what createFlowSubTicketMappings stores — this is the conversation
-            // the sub-ticket is discussed in, not the child's own.
+            // The PARENT's conversation, as subTicket.create's callers pass.
             conversationId: parentTicket.conversationId ?? null,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -6880,10 +6856,8 @@ export function createMutators(
           }
         },
       ),
-      // Undo a `linkExisting`: drop the parent -> sub-ticket edge. The linked ticket
-      // itself is never touched. The sub_tickets row goes with the edge, so the child
-      // stops counting as somebody's sub-ticket (queries.subTicketsByMappedTicketId)
-      // and can be linked or given sub-tickets of its own again.
+      // Undo a link: drop the edge, never the linked ticket. The sub_tickets row goes
+      // too, so the child stops counting as somebody's sub-ticket and can be re-linked.
       unlink: defineMutator(
         z.object({
           mappingId: z.string(),
@@ -6913,9 +6887,8 @@ export function createMutators(
           }
 
           const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
-          // Only a link to an existing ticket can be unlinked. A sub-ticket drafted
-          // here and never materialised (mappedTicketId === null) holds the only copy
-          // of its own title and description, so dropping it would destroy content.
+          // A drafted sub-ticket (mappedTicketId null) holds its own content — dropping
+          // it would destroy data, so only real links are unlinkable.
           if (!subTicket?.mappedTicketId) {
             throw new Error('Only linked sub-tickets can be unlinked');
           }
@@ -6926,7 +6899,7 @@ export function createMutators(
 
           await tx.mutate.ticket_sub_ticket_mappings.delete({ id: mappingId });
 
-          // Defensive: only drop the row once nothing points at it any more.
+          // Only drop the row once nothing points at it.
           const remainingMappings = await tx.run(
             zql.ticket_sub_ticket_mappings.where('subTicketId', mapping.subTicketId),
           );

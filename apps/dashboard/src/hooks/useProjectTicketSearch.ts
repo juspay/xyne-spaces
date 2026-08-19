@@ -8,10 +8,7 @@ export type ProjectTicketSearchResult = {
   xyneId?: string | null;
 };
 
-/**
- * Vespa never pages past this offset, so stop asking rather than showing a spinner
- * that can't resolve.
- */
+// Vespa never pages past this offset, so stop asking.
 const VESPA_PROJECT_TICKET_MAX_OFFSET = 1000;
 const VESPA_PROJECT_TICKET_PAGE_SIZE = 200;
 
@@ -64,13 +61,9 @@ const fetchPage = async (
 };
 
 /**
- * Paged Vespa search over a project's tickets, scoped to ONE dropdown.
- *
- * Ticket Details renders two independent ticket pickers (Related Tickets and
- * Add-existing-sub-ticket). They each get their own instance of this hook so that
- * typing in, closing, or mounting one cannot blank the other's results — the two
- * used to share a single set of useState values in the component and did exactly
- * that.
+ * Paged Vespa search over a project's tickets, scoped to ONE dropdown. Ticket Details
+ * renders two independent pickers; each gets its own instance so typing in or closing
+ * one cannot blank the other's results.
  */
 export const useProjectTicketSearch = ({
   projectId,
@@ -82,8 +75,7 @@ export const useProjectTicketSearch = ({
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
   const [nextOffset, setNextOffset] = useState(0);
-  // Bumped on every state reset so a slow response from a superseded query is
-  // dropped instead of overwriting newer results.
+  // Bumped on every reset so a superseded response cannot overwrite newer results.
   const requestIdRef = useRef(0);
 
   const reset = useCallback((): void => {
@@ -151,11 +143,9 @@ export const useProjectTicketSearch = ({
 
         setHasMore(false);
       } finally {
-        // Only the current request may clear the flag — otherwise a slow superseded
-        // response turns the spinner off while its replacement is still loading, and
-        // the dropdown flashes "No results found". The paths that supersede a request
-        // (handleSearchChange, reset) clear the flags themselves, so nothing is left
-        // stuck on when no replacement request follows.
+        // Only the current request may clear the flag, or a slow superseded response
+        // flashes "No results found" over its replacement. handleSearchChange and reset
+        // clear the flags themselves when no replacement request follows.
         if (requestId === requestIdRef.current) {
           setIsLoading(false);
           setIsLoadingMore(false);
@@ -165,8 +155,7 @@ export const useProjectTicketSearch = ({
     [projectId, search],
   );
 
-  // Drop everything when the dropdown closes or the project changes, and run the
-  // query when it is open with a term typed.
+  // Re-query whenever the dropdown opens or the term changes.
   useEffect(() => {
     if (!isActive || !projectId) {
       return;
