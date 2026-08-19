@@ -1,6 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { notificationService } from '@/services/notificationService';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -72,6 +73,26 @@ function filterUsersByResponsibility(
       }
     })
     .map(mapping => mapping.userId);
+}
+
+/**
+ * Fires (fire-and-forget, never blocks or fails assignment) whenever the
+ * maxWorkload cap left no one eligible. Recipients are subscribers
+ * (user_group_mappings.isNotified) — this is unrelated to who was capped.
+ */
+function notifyMaxWorkloadReached(
+  userGroupId: string,
+  userGroup: { name: string; workspaceId: string } | null | undefined,
+  userGroupMappings: UserGroupMapping[],
+): void {
+  if (!userGroup) return;
+  const recipientUserIds = userGroupMappings
+    .filter((m: UserGroupMapping) => m.isNotified === true)
+    .map((m: UserGroupMapping) => m.userId);
+  if (recipientUserIds.length === 0) return;
+  notificationService
+    .sendMaxWorkloadReachedNotification(userGroupId, userGroup.name, userGroup.workspaceId, recipientUserIds)
+    .catch(err => logger.error(`[Assignment] Failed to send maxWorkload notification for userGroupId ${userGroupId}`, err));
 }
 
 async function resolveStartOffsets(
@@ -428,7 +449,7 @@ export async function evaluateAssignmentRule(
 
   if (!selectedUser && cappedCount > 0) {
     logger.info(
-      `[Assignment] ${cappedCount}/${candidates.length} candidates at or above maxWorkload ${maxWorkload} for userGroupId: ${userGroupId} — no assignment`,
+      `[Assignment] ${cappedCount}/${candidates.length} candidates at or above maxWorkload ${maxWorkload} for userGroupId: ${userGroupId} — no assignment yet, trying fallback`,
     );
   }
 
@@ -463,9 +484,12 @@ export async function evaluateAssignmentRule(
     }
     
     if (fallbackUserIds.length === 0) {
+      if (cappedCount > 0) {
+        notifyMaxWorkloadReached(userGroupId, userGroup, userGroupMappings);
+      }
       return { reason: 'NO_ON_CALL_USERS' };
     }
-    
+
     // Calculate scores for fallback candidates
     const fallbackCandidates: AssignmentCandidate[] = [];
     const fallbackOffsetMap = await resolveStartOffsets(fallbackUserIds, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
@@ -547,6 +571,9 @@ export async function evaluateAssignmentRule(
           `[Assignment] ${fallbackCappedCount}/${fallbackCandidates.length} fallback candidates at or above maxWorkload ${maxWorkload} for userGroupId: ${userGroupId} — no assignment`,
         );
       }
+      if (cappedCount > 0 || fallbackCappedCount > 0) {
+        notifyMaxWorkloadReached(userGroupId, userGroup, userGroupMappings);
+      }
       return { reason: 'NO_ON_CALL_USERS' };
     }
   }
@@ -581,6 +608,7 @@ interface SharedContext {
   userGroupMappingByUserId: Map<string, UserGroupMapping>;
   usePercentageForBoard:    boolean;
   maxWorkload:              number | null;
+  userGroup:                { name: string; workspaceId: string } | null;
   totalTicketsOnBoard:      number;
 }
 
@@ -595,7 +623,8 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, totalTicketsOnBoard } = ctx;
+  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, userGroup, totalTicketsOnBoard } = ctx;
+  const userGroupId = userGroupMappings[0]?.userGroupId;
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
@@ -683,6 +712,9 @@ async function pickBest(
       logger.info(
         `[Assignment] ${cappedCount}/${candidates.length} candidates at or above maxWorkload ${maxWorkload} for ${assignmentType} — no assignment`,
       );
+      if (userGroupId) {
+        notifyMaxWorkloadReached(userGroupId, userGroup, userGroupMappings);
+      }
     }
     return { reason: 'NO_ON_CALL_USERS' };
   };
@@ -803,6 +835,7 @@ export async function evaluateAllRoles(
     userGroupMappingByUserId,
     usePercentageForBoard,
     maxWorkload,
+    userGroup,
     totalTicketsOnBoard,
   };
 
@@ -938,6 +971,7 @@ export async function evaluateRoleSlots(
     userGroupMappingByUserId,
     usePercentageForBoard,
     maxWorkload,
+    userGroup,
     totalTicketsOnBoard,
   };
 
