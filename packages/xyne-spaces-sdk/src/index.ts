@@ -155,6 +155,8 @@ export type {
   TicketCursor,
   TicketActivityCursor,
   TicketViewMode,
+  KanbanColumnType,
+  KanbanTicketFilters,
 } from './registry/tickets.js';
 export type { SupportTicketCursor } from './registry/support-tickets.js';
 export type { StageInput } from './registry/boards.js';

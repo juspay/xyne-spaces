@@ -35,6 +35,38 @@ export interface TicketCursor {
   createdAt: number;
 }
 
+/** Whether a kanban column is a workflow stage or a ticket status. */
+export type KanbanColumnType = 'stage' | 'status';
+
+/**
+ * The kanban board's filter set.
+ *
+ * Mirrors `kanbanTicketPageV2FiltersSchema` in `apps/backend/src/zero/queries.ts`.
+ * Ids are user, group, board, tag, and channel ids; `stages` and `ticketTypes` are
+ * names.
+ */
+export interface KanbanTicketFilters {
+  priority?: TicketPriority[];
+  assignee?: string[];
+  userGroups?: string[];
+  createdBy?: string[];
+  prReviewers?: string[];
+  qaAssigned?: string[];
+  dueDateStart?: number;
+  dueDateEnd?: number;
+  createdDateStart?: number;
+  createdDateEnd?: number;
+  boards?: string[];
+  tags?: string[];
+  assigned?: boolean;
+  created?: boolean;
+  stages?: string[];
+  ticketTypes?: string[];
+  sourceChannels?: string[];
+  /** Role-scoped assignment filter: everyone assigned to `roleId` from `userIds`. */
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
+}
+
 /** Page cursor for the cross-ticket activity feed, ordered by timestamp then id. */
 export interface TicketActivityCursor {
   timestamp: number;
@@ -97,27 +129,61 @@ export const ticketsOperations = {
   /**
    * A page of tickets for the kanban board, with the board's filter set.
    * Maps to: Zero query 'kanbanTicketsPageV2'
+   *
+   * `viewMode` and `stageName` are required by the query, not conveniences: the
+   * query is written per board column, so it wants to know which scope and which
+   * column. `stageName: ''` is the sentinel the product's own board navigation
+   * uses to mean "every stage", and is the default here.
+   *
+   * Filters go inside `filters`. An earlier version of this entry accepted
+   * `searchQuery` / `statusFilter` / `assignedToFilter` / `createdByFilter` /
+   * `workflowTypeFilter`, which belong to the unrelated `workflowsPaginated`
+   * query — zod stripped them silently, so those filters never did anything.
    */
   listKanban: query<
     {
+      viewMode: TicketViewMode;
+      stageName?: string;
+      columnType?: KanbanColumnType;
       limit?: number;
-      start?: TicketCursor;
-      searchQuery?: string;
-      statusFilter?: string[];
-      assignedToFilter?: string[];
-      createdByFilter?: string[];
-      workflowTypeFilter?: string[];
+      start?: TicketCursor | null;
+      dir?: 'forward' | 'backward';
+      projectId?: string;
+      boardId?: string;
+      userId?: string;
+      groupId?: string;
+      filters?: KanbanTicketFilters;
+      formEntityValueFieldIds?: string[];
+      showOverdueOnly?: boolean;
+      overdueReferenceTime?: number;
+      excludeFlowSteps?: boolean;
     },
     Ticket[]
   >('kanbanTicketsPageV2', {
     mapArgs: (args) => ({
+      viewMode: args.viewMode,
+      stageName: args.stageName ?? '',
       limit: args.limit ?? 50,
       start: args.start ?? null,
-      ...(args.searchQuery ? { searchQuery: args.searchQuery } : {}),
-      ...(args.statusFilter ? { statusFilter: args.statusFilter } : {}),
-      ...(args.assignedToFilter ? { assignedToFilter: args.assignedToFilter } : {}),
-      ...(args.createdByFilter ? { createdByFilter: args.createdByFilter } : {}),
-      ...(args.workflowTypeFilter ? { workflowTypeFilter: args.workflowTypeFilter } : {}),
+      ...(args.columnType ? { columnType: args.columnType } : {}),
+      ...(args.dir ? { dir: args.dir } : {}),
+      ...(args.projectId ? { projectId: args.projectId } : {}),
+      ...(args.boardId ? { boardId: args.boardId } : {}),
+      ...(args.userId ? { userId: args.userId } : {}),
+      ...(args.groupId ? { groupId: args.groupId } : {}),
+      ...(args.filters ? { filters: args.filters } : {}),
+      ...(args.formEntityValueFieldIds
+        ? { formEntityValueFieldIds: args.formEntityValueFieldIds }
+        : {}),
+      ...(args.showOverdueOnly !== undefined
+        ? { showOverdueOnly: args.showOverdueOnly }
+        : {}),
+      ...(args.overdueReferenceTime !== undefined
+        ? { overdueReferenceTime: args.overdueReferenceTime }
+        : {}),
+      ...(args.excludeFlowSteps !== undefined
+        ? { excludeFlowSteps: args.excludeFlowSteps }
+        : {}),
     }),
   }),
 

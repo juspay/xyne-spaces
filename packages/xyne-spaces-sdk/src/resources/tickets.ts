@@ -11,6 +11,8 @@
 import { Resource } from './base.js';
 import {
   ticketsOperations,
+  type KanbanColumnType,
+  type KanbanTicketFilters,
   type TicketActivityCursor,
   type TicketCursor,
   type TicketViewMode,
@@ -60,18 +62,38 @@ export class TicketsResource extends Resource {
   /**
    * List a page of tickets for the kanban board.
    *
+   * `viewMode` is required and picks the scope exactly as in {@link list}.
+   * `stageName` narrows to a single board column; omit it (or pass `''`) for
+   * every stage. Filters belong in `filters` — see {@link KanbanTicketFilters}.
+   *
    * @param options.start - Cursor from the last item of the previous page
+   *
+   * @example
+   * const page = await sdk.tickets.listKanban({
+   *   viewMode: 'board',
+   *   boardId: 'board-1',
+   *   limit: 100,
+   *   filters: { priority: ['HIGH'] },
+   * });
    */
-  listKanban(options?: {
+  listKanban(options: {
+    viewMode: TicketViewMode;
+    stageName?: string;
+    columnType?: KanbanColumnType;
     limit?: number;
-    start?: TicketCursor;
-    searchQuery?: string;
-    statusFilter?: string[];
-    assignedToFilter?: string[];
-    createdByFilter?: string[];
-    workflowTypeFilter?: string[];
+    start?: TicketCursor | null;
+    dir?: 'forward' | 'backward';
+    projectId?: string;
+    boardId?: string;
+    userId?: string;
+    groupId?: string;
+    filters?: KanbanTicketFilters;
+    formEntityValueFieldIds?: string[];
+    showOverdueOnly?: boolean;
+    overdueReferenceTime?: number;
+    excludeFlowSteps?: boolean;
   }): Promise<Ticket[]> {
-    return this.call(ticketsOperations.listKanban, options ?? {});
+    return this.call(ticketsOperations.listKanban, options);
   }
 
   /** Get one ticket. */

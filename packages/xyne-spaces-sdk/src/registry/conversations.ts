@@ -150,10 +150,15 @@ export const conversationsOperations = {
   getByCallId: query<{ callId: string }, Conversation | null>('getConversationByCallId'),
 
   /**
-   * Participants of a thread, including their subscription state.
+   * The **caller's own** participation in a thread, including subscription state.
    * Maps to: Zero query 'conversationParticipantByConversationId'
+   *
+   * Despite the query's name, this is one row, not a list: it filters on
+   * `ctx.userID` and ends in `.one()`. The catalog has no query that returns every
+   * participant of a thread. This was declared `ConversationParticipant[]`, so a
+   * caller iterating the result got a `TypeError` on a plain object.
    */
-  listParticipants: query<{ conversationId: string }, ConversationParticipant[]>(
+  getMyParticipation: query<{ conversationId: string }, ConversationParticipant | null>(
     'conversationParticipantByConversationId'
   ),
 

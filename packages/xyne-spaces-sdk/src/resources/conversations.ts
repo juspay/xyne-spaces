@@ -90,9 +90,16 @@ export class ConversationsResource extends Resource {
     return this.call(conversationsOperations.getLatest, { channelId, ...options });
   }
 
-  /** List a thread's participants and their subscription state. */
-  listParticipants(conversationId: string): Promise<ConversationParticipant[]> {
-    return this.call(conversationsOperations.listParticipants, { conversationId });
+  /**
+   * Get your own participation in a thread — subscription state, last read, and
+   * last reply.
+   *
+   * Not every participant: the underlying query is scoped to the authenticated
+   * caller and returns a single row. This was `listParticipants(): Promise<[]>`,
+   * which typed one object as an array.
+   */
+  getMyParticipation(conversationId: string): Promise<ConversationParticipant | null> {
+    return this.call(conversationsOperations.getMyParticipation, { conversationId });
   }
 
   /** List pinned threads in a channel. */

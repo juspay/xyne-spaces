@@ -19,7 +19,7 @@ import {
   CLAW_AUTH_TOKEN_PATH,
   CLAW_CLIENT_ID,
 } from '../registry/claw.js';
-import { SdkError, AuthError } from './errors.js';
+import { SdkError, AuthError, NotFoundError } from './errors.js';
 import type { HttpClient } from './http.js';
 import type { ClawDevicePrompt, ClawLoginResult } from '../types/index.js';
 
@@ -165,9 +165,32 @@ export class ClawAuth {
   }
 
   private async startDeviceAuth(): Promise<DeviceAuthStart> {
-    const raw = (await this.http.post<Record<string, unknown>>(CLAW_AUTH_START_PATH, {
-      clientId: CLAW_CLIENT_ID,
-    })) as Record<string, unknown>;
+    let raw: Record<string, unknown>;
+    try {
+      raw = (await this.http.post<Record<string, unknown>>(CLAW_AUTH_START_PATH, {
+        clientId: CLAW_CLIENT_ID,
+      })) as Record<string, unknown>;
+    } catch (err) {
+      /*
+       * A 404 on the very first call of the flow almost always means the requests
+       * are going to the wrong service. `clawBaseUrl` defaults to `baseUrl`, which
+       * is only right where a proxy puts Claw and Spaces on one host; point it at
+       * a bare Spaces backend and you get that host's generic 404 instead, which
+       * says nothing about why. Name the likely cause rather than pass it through.
+       */
+      if (err instanceof NotFoundError) {
+        throw new NotFoundError(
+          `Claw device authorization is not available at ${CLAW_AUTH_START_PATH}. ` +
+            'Claw is a separate service from the Spaces backend: check that ' +
+            '`clawBaseUrl` points at the Claw deployment (it defaults to `baseUrl`, ' +
+            'which is only correct when a proxy serves both on one host), and that ' +
+            'the deployment has CLI tokens enabled. ' +
+            `Original: ${err.message}`,
+          err.serverCode
+        );
+      }
+      throw err;
+    }
 
     const deviceCode = str(raw, 'deviceCode', 'device_code');
     const userCode = str(raw, 'userCode', 'user_code');
