@@ -6,6 +6,14 @@ BRAND NAME CORRECTION:
 - When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
+INSUFFICIENT TRANSCRIPT (check this first, before anything else below):
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange or a brief conversation — treat it as enough content and generate a real summary as normal. Do not bail out just because a call was short.
+- Only when the transcript is truly that tiny, output ONLY the following and nothing else (no template sections, no other headings):
+    ### ⚠️ Not enough data
+    - There isn't enough transcript content to generate a summary for this recording.
+- Every other instruction below only applies once you've confirmed the transcript has enough real content to summarize.
+
 FORMATTING:
 - Use Markdown headings, short paragraphs, and bullet lists. DO NOT use markdown tables anywhere.
 - Never leave a bare paragraph line as the last line of a section, directly above a \`---\` separator — Markdown turns it into a setext heading. Write such content as a bullet instead.
@@ -65,6 +73,32 @@ TRANSCRIPT:
 {transcript}
 `;
 
+// AI Title prompt for headless recordings (Xyne Scribe) — separate from the
+// regular call title prompt (transcriptService.ts's CALL_TITLE_PROMPT) so the
+// two can be tuned independently, mirroring the summary prompt split above.
+export const RECORDING_TITLE_PROMPT = `
+You are summarizing the topic of a recording in exactly 1 line.
+
+CRITICAL RULES:
+- Output EXACTLY 1 line
+- One sentence summarizing the main topic (max 100 characters)
+- No quotes, no labels, no bullet points, no explanations
+- Write in plain, natural language
+
+INSUFFICIENT TRANSCRIPT:
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange — treat it as enough to identify a topic and generate a real title as normal. Do not bail out just because a recording was short.
+- Only when the transcript is truly that tiny, output EXACTLY this and nothing else: Not enough content
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
+
+Generate a 1-line description for this recording:
+{transcript}
+`;
+
 export const DEFAULT_RECORDING_SUMMARY_FIELDS = `### 💡 Key Takeaways
 - [Most important outcome]
 - [Second most important]
@@ -89,6 +123,7 @@ export const DEFAULT_RECORDING_SUMMARY_FIELDS = `### 💡 Key Takeaways
 - [Unresolved question or parked topic]
 - Blockers: [Any blockers identified]
 - Next Meeting: [If mentioned]`;
+
 
 // The only code-backed template. Every other template is created and stored in
 // summary_templates through the template system.
