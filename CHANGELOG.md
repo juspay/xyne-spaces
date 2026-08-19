@@ -1,3 +1,10 @@
+## [1.195.0](https://github.com/juspay/xyne-spaces/compare/v1.194.0...v1.195.0) (2026-08-19)
+
+
+### Features
+
+* instant share recordings ([#702](https://github.com/juspay/xyne-spaces/issues/702)) ([67eb80f](https://github.com/juspay/xyne-spaces/commit/67eb80f7c0024e25f883b30255a0a2adb135e601))
+
 ## [1.194.0](https://github.com/juspay/xyne-spaces/compare/v1.193.0...v1.194.0) (2026-08-18)
 
 
