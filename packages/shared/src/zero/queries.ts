@@ -35,6 +35,7 @@ import {
   TicketPriority,
   TicketStageRequestStatus,
   MailboxState,
+  MessageArtifactStatus,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -540,6 +541,17 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 
 export const queries = defineQueries({
+  activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
+    zql.message_artifacts
+      .where('workspaceId', ctx.workspaceId)
+      .where('status', MessageArtifactStatus.ACTIVE)
+      // Banner delivery is participant-only even when public channel messages are readable.
+      .whereExists('channelParticipants', participant =>
+        participant.where('userId', ctx.userID),
+      )
+      .orderBy('messageCreatedAt', 'desc'),
+  ),
+
   userChannelSections: defineQuery(z.object({}), () => {
     return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
   }),

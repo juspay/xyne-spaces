@@ -75,4 +75,7 @@ export interface InputBoxProps {
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
   dockSlot?: React.ReactNode;
+  slashCommandArtifactCommand?: string;
+  slashCommandArtifactChannelLabel?: string;
+  onCancelSlashCommandArtifact?: () => void;
 }

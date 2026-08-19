@@ -95,6 +95,10 @@ class NoteTakerWebhookController {
       typeof roomMetadata.createdBy === 'string' ? roomMetadata.createdBy : participant.identity;
     const notesCanvasId =
       typeof roomMetadata.notesCanvasId === 'string' ? roomMetadata.notesCanvasId : undefined;
+    const detailedSummaryCanvasId =
+      typeof roomMetadata.detailedSummaryCanvasId === 'string'
+        ? roomMetadata.detailedSummaryCanvasId
+        : undefined;
     // Present only when the recording was started from inside a thread (see
     // callController's headless-initiate branch, which stamps these two onto
     // the LiveKit room metadata synchronously). messageId is generated here,
@@ -116,6 +120,10 @@ class NoteTakerWebhookController {
       logger.error(`[NoteTaker Webhook] Missing notesCanvasId in room metadata for ${roomName}`);
       return;
     }
+    if (!detailedSummaryCanvasId) {
+      logger.error(`[NoteTaker Webhook] Missing detailedSummaryCanvasId in room metadata for ${roomName}`);
+      return;
+    }
 
     const callId = uuidv4();
     const roomLink = buildCallInviteUrl(roomName);
@@ -128,6 +136,7 @@ class NoteTakerWebhookController {
         workspaceId,
         createdBy,
         notesCanvasId,
+        detailedSummaryCanvasId,
         roomLink,
         now: new Date(),
       });
@@ -190,6 +199,7 @@ class NoteTakerWebhookController {
           createdBy,
           workspaceId,
           notesCanvasId,
+          detailedSummaryCanvasId,
         });
         if (!posted) {
           logger.error('[NoteTaker Webhook] thread_anchor_message_conversation_mismatch', {
@@ -208,10 +218,9 @@ class NoteTakerWebhookController {
     }
 
     // Thread-linked recording: view access to the recording is granted to
-    // the thread's channel later, once the detailed summary canvas exists
-    // (recordingSharingService requires it) — see
-    // noteTakerTranscriptService.shareThreadRecordingIfLinked, called at the
-    // end of transcript/summary processing.
+    // the thread's channel once the recording actually ends — see
+    // handleParticipantLeft / handleRoomFinished below
+    // (noteTakerTranscriptService.shareThreadRecordingIfLinked).
 
     // Auto-start an audio recording for the whole call — note-taker calls have
     // no manual "start recording" UI action, so this replaces that trigger.
@@ -275,6 +284,13 @@ class NoteTakerWebhookController {
         logger.error(`[NoteTaker Webhook] Failed to stop recording for call ${roomName}:`, stopErr);
       }
 
+      // Thread-linked recording: grant the thread's channel VIEW access to
+      // this recording immediately now that it has ended — both canvases
+      // already exist (created up front at call-initiate time), so there's
+      // no need to wait for the post-call AI summary pipeline. Best-effort
+      // — a failure here must not block ending the call.
+      await noteTakerTranscriptService.shareThreadRecordingIfLinked(result.call);
+
       await this.emitCallEndedAutomation(result.call, now);
     }
   }
@@ -313,6 +329,8 @@ class NoteTakerWebhookController {
 
     if (result.shouldEndCall) {
       logger.info(`[NoteTaker Webhook] Marked call ${roomName} as ENDED (room_finished)`);
+
+      await noteTakerTranscriptService.shareThreadRecordingIfLinked(result.call);
       await this.emitCallEndedAutomation(result.call, now);
     }
 

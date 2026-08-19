@@ -59,6 +59,7 @@ import {
   LinkVisibility,
   LookupType,
   MailboxState,
+  MessageArtifactStatus,
   MeetingStatus,
   MessageType,
   NotificationLevel,
@@ -932,6 +933,33 @@ export const messageTable = table('messages')
     messageActs: string().optional(),
   })
   .primaryKey('messageId');
+
+// Deliberately self-contained: the global artifact subscription must not relate
+// to `messages`, or every message delta in the workspace would flow through its
+// IVM pipeline. Each column below is either lifecycle state or the minimum
+// needed to route to the artifact without that join.
+export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    // Whether the artifact is the conversation's initial message decides
+    // between the channel route and the thread route. It cannot be derived
+    // without joining messages/conversations, so it is projected here.
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    // The source message's createdAt — drives the banner's age label and the
+    // channel-list load anchor. Equal to the conversation's createdAt when the
+    // artifact is the initial message, which is the case the anchor is used for.
+    messageCreatedAt: number(),
+    command: string(),
+    status: enumeration<MessageArtifactStatus>(),
+    callExternalId: string().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
 
 export const messageAttachmentTable = table('message_attachments')
   .columns({
@@ -3319,6 +3347,23 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
   }),
 }));
 
+export const messageArtifactTableRelationships = relationships(
+  messageArtifactTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    // Used by the artifact subscription to keep banner delivery participant-only.
+    channelParticipants: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+  }),
+);
+
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({
     sourceField: ['id'],
@@ -4590,6 +4635,7 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
     delayedMessageTable,
@@ -4714,6 +4760,7 @@ export const schema = createSchema({
     channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
     messageTableRelationships,
+    messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
     channelParticipantTableRelationships,

@@ -2261,6 +2261,32 @@ model Message {
   @@schema("public")
 }
 
+// Lifecycle row for structured message artifacts (slash commands). The banner
+// renders and authorizes from this row alone: relating it to `messages` would
+// push every message delta through the global artifact subscription, so the few
+// fields needed to route to the message are projected here instead.
+// `status`/`callExternalId` are the single source of truth for lifecycle and are
+// never mirrored back into message content.
+model MessageArtifact {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  messageId        String   @unique
+  channelId        String
+  conversationId   String
+  isInitialMessage Boolean
+  messagePreview   String
+  messageCreatedAt DateTime
+  command          String
+  status           String
+  callExternalId   String?
+  updatedAt        DateTime
+
+  @@index([workspaceId, status, messageCreatedAt])
+  @@index([channelId])
+  @@map("message_artifacts")
+  @@schema("public")
+}
+
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())

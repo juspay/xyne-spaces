@@ -33,7 +33,7 @@ export function BrowserPanelHandler(): null {
     const cleanup = api.onOpenInBrowserPanel((url: string) => {
       xyneAIActor.send({ type: 'CLOSE' });
 
-      logger.info(Event.BROWSER_LINK_CLICK, { url });
+      logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'in-app' });
 
       if (browserPanelState === 'open' || isOnBrowserRoute) {
         browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
@@ -44,6 +44,21 @@ export function BrowserPanelHandler(): null {
 
     return cleanup;
   }, [isOnBrowserRoute, browserPanelState]);
+
+  // Links main routed to the external browser: logged here so external opens are
+  // counted alongside the in-app ones above.
+  useEffect(() => {
+    if (!isElectronApp()) return;
+
+    const api = window.electronAPI;
+    if (!api?.onLinkOpenedExternal) return;
+
+    const cleanup = api.onLinkOpenedExternal((url: string) => {
+      logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'external' });
+    });
+
+    return cleanup;
+  }, []);
 
   // Handle XyneAI context from Chrome extension deep link
   useEffect(() => {

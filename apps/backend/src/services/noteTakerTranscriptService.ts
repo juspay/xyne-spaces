@@ -152,22 +152,21 @@ class NoteTakerTranscriptService {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
+          detailedSummaryReady: detailedSummary ? true : undefined,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
 
-      // Thread-linked recording (started from inside a thread — see
-      // callController's headless-initiate branch): now that the detailed
-      // summary canvas exists, auto-share the recording to that thread's
-      // channel. Must wait until here — recordingSharingService requires both
-      // notesCanvasId AND detailedSummaryCanvasId to be on Call.metadata
-      // before it can sync canvas access, so calling it any earlier (e.g. at
-      // call-start) always fails with "Detailed summary canvas is not ready yet".
-      if (detailedSummary?.canvasId) {
-        await this.shareThreadRecordingIfLinked(call);
-      }
+      // Thread-linked recording: already auto-shared to the thread's channel
+      // immediately when the recording ended (see
+      // noteTakerWebhookController.handleParticipantLeft /
+      // handleRoomFinished). This call is now just an idempotent fallback in
+      // case that earlier attempt failed — recordingSharingService's grant
+      // is a safe upsert, so re-running it here is harmless even when the
+      // earlier share already succeeded.
+      await this.shareThreadRecordingIfLinked(call);
     } finally {
       await releaseLock(lockHandle);
     }
@@ -183,6 +182,7 @@ class NoteTakerTranscriptService {
   ): Promise<{
     summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
+    detailedSummaryReady: boolean;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
@@ -209,6 +209,7 @@ class NoteTakerTranscriptService {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
+        detailedSummaryReady: true,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
       markedItems,
@@ -217,6 +218,7 @@ class NoteTakerTranscriptService {
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
       detailedSummaryCanvasId: detailedSummary.canvasId,
+      detailedSummaryReady: true,
     };
   }
 
@@ -257,9 +259,13 @@ class NoteTakerTranscriptService {
    * so every thread/channel member can see the recording message card and
    * open /recordings/:callId. No-op for recordings not started from a thread
    * (no channelId on Call.metadata). Best-effort — a failure here must never
-   * block transcript/summary processing.
+   * block transcript/summary processing. Public so
+   * noteTakerWebhookController can call this immediately once the recording
+   * ends (handleParticipantLeft / handleRoomFinished) — both canvases
+   * already exist by then via eager creation, so there's no reason to wait
+   * for the detailed-summary pipeline anymore.
    */
-  private async shareThreadRecordingIfLinked(call: Call): Promise<void> {
+  async shareThreadRecordingIfLinked(call: Call): Promise<void> {
     const metadata =
       call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
         ? (call.metadata as Record<string, unknown>)

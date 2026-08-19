@@ -1,3 +1,32 @@
+## [1.195.0](https://github.com/juspay/xyne-spaces/compare/v1.194.0...v1.195.0) (2026-08-19)
+
+
+### Features
+
+* instant share recordings ([#702](https://github.com/juspay/xyne-spaces/issues/702)) ([67eb80f](https://github.com/juspay/xyne-spaces/commit/67eb80f7c0024e25f883b30255a0a2adb135e601))
+
+## [1.194.0](https://github.com/juspay/xyne-spaces/compare/v1.193.0...v1.194.0) (2026-08-18)
+
+
+### Features
+
+* slash commands with flowjson artifacts and  side eff… ([#355](https://github.com/juspay/xyne-spaces/issues/355)) ([46c0fa9](https://github.com/juspay/xyne-spaces/commit/46c0fa9ad1a88bbe1de3138fb83c5f704d73ba3d))
+
+## [1.193.0](https://github.com/juspay/xyne-spaces/compare/v1.192.2...v1.193.0) (2026-08-18)
+
+
+### Features
+
+* upgraded ysweet image with support for service accounts and docid in query params ([#710](https://github.com/juspay/xyne-spaces/issues/710)) ([1b1b11f](https://github.com/juspay/xyne-spaces/commit/1b1b11f823b1f68c1b337942eeb61a1263b32b4b))
+
+## [1.192.2](https://github.com/juspay/xyne-spaces/compare/v1.192.1...v1.192.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* acl fix for canvas ([#700](https://github.com/juspay/xyne-spaces/issues/700)) ([93ef45c](https://github.com/juspay/xyne-spaces/commit/93ef45c277692c483e6b940f2ee1d65d64272103))
+* log whether a link opened in the in-app or external browser ([#704](https://github.com/juspay/xyne-spaces/issues/704)) ([b08e0dc](https://github.com/juspay/xyne-spaces/commit/b08e0dc1488de5de423a16033390631de2ddbbb9))
+
 ## [1.192.1](https://github.com/juspay/xyne-spaces/compare/v1.192.0...v1.192.1) (2026-08-18)
 
 

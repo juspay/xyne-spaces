@@ -61,6 +61,12 @@ interface RenderMessageWithHTMLProps {
   messageId?: string;
   conversationId?: string;
   preserveThreadRoute?: boolean;
+  slashCommandArtifactContext?: {
+    channelId?: string;
+    senderId?: string;
+    createdAt?: number;
+    surface?: 'channel' | 'thread';
+  };
 }
 
 const MAX_HTML_LENGTH = 100000;
@@ -880,6 +886,7 @@ const parseNode = (
   messageId?: string,
   conversationId?: string,
   preserveThreadRoute = false,
+  slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -1084,6 +1091,9 @@ const parseNode = (
             flow={flowJSON}
             messageId={messageId ?? ''}
             conversationId={conversationId ?? ''}
+            {...(slashCommandArtifactContext && {
+              messageContext: slashCommandArtifactContext,
+            })}
           />
         );
       } catch (e) {
@@ -1128,6 +1138,7 @@ const parseNode = (
       messageId,
       conversationId,
       preserveThreadRoute,
+      slashCommandArtifactContext,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1295,9 +1306,6 @@ const parseNode = (
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
         const externalHref = href;
         props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
-          if (e.metaKey || e.ctrlKey) {
-            logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: externalHref });
-          }
           e.preventDefault();
           openLink(externalHref, e);
         };
@@ -1362,6 +1370,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   messageId,
   conversationId,
   preserveThreadRoute = false,
+  slashCommandArtifactContext,
 }): JSX.Element => {
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
@@ -1406,6 +1415,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           messageId,
           conversationId,
           preserveThreadRoute,
+          slashCommandArtifactContext,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1422,6 +1432,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     messageId,
     conversationId,
     preserveThreadRoute,
+    slashCommandArtifactContext,
   ]);
 
   // Inject (edited) into the last element if it's safe to do so
