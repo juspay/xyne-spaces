@@ -303,9 +303,16 @@ export interface QueryAST {
   select?: Record<string, unknown>;
 }
 
+// Opt-in outbound-query tracing. Off by default so the hot path is silent; set
+// SPACES_CLIENT_DEBUG=1 to see model/operation per query when diagnosing a
+// specific run. Never logs where/param/body VALUES (PII) — shape only.
+const SPACES_CLIENT_DEBUG = process.env["SPACES_CLIENT_DEBUG"] === "1";
+
 export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
-  console.error(`[spaces-client] POST /api/query/claw ${payload}`);
+  if (SPACES_CLIENT_DEBUG) {
+    console.error(`[spaces-client] POST /api/query/claw model=${ast.model} op=${ast.operation}`);
+  }
   const result = (await spacesFetch("/api/query/claw", {
     method: "POST",
     body: payload,
@@ -315,13 +322,11 @@ export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise
 
 export async function search(params: Record<string, string>, auth?: SpacesAuthContext): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
-  console.error(`[spaces-client] GET /api/vespaSearch/claw?${qs}`);
   return spacesFetch(`/api/vespaSearch/claw?${qs}`, undefined, auth);
 }
 
 export async function memorySearch(body: Record<string, unknown>, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(body);
-  console.error(`[spaces-client] POST /api/memory/claw/search ${payload}`);
   return spacesFetch("/api/memory/claw/search", {
     method: "POST",
     body: payload,

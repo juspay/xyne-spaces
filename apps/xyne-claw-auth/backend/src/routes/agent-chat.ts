@@ -1634,14 +1634,16 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 // assistant under the same user message.
 router.post("/:slug/chat/:convId/regenerate", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
-    const { convId } = req.params;
+    const { slug, convId } = req.params;
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
-    const messages = await chatMessageRepository.findByConversation(convId);
+    const messages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) {
       res.status(400).json({ success: false, error: "No assistant message found" });
@@ -1977,7 +1979,9 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
       return;
     }
 
-    const sourceMessages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    const sourceMessages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     if (sourceMessages.length === 0) {
       res.status(404).json({ success: false, error: "Source conversation is empty" });
       return;

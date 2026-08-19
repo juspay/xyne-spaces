@@ -742,8 +742,6 @@ export async function queryDirect(
     Object.assign(payload, Object.keys(explicit).length > 0 ? explicit : defaultNativeInputs(query));
   }
 
-  console.error("[vespa-direct] raw YQL:", safeYql, "| profile:", profile);
-
   const debug = { payloads: [{ stage: "direct", yql: safeYql, vespaParams: {} as Record<string, unknown> }] };
 
   let raw: Record<string, unknown>;

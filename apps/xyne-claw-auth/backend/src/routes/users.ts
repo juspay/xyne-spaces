@@ -265,8 +265,21 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
 
 router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
+    const requesterId = getRequesterId(req);
+    const orgId =
+      getOrgId(req) ??
+      (requesterId
+        ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+        : undefined);
+    if (!orgId) {
+      log.error(`[users] orgId is required; refusing cross-org user lookup requesterId=${requesterId ?? "none"} id=${req.params.id}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, orgId },
+      select: { id: true, email: true, name: true },
     });
 
     if (!user) {

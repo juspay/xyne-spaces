@@ -91,7 +91,7 @@ import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middlewa
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
@@ -104,6 +104,9 @@ import {
   clearPlanExecMeta,
   normalizePlanTitle,
   filterToApprovedTitles,
+  setPlanLastTodos,
+  getPlanLastTodos,
+  clearPlanLastTodos,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
@@ -500,6 +503,10 @@ import {
   readPrBindingData,
   normalizePrUrl,
   setWidgetBindingStatus,
+  upsertPlanBinding,
+  findProposedPlanBinding,
+  readPlanBindingData,
+  markPlanBindingStatus,
 } from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -781,7 +788,6 @@ async function pendingActionTargetValidation(
     return { error: null };
   }
 }
-
 
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
@@ -1400,7 +1406,6 @@ async function postWriteApprovalAction(args: {
   }, token);
 }
 
-
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
 
 async function handleWebhook(req: Request, res: Response): Promise<void> {
@@ -1543,7 +1548,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (mentionedUserIds.length > 0) {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
-
 
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
@@ -4242,12 +4246,41 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
+  const forwardToInternal = isInternalCallbackOrigin(url);
+  // Origin only — the full URL can carry a secret path segment.
+  const targetOrigin = (() => { try { return new URL(url).origin; } catch { return "(unparseable)"; } })();
+  // A dropped forward means the automation upstream waits forever for a result
+  // that will never arrive, so every non-delivery outcome here must be LOUD:
+  // error-level, event-tagged for the log bridge, and counted as a metric —
+  // not a warn that scrolls past.
+  const forwardFailure = (outcome: string, detail: string): void => {
+    clog.error(`[webhook/result] resultForward ${outcome} session=${payload.sessionId} origin=${targetOrigin} ${detail}`, {
+      event: "result_forward_failed",
+      sessionId: payload.sessionId,
+      outcome,
+      origin: targetOrigin,
+      internal: forwardToInternal,
+      automationCallback: isAutomationCallback,
+    });
+    clog.info([
+      "[metric]",
+      "name=result_forward",
+      "kind=count",
+      `outcome=${outcome}`,
+      `internal=${forwardToInternal}`,
+      `automation=${isAutomationCallback}`,
+    ].join(" "));
+  };
+  if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
+    forwardFailure("refused_origin", "target origin is neither internal nor an allowed external callback — result DROPPED");
+    return;
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,
@@ -4257,9 +4290,17 @@ async function forwardResult(
         ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
       }),
     });
-    if (!res.ok) clog.warn(`[webhook/result] resultForward returned ${res.status}`);
+    if (!res.ok) {
+      // 401/403 on an internal-classified target is the L-18 misconfiguration
+      // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
+      // key mismatch) — the detail names it so the fix is obvious from the log.
+      const authHint = res.status === 401 || res.status === 403
+        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
+        : "";
+      forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
+    }
   } catch (err) {
-    clog.warn(`[webhook/result] resultForward failed: ${err instanceof Error ? err.message : String(err)}`);
+    forwardFailure("network_error", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -4836,6 +4877,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  // The run is over and will NOT continue: every path that re-dispatches or
+  // re-queues (handoff, broken-SSE retry, session_locked, recovery retry) has
+  // already returned above. Settle the plan card here, so it covers a failed or
+  // cancelled run too — those are exactly the ones that die mid-step.
+  await reconcileStalePlanTodos(
+    sessionId,
+    ctx?.conversationId ?? payload.conversationId ?? null,
+    ctx?.agentSlug ?? payload.agentSlug ?? null,
+  ).catch((err) =>
+    clog.warn(
+      "[webhook/result] plan todo reconcile failed (non-fatal):",
+      err instanceof Error ? err.message : err,
+    ),
+  );
+
   if (payload.status !== "completed") {
     // Result-forward callers (Spaces auto-draft / automations) get the failure
     // via their callback and return BEFORE the bot-mention surfacing below —
@@ -5307,7 +5363,23 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // re-planned). Grey it out + disable its Approve button so a superseded
       // plan can't be run. Best-effort; the new card posts regardless.
       if (ctx.conversationId && ctx.agentSlug) {
-        const prevCard = await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        // Redis is the fast path; the durable binding is what still finds a
+        // proposal older than the 24h TTL — without it an ancient card would
+        // stay tappable (and, now that approval survives, actually runnable)
+        // after the agent has already re-planned.
+        const prevBinding = await findProposedPlanBinding(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        const prevBindingData = prevBinding ? readPlanBindingData(prevBinding) : null;
+        const prevCard =
+          (await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null)) ??
+          (prevBinding?.messageId && prevBindingData
+            ? {
+                messageId: prevBinding.messageId,
+                todos: prevBindingData.todos,
+                ...(prevBindingData.title ? { title: prevBindingData.title } : {}),
+                ...(prevBindingData.desc ? { desc: prevBindingData.desc } : {}),
+                ...(prevBindingData.document ? { document: prevBindingData.document } : {}),
+              }
+            : null);
         if (prevCard?.messageId) {
           try {
             const supersededFlow = withSpacesAppId(
@@ -5337,6 +5409,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               error: e instanceof Error ? e.message : String(e),
             });
           }
+        }
+        // Terminal in the durable store too, whether or not the card repaint
+        // above succeeded: a superseded plan must fail the approve guard forever,
+        // not just until its Redis pointer is overwritten.
+        if (prevBinding) {
+          await markPlanBindingStatus(prevBinding.id, "superseded").catch((e) => {
+            log.warn("Failed to mark prior plan binding superseded (non-fatal)", {
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
         }
       }
 
@@ -5399,6 +5481,39 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
             ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
           }).catch(() => {});
+          // Durable mirror of the line above. The Redis pointer and the session
+          // both expire in 24h, but the card in the thread does not — this row is
+          // what lets someone approve a plan days later. It carries everything
+          // flow-action.ts needs with NO surviving Redis state: the executable
+          // todos, the card's routing, and the proposer (the only user allowed to
+          // act on it). Best-effort: a failure here costs durability, never the
+          // card, and the Redis fast path still covers the first 24h.
+          if (ctx.agentOrgId && ctx.spacesAppId && ctx.spacesAppUserId) {
+            await upsertPlanBinding({
+              orgId: ctx.agentOrgId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+              messageId: planMessageId,
+              spacesAppId: ctx.spacesAppId,
+              spacesAppUserId: ctx.spacesAppUserId,
+              agentSlug: ctx.agentSlug,
+              data: {
+                todos: planTodos,
+                ownerUserId: ctx.senderId,
+                ...(pendingPlan.title ? { title: pendingPlan.title } : {}),
+                ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+                ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+              },
+            }).catch((e) => {
+              log.warn("Failed to persist plan binding — approval will expire with Redis (non-fatal)", {
+                error: e instanceof Error ? e.message : String(e),
+              });
+            });
+          } else {
+            log.warn(
+              `Plan card posted without org/app context — no durable binding written, approval expires in 24h (conv=${ctx.conversationId})`,
+            );
+          }
           // Fresh proposal awaiting approval: reset any prior run's exec meta so
           // stale approvedTitles/autoApproved can't leak into this plan. The
           // approve flow-action writes the real meta before it dispatches Turn 2.
@@ -6742,6 +6857,15 @@ async function doRenderPlanCard(
     );
   }
 
+  // Snapshot exactly what this card is about to show. Nothing else records the
+  // todo list, so this is what reconcileStalePlanTodos reads at run end to find
+  // a step the agent left `in_progress` and never closed.
+  const snapConversationId = ctx.conversationId ?? conversationId ?? "";
+  const snapAgentSlug = ctx.agentSlug ?? agentSlug ?? "";
+  if (snapConversationId && snapAgentSlug) {
+    await setPlanLastTodos(snapConversationId, snapAgentSlug, renderTodos).catch(() => {});
+  }
+
   // Live todo cards are always in execution (auto mode). Pick the phase so the
   // PlanNode renders the executing/done layout (buildPlanFlow maps the internal
   // Todo status → the component's exec status). Once every todo is
@@ -6803,6 +6927,58 @@ function renderPlanCard(
     if (planRenderQueue.get(sessionId) === next) planRenderQueue.delete(sessionId);
   });
   return next;
+}
+
+/**
+ * Run-end reconciliation for the live plan card.
+ *
+ * A todo only leaves `in_progress` when the NEXT todo-write arrives. If the run
+ * ends without one — the model forgot to close the last step, or the run died
+ * mid-step — the card keeps rendering that row as `running`, so the user watches
+ * a spinner that can never resolve on a run that is definitively over.
+ *
+ * Those rows are reset to `pending`, NOT `completed`. The run ended without ever
+ * telling us the step succeeded, so marking it done would be inventing a result,
+ * and a false ✓ is the one outcome the user can't tell apart from a real one.
+ * `pending` also deliberately keeps the card out of the terminal 'done' phase
+ * (which needs every todo completed/failed), so the header stays "Approved"
+ * rather than claiming "Completed" over work that never finished.
+ *
+ * `failed` was the other candidate and is worse: it asserts the step broke,
+ * which is equally unverified, and it reads as an error the user should act on.
+ * Not-confirmed is the honest state, and `pending` is the only status that says
+ * that without also making a claim.
+ */
+async function reconcileStalePlanTodos(
+  sessionId: string,
+  conversationId: string | null,
+  agentSlug: string | null,
+): Promise<void> {
+  if (!conversationId || !agentSlug) return;
+  // Drain any todo-write render still queued for this session BEFORE reading the
+  // snapshot. Reading first would capture the previous render's list and then
+  // re-render it on top of the newer one, reverting a status the agent did
+  // legitimately write in its final tick.
+  await (planRenderQueue.get(sessionId) ?? Promise.resolve()).catch(() => {});
+  const last = await getPlanLastTodos(conversationId, agentSlug).catch(() => null);
+  if (!last?.length) return;
+  const stalled = last.filter((t) => t.status === "in_progress").length;
+  if (stalled === 0) {
+    // Card already settled itself — drop the snapshot so it can't be re-applied
+    // to a later run in this thread.
+    await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
+    return;
+  }
+  const reconciled: Todo[] = last.map((t) =>
+    t.status === "in_progress" ? { ...t, status: "pending" as const } : t,
+  );
+  clog.info(
+    `[plan] run ended with ${stalled} step(s) still in_progress — resetting to pending conv=${conversationId} agent=${agentSlug}`,
+  );
+  // Goes through the SAME serialized queue as every todo-write render, so it
+  // lands after any render still in flight instead of racing it.
+  await renderPlanCard(sessionId, reconciled, conversationId, agentSlug);
+  await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
 }
 
 // ── PR card render (create/merge PR subagent tool → kind:"pr" progress) ─────

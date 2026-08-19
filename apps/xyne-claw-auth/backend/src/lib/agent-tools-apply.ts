@@ -33,6 +33,7 @@ import {
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { resolveAgentCapabilities, toConfigTools, unknownToolsNote } from "./agent-card.js";
 import { writeAuditLog } from "./audit.js";
+import { resolvePromptChange } from "./prompt-edits.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-tools-apply");
@@ -154,12 +155,21 @@ async function updateAgent(params: Record<string, unknown>, userId: string): Pro
 
   const data: Record<string, unknown> = {};
   const changed: string[] = [];
-  for (const field of ["name", "description", "systemPrompt", "modelId", "color"] as const) {
+  for (const field of ["name", "description", "modelId", "color"] as const) {
     const value = str(params[field]);
     if (value) {
       data[field] = value;
       changed.push(field);
     }
+  }
+
+  // Prompt changes go through resolvePromptChange: anchored promptEdits against
+  // the stored prompt, or full replacement only while the prompt is short.
+  const promptChange = resolvePromptChange(params, agent.systemPrompt ?? "");
+  if (promptChange.error) return { ok: false, error: promptChange.error };
+  if (promptChange.prompt !== undefined) {
+    data["systemPrompt"] = promptChange.prompt;
+    changed.push("systemPrompt");
   }
 
   let note: string | undefined;
@@ -259,12 +269,20 @@ async function updateSubagent(params: Record<string, unknown>, userId: string): 
 
   const data: Record<string, unknown> = {};
   const changed: string[] = [];
-  for (const field of ["description", "systemPrompt", "paramName", "paramDescription"] as const) {
+  for (const field of ["description", "paramName", "paramDescription"] as const) {
     const value = str(params[field]);
     if (value) {
       data[field] = field === "paramName" ? kebab(value) : value;
       changed.push(field);
     }
+  }
+
+  // Same prompt-change contract as update-agent (see resolvePromptChange).
+  const promptChange = resolvePromptChange(params, existing.systemPrompt ?? "");
+  if (promptChange.error) return { ok: false, error: promptChange.error };
+  if (promptChange.prompt !== undefined) {
+    data["systemPrompt"] = promptChange.prompt;
+    changed.push("systemPrompt");
   }
   if (typeof params["enabled"] === "boolean") {
     data["enabled"] = params["enabled"];

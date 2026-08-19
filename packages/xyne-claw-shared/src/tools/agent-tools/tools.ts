@@ -40,6 +40,26 @@ const toolsProperty = {
   items: { type: "string" as const },
 };
 
+// Shared by update-agent / update-subagent. Mirrors update-skill's `edits`
+// contract (see skill-management/tools.ts): long prompts do not survive as tool
+// arguments, so surgical anchored edits are the safe way to change them.
+const promptEditsProperty = {
+  type: "array" as const,
+  description:
+    "PREFERRED way to change the system prompt: anchored replacements applied in order to the CURRENT prompt. " +
+    "Each oldText must be copied EXACTLY from the current prompt and must be unique within it; newText replaces it. " +
+    "To insert a new section, use an edit whose oldText is the exact line to insert after, and whose newText is that " +
+    "same line followed by the new section. Mutually exclusive with systemPrompt.",
+  items: {
+    type: "object" as const,
+    properties: {
+      oldText: { type: "string" as const, description: "Exact snippet copied from the current prompt (unique within it)." },
+      newText: { type: "string" as const, description: "Replacement text." },
+    },
+    required: ["oldText", "newText"],
+  },
+};
+
 export const createAgentTool: ToolDefinition = {
   slug: "create-agent",
   name: "Create Agent",
@@ -85,6 +105,10 @@ export const updateAgentTool: ToolDefinition = {
     "Propose a change to an EXISTING agent. The user sees an Approve/Decline card with what would change; nothing is " +
     "applied until they approve, and approval is refused unless the approver may edit that agent (its owner, an EDITOR, or an admin). " +
     "Send ONLY the fields you want to change — omitted fields are left exactly as they are. " +
+    "To change the system prompt, PREFER `promptEdits` — anchored {oldText, newText} replacements against the current prompt " +
+    "(read it first via get-agent-config so your oldText anchors are exact; each must appear exactly once). " +
+    "`systemPrompt` (full replacement) is only accepted while the current prompt is under ~8K chars — larger bodies get " +
+    "truncated as tool arguments and would destroy the prompt, so the server rejects them. " +
     "`tools` REPLACES the agent's tool list rather than adding to it, so read the agent's current tools first (get-agent-config) " +
     "and send the full intended list. " +
     "This mutates an agent that may be running right now, so prefer a narrow change over a rewrite.",
@@ -96,7 +120,13 @@ export const updateAgentTool: ToolDefinition = {
       slug: { type: "string", description: "Identifier of the agent to change, e.g. 'release-notes-writer'. Required." },
       name: { type: "string", description: "New display name. Omit to leave unchanged." },
       description: { type: "string", description: "New one-line description. Omit to leave unchanged." },
-      systemPrompt: { type: "string", description: "Replacement system prompt (full body, not a diff). Omit to leave unchanged." },
+      systemPrompt: {
+        type: "string",
+        description:
+          "Full replacement system prompt — SMALL PROMPTS ONLY (rejected when the current prompt exceeds ~8K chars; " +
+          "use promptEdits instead). Omit to leave unchanged.",
+      },
+      promptEdits: promptEditsProperty,
       modelId: { type: "string", description: "New pinned model id. Omit to leave unchanged." },
       color: { type: "string", description: "New hex accent colour. Omit to leave unchanged." },
       tools: {
@@ -157,7 +187,9 @@ export const updateSubagentTool: ToolDefinition = {
   description:
     "Propose a change to an EXISTING subagent. The user sees an Approve/Decline card; nothing is applied until they approve, " +
     "and approval is refused unless the approver may edit that subagent (its creator, an EDITOR share, or an admin). " +
-    "Send ONLY the fields you want to change. `tools` REPLACES the subagent's tool list rather than adding to it.",
+    "Send ONLY the fields you want to change. To change the system prompt, PREFER `promptEdits` (anchored {oldText, newText} " +
+    "replacements — read the current prompt first); `systemPrompt` full replacement is rejected once the current prompt " +
+    "exceeds ~8K chars. `tools` REPLACES the subagent's tool list rather than adding to it.",
   source: AGENT_TOOLS_SOURCE,
   isWriteTool: true,
   inputSchema: {
@@ -165,7 +197,13 @@ export const updateSubagentTool: ToolDefinition = {
     properties: {
       name: { type: "string", description: "Identifier of the subagent to change, e.g. 'changelog'. Required." },
       description: { type: "string", description: "New one-line description. Omit to leave unchanged." },
-      systemPrompt: { type: "string", description: "Replacement system prompt (full body, not a diff). Omit to leave unchanged." },
+      systemPrompt: {
+        type: "string",
+        description:
+          "Full replacement system prompt — SMALL PROMPTS ONLY (rejected when the current prompt exceeds ~8K chars; " +
+          "use promptEdits instead). Omit to leave unchanged.",
+      },
+      promptEdits: promptEditsProperty,
       paramName: { type: "string", description: "New input parameter name. Omit to leave unchanged." },
       paramDescription: { type: "string", description: "New description of the input parameter. Omit to leave unchanged." },
       tools: {

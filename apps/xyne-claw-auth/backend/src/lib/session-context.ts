@@ -440,3 +440,56 @@ export async function deleteSession(sessionId: string): Promise<void> {
     } catch { /* malformed — nothing to clean up */ }
   }
 }
+
+
+// ── Last rendered plan todos (conversation-scoped) ───────────────────────────
+// The live plan card is fire-and-forget: every todo-write re-renders it and
+// nothing keeps the list afterwards. A todo only leaves `in_progress` when the
+// NEXT todo-write arrives, so a run that ends without one — the model forgot to
+// close the step, or it crashed mid-step — leaves the card frozen mid-flight
+// with a row spinning forever on a run that is definitively over.
+//
+// This snapshot is the only record of what the card currently shows, so it is
+// what /webhook/result reconciles against at run end. Written on every render;
+// cleared once reconciled.
+const PLAN_LAST_TODOS_PREFIX = "plan-last-todos:";
+
+/** Mirrors xyne-claw-shared's `Todo` structurally, without the dependency. */
+export interface PlanTodoSnapshot {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+}
+
+function planLastTodosKey(conversationId: string, agentSlug: string): string {
+  return `${PLAN_LAST_TODOS_PREFIX}${conversationId}:${agentSlug}`;
+}
+
+export async function setPlanLastTodos(
+  conversationId: string,
+  agentSlug: string,
+  todos: PlanTodoSnapshot[],
+): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(planLastTodosKey(conversationId, agentSlug), JSON.stringify(todos), "EX", SESSION_TTL);
+}
+
+export async function getPlanLastTodos(
+  conversationId: string,
+  agentSlug: string,
+): Promise<PlanTodoSnapshot[] | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.get(planLastTodosKey(conversationId, agentSlug));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as PlanTodoSnapshot[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPlanLastTodos(conversationId: string, agentSlug: string): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.del(planLastTodosKey(conversationId, agentSlug)).catch(() => {});
+}

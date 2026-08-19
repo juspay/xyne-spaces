@@ -43,6 +43,22 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "euler-workspace-template-a",
     "euler-workspace-template-b",
   ],
+  // upi: 4-way. Its load is BURSTY rather than steady — newton-doctor fans out
+  // ~30 concurrent threads, and on 2026-08-11 that single burst stormed the one
+  // snapshot. Clones are 100Gi (half euler's), so four variants cost ~$10/mo in
+  // snapshot storage — cheap for 4x the clone ceiling against a fan-out that
+  // arrives all at once and cannot be smoothed by a longer warm window.
+  //
+  // Infra side:
+  //   BASE_TEMPLATE=upi-workspace-template BASE_WARMPOOL=upi-warmpool \
+  //   GOLDEN_PVC=upi-golden-pvc SNAP_PREFIX=upi-golden-snap-rot \
+  //   VARIANTS="a b c d" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "upi-workspace-template": [
+    "upi-workspace-template-a",
+    "upi-workspace-template-b",
+    "upi-workspace-template-c",
+    "upi-workspace-template-d",
+  ],
 };
 
 // Per-base round-robin cursor. Process-local (each claw pod has its own), which

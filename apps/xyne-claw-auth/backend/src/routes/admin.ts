@@ -95,7 +95,7 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
       description: `${role} granted to ${targetUser.email}`,
       metadata: { targetEmail: targetUser.email, role },
     });
-    log.info(`[admin] ${role} granted to ${targetUser.email} by ${requesterId}`);
+    log.info(`[admin] ${role} granted to user=${targetUser.id} by ${requesterId}`);
     res.status(201).json({ success: true, data: grantedRole });
   } catch (err) {
     log.error("[admin] grant role error:", err);
@@ -119,7 +119,7 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
 
     await userRoleRepository.delete(userId, role);
     await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
-    log.info(`[admin] ${role} revoked from ${targetUser.email} by ${requesterId}`);
+    log.info(`[admin] ${role} revoked from user=${targetUser.id} by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {

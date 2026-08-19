@@ -34,6 +34,12 @@ import { executeTool as executeGatewayTool } from "../mcpgateway/services/execut
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 import { redisService } from "../redis.js";
 import {
+  findPlanBindingByMessageId,
+  readPlanBindingData,
+  consumePlanBinding,
+  type PlanBindingStatus,
+} from "../lib/agent-widget-binding.js";
+import {
   QUEUE_CAP,
   QUEUE_ENABLED,
   enqueueMessage,
@@ -175,6 +181,33 @@ async function consumePlanAction(messageId: string): Promise<boolean> {
   const key = `flow-action:plan:${messageId}`;
   const result = await redisService.getConnection().set(key, "1", "EX", PLAN_ACTION_CONSUMED_TTL_SEC, "NX");
   return result === "OK";
+}
+
+/**
+ * Single-use gate for a plan card — durable whenever the card has a binding.
+ * The Redis NX key above expires in PLAN_ACTION_CONSUMED_TTL_SEC while the card
+ * itself never does, so for a bound card the authoritative gate is the row's
+ * atomic 'proposed' → terminal transition; without it a plan approved once could
+ * be approved again after the key lapsed. Cards posted before bindings existed
+ * keep the Redis behaviour. Fails CLOSED (a DB error refuses the action) — a
+ * blocked approve is recoverable, a double-dispatched plan is not.
+ */
+async function consumePlanCard(
+  messageId: string,
+  binding: { screenId: string } | null,
+  next: PlanBindingStatus,
+): Promise<boolean> {
+  if (!messageId) return false;
+  if (!binding) return consumePlanAction(messageId);
+  try {
+    return await consumePlanBinding(binding.screenId, next);
+  } catch (err) {
+    log.error(
+      `[flow-action] plan-approval: durable consume failed screenId=${binding.screenId}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
 }
 
 // ── Spaces signature re-verification ─────────────────────────────────────────
@@ -1994,31 +2027,80 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       const { getSessionByConv } = await import("./webhook.js");
-      const [priorCtx, activePlan] = await Promise.all([
+      const [priorCtx, activePlan, planBinding] = await Promise.all([
         getSessionByConv(flowConversationId, flowAgentSlug),
         getActivePlanCard(flowConversationId, flowAgentSlug),
+        findPlanBindingByMessageId(messageId).catch(() => null),
       ]);
-      // A plan action must target the exact outstanding server-created card.
-      // This rejects stale/replayed cards and a flow body with substituted plan
-      // text even when the transport itself was validly signed.
-      if (
-        !priorCtx ||
-        !activePlan ||
-        activePlan.messageId !== messageId ||
-        priorCtx.planMessageId !== messageId ||
-        !priorCtx.pendingPlan?.todos?.length
-      ) {
+      const bindingData = planBinding ? readPlanBindingData(planBinding) : null;
+
+      // A plan action must target the exact outstanding server-created card, and
+      // every todo it runs must come from server state — never from the submitted
+      // flow body, which is user-mutable even when the transport was validly
+      // signed. Two server sources, in priority order:
+      //
+      //   1. Redis `plan-active-card:` — the live fast path (24h TTL).
+      //   2. The durable AgentWidgetBinding row ('plan') — the same facts with no
+      //      expiry. This is what makes a card posted days ago still approvable:
+      //      by then the Redis pointer AND the SessionContext are both gone.
+      //
+      // NOTE: ctx.pendingPlan is deliberately NOT part of this gate. Turn 1 never
+      // writes it (it is only set when Turn 2 is dispatched), so requiring it
+      // 409'd EVERY non-trivial plan approval — prod 2026-08-19, "App backend
+      // error 409" on all Approve clicks since the 2026-08-18 sync deploy. The
+      // todos the dispatch trusts come from the card record, never the session.
+      //
+      // A binding is the AUTHORITY on liveness. Anything but 'proposed' —
+      // superseded by a re-plan, or already approved/rejected — is refused
+      // outright, which is also what makes the single-use gate durable.
+      if (planBinding && planBinding.status !== "proposed") {
+        log.warn(`[flow-action] plan-approval: plan is '${planBinding.status}' conv=${flowConversationId} agent=${flowAgentSlug}`);
+        res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
+        return;
+      }
+      // Redis still holds a DIFFERENT live card for this thread ⇒ this one was
+      // superseded by a re-plan. Refuse even if the binding still reads
+      // 'proposed', since the binding's supersede write is best-effort.
+      if (activePlan && activePlan.messageId !== messageId) {
+        log.warn(`[flow-action] plan-approval: superseded card conv=${flowConversationId} agent=${flowAgentSlug}`);
+        res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
+        return;
+      }
+      const serverPlan =
+        activePlan?.todos?.length
+          ? {
+              todos: activePlan.todos,
+              title: activePlan.title ?? "Plan",
+              desc: activePlan.desc,
+              document: activePlan.document,
+            }
+          : bindingData
+            ? {
+                todos: bindingData.todos,
+                title: bindingData.title ?? "Plan",
+                desc: bindingData.desc,
+                document: bindingData.document,
+              }
+            : null;
+
+      // Card-scoped facts come from the binding first: it was written when THIS
+      // card was posted, whereas the session is conversation-scoped and any later
+      // turn overwrites it (a different sender's mention would otherwise hand us
+      // the wrong plan owner). The session is the fallback for cards proposed
+      // before bindings existed.
+      const planAgentSlug = planBinding?.agentSlug ?? priorCtx?.agentSlug ?? flowAgentSlug;
+      const planSpacesAppId = planBinding?.spacesAppId ?? priorCtx?.spacesAppId;
+      const planChannelId = planBinding?.channelId ?? priorCtx?.channelId;
+      const planConversationId = planBinding?.conversationId ?? priorCtx?.conversationId ?? flowConversationId;
+      const planUserId = bindingData?.ownerUserId ?? priorCtx?.senderId;
+
+      if (!serverPlan || !planUserId) {
         log.warn(`[flow-action] plan-approval: stale or missing server plan conv=${flowConversationId} agent=${flowAgentSlug}`);
         res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
         return;
       }
 
-      const planAgentSlug = priorCtx.agentSlug ?? flowAgentSlug;
-      const planSpacesAppId = priorCtx.spacesAppId;
-      const planChannelId = priorCtx.channelId;
-      const planConversationId = priorCtx.conversationId ?? flowConversationId;
-      const planUserId = priorCtx.senderId;
-      const serverTodos = activePlan.todos;
+      const serverTodos = serverPlan.todos;
 
       // Only the user the server recorded for this plan can approve/reject it.
       if (!callerUserId || callerUserId !== planUserId) {
@@ -2032,14 +2114,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a "Rejected by <name>" audit. NO Turn 2, NO plan-mode/config change, no
       // follow-ups — if they want a new plan they mention the agent again.
       if (actionId === "plan-reject") {
-        if (!(await consumePlanAction(messageId))) {
+        if (!(await consumePlanCard(messageId, planBinding, "rejected"))) {
           res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
           return;
         }
         const rejectedTodos = serverTodos;
-        const rejectTitle = activePlan.title ?? "Plan";
-        const rejectDesc = activePlan.desc;
-        const rejectDoc = activePlan.document;
+        const rejectTitle = serverPlan.title;
+        const rejectDesc = serverPlan.desc;
+        const rejectDoc = serverPlan.document;
         const rejecterName = await prisma.user
           .findUnique({ where: { id: callerUserId }, select: { name: true } })
           .then((u) => u?.name?.trim() ?? "")
@@ -2108,7 +2190,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      if (!(await consumePlanAction(messageId))) {
+      if (!(await consumePlanCard(messageId, planBinding, "approved"))) {
         res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
         return;
       }
@@ -2120,9 +2202,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // because the whole flow is replaced.
       resp = { type: "close_screen", finalMessage: `▶ Approved — running ${approved.length} step(s)…` };
       res.json(resp);
-      const planTitleForCard = activePlan.title ?? "Plan";
-      const planDescForCard = activePlan.desc;
-      const planDocForCard = activePlan.document;
+      const planTitleForCard = serverPlan.title;
+      const planDescForCard = serverPlan.desc;
+      const planDocForCard = serverPlan.document;
       // Who approved (already authz-checked === planUserId) — resolved once here
       // and reused for BOTH the immediate executing card and the durable exec
       // meta, so the card shows "Approved by <name>" with no flicker. Response is
