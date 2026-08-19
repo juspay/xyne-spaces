@@ -41,16 +41,6 @@ export interface TimeSeriesDataPoint {
   date: string
   stats: PRStatsLegacy
 }
-
-// Message type for filtered messages
-type FilteredMessage = {
-  messageId: string;
-  senderId: string;
-  conversationId: string;
-  channelId: string;
-  channelScopeType: string;
-  createdAt: Date;
-};
 const MINUTE_MS = 60 * 1000;
 /**
  * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]
@@ -141,33 +131,6 @@ export class AnalyticsRepository {
     'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n','cmlv7gc0a00mrka9fol3ccjrk'
   ];
 
-  /**
-   * Coalesces concurrent identical scans. Every analytics panel calls this
-   * helper with the same (workspace, range) key, and the dashboard fires all
-   * of them in parallel on mount and on every refetch — without this, one
-   * dashboard render issues ~8 copies of the same scan against the replica.
-   *
-   * Relies on ranges being minute-quantized (see floorToMinute) so that panels
-   * resolving their range moments apart still produce the same key.
-   */
-  private static readonly inFlightMessageQueries = new Map<string, Promise<FilteredMessage[]>>();
-
-  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<readonly FilteredMessage[]> {
-    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    const gte = dateCondition.gte ? dateCondition.gte.toISOString() : null;
-    const lte = dateCondition.lte ? dateCondition.lte.toISOString() : null;
-
-    const key = `${scopedWorkspaceId}|${gte ?? ''}|${lte ?? ''}`;
-    const inFlight = AnalyticsRepository.inFlightMessageQueries.get(key);
-    if (inFlight) return inFlight;
-
-    const query = this.queryFilteredMessages(gte, lte, scopedWorkspaceId)
-      .finally(() => AnalyticsRepository.inFlightMessageQueries.delete(key));
-
-    AnalyticsRepository.inFlightMessageQueries.set(key, query);
-    return query;
-  }
-
   private toIsoBounds(dateCondition: { gte?: Date; lte?: Date }): { gte: string | null; lte: string | null } {
     return {
       gte: dateCondition.gte ? dateCondition.gte.toISOString() : null,
@@ -219,21 +182,6 @@ export class AnalyticsRepository {
           AND (c."parentMessageId" IS NULL OR m."messageId" = c."initialMessageId")
         )
     `;
-  }
-
-  private async queryFilteredMessages(gte: string | null, lte: string | null, scopedWorkspaceId: string): Promise<FilteredMessage[]> {
-    const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
-      SELECT 
-        m."messageId", 
-        m."senderId", 
-        m."conversationId", 
-        c."channelId",
-        ch."scopeType" AS "channelScopeType",
-        m."createdAt"
-      ${this.validMessagesFrom(gte, lte, scopedWorkspaceId)}
-    `);
-
-    return messages;
   }
   private prisma = this.getDbInstance();
 
@@ -295,9 +243,9 @@ export class AnalyticsRepository {
    * same key string getBucketKey / generate*TimeBuckets produce, so SQL-side
    * grouping stays byte-identical to the old Node bucketing.
    */
-  private bucketOrdinalSql(groupBy: 'day' | 'hour'): Prisma.Sql {
+  private bucketOrdinalSql(groupBy: 'day' | 'hour', column: Prisma.Sql = Prisma.sql`m."createdAt"`): Prisma.Sql {
     const unitMs = groupBy === 'hour' ? HOUR_MS : HOUR_MS * 24;
-    return Prisma.sql`floor((floor(extract(epoch from m."createdAt") * 1000) + ${IST_OFFSET_MS}) / ${unitMs})::bigint`;
+    return Prisma.sql`floor((floor(extract(epoch from ${column}) * 1000) + ${IST_OFFSET_MS}) / ${unitMs})::bigint`;
   }
 
   /**
@@ -337,7 +285,7 @@ export class AnalyticsRepository {
   /**
    * Zero-fill a single-value bucketed aggregate into the ordered bucket list,
    * reconstructing each row's key from its ordinal and sorting by date - the
-   * same shape the old bucketCounts/bucketDistinct paths returned.
+   * same shape the old bucketCounts and distinct-user passes returned.
    */
   private zeroFillSingle(
     rows: { bucket: bigint; value: number }[],
@@ -380,35 +328,6 @@ export class AnalyticsRepository {
     return timeBuckets.map(bucketKey => ({
       date: bucketKey,
       value: bucketData.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
-  }
-
-  /**
-   * Like {@link bucketCounts} but counts DISTINCT ids per bucket. `idOf` yields the
-   * value deduped within a bucket (null/undefined rows are skipped); `keyOf` yields
-   * the bucket key (a null key drops the row). Empty buckets are zero-filled.
-   */
-  private bucketDistinct<T>(
-    records: readonly T[],
-    timeBuckets: string[],
-    keyOf: (record: T) => string | null | undefined,
-    idOf: (record: T) => string | null | undefined,
-  ): { date: string; value: number }[] {
-    const bucketData = new Map<string, Set<string>>();
-    timeBuckets.forEach(bucket => bucketData.set(bucket, new Set<string>()));
-
-    records.forEach(record => {
-      const id = idOf(record);
-      if (id == null) return;
-      const bucketKey = keyOf(record);
-      if (bucketKey != null && bucketData.has(bucketKey)) {
-        bucketData.get(bucketKey)!.add(id);
-      }
-    });
-
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      value: bucketData.get(bucketKey)?.size || 0,
     })).sort((a, b) => a.date.localeCompare(b.date));
   }
 
@@ -674,89 +593,132 @@ export class AnalyticsRepository {
   }> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
     const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    // Use getFilteredMessages for robust filtering
-    const validMessageActivities = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
-    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
-        where: { createdAt: dateCondition, userId: { in: userIds } },
-        select: { userId: true, createdAt: true },
-      })),
-      this.prisma.messageAttachment.findMany({
-        where: { createdAt: dateCondition, workspaceId },
-        select: { createdBy: true, createdAt: true },
-      }),
-
-      // Users who created tickets
-      this.prisma.ticket.findMany({
-        where: { createdAt: dateCondition, workspaceId },
-        select: { createdBy: true, createdAt: true },
-      }),
-
-      // Users who update ticket_activities
-      this.prisma.ticketActivity.findMany({
-        where: { timestamp: dateCondition, ticket: { workspaceId } },
-        select: { updatedBy: true, timestamp: true },
-      }),
-
-      // Users who created canvas
-      this.prisma.canvas.findMany({
-        where: { createdAt: dateCondition, createdBy: { in: userIds } },
-        select: { createdBy: true, createdAt: true },
-      }),
-
-      // Users who edited canvas
-      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: dateCondition, userId: { in: userIds } },
-        select: { userId: true, updatedAt: true },
-      }))
-    ]);
-
-    // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
 
-    // Normalise every activity source to a common { userId, timestamp } shape so the
-    // aggregation is strongly typed instead of sniffing keys off a union at runtime.
-    const activities: { userId: string | null | undefined; timestamp: Date | null | undefined }[] = [
-      ...validMessageActivities.map(m => ({ userId: m.senderId, timestamp: m.createdAt })),
-      ...reactionUsers.map(r => ({ userId: r.userId, timestamp: r.createdAt })),
-      ...attachmentUsers.map(a => ({ userId: a.createdBy, timestamp: a.createdAt })),
-      ...ticketCreators.map(t => ({ userId: t.createdBy, timestamp: t.createdAt })),
-      ...ticketActivityUsers.map(t => ({ userId: t.updatedBy, timestamp: t.timestamp })),
-      ...canvasCreators.map(c => ({ userId: c.createdBy, timestamp: c.createdAt })),
-      ...canvasParticipants.map(c => ({ userId: c.userId, timestamp: c.updatedAt })),
-    ];
-
-    // Distinct users active per bucket. Rows without a user or timestamp are skipped,
-    // matching the previous `if (userId && timestamp)` guard.
-    const timeSeries = this.bucketDistinct(
-      activities,
-      timeBuckets,
-      a => (a.timestamp ? this.getBucketKey(a.timestamp, groupBy) : null),
-      a => a.userId,
+    // One scan serves both the per-bucket distinct-user series AND the period
+    // total. Every activity source (messages, reactions, attachments, tickets,
+    // ticket activities, canvases, canvas participants) is UNION ALL'd into a
+    // single (user_id, bucket) set; GROUP BY ROLLUP(bucket) then returns one
+    // COUNT(DISTINCT user_id) row per bucket plus a grand-total row (flagged by
+    // GROUPING(bucket) = 1). This replaces 7 unbounded findMany calls that
+    // materialized every activity row in Node plus two in-memory passes - a
+    // per-bucket Set map and a whole-period Set (#9, #10).
+    const rows = await this.prisma.$queryRaw<{ is_total: number; bucket: bigint | null; value: number }[]>(
+      this.activeUsersActivitySql(gte, lte, workspaceId, groupBy),
     );
 
-    // Unique users across the whole period. A user counts even without a timestamp,
-    // preserving the previous total-count behaviour.
-    const uniqueUsers = new Set(
-      activities.map(a => a.userId).filter((id): id is string => id != null),
-    ).size;
+    const perBucket: { bucket: bigint; value: number }[] = [];
+    let uniqueUsers = 0;
+    for (const row of rows) {
+      if (row.is_total === 1) {
+        uniqueUsers = Number(row.value);
+      } else if (row.bucket !== null) {
+        perBucket.push({ bucket: row.bucket, value: Number(row.value) });
+      }
+    }
 
     return {
       uniqueUsers,
-      timeSeries,
+      timeSeries: this.zeroFillSingle(perBucket, timeBuckets, groupBy),
     };
+  }
+
+  /**
+   * Inclusive date bounds for an arbitrary timestamp column, emitted as plain
+   * sargable comparisons - the same shape validMessagesFrom uses for messages.
+   * A missing bound emits no clause, matching the old Prisma `createdAt: {}`
+   * ("all time") behaviour for the non-message activity sources.
+   */
+  private dateBoundsSql(column: Prisma.Sql, gte: string | null, lte: string | null): Prisma.Sql {
+    const gteClause = gte ? Prisma.sql`AND ${column} >= ${gte}::timestamp` : Prisma.empty;
+    const lteClause = lte ? Prisma.sql`AND ${column} <= ${lte}::timestamp` : Prisma.empty;
+    return Prisma.sql`${gteClause} ${lteClause}`;
+  }
+
+  /**
+   * The active-users activity set as a single UNION ALL over every source that
+   * counts as "activity", aggregated to distinct users per bucket (plus the
+   * grand total via ROLLUP) entirely in Postgres. Each member reproduces the
+   * exact tenant scoping the old per-source findMany calls used:
+   *   - messages           : validMessagesFrom (workspace + valid-message rules)
+   *   - reactions          : workspaceId + userId IN (workspace USER members)
+   *   - message attachments: workspaceId
+   *   - tickets            : workspaceId
+   *   - ticket activities  : workspaceId (denormalized tenant key)
+   *   - canvases           : createdBy IN (workspace USER members)
+   *   - canvas participants: workspaceId + userId IN (workspace USER members)
+   * COUNT(DISTINCT) ignores NULL user ids, matching the old null-id skip.
+   */
+  private activeUsersActivitySql(
+    gte: string | null,
+    lte: string | null,
+    workspaceId: string,
+    groupBy: 'day' | 'hour',
+  ): Prisma.Sql {
+    // USER-type members of the workspace; mirrors getUsersId()'s `userId IN (...)`.
+    const workspaceUsers = Prisma.sql`
+      SELECT u."id" FROM "public"."users" u
+      WHERE u."userType" = 'USER' AND u."workspaceId" = ${workspaceId}
+    `;
+    const bucketOf = (column: Prisma.Sql) => this.bucketOrdinalSql(groupBy, column);
+
+    return Prisma.sql`
+      WITH activity AS (
+        SELECT m."senderId" AS user_id, ${bucketOf(Prisma.sql`m."createdAt"`)} AS bucket
+        ${this.validMessagesFrom(gte, lte, workspaceId)}
+
+        UNION ALL
+        SELECT r."userId", ${bucketOf(Prisma.sql`r."createdAt"`)}
+        FROM "public"."reactions" r
+        WHERE r."workspaceId" = ${workspaceId}
+          AND r."userId" IN (${workspaceUsers})
+          ${this.dateBoundsSql(Prisma.sql`r."createdAt"`, gte, lte)}
+
+        UNION ALL
+        SELECT a."createdBy", ${bucketOf(Prisma.sql`a."createdAt"`)}
+        FROM "public"."message_attachments" a
+        WHERE a."workspaceId" = ${workspaceId}
+          ${this.dateBoundsSql(Prisma.sql`a."createdAt"`, gte, lte)}
+
+        UNION ALL
+        SELECT t."createdBy", ${bucketOf(Prisma.sql`t."createdAt"`)}
+        FROM "public"."tickets" t
+        WHERE t."workspaceId" = ${workspaceId}
+          ${this.dateBoundsSql(Prisma.sql`t."createdAt"`, gte, lte)}
+
+        UNION ALL
+        SELECT ta."updatedBy", ${bucketOf(Prisma.sql`ta."timestamp"`)}
+        FROM "public"."ticket_activities" ta
+        WHERE ta."workspaceId" = ${workspaceId}
+          ${this.dateBoundsSql(Prisma.sql`ta."timestamp"`, gte, lte)}
+
+        UNION ALL
+        SELECT cv."createdBy", ${bucketOf(Prisma.sql`cv."createdAt"`)}
+        FROM "public"."canvases" cv
+        WHERE cv."createdBy" IN (${workspaceUsers})
+          ${this.dateBoundsSql(Prisma.sql`cv."createdAt"`, gte, lte)}
+
+        UNION ALL
+        SELECT cp."userId", ${bucketOf(Prisma.sql`cp."updatedAt"`)}
+        FROM "public"."canvas_participants" cp
+        WHERE cp."workspaceId" = ${workspaceId}
+          AND cp."userId" IN (${workspaceUsers})
+          ${this.dateBoundsSql(Prisma.sql`cp."updatedAt"`, gte, lte)}
+      )
+      SELECT
+        GROUPING(bucket) AS is_total,
+        bucket,
+        COUNT(DISTINCT user_id)::int AS value
+      FROM activity
+      WHERE user_id IS NOT NULL
+      GROUP BY ROLLUP(bucket)
+    `;
   }
 
   /**
