@@ -1,3 +1,19 @@
+## [1.198.0](https://github.com/juspay/xyne-spaces/compare/v1.197.1...v1.198.0) (2026-08-19)
+
+
+### Features
+
+* GENIUS-5422 added status dropout picker ([#75](https://github.com/juspay/xyne-spaces/issues/75)) ([9bc1359](https://github.com/juspay/xyne-spaces/commit/9bc13598ce1314257166d5e3c8a3d42b040812c9))
+* number shortcuts for the sidebar rail, and shortcut hints in tooltips ([#729](https://github.com/juspay/xyne-spaces/issues/729)) ([3dff5b1](https://github.com/juspay/xyne-spaces/commit/3dff5b1351d2652e85288a2f67eeac53a4ab0bcf))
+
+
+### Bug Fixes
+
+* block workspace guests from the Claw Agents section ([#287](https://github.com/juspay/xyne-spaces/issues/287)) ([adc4ef8](https://github.com/juspay/xyne-spaces/commit/adc4ef83e4edcba935ea9b02996ca302ced88967))
+* disallow human senders in automation messaging steps (bot/app only) ([#717](https://github.com/juspay/xyne-spaces/issues/717)) ([3b1e499](https://github.com/juspay/xyne-spaces/commit/3b1e499360bbc6ea267dab4b57828b48fa83b3e1))
+* pass channelId prop to TagGenerationConfig in AIFeaturesTab ([#70](https://github.com/juspay/xyne-spaces/issues/70)) ([877cbe5](https://github.com/juspay/xyne-spaces/commit/877cbe5abeb837af0d49871511cb7d20d11b8dd9))
+* stop the app shell remounting when the Ask AI panel toggles ([#736](https://github.com/juspay/xyne-spaces/issues/736)) ([28106a2](https://github.com/juspay/xyne-spaces/commit/28106a2ba77f90eae423fa5204e47612f9d85f16))
+
 ## [1.197.1](https://github.com/juspay/xyne-spaces/compare/v1.197.0...v1.197.1) (2026-08-19)
 
 
