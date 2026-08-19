@@ -2,6 +2,7 @@ import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 import { decryptSurfaceSecret } from "../../lib/surface-resolver.js";
 import { postExternalCallback } from "./api.js";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 import {
   RETRY_DELAYS_MS,
   MAX_DELIVERY_ATTEMPTS,
@@ -93,6 +94,13 @@ export async function sendExternalResultCallback(
 ): Promise<"delivered" | "refused" | "failed"> {
   if (!isAllowedExternalCallbackUrl(callback.url)) {
     log.warn(`[external-callback] refused unsafe callback target session=${payload.sessionId}`);
+    return "refused";
+  }
+
+  try {
+    await assertSafeOutboundUrl(callback.url);
+  } catch {
+    log.warn(`[external-callback] refused callback target resolving to a blocked address session=${payload.sessionId}`);
     return "refused";
   }
 
