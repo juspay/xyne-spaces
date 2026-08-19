@@ -28,6 +28,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
+import { s2sKeyMatches } from "./require-auth.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
@@ -221,19 +222,32 @@ export async function verifySpacesSignature(
     verificationFailure("stale_timestamp", "signature timestamp outside allowed window", `skewMs=${now - signedTs}`);
     return;
   }
-  const redisVerdict = await checkSignatureReplayRedis(received);
-  if (redisVerdict === "replay") {
-    verificationFailure("replayed_signature", "duplicate signature");
-    return;
-  }
-  if (redisVerdict === null) {
-    const priorExpiry = seenSignatures.get(received);
-    if (priorExpiry !== undefined && priorExpiry > now) {
+  // Replay dedup runs ONLY for external Spaces callers (no s2s key). A single
+  // approval click is signature-verified TWICE in one request chain: first at
+  // the /webhook edge, then again at /flow/action after proxyFlowAction
+  // forwards the SAME x-xyne-signature. That internal hop always carries the
+  // s2s key (the /flow mount is requireStrictS2S), so gating on its ABSENCE
+  // means the same in-flight signature is only recorded once. Without this the
+  // replay guard rejects the second (proxied) verification as a "duplicate
+  // signature" and every Spaces flow-action approval 401s. The HMAC
+  // authenticity check above still runs on BOTH hops; only the replay-set
+  // record/check is skipped for trusted s2s callers.
+  const isInternalReverify = s2sKeyMatches(req.headers["x-s2s-key"]);
+  if (!isInternalReverify) {
+    const redisVerdict = await checkSignatureReplayRedis(received);
+    if (redisVerdict === "replay") {
       verificationFailure("replayed_signature", "duplicate signature");
       return;
     }
-    pruneSeenSignatures(now);
-    seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
+    if (redisVerdict === null) {
+      const priorExpiry = seenSignatures.get(received);
+      if (priorExpiry !== undefined && priorExpiry > now) {
+        verificationFailure("replayed_signature", "duplicate signature");
+        return;
+      }
+      pruneSeenSignatures(now);
+      seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
+    }
   }
 
   next();

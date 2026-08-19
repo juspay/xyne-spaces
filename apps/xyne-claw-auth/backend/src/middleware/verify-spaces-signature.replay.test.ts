@@ -31,6 +31,20 @@ describe("webhook signature replay guard", () => {
     expect(guard).toContain("redisVerdict === null");
   });
 
+  it("skips the replay dedup for internal s2s re-verification (the proxy hop)", () => {
+    // A single approval is signature-verified twice in one chain: /webhook edge
+    // (external, no s2s key) then /flow/action (proxied WITH the s2s key). The
+    // replay set must record only the edge check, or the proxied re-verify of
+    // the SAME signature is rejected as "duplicate signature" and every Spaces
+    // flow-action approval 401s. Gate: replay runs only when NOT an s2s caller.
+    const guard = src.slice(src.indexOf("const isInternalReverify"), src.indexOf("next();"));
+    expect(guard).toContain("s2sKeyMatches(req.headers[\"x-s2s-key\"])");
+    expect(guard).toContain("if (!isInternalReverify)");
+    // The HMAC authenticity check must NOT be inside the skip — only the replay
+    // record/check is gated. (The match comparison lives above this slice.)
+    expect(guard).toContain("checkSignatureReplayRedis");
+  });
+
   it("keeps the TTL aligned with the timestamp skew window", () => {
     // The replay set only needs to cover the window in which a stale timestamp
     // would still pass; a shorter TTL reopens replays early, a longer one just
