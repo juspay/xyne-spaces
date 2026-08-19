@@ -102,6 +102,11 @@ export interface RecoverySessionContext {
    *  never gets its result and the run is retried pointlessly. */
   resultForwardUrl?: string;
   resolveMentions?: boolean;
+  /** Mirrors SessionContext.isAutomation — see src/lib/session-context.ts.
+   *  Carried through recovery so a replayed automation run still gets the
+   *  app-mode Spaces MCP swap even when it has neither externalResultCallback
+   *  nor resolveMentions (plain-callback automations set neither). */
+  isAutomation?: boolean;
   workspaceId?: string;
 }
 

@@ -80,6 +80,16 @@ const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
   .find((tenant) => tenant.length > 0);
 const loggedGlobalServerExclusions = new Set<string>();
 
+// Tools implemented locally by xyne-spaces-app-tools-server.ts (not part of the
+// shared Spaces registry it also mounts). On non-automation runs the app-tools
+// listing is reduced to exactly these — see the filter in GET /mcp/tools.
+// `spaces-send-message` is the legacy alias the server still dispatches.
+const APP_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "ping",
+  "apps-send-message",
+  "spaces-send-message",
+]);
+
 function isStrictAgentToolsEnabled(): boolean {
   return (process.env.MCP_STRICT_AGENT_TOOLS ?? "on").toLowerCase() !== "off";
 }
@@ -849,12 +859,58 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    // ── Automation app-mode Spaces (decided HERE, at entry build) ──────────
+    // Automation (app-user) runs get Spaces served in APP MODE: the
+    // xyne-spaces-app-tools server (full registry, app token, see
+    // xyne-spaces-app-tools-server.ts) replaces the user xyne-spaces server.
+    // The decision is made once, where server entries are assembled — not by
+    // splicing the listing afterwards. `isAutomation` is the explicit dispatch
+    // flag; resolveMentions/externalResultCallback is the legacy proxy kept
+    // for sessions dispatched before the flag existed.
+    const { getSession } = await import("./webhook.js");
+    const runCtx = await getSession(req.params.sessionId).catch(() => null);
+    const isAutomationRun =
+      runCtx?.isAutomation === true ||
+      runCtx?.resolveMentions === true ||
+      !!runCtx?.externalResultCallback;
+    let automationAppSwap = false;
+    if (isAutomationRun) {
+      // Only swap when the app token actually resolves AND the app-tools
+      // server row exists — otherwise we'd strip Spaces access and silently
+      // break the run. Keep the user server and log loudly instead.
+      const appCreds = await getAppTokenCredentials(userId);
+      const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
+      if (appCreds && appToolsRow) {
+        automationAppSwap = true;
+        let dropped = 0;
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (entries[i]!.serverType === "xyne-spaces") {
+            entries.splice(i, 1);
+            dropped++;
+          }
+        }
+        log.info(
+          `[mcp/tools] automation app-mode: xyne-spaces-app-tools serves Spaces for userId=${userId} ` +
+          `(dropped ${dropped} xyne-spaces entr${dropped === 1 ? "y" : "ies"})`,
+        );
+      } else {
+        log.warn(
+          `[mcp/tools] automation app-mode SKIPPED for userId=${userId}: ` +
+          `appCreds=${!!appCreds} appToolsRow=${!!appToolsRow}. ` +
+          "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
+          "If this is an automation run, the agent's app is likely not installed / app token missing.",
+        );
+      }
+    }
+
     // Virtual xyne-spaces entry: if SPACES_DB_URL is configured the user can
     // use Spaces tools without ever clicking "Connect" — loadEffectiveCredentials
     // synthesizes the creds from the live session row. Only add when there's
     // no existing user/global row for xyne-spaces (else we'd duplicate).
+    // Skipped under the automation app-mode swap — Spaces is served by
+    // xyne-spaces-app-tools for those runs.
     const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
-    if (!hasSpacesEntry && CONFIG.spacesDbUrl) {
+    if (!hasSpacesEntry && !automationAppSwap && CONFIG.spacesDbUrl) {
       const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
       log.info(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
       if (spacesServer) {
@@ -922,8 +978,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // connection. The verified workspace install supplies credentials.
     const hasSlackEntry = entries.some((entry) => entry.serverType === "slack");
     if (!hasSlackEntry) {
-      const { getSession } = await import("./webhook.js");
-      const runCtx = await getSession(req.params.sessionId).catch(() => null);
+      // runCtx fetched once above (automation app-mode block).
       if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
         const slackServer = await prisma.mcpServer.findUnique({ where: { type: "slack" } });
         if (slackServer) {
@@ -935,10 +990,12 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
-    // Fallback: if no xyne-spaces connection exists, try using the agent's app token
+    // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
+    // Skipped under the automation app-mode swap — that path must NOT re-list the
+    // user xyne-spaces server (with app creds) that the swap just removed.
     const hasSpacesConnection = entries.some((e) => e.serverType === "xyne-spaces" && e.type !== "user");
     let appTokenToolsResult: Awaited<ReturnType<typeof listToolsForUser>> | null = null;
-    if (!hasSpacesConnection) {
+    if (!hasSpacesConnection && !automationAppSwap) {
       const appCreds = await getAppTokenCredentials(userId);
       if (appCreds) {
         try {
@@ -1141,69 +1198,31 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       writeTools: [],
     });
 
-    // ── Automation MCP swap ────────────────────────────────────────────────
-    // Anurag's directive: automation (app-user) runs must use the APP surface
-    // only. So for those runs we drop the user `xyne-spaces` MCP entirely and
-    // keep only `xyne-spaces-app-tools`, which now mounts the full Spaces
-    // registry in app mode (see xyne-spaces-app-tools-server.ts). This is a
-    // clean server swap — not a per-tool patch.
-    //
-    // `resolveMentions === true` is set ONLY by the automation webhook path
-    // (never by interactive or email auto-draft), so it is the reliable
-    // automation signal; `externalResultCallback` covers the external-callback
-    // automation variant. We additionally require that the app token actually
-    // resolves — if it does NOT, we do NOT swap (that would strip Spaces access
-    // and silently break the run); we keep xyne-spaces and log loudly instead.
-    {
-      const { getSession } = await import("./webhook.js");
-      const swapRunCtx = await getSession(req.params.sessionId).catch(() => null);
-      const isAutomationRun =
-        swapRunCtx?.resolveMentions === true || !!swapRunCtx?.externalResultCallback;
-      const appToolsPresent = data.some((s2) => s2.serverType === "xyne-spaces-app-tools");
-
-      if (isAutomationRun) {
-        const appCreds = await getAppTokenCredentials(userId);
-        if (appCreds && appToolsPresent) {
-          const before = data.length;
-          for (let i = data.length - 1; i >= 0; i--) {
-            if (data[i]!.serverType === "xyne-spaces") data.splice(i, 1);
-          }
-          log.info(
-            `[mcp/tools] automation swap: dropped xyne-spaces user MCP (${before - data.length} server group(s)); ` +
-            `xyne-spaces-app-tools now serves Spaces tools in app mode for userId=${userId}`,
-          );
-        } else {
-          log.warn(
-            `[mcp/tools] automation swap SKIPPED for userId=${userId}: ` +
-            `appCreds=${!!appCreds} appToolsPresent=${appToolsPresent}. ` +
-            "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
-            "If this is an automation run, the agent's app is likely not installed / app token missing.",
-          );
-        }
-      } else if (appToolsPresent) {
-        // ── Interactive de-dup ───────────────────────────────────────────────
-        // Interactive runs list BOTH servers. Now that app-tools mounts the full
-        // registry, its tool names would collide with xyne-spaces (the user
-        // server) and could route a user's call to the app/bot identity. Strip
-        // from app-tools every tool that xyne-spaces already provides, leaving
-        // only the app-only tools (ping, apps-send-message, …). Interactive
-        // behaviour is therefore unchanged.
-        const spacesServer = data.find((s2) => s2.serverType === "xyne-spaces");
-        const appToolsIdx = data.findIndex((s2) => s2.serverType === "xyne-spaces-app-tools");
-        if (spacesServer && appToolsIdx >= 0) {
-          const userToolNames = new Set(spacesServer.tools.map((t) => t.name));
-          const appTools = data[appToolsIdx]!;
-          const kept = appTools.tools.filter((t) => !userToolNames.has(t.name));
-          const removed = appTools.tools.length - kept.length;
+    // ── Non-automation runs: app-tools shows ONLY its app-native tools ─────
+    // The app-tools server mounts the full Spaces registry so it can be the
+    // sole Spaces server on automation runs (the entry-stage swap above). On
+    // every OTHER run those registry tools must not be reachable through the
+    // bot identity — a human's call would execute with app credentials and
+    // skip user ACLs. So outside the swap, app-tools is reduced to its
+    // app-native tools regardless of whether a user xyne-spaces server is
+    // present (the old name-collision de-dup left the full registry exposed
+    // whenever the user server happened to be missing).
+    if (!automationAppSwap) {
+      const appToolsIdx = data.findIndex((s2) => s2.serverType === "xyne-spaces-app-tools");
+      if (appToolsIdx >= 0) {
+        const appTools = data[appToolsIdx]!;
+        const kept = appTools.tools.filter((t) => APP_ONLY_TOOL_NAMES.has(t.name));
+        const removed = appTools.tools.length - kept.length;
+        if (removed > 0) {
           // McpServerTools.tools/writeTools are readonly — replace the object.
           data[appToolsIdx] = {
             ...appTools,
             tools: kept,
-            writeTools: appTools.writeTools.filter((n) => !userToolNames.has(n)),
+            writeTools: appTools.writeTools.filter((n) => APP_ONLY_TOOL_NAMES.has(n)),
           };
           log.info(
-            `[mcp/tools] interactive de-dup: removed ${removed} registry tool(s) from ` +
-            `xyne-spaces-app-tools (already provided by xyne-spaces) for userId=${userId}`,
+            `[mcp/tools] hid ${removed} Spaces registry tool(s) on xyne-spaces-app-tools ` +
+            `(non-automation run) for userId=${userId}`,
           );
         }
       }

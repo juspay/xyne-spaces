@@ -144,17 +144,23 @@ const SEND_MESSAGE_TOOL = {
 };
 
 // The app-tools server is the SOLE Spaces MCP for automation/app-user runs
-// (routes/mcp.ts drops the user `xyne-spaces` server for those runs). So it must
-// surface the full Spaces toolset — reuse the SAME shared registry the user
-// server uses, running every tool in app mode. Local `ping` + `apps-send-message`
-// are app-tools-only and are appended. For interactive runs, routes/mcp.ts hides
-// the registry tools here (they'd duplicate the user server), leaving only the
-// app-only tools — so nothing changes for interactive users.
-const REGISTRY_TOOL_DEFS = spacesTools.map((t) => ({
-  name: t.name,
-  description: t.description,
-  inputSchema: t.inputSchema,
-}));
+// (routes/mcp.ts injects it INSTEAD of the user `xyne-spaces` server for those
+// runs). So it must surface the full Spaces toolset — reuse the SAME shared
+// registry the user server uses, running every tool in app mode. Local `ping`
+// + `apps-send-message` are app-tools-only and are appended. For every other
+// run, routes/mcp.ts reduces this server's listing to the app-only tools —
+// so nothing changes for interactive users.
+//
+// `userOnly` tools are excluded here: this server ALWAYS runs in app mode, and
+// those tools either act as the human or hit user-session-only routes — they
+// could only 401. Never list a tool that cannot succeed.
+const REGISTRY_TOOL_DEFS = spacesTools
+  .filter((t) => !t.userOnly)
+  .map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema,
+  }));
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [...REGISTRY_TOOL_DEFS, PING_TOOL, SEND_MESSAGE_TOOL],
@@ -247,6 +253,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
   // `xyne-spaces` server uses in app mode — kept identical so behaviour matches.
   const registryTool = spacesTools.find((t) => t.name === name);
   if (registryTool) {
+    if (registryTool.userOnly) {
+      return {
+        content: [{
+          type: "text",
+          text: `${name} requires the human user's session and is not available in app mode (automation runs act as the bot).`,
+        }],
+        isError: true,
+      };
+    }
     const ctx = { userId: USER_ID, authMode: "app" as const };
     const result = registryTool.appHandler
       ? await registryTool.appHandler(args ?? {}, ctx)

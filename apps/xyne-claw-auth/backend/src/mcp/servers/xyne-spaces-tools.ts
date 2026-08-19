@@ -97,12 +97,24 @@ export interface ToolDef {
   /** Default (user-session) implementation, hits `/api/query` etc. */
   handler: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
   /**
-   * Optional app-token implementation, hits the `/api/apps/*` routes. A tool is
-   * only available in APP MODE if it defines this. As Spaces adds app routes for
-   * search / ticket-filter / user-search, give those tools an `appHandler` here
-   * — no duplicate `apps-*` tool is created; it's the SAME tool, app backend.
+   * Optional app-token implementation, hits the `/api/apps/*` routes. As
+   * Spaces adds app routes for search / ticket-filter / user-search, give
+   * those tools an `appHandler` here — no duplicate `apps-*` tool is created;
+   * it's the SAME tool, app backend. Tools WITHOUT one still run in app mode
+   * through `handler` when that handler only hits dual-auth `/claw` routes
+   * (interact / search / memorySearch — authenticateUserOrApp on the Spaces
+   * side), which is most of the read tools.
    */
   appHandler?: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
+  /**
+   * True when the tool is meaningless or broken without a human user token:
+   * either it acts AS the human (user-send-message) or its handler hits
+   * user-session-only routes with no app equivalent and no appHandler. The
+   * app-tools server (which always runs in app mode) hides these from its
+   * listing and rejects calls to them — otherwise they surface to automation
+   * runs and can only 401.
+   */
+  userOnly?: boolean;
 }
 
 function ok(text: string): ToolResult {
@@ -4271,6 +4283,10 @@ const spacesCreateBulkTickets: ToolDef = {
 
 const spacesUpdateTicket: ToolDef = {
   name: "spaces-update-ticket",
+  // PATCH /api/tickets/:id is user-session-only (unlike create, which has the
+  // dual-auth /api/tickets/claw route). Until Spaces grows an app-capable
+  // update route (or this gains an appHandler), app-mode calls can only 401.
+  userOnly: true,
   description:
     "Update an existing ticket in Spaces. At least one update field must be provided. " +
     "Use spaces-tickets to find the ticket ID (use the Internal ID, not the Xyne ID), spaces-users for user IDs, and spaces-boards for valid stage names. " +
@@ -5703,6 +5719,9 @@ interface AccessibleKbCollection {
 
 const spacesUploadToKb: ToolDef = {
   name: "spaces-upload-to-kb",
+  // Depends on /api/collections/accessible and the user attachment download —
+  // both user-session-only routes with no app equivalents wired here yet.
+  userOnly: true,
   description:
     "Save one or more files into a channel's Knowledge Base collection. TWO input sources — provide EXACTLY ONE: " +
     "(1) attachments — EXISTING Spaces thread attachments (get ids from spaces-thread-attachments). Pass a SINGLE id " +
@@ -6249,6 +6268,9 @@ const spacesWorkflowStats: ToolDef = {
 //   - POST /api/channels/:channelId/conversations to start a new top-level thread
 const userSendMessage: ToolDef = {
   name: "user-send-message",
+  // Posts AS the human via their session token — inherently meaningless for an
+  // app-user run (and its channel-conversations lookup is a user-only route).
+  userOnly: true,
   description:
     "Post a message to a DIFFERENT thread or channel — NOT the one the user is talking to you in — AS THE LOGGED-IN USER. " +
     "The message appears in Spaces with the user's name + avatar, not the bot's. " +
@@ -6405,7 +6427,10 @@ const spacesVespaSchema: ToolDef = {
     try {
       const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
 
-      const text = await spacesFetchText(`/api/vespaSearch/schema${qs}`);
+      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
+      // both user and app tokens (the bare /api/vespaSearch mount is
+      // user-session-only and 401s app-mode runs).
+      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
       if (!text || !text.trim())
         return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
       return ok(text);

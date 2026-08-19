@@ -3867,6 +3867,9 @@ export async function handleAutomationWebhook(
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       rootAgentSlug: agent.slug,
+      // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
+      // MCP swap on this (not on the resolveMentions proxy).
+      isAutomation: true,
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
@@ -4158,6 +4161,11 @@ export async function handleAutomationWebhook(
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+      // Explicit automation marker — see SessionContext.isAutomation. Set
+      // unconditionally: a plain-callback automation (no externalResultCallback,
+      // no interpose) otherwise carries NEITHER forward flag, and a recovery
+      // replay of it would be indistinguishable from an interactive run.
+      isAutomation: true,
       // Carry the automation's forward target through recovery. claw calls back
       // with its own sessionId (misses the Redis session keyed by the dispatch
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
