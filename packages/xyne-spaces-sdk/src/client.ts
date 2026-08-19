@@ -6,6 +6,7 @@
 
 import { HttpClient } from './core/http.js';
 import { Transport } from './core/transport.js';
+import type { MTLSConfig } from './core/mtls.js';
 import { UsersResource } from './resources/users.js';
 import { SearchResource } from './resources/search.js';
 import { ChannelsResource } from './resources/channels.js';
@@ -51,6 +52,32 @@ export interface SpacesClientOptions {
    * @default 30000
    */
   timeout?: number;
+
+  /**
+   * mTLS (mutual TLS) configuration for client certificate authentication.
+   *
+   * When provided, the client certificate will be sent with every API request.
+   * This is similar to how the Xyne Electron app handles device enrollment.
+   *
+   * In browser environments, mTLS is handled by the browser/OS through the
+   * system keychain. In Node.js, provide the certificate and key as PEM strings.
+   *
+   * @example
+   * ```typescript
+   * import { readFileSync } from 'fs';
+   * import { createClient } from '@xyne/spaces-sdk';
+   *
+   * const client = createClient({
+   *   baseUrl: 'https://api.xyne.app',
+   *   mtls: {
+   *     cert: readFileSync('/path/to/client.crt', 'utf8'),
+   *     key: readFileSync('/path/to/client.key', 'utf8'),
+   *     ca: readFileSync('/path/to/ca.crt', 'utf8'), // optional
+   *   },
+   * });
+   * ```
+   */
+  mtls?: MTLSConfig;
 
   /**
    * Base URL of the Claw service.
@@ -201,16 +228,19 @@ export class SpacesClient {
       baseUrl,
       token: options.token,
       timeout: options.timeout,
+      mtls: options.mtls,
     });
 
     this.transport = new Transport(this.http);
 
     // Claw gets its own client so its credential stays independent of the Spaces
     // token: refreshing one must never disturb the other.
+    // mTLS config is shared - both Spaces and Claw use the same client certificate.
     this.clawHttp = new HttpClient({
       baseUrl: options.clawBaseUrl ?? baseUrl,
       token: options.clawToken,
       timeout: options.timeout,
+      mtls: options.mtls,
     });
     this.clawAuth = new ClawAuth(this.clawHttp, options.clawTokenStore);
 

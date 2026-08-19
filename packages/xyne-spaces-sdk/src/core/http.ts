@@ -2,9 +2,16 @@
  * HTTP Client
  *
  * Handles HTTP requests with authentication, timeout, and error handling.
+ * Supports mTLS (mutual TLS) for client certificate authentication.
  */
 
 import { SdkError, AuthError, RateLimitError, NotFoundError } from './errors.js';
+import {
+  type MTLSConfig,
+  type NodeFetchOptions,
+  isNodeEnvironment,
+  createMTLSAgent,
+} from './mtls.js';
 
 export interface HttpClientOptions {
   /** Base URL of the Spaces API */
@@ -13,17 +20,58 @@ export interface HttpClientOptions {
   token?: string;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
+  /**
+   * mTLS configuration for client certificate authentication.
+   * When provided, the client certificate will be sent with every request.
+   *
+   * @example
+   * ```typescript
+   * {
+   *   cert: fs.readFileSync('/path/to/client.crt', 'utf8'),
+   *   key: fs.readFileSync('/path/to/client.key', 'utf8'),
+   * }
+   * ```
+   */
+  mtls?: MTLSConfig;
 }
 
 export class HttpClient {
   private baseUrl: string;
   private token?: string;
   private timeout: number;
+  private mtlsConfig?: MTLSConfig;
+  private mtlsAgent?: unknown;
+  private mtlsAgentPromise?: Promise<unknown | undefined>;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.token = options.token;
     this.timeout = options.timeout ?? 30000;
+    this.mtlsConfig = options.mtls;
+
+    // Pre-create the mTLS agent if config is provided
+    if (this.mtlsConfig) {
+      this.mtlsAgentPromise = this.initMTLSAgent();
+    }
+  }
+
+  /**
+   * Initialize the mTLS agent asynchronously.
+   * This is done once and cached for all requests.
+   */
+  private async initMTLSAgent(): Promise<unknown | undefined> {
+    if (!this.mtlsConfig) return undefined;
+    this.mtlsAgent = await createMTLSAgent(this.mtlsConfig);
+    return this.mtlsAgent;
+  }
+
+  /**
+   * Get the mTLS agent, waiting for initialization if needed.
+   */
+  private async getMTLSAgent(): Promise<unknown | undefined> {
+    if (this.mtlsAgent) return this.mtlsAgent;
+    if (this.mtlsAgentPromise) return this.mtlsAgentPromise;
+    return undefined;
   }
 
   /**
@@ -108,12 +156,27 @@ export class HttpClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      // Build fetch options, including mTLS dispatcher for Node.js
+      const fetchOptions: NodeFetchOptions = {
         method,
         headers,
         body: requestBody,
         signal: controller.signal,
-      });
+      };
+
+      // Add mTLS agent/dispatcher if configured (Node.js only)
+      if (this.mtlsConfig && isNodeEnvironment()) {
+        const agent = await this.getMTLSAgent();
+        if (agent) {
+          // In Node.js 18+, fetch uses undici which accepts 'dispatcher'
+          // For older Node.js with node-fetch, it uses 'agent'
+          // We set both to be compatible with different implementations
+          fetchOptions.dispatcher = agent;
+          fetchOptions.agent = agent;
+        }
+      }
+
+      const response = await fetch(url, fetchOptions as RequestInit);
 
       clearTimeout(timeoutId);
 
