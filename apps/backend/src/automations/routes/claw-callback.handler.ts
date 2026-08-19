@@ -2,6 +2,14 @@ import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { automationQueue } from '../queue/automation.queue';
+import { AutomationRunStatus } from '../types/status';
+
+const TERMINAL_EXECUTION_STATUSES: ReadonlySet<string> = new Set([
+  AutomationRunStatus.COMPLETED,
+  AutomationRunStatus.FAILED,
+  AutomationRunStatus.CANCELLED,
+  AutomationRunStatus.SKIPPED,
+]);
 
 export async function handleClawCallback(
   req: Request<{ executionId: string; stepName: string }>,
@@ -14,35 +22,37 @@ export async function handleClawCallback(
     const [existingRow, workflowExecution] = await Promise.all([
       db.workflowStep.findUnique({
         where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-        select: { data: true },
+        select: { data: true, status: true },
       }),
       db.workflowExecution.findUniqueOrThrow({
         where: { id: executionId },
-        select: { workspaceId: true },
+        select: { status: true },
       }),
     ]);
     if (!existingRow) {
-      logger.warn(
-        `[automations] claw-callback: no workflow_step row for execution=${executionId} step=${stepName} — proceeding with empty existing data`,
+      logger.error(
+        `[automations] claw-callback: no workflow_step row for execution=${executionId} step=${stepName}`,
       );
+      res.status(409).json({ success: false, error: 'waiting automation step not found' });
+      return;
+    }
+    if (
+      existingRow.status === AutomationRunStatus.COMPLETED ||
+      TERMINAL_EXECUTION_STATUSES.has(workflowExecution.status)
+    ) {
+      logger.info(
+        `[automations] claw-callback ignored duplicate/stale payload execution=${executionId} step=${stepName}`,
+      );
+      res.json({ success: true, duplicate: true });
+      return;
     }
 
-    const existing = parseRowData(existingRow?.data);
+    const existing = parseRowData(existingRow.data);
     const merged = { ...existing, agentRawResult: payload };
 
-    await db.workflowStep.upsert({
+    await db.workflowStep.update({
       where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-      create: {
-        workflowExecutionId: executionId,
-        stepName,
-        stepExecutorType: 'RUN_AGENT',
-        status: 'EXTERNAL_WAIT',
-        data: JSON.stringify(merged),
-        workspaceId: workflowExecution.workspaceId,
-      },
-      update: {
-        data: JSON.stringify(merged),
-      },
+      data: { data: JSON.stringify(merged) },
     });
 
     await automationQueue.enqueueRun({ executionId });
@@ -64,10 +74,13 @@ function parseRowData(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('step data is not a JSON object');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(
+      `waiting step data is invalid: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

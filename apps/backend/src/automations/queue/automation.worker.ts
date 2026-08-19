@@ -17,7 +17,11 @@ import {
 import { getAutomationPauseState } from '@/database/repositories/workflowExecutionStateUtils';
 import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
+import { DataNotReadyError, RetryableError } from '../engine/retryability';
 import type { TriggerType } from '../types/trigger-types';
+
+const EXECUTION_FETCH_MAX_RETRIES = 3;
+const EXECUTION_FETCH_RETRY_DELAY_MS = 100;
 
 class AutomationWorker {
   private isInitialized = false;
@@ -50,16 +54,24 @@ class AutomationWorker {
     const { executionId } = job.data;
     logger.info(`[AUTOMATION-WORKER] Job ${job.id} starting — execution=${executionId}`);
 
-    const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
-    if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    const fetchExecution = () => db.workflowExecution.findUnique({ where: { id: executionId } });
+    let execution = await fetchExecution();
+    for (let retry = 0; !execution && retry < EXECUTION_FETCH_MAX_RETRIES; retry++) {
+      await new Promise(resolve => setTimeout(resolve, EXECUTION_FETCH_RETRY_DELAY_MS));
+      execution = await fetchExecution();
+    }
+    if (!execution) {
+      throw new DataNotReadyError('workflow execution', executionId);
+    }
+    if (execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
       logger.warn(
-        `[AUTOMATION-WORKER] execution=${executionId} missing or wrong workflowType — dropping`,
+        `[AUTOMATION-WORKER] execution=${executionId} has workflowType=${execution.workflowType ?? '∅'} — not an automation, dropping`,
       );
       return;
     }
     const acceptableStatuses: readonly string[] = [
       AutomationRunStatus.PENDING,
-      'EXTERNAL_WAIT',
+      AutomationRunStatus.EXTERNAL_WAIT,
     ];
     if (!acceptableStatuses.includes(execution.status)) {
       logger.warn(
@@ -97,7 +109,7 @@ class AutomationWorker {
     }
     const { executionId } = job.data;
 
-    if (execution.status === 'EXTERNAL_WAIT') {
+    if (execution.status === AutomationRunStatus.EXTERNAL_WAIT) {
       await this.executor.runExecution(executionId);
       return;
     }
@@ -190,9 +202,13 @@ class AutomationWorker {
       try {
         return await triggerImpl.hydratePayload(triggerData);
       } catch (err) {
-        logger.warn(
-          `[AUTOMATION-WORKER] hydratePayload threw for execution=${executionId}, using wire payload only:`,
+        logger.error(
+          `[AUTOMATION-WORKER] hydratePayload threw for execution=${executionId} — retrying at run level instead of evaluating filters on an empty payload:`,
           err,
+        );
+        throw new RetryableError(
+          `hydratePayload failed for execution=${executionId}: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
         );
       }
     }

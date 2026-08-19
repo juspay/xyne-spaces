@@ -41,16 +41,36 @@ export class SwitchStep extends BaseControlFlowStep<typeof SwitchConfigSchema, S
     context: AutomationContext,
     ctx: ControlFlowExecutionContext,
   ): Promise<SwitchOutput> {
+    const persistedBranchKey = ctx.getPersistedBranchKey();
+    if (persistedBranchKey !== undefined) {
+      if (persistedBranchKey === 'default') {
+        await ctx.walkBranch(config.default as AutomationStepConfig[], context, 'default');
+        return { matchedIndex: -1 };
+      }
+
+      const match = /^case_(\d+)$/.exec(persistedBranchKey);
+      const caseIndex = match ? Number.parseInt(match[1] as string, 10) : -1;
+      if (caseIndex < 0 || caseIndex >= config.cases.length) {
+        throw new Error(`[SWITCH] persisted branch key is invalid: ${persistedBranchKey}`);
+      }
+      await ctx.walkBranch(
+        config.cases[caseIndex]!.steps as AutomationStepConfig[],
+        context,
+        persistedBranchKey,
+      );
+      return { matchedIndex: caseIndex };
+    }
+
     for (let i = 0; i < config.cases.length; i++) {
       const caseEntry = config.cases[i]!;
       const matched = this.evaluator.evaluate(caseEntry.condition, context);
       if (matched) {
-        await ctx.walkBranch(caseEntry.steps as AutomationStepConfig[], context);
+        await ctx.walkBranch(caseEntry.steps as AutomationStepConfig[], context, `case_${i}`);
         return { matchedIndex: i };
       }
     }
     // No case matched — run default branch
-    await ctx.walkBranch(config.default as AutomationStepConfig[], context);
+    await ctx.walkBranch(config.default as AutomationStepConfig[], context, 'default');
     return { matchedIndex: -1 };
   }
 }

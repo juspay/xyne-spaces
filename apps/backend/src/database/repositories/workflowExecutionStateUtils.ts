@@ -218,6 +218,11 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
   'CANCELLED',
 ]);
 
+// A Bull retry can fail before the executor's runSteps() failure boundary gets
+// a chance to mark the execution FAILED. These states are safe retry sources:
+// the next queue attempt must be allowed to pick the execution up again.
+const RETRY_RESETTABLE_RUN_STATUSES = ['FAILED', 'RUNNING', 'SCHEDULED'] as const;
+
 export async function markAutomationFailed(
   workflowExecutionId: string,
   errorMessage: string,
@@ -245,11 +250,11 @@ export async function markAutomationFailed(
     }
   }
   const existingMeta =
-    (mergedContext['__meta'] as { error?: string | null; chain?: readonly string[] } | undefined) ??
-    {};
+    (mergedContext['__meta'] as Record<string, unknown> | undefined) ?? {};
   mergedContext['__meta'] = {
+    ...existingMeta,
     error: errorMessage,
-    chain: existingMeta.chain ?? [],
+    chain: existingMeta['chain'] ?? [],
   };
 
   await prisma.$transaction([
@@ -264,6 +269,77 @@ export async function markAutomationFailed(
     }),
   ]);
   return 'marked';
+}
+
+/**
+ * Reset a retryable run back to PENDING for the next retry attempt, recording
+ * the failure under __meta.lastError + __meta.retryCount. Most failures arrive
+ * after the executor has pre-marked the run FAILED, but failures before the
+ * runSteps() boundary can leave it RUNNING or SCHEDULED. Those states must also
+ * be recoverable or the next Bull attempt will be skipped by the worker.
+ */
+export async function markAutomationRetryPending(
+  workflowExecutionId: string,
+  errorMessage: string,
+  retryCount: number,
+): Promise<'reset' | 'skipped-terminal' | 'not-found'> {
+  const execution = await prisma.workflowExecution.findUnique({
+    where: { id: workflowExecutionId },
+    select: { id: true, status: true, workspaceId: true },
+  });
+  if (!execution) return 'not-found';
+  if (!(RETRY_RESETTABLE_RUN_STATUSES as readonly string[]).includes(execution.status)) {
+    return 'skipped-terminal';
+  }
+
+  const state = await prisma.workflowExecutionState.findUnique({
+    where: { workflowExecutionId },
+    select: { context: true },
+  });
+  let mergedContext: Record<string, unknown> = {};
+  if (state?.context) {
+    try {
+      const parsed = JSON.parse(state.context);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        mergedContext = parsed as Record<string, unknown>;
+      }
+    } catch {
+      mergedContext = {};
+    }
+  }
+  const existingMeta =
+    (mergedContext['__meta'] as Record<string, unknown> | undefined) ?? {};
+  mergedContext['__meta'] = {
+    ...existingMeta,
+    error: errorMessage,
+    chain: existingMeta['chain'] ?? [],
+    lastError: errorMessage,
+    retryCount,
+  };
+
+  // Conditional + atomic: only flip a retry-resettable state -> PENDING if the
+  // row is STILL in one of those states at write time. This guards against a
+  // cancel/kill or duplicate-success racing between the read above and this
+  // write. If the guard matches 0 rows, skip the state upsert.
+  const flipped = await prisma.$transaction(async tx => {
+    const { count } = await tx.workflowExecution.updateMany({
+      where: {
+        id: workflowExecutionId,
+        status: { in: [...RETRY_RESETTABLE_RUN_STATUSES] },
+      },
+      data: { status: 'PENDING' },
+    });
+    if (count === 0) {
+      return false;
+    }
+    await tx.workflowExecutionState.upsert({
+      where: { workflowExecutionId },
+      create: { workflowExecutionId, workspaceId: execution.workspaceId, context: JSON.stringify(mergedContext) },
+      update: { context: JSON.stringify(mergedContext) },
+    });
+    return true;
+  });
+  return flipped ? 'reset' : 'skipped-terminal';
 }
 
 export async function getAutomationPauseState(

@@ -15,6 +15,7 @@ import {
 } from './ticket-context';
 import type { TicketCommentedEventPayload } from '../types/automation-events';
 import type { TicketLike } from './ticket-context';
+import { DataNotReadyError } from '../engine/retryability';
 
 export const TICKET_COMMENTED_EVENT = 'TICKET_COMMENTED';
 
@@ -157,8 +158,8 @@ async function hydrateTicketCommentedPayload(
 ): Promise<Record<string, unknown>> {
   const { ticketId, messageId, conversationId, authorId } = payload;
 
-  const ticket = await repositories.tickets.getTicketById(ticketId).catch(() => null);
-  if (!ticket) return { ...payload };
+  const ticket = await repositories.tickets.getTicketById(ticketId);
+  if (!ticket) throw new DataNotReadyError('ticket', ticketId);
 
   const channelId =
     ticket.channelId ??
@@ -169,9 +170,10 @@ async function hydrateTicketCommentedPayload(
 
   const [context, messageRow, authorUser] = await Promise.all([
     buildTicketContext(ticket as TicketLike),
-    db.message.findUnique({ where: { messageId } }).catch(() => null),
+    db.message.findUnique({ where: { messageId } }),
     repositories.users.findById(authorId).catch(() => null),
   ]);
+  if (!messageRow) throw new DataNotReadyError('message', messageId);
 
   return {
     ...payload,

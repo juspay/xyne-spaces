@@ -36,9 +36,20 @@ export class ConditionalStep extends BaseControlFlowStep<typeof ConditionalConfi
     context: AutomationContext,
     ctx: ControlFlowExecutionContext,
   ): Promise<ConditionalOutput> {
-    const result = this.evaluator.evaluate(config.condition, context);
+    const persistedBranchKey = ctx.getPersistedBranchKey();
+    let result: boolean;
+    if (persistedBranchKey !== undefined) {
+      if (persistedBranchKey !== 'if_true' && persistedBranchKey !== 'if_false') {
+        throw new Error(
+          `[CONDITIONAL] persisted branch key must be if_true or if_false, got ${persistedBranchKey}`,
+        );
+      }
+      result = persistedBranchKey === 'if_true';
+    } else {
+      result = this.evaluator.evaluate(config.condition, context);
+    }
     const branch = (result ? config.if_true : (config.if_false ?? [])) as AutomationStepConfig[];
-    await ctx.walkBranch(branch, context);
+    await ctx.walkBranch(branch, context, result ? 'if_true' : 'if_false');
     return { result };
   }
 }

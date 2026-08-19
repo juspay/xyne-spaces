@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
+import { DataNotReadyError } from '../engine/retryability';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
 
@@ -236,9 +237,10 @@ async function hydrateMessageReceivedPayload(
   const { messageId, conversationId, channelId, authorId } = payload;
 
   const [messageRow, authorUser] = await Promise.all([
-    db.message.findUnique({ where: { messageId } }).catch(() => null),
+    db.message.findUnique({ where: { messageId } }),
     repositories.users.findById(authorId).catch(() => null),
   ]);
+  if (!messageRow) throw new DataNotReadyError('message', messageId);
 
   let mentionedUserIds: string[] = [];
   let mentionedUsers: Array<{ id: string; name: string | null; email: string | null }> = [];

@@ -4,6 +4,7 @@ import { repositories } from '@/database/repositories';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
 import type { TicketLike } from './ticket-context';
+import { DataNotReadyError } from '../engine/retryability';
 
 export function extractEmailAddress(raw: string): string {
   if (!raw) return '';
@@ -135,8 +136,8 @@ function emailRowToOutput(email: EmailRow): EmailRow {
 export async function hydrateEmailReceivedPayload(
   payload: EmailEventPayload,
 ): Promise<Record<string, unknown>> {
-  const email = await db.email.findUnique({ where: { id: payload.emailId } }).catch(() => null);
-  if (!email) return { ...payload };
+  const email = await db.email.findUnique({ where: { id: payload.emailId } });
+  if (!email) throw new DataNotReadyError('email', payload.emailId);
 
   let isReply = false;
   if (email.externalThreadId) {
@@ -171,8 +172,8 @@ export async function hydrateEmailReceivedPayload(
 export async function hydrateEmailSentPayload(
   payload: EmailEventPayload,
 ): Promise<Record<string, unknown>> {
-  const email = await db.email.findUnique({ where: { id: payload.emailId } }).catch(() => null);
-  if (!email) return { ...payload };
+  const email = await db.email.findUnique({ where: { id: payload.emailId } });
+  if (!email) throw new DataNotReadyError('email', payload.emailId);
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
   const emailUrl = buildEmailUrl({

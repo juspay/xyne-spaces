@@ -10,13 +10,13 @@ import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import type { AutomationStepConfig } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import type { TriggerType } from '../types/trigger-types';
-import type { StepType } from '../types/step-types';
 import { CONTROL_FLOW_STEP_TYPES } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
-import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
+import { BaseActionStep, BaseControlFlowStep, BaseStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
 import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
+import { DataNotReadyError, isTransientError, RetryableError } from './retryability';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   mayDrainInFlight,
@@ -36,10 +36,25 @@ interface PreparedRun {
   chain: readonly string[];
   startIndex: number;
   label: 'STARTED' | 'RESUMED';
-  resumeAtIndex?: number;
+  resumeStepName?: string;
 }
 
-const EXTERNAL_WAIT_STATUS = 'EXTERNAL_WAIT';
+interface StepCallContext {
+  runId: string;
+  stepName: string;
+  isResuming: boolean;
+  resumeStepName?: string;
+  persistedData?: Record<string, unknown>;
+}
+
+interface StepExecutionResult {
+  branchKey?: string;
+}
+
+interface PersistedStepRow {
+  status: string | null;
+  data: string | null;
+}
 
 function safeParseJson(raw: string): unknown {
   try {
@@ -47,13 +62,6 @@ function safeParseJson(raw: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function parseStepIndexFromName(name: string): number | null {
-  const m = /^step_(\d+)$/.exec(name);
-  if (!m) return null;
-  const n = Number.parseInt(m[1] as string, 10);
-  return Number.isInteger(n) ? n : null;
 }
 
 export class AutomationExecutor {
@@ -74,8 +82,7 @@ export class AutomationExecutor {
       where: { id: executionId },
     });
     if (!existing) {
-      logger.warn(`[automations] runExecution: row ${executionId} not found, dropping`);
-      return undefined;
+      throw new DataNotReadyError('workflow execution', executionId);
     }
     if (existing.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
       logger.warn(
@@ -108,8 +115,7 @@ export class AutomationExecutor {
 
     const config = parseAutomationConfig(workflow.context);
     const metadata = parseAutomationMetadata(workflow.metadata);
-
-    const isResume = existing.status === EXTERNAL_WAIT_STATUS;
+    const isResume = existing.status === AutomationRunStatus.EXTERNAL_WAIT;
     const isFresh =
       existing.status === AutomationRunStatus.PENDING ||
       existing.status === AutomationRunStatus.SCHEDULED;
@@ -120,7 +126,13 @@ export class AutomationExecutor {
       return undefined;
     }
 
-    const prep = await this.prepareRun(executionId, workflow, config, metadata, isResume);
+    const prep = await this.prepareRun(
+      executionId,
+      workflow,
+      config,
+      metadata,
+      isResume,
+    );
     if (!prep) return undefined;
     return this.commitAndRun(executionId, workflow, config, prep);
   }
@@ -131,7 +143,7 @@ export class AutomationExecutor {
     config: ReturnType<typeof parseAutomationConfig>,
     prep: PreparedRun,
   ): Promise<unknown> {
-    prep.ctx.__meta = { error: null, chain: prep.chain };
+    prep.ctx.__meta = { ...(prep.ctx.__meta ?? {}), error: null, chain: prep.chain };
     await this.prisma.workflowExecution.update({
       where: { id: executionId },
       data: { status: AutomationRunStatus.RUNNING },
@@ -146,7 +158,7 @@ export class AutomationExecutor {
       prep.chain,
       config.steps,
       prep.startIndex,
-      prep.resumeAtIndex,
+      prep.resumeStepName,
     );
   }
 
@@ -194,39 +206,24 @@ export class AutomationExecutor {
     const chain: readonly string[] = readAutomationMeta(pauseState.context).chain;
 
     if (isResume) {
-      const stepRows = await this.prisma.workflowStep.findMany({
-        where: { workflowExecutionId: executionId },
-      });
-      for (const row of stepRows) {
-        if (!row.stepName || !row.data) continue;
-        const idx = parseStepIndexFromName(row.stepName);
-        if (idx === null) continue;
-        const stepConfig = config.steps[idx];
-        if (!stepConfig) continue;
-        const parsedRow = safeParseJson(row.data);
-        if (parsedRow !== undefined && parsedRow !== null && typeof parsedRow === 'object') {
-          const fromRow = parsedRow as {
-            type?: StepType;
-            input?: Record<string, unknown>;
-            output?: unknown;
-          };
-          initialCtx.steps[stepConfig.id] = {
-            type: fromRow.type ?? stepConfig.type,
-            ...(fromRow.input !== undefined ? { input: fromRow.input } : {}),
-            output: (fromRow.output ?? {}) as Record<string, unknown>,
-          };
-        }
-      }
-      const pausedIndex = pauseState.currentStepIndex;
+      const resumeStepName = await this.resolveResumeStepName(
+        executionId,
+        initialCtx.__meta?.waitingStepName,
+        pauseState.currentStepIndex,
+      );
       return {
         ctx: initialCtx,
         chain,
-        startIndex: pausedIndex,
+        // Replay from the root. Completed rows hydrate context and persisted
+        // branch keys route us back to a nested resume target deterministically.
+        startIndex: 0,
         label: 'RESUMED',
-        resumeAtIndex: pausedIndex,
+        resumeStepName,
       };
     }
 
+    // Backward-compatible intake for executions created before the worker began
+    // persisting its authoritative hydration/filter decision.
     const triggerType = config.trigger.type as TriggerType;
     const originalTriggerData =
       ((initialCtx.trigger as { data?: Record<string, unknown> } | undefined)?.data) ?? {};
@@ -270,6 +267,31 @@ export class AutomationExecutor {
     return { ctx: freshContext, chain, startIndex: 0, label: 'STARTED' };
   }
 
+  private async resolveResumeStepName(
+    runId: string,
+    contextStepName: string | undefined,
+    legacyStepIndex: number,
+  ): Promise<string> {
+    // The persisted hierarchical name is authoritative. The numeric index is
+    // retained only for executions paused before waitingStepName was introduced.
+    const stepName = contextStepName ?? `step_${legacyStepIndex}`;
+
+    const row = await this.readStepRow(runId, stepName);
+    if (!row) {
+      throw new Error(
+        `[automations] resume target ${stepName} does not exist for execution ${runId}`,
+      );
+    }
+
+    if (row.status !== AutomationRunStatus.EXTERNAL_WAIT) {
+      throw new Error(
+        `[automations] resume target ${stepName} has status=${row.status}, expected EXTERNAL_WAIT`,
+      );
+    }
+
+    return stepName;
+  }
+
   private async invokeResume(
     actionImpl: BaseActionStep<z.ZodSchema, Record<string, unknown>>,
     runId: string,
@@ -281,15 +303,22 @@ export class AutomationExecutor {
       where: { workflowExecutionId_stepName: { workflowExecutionId: runId, stepName } },
       select: { data: true },
     });
-    const rowData: Record<string, unknown> =
-      row?.data && typeof row.data === 'string'
-        ? (safeParseJson(row.data) as Record<string, unknown> | undefined) ?? {}
-        : {};
+    if (!row) {
+      throw new Error(
+        `[automations] resume target ${stepName} disappeared for execution ${runId}`,
+      );
+    }
+    const rowData = this.parsePersistedData(row.data);
+    if (row.data && !rowData) {
+      throw new Error(
+        `[automations] resume target ${stepName} has invalid persisted data for execution ${runId}`,
+      );
+    }
 
     if (typeof actionImpl.onResume === 'function') {
-      return actionImpl.onResume(rowData, resolvedInput, context);
+      return actionImpl.onResume(rowData ?? {}, resolvedInput, context);
     }
-    const fallback = rowData['output'];
+    const fallback = rowData?.['output'];
     return (fallback && typeof fallback === 'object' && !Array.isArray(fallback)
       ? (fallback as Record<string, unknown>)
       : {});
@@ -304,11 +333,14 @@ export class AutomationExecutor {
     try {
       return await triggerImpl.hydratePayload(triggerData);
     } catch (err) {
-      logger.warn(
-        `[automations] hydratePayload failed for automation=${automationId}, using snapshot:`,
+      logger.error(
+        `[automations] hydratePayload failed for legacy execution automation=${automationId}:`,
         err,
       );
-      return triggerData;
+      throw new RetryableError(
+        `hydratePayload failed for automation=${automationId}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
   }
 
@@ -337,18 +369,18 @@ export class AutomationExecutor {
     chain: readonly string[],
     steps: AutomationStepConfig[],
     startIndex: number,
-    resumeAtIndex?: number,
+    resumeStepName?: string,
   ): Promise<unknown> {
     const automationId = context.automation.id;
     try {
       const walkResult = await automationContextStorage.run<Promise<WalkResult>>(
         { runId, automationId, chain },
-        () => this.walkSteps(steps, context, runId, startIndex, resumeAtIndex),
+        () => this.walkSteps(steps, context, runId, startIndex, resumeStepName),
       );
 
       if (walkResult.kind === 'paused') {
         logger.info(
-          `AutomationExecutor: run ${runId} PAUSED at index=${walkResult.atIndex} (externalRef=${walkResult.externalRef ?? '∅'})`,
+          `AutomationExecutor: run ${runId} PAUSED at step=${context.__meta?.waitingStepName ?? `step_${walkResult.atIndex}`} (externalRef=${walkResult.externalRef ?? '∅'})`,
         );
         return undefined;
       }
@@ -357,7 +389,8 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.COMPLETED },
       });
-      context.__meta = { error: null, chain };
+      context.__meta = { ...(context.__meta ?? {}), error: null, chain };
+      delete context.__meta.waitingStepName;
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
         currentStepIndex: steps.length,
@@ -370,12 +403,18 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.FAILED },
       });
-      context.__meta = { error: errMessage, chain };
+      context.__meta = { ...(context.__meta ?? {}), error: errMessage, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
       });
+      if (!isTransientError(err)) {
+        logger.error(
+          `AutomationExecutor: run ${runId} FAILED terminally (deterministic error, no retry) for automation ${automationId}: ${errMessage}`,
+        );
+        return undefined;
+      }
       logger.error(
-        `AutomationExecutor: run ${runId} FAILED for automation ${automationId}: ${errMessage}`,
+        `AutomationExecutor: run ${runId} FAILED (transient — Bull will retry) for automation ${automationId}: ${errMessage}`,
       );
       throw err;
     }
@@ -386,62 +425,139 @@ export class AutomationExecutor {
     context: AutomationContext,
     runId: string,
     startIndex: number = 0,
-    resumeAtIndex?: number,
+    resumeStepName?: string,
   ): Promise<WalkResult> {
     for (let i = startIndex; i < steps.length; i++) {
       const step = steps[i] as AutomationStepConfig;
       const stepName = `step_${i}`;
-      const isResuming = resumeAtIndex === i;
-
-      if (!isResuming) {
-        await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
-      }
+      const isResuming = resumeStepName === stepName;
 
       try {
-        await this.executeStep(step, context, { runId, stepName, isResuming });
-
-        const stepCtxEntry = context.steps[step.id];
-        await this.markStepCompleted(runId, stepName, stepCtxEntry);
+        await this.walkPersistedStep(step, context, {
+          runId,
+          stepName,
+          isResuming,
+          resumeStepName,
+        });
       } catch (err) {
         if (PauseStep.is(err)) {
-          await this.markStepWaiting(runId, stepName, context.steps[step.id], err.statePatch);
+          const waitingStepName = err.waitingStepName ?? stepName;
+          context.__meta = {
+            ...(context.__meta ?? {}),
+            error: null,
+            waitingStepName,
+          };
           await persistAutomationPauseState(runId, {
             context: JSON.stringify(context),
             currentStepIndex: i,
           });
           await this.prisma.workflowExecution.update({
             where: { id: runId },
-            data: { status: EXTERNAL_WAIT_STATUS },
+            data: { status: AutomationRunStatus.EXTERNAL_WAIT },
           });
           return { kind: 'paused', atIndex: i, externalRef: err.externalRef };
         }
-        const errMessage = err instanceof Error ? err.message : String(err);
-        await this.markStepFailed(runId, stepName, errMessage, context.steps[step.id]);
         throw err;
       }
     }
     return { kind: 'completed' };
   }
 
+  private async walkPersistedStep(
+    step: AutomationStepConfig,
+    context: AutomationContext,
+    callCtx: StepCallContext,
+  ): Promise<void> {
+    // Read the row before the RUNNING upsert. This is what lets an automation
+    // retry replay a completed action without firing its side effect again.
+    const row = await this.readStepRow(callCtx.runId, callCtx.stepName);
+    const persistedData = this.parsePersistedData(row?.data);
+    const replayed = this.replayIfCompleted(row, step, context);
+
+    if (!replayed && !callCtx.isResuming) {
+      await this.upsertStepRow(callCtx.runId, callCtx.stepName, step, 'RUNNING', null);
+    }
+
+    try {
+      // A completed control-flow row also owns completed descendant rows. Walk
+      // that branch on replay so their outputs are hydrated into context, while
+      // the persisted branch key prevents the condition from being reevaluated.
+      const replayControlChildren =
+        replayed &&
+        CONTROL_FLOW_STEP_TYPES.has(step.type) &&
+        this.readBranchKey(persistedData) !== undefined;
+      const result =
+        !replayed || replayControlChildren
+          ? await this.executeStep(step, context, {
+              ...callCtx,
+              persistedData,
+            })
+          : {};
+      const branchKey = result.branchKey ?? this.readBranchKey(persistedData);
+      await this.markStepCompleted(
+        callCtx.runId,
+        callCtx.stepName,
+        context.steps[step.id],
+        branchKey,
+      );
+    } catch (err) {
+      if (PauseStep.is(err)) {
+        // The first persisted frame to observe the pause is the action that
+        // actually stopped. Parent control-flow frames retain the same target
+        // while also becoming EXTERNAL_WAIT, allowing replay to route through
+        // their persisted branch keys on resume.
+        const isWaitingStep = err.waitingStepName === undefined;
+        const waitingStepName = err.waitingStepName ?? callCtx.stepName;
+        err.waitingStepName = waitingStepName;
+        const currentData =
+          this.parsePersistedData(
+            (await this.readStepRow(callCtx.runId, callCtx.stepName))?.data,
+          ) ?? persistedData;
+        await this.markStepWaiting(
+          callCtx.runId,
+          callCtx.stepName,
+          context.steps[step.id],
+          isWaitingStep ? err.statePatch : undefined,
+          waitingStepName,
+          currentData,
+        );
+        throw err;
+      }
+
+      const errMessage = err instanceof Error ? err.message : String(err);
+      // A control-flow step writes its branch key before walking children. Read
+      // the row again so a later child failure does not erase that selection.
+      const failureData =
+        this.parsePersistedData((await this.readStepRow(callCtx.runId, callCtx.stepName))?.data) ??
+        persistedData;
+      await this.markStepFailed(
+        callCtx.runId,
+        callCtx.stepName,
+        errMessage,
+        context.steps[step.id],
+        failureData,
+      );
+      throw err;
+    }
+  }
+
   private async walkNestedBranch(
     steps: AutomationStepConfig[],
     context: AutomationContext,
+    runId: string,
+    parentStepName: string,
+    branchKey: string,
+    resumeStepName?: string,
   ): Promise<void> {
-    for (const step of steps) {
-      try {
-        await this.executeStep(step, context, {
-          runId: '',
-          stepName: '',
-          isResuming: false,
-        });
-      } catch (err) {
-        if (PauseStep.is(err)) {
-          throw new Error(
-            `Step "${step.id}" (${step.type}) tried to pause inside a control-flow branch. Pausing is only supported at the top level — restructure the automation so the waiting step is not nested.`,
-          );
-        }
-        throw err;
-      }
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i] as AutomationStepConfig;
+      const stepName = `${parentStepName}.${branchKey}.step_${i}`;
+      await this.walkPersistedStep(step, context, {
+        runId,
+        stepName,
+        isResuming: resumeStepName === stepName,
+        resumeStepName,
+      });
     }
   }
 
@@ -481,18 +597,107 @@ export class AutomationExecutor {
     });
   }
 
+  private async readStepRow(runId: string, stepName: string): Promise<PersistedStepRow | null> {
+    return this.prisma.workflowStep.findUnique({
+      where: { workflowExecutionId_stepName: { workflowExecutionId: runId, stepName } },
+      select: { status: true, data: true },
+    });
+  }
+
+  private parsePersistedData(raw: string | null | undefined): Record<string, unknown> | undefined {
+    if (typeof raw !== 'string') return undefined;
+    const parsed = safeParseJson(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  }
+
+  private readBranchKey(data: Record<string, unknown> | undefined): string | undefined {
+    return typeof data?.branchKey === 'string' ? data.branchKey : undefined;
+  }
+
+  private async persistBranchSelection(
+    runId: string,
+    stepName: string,
+    step: AutomationStepConfig,
+    branchKey: string,
+  ): Promise<void> {
+    const row = await this.readStepRow(runId, stepName);
+    const existing = this.parsePersistedData(row?.data) ?? {};
+    const existingBranchKey = this.readBranchKey(existing);
+    if (existingBranchKey !== undefined && existingBranchKey !== branchKey) {
+      throw new Error(
+        `Step "${step.id}" (${step.type}) attempted to change persisted branch from ${existingBranchKey} to ${branchKey}`,
+      );
+    }
+
+    await this.prisma.workflowStep.update({
+      where: {
+        workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },
+      },
+      data: {
+        data: JSON.stringify({ ...existing, type: step.type, branchKey }),
+      },
+    });
+  }
+
+  // Rehydrate a completed step's stored entry so a retry skips its side effect
+  // but downstream steps still resolve. Returns false unless the output is replayable.
+  private replayIfCompleted(
+    row: PersistedStepRow | null,
+    step: AutomationStepConfig,
+    context: AutomationContext,
+  ): boolean {
+    if (row?.status !== 'COMPLETED' || typeof row.data !== 'string') {
+      return false;
+    }
+    const stored = this.parsePersistedData(row.data);
+    const output = stored?.['output'];
+    const outputIsObject =
+      !!output && typeof output === 'object' && !Array.isArray(output);
+    if (
+      !stored ||
+      typeof stored !== 'object' ||
+      !('output' in stored) ||
+      (output !== null && output !== undefined && !outputIsObject)
+    ) {
+      return false;
+    }
+    const outputRecord =
+      outputIsObject
+        ? (output as Record<string, unknown>)
+        : ((output ?? {}) as Record<string, unknown>);
+    const storedInput = stored['input'];
+    context.steps[step.id] = {
+      type: step.type,
+      ...(storedInput && typeof storedInput === 'object' && !Array.isArray(storedInput)
+        ? { input: storedInput as Record<string, unknown> }
+        : {}),
+      output: outputRecord,
+    };
+    logger.info(
+      `[automations] step REPLAY id=${step.id} type=${step.type} (already COMPLETED)`,
+    );
+    return true;
+  }
+
   private async markStepCompleted(
     runId: string,
     stepName: string,
     ctxEntry: { input?: unknown; output: unknown } | undefined,
+    branchKey?: string,
   ): Promise<void> {
+    const data = {
+      ...(ctxEntry ?? { output: null }),
+      ...(branchKey ? { branchKey } : {}),
+    };
     await this.prisma.workflowStep.update({
       where: {
         workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },
       },
       data: {
         status: 'COMPLETED',
-        data: JSON.stringify(ctxEntry ?? { output: null }),
+        data: JSON.stringify(data),
       },
     });
   }
@@ -502,9 +707,15 @@ export class AutomationExecutor {
     stepName: string,
     ctxEntry: { input?: unknown; output: unknown } | undefined,
     statePatch?: Record<string, unknown>,
+    waitingStepName?: string,
+    persistedData?: Record<string, unknown>,
   ): Promise<void> {
-    const base = ctxEntry ?? { output: null };
-    const merged = statePatch ? { ...base, ...statePatch } : base;
+    const merged = {
+      ...(persistedData ?? {}),
+      ...(ctxEntry ?? { output: null }),
+      ...(statePatch ?? {}),
+      ...(waitingStepName ? { waitingStepName } : {}),
+    };
     await this.prisma.workflowStep.update({
       where: {
         workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },
@@ -521,6 +732,7 @@ export class AutomationExecutor {
     stepName: string,
     error: string,
     ctxEntry: { input?: unknown; output: unknown } | undefined,
+    persistedData?: Record<string, unknown>,
   ): Promise<void> {
     await this.prisma.workflowStep.update({
       where: {
@@ -528,7 +740,7 @@ export class AutomationExecutor {
       },
       data: {
         status: 'FAILED',
-        data: JSON.stringify({ ...(ctxEntry ?? {}), error }),
+        data: JSON.stringify({ ...(persistedData ?? {}), ...(ctxEntry ?? {}), error }),
       },
     });
   }
@@ -536,10 +748,26 @@ export class AutomationExecutor {
   private async executeStep(
     step: AutomationStepConfig,
     context: AutomationContext,
-    callCtx: { runId: string; stepName: string; isResuming: boolean },
-  ): Promise<void> {
+    callCtx: StepCallContext,
+  ): Promise<StepExecutionResult> {
     const stepImpl = this.stepRegistry.get(step.type);
 
+    // Give the step its authoritative persisted key without mutating the
+    // caller's ALS store. Nested runs automatically restore the parent key.
+    const store = automationContextStorage.getStore();
+    if (!store) return this.executeStepBody(step, context, callCtx, stepImpl);
+    return automationContextStorage.run(
+      { ...store, stepName: callCtx.stepName },
+      () => this.executeStepBody(step, context, callCtx, stepImpl),
+    );
+  }
+
+  private async executeStepBody(
+    step: AutomationStepConfig,
+    context: AutomationContext,
+    callCtx: StepCallContext,
+    stepImpl: BaseStep<z.ZodSchema, Record<string, unknown>>,
+  ): Promise<StepExecutionResult> {
     if (stepImpl.kind === StepKind.CONTROL) {
       const controlImpl = stepImpl as BaseControlFlowStep<typeof stepImpl.configSchema, Record<string, unknown>>;
       const safeResult = controlImpl.configSchema.safeParse(step.config);
@@ -553,14 +781,38 @@ export class AutomationExecutor {
       }
       const t0 = Date.now();
       logger.info(`[automations] step START id=${step.id} type=${step.type}`);
+      const persistedBranchKey = this.readBranchKey(callCtx.persistedData);
+      let selectedBranchKey = persistedBranchKey;
       const output = await controlImpl.execute(safeResult.data, context, {
-        walkBranch: (steps, ctx) => this.walkNestedBranch(steps, ctx),
+        getPersistedBranchKey: () => persistedBranchKey,
+        walkBranch: async (steps, ctx, branchKey) => {
+          if (selectedBranchKey !== undefined && selectedBranchKey !== branchKey) {
+            throw new Error(
+              `Step "${step.id}" (${step.type}) attempted to execute branch ${branchKey} after ${selectedBranchKey} was selected`,
+            );
+          }
+          selectedBranchKey = branchKey;
+          await this.persistBranchSelection(
+            callCtx.runId,
+            callCtx.stepName,
+            step,
+            branchKey,
+          );
+          await this.walkNestedBranch(
+            steps,
+            ctx,
+            callCtx.runId,
+            callCtx.stepName,
+            branchKey,
+            callCtx.resumeStepName,
+          );
+        },
       });
       context.steps[step.id] = { type: step.type, output };
       logger.info(
         `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,
       );
-      return;
+      return { branchKey: selectedBranchKey };
     }
 
     const resolvedConfig = stripNullForOptionalKeys(
@@ -609,6 +861,7 @@ export class AutomationExecutor {
       }
       throw err;
     }
+    return {};
   }
 
 }
