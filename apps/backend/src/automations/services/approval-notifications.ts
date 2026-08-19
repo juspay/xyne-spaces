@@ -71,15 +71,6 @@ async function dmToUser(
   workspaceId: string,
   content: string,
 ): Promise<void> {
-  // The automation bot sends this DM on behalf of the workspace, but the ambient
-  // tenant context is the submitter/approver — a user who is NOT a participant of the
-  // private bot<->recipient DM. Under that per-user channel ACL, both the
-  // find-or-create probe AND createConversationWithMessage's findById fail to see the
-  // channel: the probe mints an empty duplicate DM and the message insert throws
-  // 'Channel not found', so the notification never lands (the empty "No messages yet"
-  // Automations DMs). Run the whole send as a service actor scoped to the DM's
-  // workspace so the per-user ACL is dropped and only workspace scope applies. This
-  // completes PR #517, which scoped only the read-side existence probe.
   await runAsServiceActor(fromUserId, workspaceId, async () => {
     const channelId = await repositories.channels.findOrCreateDMChannel(
       fromUserId,
