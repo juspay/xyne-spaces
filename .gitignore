@@ -239,3 +239,9 @@ security-reports/
 /vespa-core/generated
 #vespa models
 /vespa-core/vespa/models/*
+
+# Local PNPM store cache
+.pnpm-store/
+.pnpm-store/**
+.nix-cache/
+.nix-cache/**
