@@ -31,24 +31,16 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
 
-// L-12 replay protection. Spaces signs the raw body with HMAC-SHA256, so the
-// signed payload's own `timestamp` (and `payload.createdAt`) are tamper-proof:
-// an attacker cannot alter or strip them from a captured request without
-// invalidating the signature. We therefore reject validly-signed requests whose
-// signed timestamp is outside a bounded skew window (mirrors the Slack adapter's
-// MAX_TIMESTAMP_SKEW_SECONDS=300), and additionally drop exact duplicates seen
-// within that window via a bounded in-memory signature cache.
-const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000; // 300s
+const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
 const SEEN_SIGNATURE_TTL_MS = MAX_TIMESTAMP_SKEW_MS;
 const MAX_SEEN_SIGNATURES = 10_000;
-const seenSignatures = new Map<string, number>(); // signature hex -> expiry epoch ms
+const seenSignatures = new Map<string, number>();
 
 function pruneSeenSignatures(now: number): void {
   if (seenSignatures.size < MAX_SEEN_SIGNATURES) return;
   for (const [sig, expiry] of seenSignatures) {
     if (expiry <= now) seenSignatures.delete(sig);
   }
-  // Hard cap: if still oversized (many live entries), evict oldest-inserted.
   if (seenSignatures.size >= MAX_SEEN_SIGNATURES) {
     const overflow = seenSignatures.size - MAX_SEEN_SIGNATURES + 1;
     let i = 0;
@@ -61,7 +53,7 @@ function pruneSeenSignatures(now: number): void {
 
 function parseSignedEpochMs(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 1e12 ? value : value * 1000; // ms vs seconds heuristic
+    return value > 1e12 ? value : value * 1000;
   }
   if (typeof value === "string" && value.length > 0) {
     const numeric = Number(value);
@@ -72,9 +64,6 @@ function parseSignedEpochMs(value: unknown): number | null {
   return null;
 }
 
-// Extract the tamper-proof timestamp from an already-signature-verified raw body.
-// Returns null when the body carries no recognizable timestamp (older/other
-// webhook shapes) — those pass through the skew check unchanged.
 function signedTimestampMs(rawBody: Buffer): number | null {
   let parsed: unknown;
   try { parsed = JSON.parse(rawBody.toString("utf8")); } catch { return null; }
@@ -201,8 +190,6 @@ export async function verifySpacesSignature(
     return;
   }
 
-  // L-12: signature is valid — now enforce replay protection using the SIGNED
-  // (tamper-proof) timestamp and a short-lived duplicate cache.
   const now = Date.now();
   const signedTs = signedTimestampMs(rawBody);
   if (signedTs !== null && Math.abs(now - signedTs) > MAX_TIMESTAMP_SKEW_MS) {

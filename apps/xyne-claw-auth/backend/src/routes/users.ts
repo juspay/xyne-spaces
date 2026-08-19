@@ -265,11 +265,6 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
 
 router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
-    // C-4: scope the lookup to the caller's org and return only display fields.
-    // A bare findUnique by id leaked name+email+orgId (and every other User
-    // column) for ANY user in ANY org. Mirror the typeahead sibling (GET /):
-    // resolve the caller's orgId, filter by it, and `select` minimal fields so
-    // a cross-org id resolves to a 404 instead of an information disclosure.
     const requesterId = getRequesterId(req);
     const orgId =
       getOrgId(req) ??

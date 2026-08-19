@@ -175,11 +175,6 @@ export async function handleWebfetch(
   }
 
   try {
-    // SSRF guard: validate the destination (and EVERY redirect hop) against the
-    // shared private/reserved-range blocklist before connecting. We follow
-    // redirects manually with `redirect: "manual"` because `redirect: "follow"`
-    // would let a public URL bounce to an internal target (e.g. the cloud
-    // metadata endpoint) without re-validation. See mcpgateway http-client.
     const MAX_FETCH_REDIRECTS = 5;
     let currentUrl = url;
     let redirectCount = 0;
@@ -204,7 +199,6 @@ export async function handleWebfetch(
         if (redirectCount > MAX_FETCH_REDIRECTS) {
           return "Error: Fetch failed: too many redirects";
         }
-        // Free the socket before following the redirect.
         await response.body?.cancel().catch(() => undefined);
         currentUrl = new URL(location, currentUrl).toString();
         continue;

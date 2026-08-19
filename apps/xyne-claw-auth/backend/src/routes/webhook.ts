@@ -782,7 +782,6 @@ async function pendingActionTargetValidation(
   }
 }
 
-
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
  * agent's result as an approve/decline flow — with attachments when present.
@@ -1380,7 +1379,6 @@ async function postWriteApprovalAction(args: {
   }, token);
 }
 
-
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
 
 async function handleWebhook(req: Request, res: Response): Promise<void> {
@@ -1523,7 +1521,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (mentionedUserIds.length > 0) {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
-
 
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
@@ -4214,12 +4211,6 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
-  // L-18: `url` is derived from caller-supplied resultForwardUrl / automation
-  // callbackUrl. Legit forward targets are always internal origins (the Spaces
-  // backend /automations/claw-callback, auto-draft, or /webhook/result). Never
-  // forward the internal x-s2s-key to a target that is not an internal origin —
-  // otherwise a body-controlled URL harvests the platform S2S key. Refuse any
-  // target that is neither an internal origin nor an explicitly allowed callback.
   const forwardToInternal = isInternalCallbackOrigin(url);
   if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
     clog.warn(`[webhook/result] refusing to forward result to non-allowlisted url origin`);

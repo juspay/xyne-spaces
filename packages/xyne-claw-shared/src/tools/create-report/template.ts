@@ -167,23 +167,6 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Sanitize already-rendered HTML (the output of `marked.parse()`) before the
- * report template wraps it and it is written to a downloadable file.
- *
- * Uses `sanitize-html` — a pure-JS, allow-list parser with NO jsdom — instead of
- * the previous regex denylist. The regex was bypassable (finding C-2): it only
- * stripped whitespace-preceded event handlers, so `<img src=x /onerror=...>`
- * survived. An allow-list closes that whole bug class by construction: anything
- * not explicitly permitted (event handlers, <script>/<iframe>/<svg>/<object>,
- * javascript:/vbscript:/data:text-html schemes) is dropped by the parser.
- *
- * We deliberately keep the inline HTML the report feature supports — <details>,
- * <summary>, <code>, <pre>, tables, headings — and raster `data:` images used by
- * embedded charts. `<img>`-loaded SVG cannot execute script, but
- * data:image/svg+xml and data:text/html srcs are dropped anyway as defense in
- * depth via exclusiveFilter.
- */
 export function sanitizeHtmlBody(html: string): string {
   return sanitizeHtml(html, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat([
@@ -202,9 +185,7 @@ export function sanitizeHtmlBody(html: string): string {
       td: ["colspan", "rowspan"],
       th: ["colspan", "rowspan", "scope"],
     },
-    // javascript:/vbscript:/ftp/etc. are rejected; only these survive.
     allowedSchemes: ["http", "https", "mailto"],
-    // Raster data: images (charts) are allowed on <img> only.
     allowedSchemesByTag: { img: ["http", "https", "data"] },
     allowProtocolRelative: false,
     exclusiveFilter: (frame) => {

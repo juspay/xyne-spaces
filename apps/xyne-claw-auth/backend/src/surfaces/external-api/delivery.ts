@@ -97,10 +97,6 @@ export async function sendExternalResultCallback(
     return "refused";
   }
 
-  // Defense in depth: the check above is a literal-hostname blocklist and cannot
-  // catch DNS names that resolve to private/reserved IPs (DNS rebinding) or the
-  // many private CIDRs not enumerated in BLOCKED_HOSTNAMES. Resolve the host and
-  // reject every private/reserved destination via the shared outbound guard.
   try {
     await assertSafeOutboundUrl(callback.url);
   } catch {

@@ -439,11 +439,6 @@ router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
       return;
     }
 
-    // L-21: full agent internals (systemPrompt, promptNote, config, tool +
-    // skill configs, KB grants) are only for the owner / admin / contributors,
-    // and the trusted runtime (S2S) that has to RUN the agent. Any other org
-    // member gets the light projection — the same fields the agent list already
-    // exposes — so a slug read can't leak another user's prompt/config/creds.
     const record = agent as unknown as Record<string, unknown>;
     const viewerId = getRequesterId(req);
     let full = s2sKeyMatches(req.headers["x-s2s-key"]);
@@ -503,10 +498,6 @@ router.post("/", async (req: Request, res: Response) => {
     const admin = requesterId ? await isClawAdmin(requesterId) : false;
     const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
-    // C-8: prevent ownerUserId mass-assignment. A non-admin may only create an
-    // agent owned by itself; forging ownerUserId=<victim> would produce an agent
-    // that LOOKS victim-owned but carries the attacker's Spaces identity
-    // (spacesAppUserId) — a trojan agent. Mirrors the PUT owner-change guard.
     if (ownerUserId && ownerUserId !== requesterId && !admin) {
       res.status(403).json({ success: false, error: "Only an admin can create an agent owned by another user" });
       return;
@@ -2853,7 +2844,6 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   } else {
     headers["x-api-key"] = apiKey;
   }
-  // SSRF guard: baseUrl is user-supplied; block private/reserved destinations.
   await assertSafeOutboundUrl(`${root}/v1/models`);
   const res = await fetch(`${root}/v1/models`, {
     method: "GET",
@@ -3988,7 +3978,6 @@ router.get(
         headers["User-Agent"] = "codex-cli";
       }
 
-      // SSRF guard: cred.baseUrl is user-supplied; block private/reserved destinations.
       await assertSafeOutboundUrl(url);
       const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
       if (!upstream.ok) {
@@ -4056,7 +4045,6 @@ router.post(
 
       const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
-      // SSRF guard: baseUrl is user-supplied; block private/reserved destinations.
       await assertSafeOutboundUrl(`${root}/v1/models`);
       const upstream = await fetch(`${root}/v1/models`, {
         headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },

@@ -58,19 +58,6 @@ function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
   return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
 }
 
-/**
- * C-5: The file-memory endpoints below are internal S2S tools (mid-chat
- * read/write-memory-file, prompt-file loader) that act on behalf of a specific
- * end user, identified by a `userId` in the query/body. `requireAuth` also
- * admits ordinary cookie/CLI user sessions, so without this check any
- * authenticated user could pass another user's id and read or OVERWRITE their
- * memory files — including `soul.md`, which is injected verbatim into the
- * agent's system prompt (data theft + persistent prompt injection).
- *
- * Rule: a trusted S2S caller (the xyne-claw runtime) may target any userId —
- * end-user attribution was already resolved upstream. A regular user session
- * may only touch its OWN files, unless it is a claw admin.
- */
 async function assertMemoryUserAccess(
   req: Request,
   res: Response,
@@ -1912,10 +1899,6 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
       });
       return;
     }
-    // L-23: backfill triggers an expensive per-session curate (an LLM call each)
-    // over another owner's history. It previously never loaded the agent, so any
-    // org member could enqueue a cross-user backfill. Load org-scoped + gate to
-    // owner-or-admin, matching the enable/disable/clear-all surfaces.
     const requesterId = getRequesterId(req);
     if (!requesterId) {
       res.status(401).json({ success: false, error: "Unauthenticated" });
@@ -2104,10 +2087,6 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    // L-23: checkTwinAccess only guards the shared digital-twin bank; for a
-    // normal agent it returns true, so this bank op had NO ownership check —
-    // any org member could change another owner's memory config. Mirror the
-    // clear-all / subsystem-delete owner-or-admin guard.
     if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
       return;
@@ -2158,10 +2137,6 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    // L-23: checkTwinAccess only guards the shared digital-twin bank; for a
-    // normal agent it returns true, so this bank op had NO ownership check —
-    // any org member could change another owner's memory config. Mirror the
-    // clear-all / subsystem-delete owner-or-admin guard.
     if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
       return;
