@@ -781,26 +781,28 @@ export class UserService {
         return { user: workspaceUser, isNewUser: false };
       }
 
-      // Also check by email (for users created by seed script or when providerUserId is unavailable)
-      // workspaceUser = await this.prisma.user.findUnique({
-      //   where: {
-      //     email_workspaceId: {
-      //       email: userData.email,
-      //       workspaceId: userData.workspaceId
-      //     }
-      //   }
-      // });
+      // Resolve an existing member of THIS workspace by email as well as by providerUserId:
+      // seeded accounts, and users who have changed auth provider, will not match on
+      // providerUserId alone.
+      workspaceUser = await this.prisma.user.findUnique({
+        where: {
+          email_workspaceId: {
+            email: userData.email,
+            workspaceId: userData.workspaceId
+          }
+        }
+      });
 
-      // if (workspaceUser) {
-      //   workspaceUser = await this.prisma.user.update({
-      //     where: { id: workspaceUser.id },
-      //     data: {
-      //       ...(userData.providerUserId ? { providerUserId: userData.providerUserId } : {}),
-      //       authProvider: normalizedAuthProvider
-      //     }
-      //   });
-      //   return { user: workspaceUser, isNewUser: false };
-      // }
+      if (workspaceUser) {
+        workspaceUser = await this.prisma.user.update({
+          where: { id: workspaceUser.id },
+          data: {
+            ...(userData.providerUserId ? { providerUserId: userData.providerUserId } : {}),
+            authProvider: normalizedAuthProvider
+          }
+        });
+        return { user: workspaceUser, isNewUser: false };
+      }
 
       // Get workspace to check org membership
       const workspace = await this.prisma.workspace.findUnique({
@@ -820,17 +822,10 @@ export class UserService {
         }
       });
 
-      // Find if there's an existing user with this email in the org
-      const existingOrgUsers = await this.prisma.user.findMany({
-        where: {
-          email: userData.email,
-          workspace: {
-            orgId: workspace.orgId
-          }
-        }
-      });
-
-      const hasAccess = invitation || existingOrgUsers.length > 0;
+      // Joining a workspace requires an invitation or an approved join request for that
+      // workspace. Membership of another workspace in the same organisation is not access
+      // to this one.
+      const hasAccess = !!invitation;
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
