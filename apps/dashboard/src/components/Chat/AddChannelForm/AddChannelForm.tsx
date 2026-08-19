@@ -1116,9 +1116,33 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                         data-track-category='ADD_CHANNEL_FORM'
                         data-track-name='REMOVE_APP_STORE_APPLICATION'
                       >
-                        <Trash2 className='size-4' />
-                      </button>
-                    )}
+                        Android package name
+                      </label>
+                      <Input
+                        id={`android-package-name-${index}`}
+                        value={application.packageName}
+                        onChange={event =>
+                          setGooglePlayApplications(applications =>
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, packageName: event.target.value.trim() }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        placeholder='com.example.app'
+                        autoComplete='off'
+                        aria-invalid={invalidPackage || duplicatePackage}
+                      />
+                      {invalidPackage && (
+                        <p className='text-sm text-destructive'>Enter a valid package name.</p>
+                      )}
+                      {duplicatePackage && (
+                        <p className='text-sm text-destructive'>
+                          This package name has already been added.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}

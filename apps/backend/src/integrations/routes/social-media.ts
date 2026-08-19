@@ -40,8 +40,6 @@ router.use(express.urlencoded({ extended: false }));
 router.use(appStoreRoutes);
 router.use(instagramRoutes);
 
-// POST /:conversationId/reply
-// Provider-agnostic — works for any SOCIAL_MEDIA source registered in adapterRegistry
 router.post(
   '/:conversationId/reply',
   authV2Middleware.authenticate,
@@ -52,13 +50,15 @@ router.post(
         where: { conversationId: req.params.conversationId, workspaceId },
         select: { channelId: true },
       });
-      if (!conversation) {
-        res.status(404).json({ error: 'Conversation not found' });
-        return;
-      }
-      const access = await canAccessSocialMediaChannel(conversation.channelId, req.user!.id, workspaceId);
-      if (!access) {
-        res.status(404).json({ error: 'Conversation not found' });
+      if (
+        !conversation ||
+        !(await canAccessSocialMediaChannel(
+          conversation.channelId,
+          req.user!.id,
+          workspaceId
+        ))
+      ) {
+        res.status(404).json({ error: 'Review conversation not found' });
         return;
       }
 
