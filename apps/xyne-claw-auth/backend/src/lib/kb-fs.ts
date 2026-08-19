@@ -157,7 +157,7 @@ export class KbFs {
   }
 
   /**
-   * Literal search across every page, with line numbers.
+   * Search across every page, with line numbers.
    *
    * Loads all bodies on first call. At the scale this KB operates
    * (tens to low hundreds of pages) that is one pass of a few hundred KB, and
@@ -167,10 +167,22 @@ export class KbFs {
   async grep(pattern: string | RegExp, pathPrefix = ""): Promise<KbGrepMatch[]> {
     await this.loadAll();
 
-    const re =
-      typeof pattern === "string"
-        ? new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-        : pattern;
+    // The tool advertises regex and promises "no match means genuinely absent",
+    // so a string is compiled as a pattern. Escaping it unconditionally made
+    // every regex silently match nothing — and a silent zero is the step right
+    // before the agent writes a page that already exists. An invalid pattern
+    // falls back to a literal search rather than failing the call: the model
+    // often means the characters it typed.
+    let re: RegExp;
+    if (typeof pattern === "string") {
+      try {
+        re = new RegExp(pattern, "i");
+      } catch {
+        re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      }
+    } else {
+      re = pattern;
+    }
 
     const matches: KbGrepMatch[] = [];
     for (const [path, body] of this.bodies) {

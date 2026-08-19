@@ -422,6 +422,43 @@ async function resolveSpacesAuthFromRequest(
   }
 }
 
+/**
+ * Validates a caller-supplied extraction scope against the KB project registry.
+ *
+ * `findingScope` is not an agent setting — it is the routing key for the whole
+ * extraction pipeline. claw's resolveFindingScope attaches emit-finding only
+ * when it is present, and the scope decides which project's GCS prefix the
+ * findings land in and therefore which project's KB the nightly merge folds
+ * them into. Taken from the body unchecked, any caller could run any agent and
+ * write findings into another project's knowledge base — pages that, by design,
+ * can never be deleted.
+ *
+ * So: only an internal S2S caller (kbExtractDaily) may supply it, and the
+ * project must be a row in kb_projects that is actually opted in. The returned
+ * scope is rebuilt from the DB row rather than echoed back, so the code, name
+ * and workspace cannot drift from what the registry says.
+ */
+async function resolveTrustedFindingScope(raw: unknown): Promise<Record<string, unknown> | undefined> {
+  if (!raw || typeof raw !== "object") return undefined;
+  const scope = raw as { workspaceId?: unknown; project?: { id?: unknown; code?: unknown }; day?: unknown };
+  const projectId = typeof scope.project?.id === "string" ? scope.project.id.trim() : "";
+  const code = typeof scope.project?.code === "string" ? scope.project.code.trim().toUpperCase() : "";
+  if (!projectId || !code) return undefined;
+
+  const project = await prisma.kbProject.findUnique({ where: { projectId } });
+  if (!project || !project.enabled) return undefined;
+  // A registered project id paired with someone else's code would still file
+  // the findings under that other code's prefix.
+  if (project.projectCode.toUpperCase() !== code) return undefined;
+
+  const day = typeof scope.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(scope.day) ? scope.day : undefined;
+  return {
+    workspaceId: project.workspaceId,
+    project: { id: project.projectId, code: project.projectCode, name: project.projectName },
+    ...(day ? { day } : {}),
+  };
+}
+
 // ── Resolve agent config ──
 
 async function resolveAgent(
@@ -924,13 +961,32 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       return;
     }
 
+    // Extraction scope is orchestrator input, not caller input — see
+    // resolveTrustedFindingScope. Rejected loudly rather than dropped: a real
+    // extraction run that lost its scope would emit nothing and look like an
+    // empty day.
+    const rawFindingScope = (req.body as { agentConfig?: { findingScope?: unknown } } | undefined)
+      ?.agentConfig?.findingScope;
+    let callerFindingScope: Record<string, unknown> | undefined;
+    if (rawFindingScope !== undefined) {
+      if (!isInternalS2SCaller) {
+        res
+          .status(403)
+          .json({ success: false, error: "findingScope requires internal service authentication" });
+        return;
+      }
+      callerFindingScope = await resolveTrustedFindingScope(rawFindingScope);
+      if (!callerFindingScope) {
+        res
+          .status(400)
+          .json({ success: false, error: "findingScope does not name an enabled kb_projects entry" });
+        return;
+      }
+    }
+
     // Resolve agent (only if explicitly requested). Org comes from auth/user DB,
     // never from request body.
-    const agent = await resolveAgent(
-      agentSlug,
-      runtimeOrgId,
-      (req.body as { agentConfig?: { findingScope?: unknown } } | undefined)?.agentConfig?.findingScope,
-    );
+    const agent = await resolveAgent(agentSlug, runtimeOrgId, callerFindingScope);
     if ("error" in agent) {
       res.status(400).json({ success: false, error: agent.error });
       return;
@@ -1146,9 +1202,28 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // platform env value (secret-exfil / SSRF / GIT_SSH_COMMAND injection).
     // xyne-claw enforces this again in resolveToolConfig; this is the boundary.
     const isInternalRun = req.baseUrl.includes("/internal");
+    // findingVocabulary widens the kinds/modes validateFinding accepts, and
+    // nothing re-validates a finding on read — so a body-supplied vocabulary is
+    // a way to write shapes the pipeline never agreed to. Honoured from the
+    // agent row (which an admin owns) and from internal callers only; the
+    // body's copy is dropped for everyone else. findingScope is already gated
+    // above and rebuilt from the registry, so the body's copy is never used.
+    const bodyAgentConfigRaw = (req.body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {};
+    const {
+      findingScope: _bodyFindingScope,
+      findingVocabulary: bodyFindingVocabulary,
+      ...bodyAgentConfigSafe
+    } = bodyAgentConfigRaw;
+    // findingScope is dropped unconditionally: the validated, registry-rebuilt
+    // copy is already on agent.agentConfig, and letting the body's version
+    // through here would overwrite it with the unchecked original.
+    const bodyAgentConfig =
+      isInternalS2SCaller && bodyFindingVocabulary !== undefined
+        ? { ...bodyAgentConfigSafe, findingVocabulary: bodyFindingVocabulary }
+        : bodyAgentConfigSafe;
     let mergedAgentConfig = stripPlatformConfigKeys({
       ...agent.agentConfig,
-      ...((req.body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
+      ...bodyAgentConfig,
     });
     if (!isInternalRun) {
       const {

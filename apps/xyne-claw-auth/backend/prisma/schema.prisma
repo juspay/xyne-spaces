@@ -2370,7 +2370,12 @@ model KbProject {
   projectId    String  @id
   /// Short stable code (e.g. "XYNE"). Used as the KB path segment, so it must
   /// not change: pages cannot be moved once written.
-  projectCode  String
+  ///
+  /// Unique because it is the routing key: the GCS findings partition, the KB
+  /// path segment and every by-code lookup in the pipeline. Two rows sharing a
+  /// code made `findFirst` pick one arbitrarily, so extraction, merge and
+  /// reconcile could each read a different project's collection under one name.
+  projectCode  String  @unique
   projectName  String
   workspaceId  String
   /// Collection this project's KB pages are written into.

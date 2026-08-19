@@ -304,8 +304,14 @@ app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
 // (not requireUserAuth) because /recall-hits is an S2S callback from xyne-claw.
 // The per-request memoization in require-auth.ts makes the second layer free.
 app.use(`${BASE}/memory`, requireAuth, requireNoAccessToken, memoryRouter);
-// KB filesystem for the curator agent. S2S only — xyne-claw holds no Spaces session.
-app.use(`${BASE}/kb`, requireAuth, kbRouter);
+// KB routes split by caller: the data plane (list/read/grep/write/edit) is
+// requireStrictS2S per-route inside the router — xyne-claw holds no Spaces
+// session and no browser caller has any business reading another user's
+// collection through it — while the admin sub-routes are cookie callers behind
+// requireClawAdmin and so need the identity requireAuth resolves.
+// requireNoAccessToken at the mount keeps scopeless CLI/service tokens out of
+// both halves (same barrier as /memory, /metrics, /control-center).
+app.use(`${BASE}/kb`, requireAuth, requireNoAccessToken, kbRouter);
 app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
 app.use(`${BASE}/control-center`, requireAuth, requireNoAccessToken, controlCenterRouter);
 app.use(`${BASE}/research-agent`, requireAuth, requireNoAccessToken, researchAgentRouter);
