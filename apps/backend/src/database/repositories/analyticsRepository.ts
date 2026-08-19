@@ -288,6 +288,73 @@ export class AnalyticsRepository {
   }
 
   /**
+   * IST bucket ordinal computed in Postgres. Mirrors getBucketKey's integer
+   * math: shift the row's UTC epoch into IST, then floor to the hour/day unit.
+   * extract(epoch ...) yields the UTC epoch regardless of the createdAt column's
+   * storage type, and bucketKeyFromOrdinal turns the ordinal back into the exact
+   * same key string getBucketKey / generate*TimeBuckets produce, so SQL-side
+   * grouping stays byte-identical to the old Node bucketing.
+   */
+  private bucketOrdinalSql(groupBy: 'day' | 'hour'): Prisma.Sql {
+    const unitMs = groupBy === 'hour' ? HOUR_MS : HOUR_MS * 24;
+    return Prisma.sql`floor((floor(extract(epoch from m."createdAt") * 1000) + ${IST_OFFSET_MS}) / ${unitMs})::bigint`;
+  }
+
+  /**
+   * Inverse of bucketOrdinalSql: reconstruct the canonical bucket key string
+   * from a SQL bucket ordinal, byte-identical to getBucketKey so the zero-fill
+   * join against generate*TimeBuckets lines up.
+   */
+  private bucketKeyFromOrdinal(ordinal: number, groupBy: 'day' | 'hour'): string {
+    const unitMs = groupBy === 'hour' ? HOUR_MS : HOUR_MS * 24;
+    const shiftedStartMs = ordinal * unitMs;
+    return groupBy === 'hour'
+      ? new Date(shiftedStartMs - IST_OFFSET_MS).toISOString()
+      : new Date(shiftedStartMs).toISOString().split('T')[0];
+  }
+
+  /**
+   * Run a per-bucket aggregate over the valid-message set entirely in Postgres.
+   * `aggregates` supplies the SELECT columns after the bucket ordinal; only
+   * non-empty buckets come back, so callers zero-fill against their generated
+   * bucket list. Keeps the whole time series off the Node heap - no message row
+   * is materialized just to be counted.
+   */
+  private async bucketedOverValidMessages<R>(
+    gte: string | null,
+    lte: string | null,
+    workspaceId: string,
+    groupBy: 'day' | 'hour',
+    aggregates: Prisma.Sql,
+  ): Promise<R[]> {
+    return this.prisma.$queryRaw<R[]>(Prisma.sql`
+      SELECT ${this.bucketOrdinalSql(groupBy)} AS bucket, ${aggregates}
+      ${this.validMessagesFrom(gte, lte, workspaceId)}
+      GROUP BY 1
+    `);
+  }
+
+  /**
+   * Zero-fill a single-value bucketed aggregate into the ordered bucket list,
+   * reconstructing each row's key from its ordinal and sorting by date - the
+   * same shape the old bucketCounts/bucketDistinct paths returned.
+   */
+  private zeroFillSingle(
+    rows: { bucket: bigint; value: number }[],
+    timeBuckets: string[],
+    groupBy: 'day' | 'hour',
+  ): { date: string; value: number }[] {
+    const byKey = new Map<string, number>();
+    for (const row of rows) {
+      byKey.set(this.bucketKeyFromOrdinal(Number(row.bucket), groupBy), row.value);
+    }
+    return timeBuckets
+      .map(date => ({ date, value: byKey.get(date) ?? 0 }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+
+  /**
    * Reduce a list of records into a per-bucket numeric time series.
    * Materializes every bucket (zero-filled) in the given order, adds each
    * record's amount (default 1) to the bucket its key falls in, and returns the
@@ -507,48 +574,46 @@ export class AnalyticsRepository {
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = this.toDateCondition(dateFilter);
     const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    // Use centralized helper for filtering. Channel + scopeType ride along on each
-    // message, so no per-conversation follow-up query (and no unbounded IN list).
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
+    // Per-bucket total plus per-scope breakdown, aggregated in Postgres. Rows in
+    // scopes other than the three tracked ones still count toward `value`
+    // (COUNT(*)) but not the breakdown, matching the old Node reduction exactly.
+    const rows = await this.bucketedOverValidMessages<{
+      bucket: bigint; value: number; channel: number; dm: number; groupdm: number;
+    }>(
+      gte, lte, workspaceId, groupBy,
+      Prisma.sql`
+        COUNT(*)::int AS value,
+        COUNT(*) FILTER (WHERE ch."scopeType" = ${ChannelScopeType.DEFAULT})::int AS channel,
+        COUNT(*) FILTER (WHERE ch."scopeType" = ${ChannelScopeType.DM})::int AS dm,
+        COUNT(*) FILTER (WHERE ch."scopeType" = ${ChannelScopeType.GROUP_DM})::int AS groupdm
+      `,
+    );
 
-    // Generate complete time buckets for the date range based on groupBy
-    const timeBuckets = groupBy === 'hour' 
+    const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, { total: number; channel: number; dm: number; groupDm: number }>();
 
-    // Initialize all buckets with zero values
-    timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, { total: 0, channel: 0, dm: 0, groupDm: 0 });
-    });
+    const byKey = new Map<string, { value: number; channel: number; dm: number; groupDm: number }>();
+    for (const row of rows) {
+      byKey.set(this.bucketKeyFromOrdinal(Number(row.bucket), groupBy), {
+        value: row.value, channel: row.channel, dm: row.dm, groupDm: row.groupdm,
+      });
+    }
 
-    // Aggregate valid messages
-    validMessages.forEach(message => {
-      const dateKey = this.getBucketKey(message.createdAt, groupBy);
-      const scopeType = message.channelScopeType;
-      if (bucketData.has(dateKey)) {
-        const bucket = bucketData.get(dateKey)!;
-        bucket.total += 1;
-
-        if (scopeType === 'DEFAULT') {
-          bucket.channel += 1;
-        } else if (scopeType === 'DM') {
-          bucket.dm += 1;
-        } else if (scopeType === 'GROUP_DM') {
-          bucket.groupDm += 1;
-        }
-      }
-    });
-
-    // Convert to final format
-    return timeBuckets.map(dateKey => ({
-      date: dateKey,
-      value: bucketData.get(dateKey)!.total,
-      channelMessages: bucketData.get(dateKey)!.channel,
-      dmMessages: bucketData.get(dateKey)!.dm,
-      groupDmMessages: bucketData.get(dateKey)!.groupDm
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    return timeBuckets
+      .map(date => {
+        const bucket = byKey.get(date);
+        return {
+          date,
+          value: bucket?.value ?? 0,
+          channelMessages: bucket?.channel ?? 0,
+          dmMessages: bucket?.dm ?? 0,
+          groupDmMessages: bucket?.groupDm ?? 0,
+        };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   /**
@@ -722,29 +787,21 @@ export class AnalyticsRepository {
   async getActiveChannelsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
     const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
 
-    // Use centralized helper for filtering. Channel + scopeType ride along on each
-    // message, so no per-conversation follow-up query (and no unbounded IN list).
-    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
+    // Distinct DEFAULT-scope channels active per bucket, counted in Postgres
+    // (COUNT(DISTINCT ...) FILTER) instead of building a per-bucket Set in Node.
+    const rows = await this.bucketedOverValidMessages<{ bucket: bigint; value: number }>(
+      gte, lte, workspaceId, groupBy,
+      Prisma.sql`COUNT(DISTINCT c."channelId") FILTER (WHERE ch."scopeType" = ${ChannelScopeType.DEFAULT})::int AS value`,
+    );
 
-    // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    // Distinct DEFAULT-scope channels active per bucket. Non-DEFAULT messages
-    // resolve to a null id and are skipped by bucketDistinct.
-    return this.bucketDistinct(
-      validMessages,
-      timeBuckets,
-      message => this.getBucketKey(message.createdAt, groupBy),
-      message => (message.channelScopeType === ChannelScopeType.DEFAULT ? message.channelId : null),
-    );
+    return this.zeroFillSingle(rows, timeBuckets, groupBy);
   }
 
   /**
@@ -807,10 +864,16 @@ export class AnalyticsRepository {
   async getMessagesToday(workspaceId?: string): Promise<number> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     const { startOfTodayUTC, now } = this.getIstDayBounds();
+    const { gte, lte } = this.toIsoBounds({ gte: startOfTodayUTC, lte: now });
 
-    const validMessages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
+    // Count today's valid messages in Postgres instead of shipping every row to
+    // Node just to read `.length`.
+    const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS count
+      ${this.validMessagesFrom(gte, lte, scopedWorkspaceId)}
+    `);
 
-    return validMessages.length;
+    return count;
   }
 
   /**
@@ -819,17 +882,15 @@ export class AnalyticsRepository {
   async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     const { startOfTodayUTC, now } = this.getIstDayBounds();
+    const { gte, lte } = this.toIsoBounds({ gte: startOfTodayUTC, lte: now });
 
-    const messages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
-
-    // Generate hourly buckets for today
-    const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
-
-    return this.bucketCounts(
-      messages,
-      timeBuckets,
-      message => this.getBucketKey(message.createdAt, 'hour'),
+    // Hourly counts bucketed in Postgres; only non-empty hours come back.
+    const rows = await this.bucketedOverValidMessages<{ bucket: bigint; value: number }>(
+      gte, lte, scopedWorkspaceId, 'hour', Prisma.sql`COUNT(*)::int AS value`,
     );
+
+    const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
+    return this.zeroFillSingle(rows, timeBuckets, 'hour');
   }
 
   /**
