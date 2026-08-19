@@ -1,3 +1,10 @@
+## [1.197.1](https://github.com/juspay/xyne-spaces/compare/v1.197.0...v1.197.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* title generation length ([#728](https://github.com/juspay/xyne-spaces/issues/728)) ([535a714](https://github.com/juspay/xyne-spaces/commit/535a71442a5ab12a27a597282276b0f94a0b99fe))
+
 ## [1.197.0](https://github.com/juspay/xyne-spaces/compare/v1.196.1...v1.197.0) (2026-08-19)
 
 
