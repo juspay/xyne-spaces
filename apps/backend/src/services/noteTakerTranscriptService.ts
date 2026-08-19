@@ -11,7 +11,7 @@ import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
 import {
   mergeRecordingSummaryMarkedItems,
@@ -136,7 +136,7 @@ class NoteTakerTranscriptService {
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
         try {
-          await repositories.calls.update(call.id, { labels: labelIds });
+          await repositories.calls.appendLabels(call.id, labelIds);
           logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
         } catch (error) {
           logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });
@@ -814,7 +814,7 @@ class NoteTakerTranscriptService {
       const slug = this.slugifyLabel(rawLabel);
       if (!slug) continue;
       try {
-        const tagId = await this.getOrCreateLabelTag(call, slug);
+        const tagId = await this.getOrCreateLabelTag(call, slug, TagMethod.LLM);
         if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
       } catch (error) {
         logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
@@ -823,13 +823,34 @@ class NoteTakerTranscriptService {
     return tagIds;
   }
 
+  /**
+   * Labels arrive as a mix of Tag ids (already applied) and raw text (just typed), and
+   * leave as ids only — typed text becomes a real Tag marked `manual`.
+   */
+  async resolveLabelsToTagIds(call: Call, incoming: string[]): Promise<string[]> {
+    if (!call.workspaceId) return [...new Set(incoming)];
+
+    const known = await tagRepository.findByIds(incoming, call.workspaceId);
+    const knownIds = new Set(known.map((tag) => tag.id));
+    const ids: string[] = [];
+
+    for (const entry of incoming) {
+      if (knownIds.has(entry)) {
+        ids.push(entry);
+        continue;
+      }
+      const slug = this.slugifyLabel(entry);
+      if (!slug) continue;
+      const id = await this.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
+      if (id) ids.push(id);
+    }
+
+    return [...new Set(ids)];
+  }
+
   /** Normalize an LLM-generated label into the Tag framework's required format (lowercase, hyphenated). */
   private slugifyLabel(raw: string): string | null {
-    const slug = raw
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    const slug = normalizeTagName(raw);
     if (!slug) return null;
     const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
     return TAG_FORMAT_REGEX.test(safe) ? safe : null;
@@ -841,9 +862,19 @@ class NoteTakerTranscriptService {
    * so tagService.createTag doesn't require a workspace-level TagsConfig for
    * the "topic" category (see assertManualCategoryOrOverride).
    */
-  private async getOrCreateLabelTag(call: Call, slug: string): Promise<string | null> {
+  private async getOrCreateLabelTag(
+    call: Call,
+    slug: string,
+    method: TagMethod,
+  ): Promise<string | null> {
     const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-    if (existing) return existing.id;
+    if (existing) {
+      // Typing a label the LLM only suggested asserts it just as the tick button does.
+      if (method === TagMethod.MANUAL && existing.method === TagMethod.LLM) {
+        await tagService.confirmTag(existing.id, call.workspaceId!);
+      }
+      return existing.id;
+    }
 
     try {
       const created = await tagService.createTag(
@@ -852,7 +883,7 @@ class NoteTakerTranscriptService {
         call.workspaceId!,
         NOTE_TAKER_LABEL_CATEGORY,
         slug,
-        TagMethod.LLM,
+        method,
       );
       return created.id;
     } catch (error) {
