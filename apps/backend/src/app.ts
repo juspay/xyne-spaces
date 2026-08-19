@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -61,7 +62,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -407,7 +407,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
@@ -449,6 +448,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);

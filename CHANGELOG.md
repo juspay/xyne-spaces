@@ -1,3 +1,45 @@
+## [1.196.1](https://github.com/juspay/xyne-spaces/compare/v1.196.0...v1.196.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* remove public create-user API endpoint and unused API_KEY_USER ([#719](https://github.com/juspay/xyne-spaces/issues/719)) ([082e079](https://github.com/juspay/xyne-spaces/commit/082e07998978e7c2744a20380a184c6cad326680))
+
+## [1.196.0](https://github.com/juspay/xyne-spaces/compare/v1.195.4...v1.196.0) (2026-08-19)
+
+
+### Features
+
+* ONETEAM-2202 auto label desk ([#32](https://github.com/juspay/xyne-spaces/issues/32)) ([ce1044d](https://github.com/juspay/xyne-spaces/commit/ce1044dc1240e9a7af3d100c026702a94c850011))
+
+## [1.195.4](https://github.com/juspay/xyne-spaces/compare/v1.195.3...v1.195.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* Resolve the issue where canvas data is not persisting … ([#716](https://github.com/juspay/xyne-spaces/issues/716)) ([b28823a](https://github.com/juspay/xyne-spaces/commit/b28823a0c41c93f44f300b4509e3aff7e06a89c2))
+
+## [1.195.3](https://github.com/juspay/xyne-spaces/compare/v1.195.2...v1.195.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* replace ExternalSourceRepository with ChannelExternalSourceResolver in EmailService ([#538](https://github.com/juspay/xyne-spaces/issues/538)) ([beb6b7b](https://github.com/juspay/xyne-spaces/commit/beb6b7b559b262fc778ec48634cbc02fb81109fe))
+
+## [1.195.2](https://github.com/juspay/xyne-spaces/compare/v1.195.1...v1.195.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* discard stale out-of-order vespaSearch responses ([#689](https://github.com/juspay/xyne-spaces/issues/689)) ([d26bcf9](https://github.com/juspay/xyne-spaces/commit/d26bcf938ac91f7b127e507c8faf0a63a1e8dccb))
+
+## [1.195.1](https://github.com/juspay/xyne-spaces/compare/v1.195.0...v1.195.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* disable toggle if user unavaiable, showing no one available for assignment in user group dropdown ([#695](https://github.com/juspay/xyne-spaces/issues/695)) ([8762a7c](https://github.com/juspay/xyne-spaces/commit/8762a7c6f94c09d01e06efa8b70620b6f64122c0))
+
 ## [1.195.0](https://github.com/juspay/xyne-spaces/compare/v1.194.0...v1.195.0) (2026-08-19)
 
 
