@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/test-local-runner
+      - feature/self-hosted-runner-test
   workflow_dispatch:
 
 jobs:
