@@ -1723,7 +1723,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 /* Incoming-call modal — the radar rings are also removed at the React level via
-   usePrefersReducedMotion; this is a backstop for any that still mount. */
+   framer-motion's useReducedMotion; this is a backstop for any that still mount. */
 @media (prefers-reduced-motion: reduce) {
   .incoming-call-card,
   .incoming-call-radar {
