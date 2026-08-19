@@ -2558,7 +2558,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Tools can legitimately run for minutes — pause the stall watchdog so a
       // slow tool isn't mistaken for a hung model.
       modelActive = false;
-      log.info(`[agent] Tool call: ${event.toolName} args=${JSON.stringify(event.args ?? {}).slice(0, 200)}`);
+      log.info(`[agent] Tool call: ${event.toolName} argCount=${Object.keys(event.args ?? {}).length} argKeys=[${Object.keys(event.args ?? {}).join(",")}]`);
       inflightCalls.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
       pushDebugEvent("tool_execution_start", {
         toolName: event.toolName,
