@@ -610,20 +610,21 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     currentCanvasIdRef.current = selectedCanvas.id;
 
     // On mobile, always navigate to /chat/canvas/:canvasId (preserves back navigation to channel)
-    // On desktop, use baseRoute-based navigation
-    const canvasPath = isMobile
-      ? `/chat/canvas/${selectedCanvas.id}`
-      : `${baseRoute}/canvas/${selectedCanvas.id}`;
-
-    // Store the original path for back navigation on mobile
     if (isMobile) {
-      void navigate(canvasPath, {
+      void navigate(`/chat/canvas/${selectedCanvas.id}`, {
         state: {
           previousPath: location.pathname,
         },
       });
     } else {
-      void navigate(canvasPath);
+      // On desktop, open the canvas in the channel's secondary ("third") pane by
+      // setting the `#canvas=` hash on the CURRENT channel route. This keeps the
+      // channel shell (ConversationPanelV2 + the top tab strip) mounted — fixing
+      // the "I go inside Canvas and lose the top tabs" problem — and renders the
+      // canvas via ChatView's secondaryPanelContent with the PaneSourceBar on top.
+      // (Previously navigated to `${baseRoute}/canvas/:id`, a sibling route that
+      // unmounted the entire channel shell.)
+      void navigate(`${baseRoute}/${channelId}#canvas=${selectedCanvas.id}`);
     }
   };
 
