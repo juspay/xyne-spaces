@@ -1,3 +1,10 @@
+## [1.195.2](https://github.com/juspay/xyne-spaces/compare/v1.195.1...v1.195.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* discard stale out-of-order vespaSearch responses ([#689](https://github.com/juspay/xyne-spaces/issues/689)) ([d26bcf9](https://github.com/juspay/xyne-spaces/commit/d26bcf938ac91f7b127e507c8faf0a63a1e8dccb))
+
 ## [1.195.1](https://github.com/juspay/xyne-spaces/compare/v1.195.0...v1.195.1) (2026-08-19)
 
 
