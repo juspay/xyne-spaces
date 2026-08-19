@@ -4220,8 +4220,32 @@ async function forwardResult(
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
   const forwardToInternal = isInternalCallbackOrigin(url);
+  // Origin only — the full URL can carry a secret path segment.
+  const targetOrigin = (() => { try { return new URL(url).origin; } catch { return "(unparseable)"; } })();
+  // A dropped forward means the automation upstream waits forever for a result
+  // that will never arrive, so every non-delivery outcome here must be LOUD:
+  // error-level, event-tagged for the log bridge, and counted as a metric —
+  // not a warn that scrolls past.
+  const forwardFailure = (outcome: string, detail: string): void => {
+    clog.error(`[webhook/result] resultForward ${outcome} session=${payload.sessionId} origin=${targetOrigin} ${detail}`, {
+      event: "result_forward_failed",
+      sessionId: payload.sessionId,
+      outcome,
+      origin: targetOrigin,
+      internal: forwardToInternal,
+      automationCallback: isAutomationCallback,
+    });
+    clog.info([
+      "[metric]",
+      "name=result_forward",
+      "kind=count",
+      `outcome=${outcome}`,
+      `internal=${forwardToInternal}`,
+      `automation=${isAutomationCallback}`,
+    ].join(" "));
+  };
   if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
-    clog.warn(`[webhook/result] refusing to forward result to non-allowlisted url origin`);
+    forwardFailure("refused_origin", "target origin is neither internal nor an allowed external callback — result DROPPED");
     return;
   }
   try {
@@ -4239,9 +4263,17 @@ async function forwardResult(
         ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
       }),
     });
-    if (!res.ok) clog.warn(`[webhook/result] resultForward returned ${res.status}`);
+    if (!res.ok) {
+      // 401/403 on an internal-classified target is the L-18 misconfiguration
+      // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
+      // key mismatch) — the detail names it so the fix is obvious from the log.
+      const authHint = res.status === 401 || res.status === 403
+        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
+        : "";
+      forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
+    }
   } catch (err) {
-    clog.warn(`[webhook/result] resultForward failed: ${err instanceof Error ? err.message : String(err)}`);
+    forwardFailure("network_error", err instanceof Error ? err.message : String(err));
   }
 }
 

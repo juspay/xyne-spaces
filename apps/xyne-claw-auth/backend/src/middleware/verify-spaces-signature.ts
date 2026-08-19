@@ -22,19 +22,44 @@
  *   - Does NOT change req body shape. Downstream handlers continue to read
  *     req.body (JSON-parsed) as before.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
+import { redisService } from "../redis.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
 
 const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
 const SEEN_SIGNATURE_TTL_MS = MAX_TIMESTAMP_SKEW_MS;
+const SEEN_SIGNATURE_TTL_SEC = Math.ceil(SEEN_SIGNATURE_TTL_MS / 1000);
 const MAX_SEEN_SIGNATURES = 10_000;
+// Fallback only — the authoritative replay set lives in Redis so all replicas
+// share it and a pod restart doesn't reopen the window. This map covers the
+// Redis-down case at the old per-pod strength.
 const seenSignatures = new Map<string, number>();
+
+/**
+ * Atomically record-and-check the signature in Redis. Returns:
+ *   "fresh"  — first sighting, recorded (SET NX won the race)
+ *   "replay" — already recorded inside the TTL window
+ *   null     — Redis unavailable; caller falls back to the in-memory map
+ * The key hashes the signature: bounded key size, and the raw HMAC never
+ * appears in Redis (a dump of the keyspace shouldn't yield replayable values).
+ */
+async function checkSignatureReplayRedis(signature: string): Promise<"fresh" | "replay" | null> {
+  try {
+    const redis = redisService.getConnection();
+    const key = `spaces-sig-replay:${createHash("sha256").update(signature).digest("hex")}`;
+    const set = await redis.set(key, "1", "EX", SEEN_SIGNATURE_TTL_SEC, "NX");
+    return set === "OK" ? "fresh" : "replay";
+  } catch (err) {
+    log.warn(`[replay-check] redis unavailable, falling back to in-memory set: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
 function pruneSeenSignatures(now: number): void {
   if (seenSignatures.size < MAX_SEEN_SIGNATURES) return;
@@ -196,13 +221,20 @@ export async function verifySpacesSignature(
     verificationFailure("stale_timestamp", "signature timestamp outside allowed window", `skewMs=${now - signedTs}`);
     return;
   }
-  const priorExpiry = seenSignatures.get(received);
-  if (priorExpiry !== undefined && priorExpiry > now) {
+  const redisVerdict = await checkSignatureReplayRedis(received);
+  if (redisVerdict === "replay") {
     verificationFailure("replayed_signature", "duplicate signature");
     return;
   }
-  pruneSeenSignatures(now);
-  seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
+  if (redisVerdict === null) {
+    const priorExpiry = seenSignatures.get(received);
+    if (priorExpiry !== undefined && priorExpiry > now) {
+      verificationFailure("replayed_signature", "duplicate signature");
+      return;
+    }
+    pruneSeenSignatures(now);
+    seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
+  }
 
   next();
 }
