@@ -99,6 +99,7 @@ import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import enterpriseRagBenchmarkRoutes from '@/routes/enterpriseRagBenchmark';
+import enterpriseRagEvalRoutes from '@/routes/enterpriseRagEval';
 import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -374,6 +375,7 @@ export class App {
     // Keep benchmark-only ingestion unavailable unless it is explicitly enabled.
     if (process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_ROUTES === 'true') {
       this.app.use('/api/admin/enterprise-rag', enterpriseRagBenchmarkRoutes);
+      this.app.use('/api/admin/enterprise-rag/eval', enterpriseRagEvalRoutes);
     }
 
     // Ticket migration route (admin-only)

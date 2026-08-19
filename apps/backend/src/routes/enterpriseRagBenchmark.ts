@@ -16,7 +16,7 @@ import { logger } from '@/utils/logger';
 
 const router = Router();
 
-const isLoopbackRequest = (req: Request): boolean => {
+export const isLoopbackRequest = (req: Request): boolean => {
   const address = req.ip || req.socket.remoteAddress || '';
   const isLoopback =
     address === '127.0.0.1' ||
@@ -25,12 +25,12 @@ const isLoopbackRequest = (req: Request): boolean => {
   return isLoopback;
 };
 
-const usesLocalBenchmarkIdentity = (req: Request): boolean =>
+export const usesLocalBenchmarkIdentity = (req: Request): boolean =>
   process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_ROUTES === 'true' &&
   process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_LOOPBACK === 'true' &&
   (isLoopbackRequest(req) || req.get('x-route-env') === 'onyx');
 
-const authenticateAdmin = [
+export const authenticateAdmin = [
   (req: Request, res: Response, next: NextFunction) => {
     if (usesLocalBenchmarkIdentity(req)) return next();
     return authMiddleware.authenticate(req, res, next);
@@ -40,6 +40,7 @@ const authenticateAdmin = [
     return authMiddleware.requireAdmin(req, res, next);
   },
 ];
+export { authenticateAdmin as enterpriseRagAuthenticateAdmin };
 
 const ingestSchema = z.object({
   rowIndex: z.number().int().nonnegative(),
@@ -49,7 +50,7 @@ const ingestSchema = z.object({
   content: z.string().trim().min(1).max(20_000_000),
 }).strict();
 
-const resolveContext = async (req: Request): Promise<EnterpriseRagContext> => {
+export const resolveContext = async (req: Request): Promise<EnterpriseRagContext> => {
   if (usesLocalBenchmarkIdentity(req)) {
     const requestedWorkspaceId = req.get('x-workspace-id')?.trim();
     const requestedUserId = req.get('x-benchmark-user-id')?.trim();

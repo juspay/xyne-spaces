@@ -489,6 +489,12 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
+    default:
+      // Any model added after this switch was last extended falls back to the
+      // conservative tenant base. Without a default the return-type check
+      // fails ("function lacks ending return statement") the moment a new
+      // model (e.g. the onyx_eval bookkeeping tables) enters the union.
+      return new BaseQueryACL(ctx, prisma)
     }
   }
 }

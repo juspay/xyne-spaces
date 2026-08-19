@@ -355,6 +355,8 @@ const envSchema = Joi.object({
     .uri()
     .default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default('http://localhost:3001'),
+  // EnterpriseRAG-Bench orchestrator → claw S2S call timeout (answerer/judges).
+  ONYX_EVAL_CLAW_TIMEOUT_MS: Joi.number().integer().min(1000).max(600000).default(180000),
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),

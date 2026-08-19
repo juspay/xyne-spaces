@@ -4394,3 +4394,67 @@ model EntityAlias {
   @@map("entity_aliases")
   @@schema("non_zero")
 }
+
+// ---------------------------------------------------------------------------
+// EnterpriseRAG-Bench eval bookkeeping (onyx only). Intra-run artifacts — NOT
+// tenant data: these live in `public`, carry no workspaceId, and are exempt
+// from tenant ACL/stamp because the benchmark corpus itself bypasses Postgres
+// (it lives only in the separate Vespa). One row per /api/onyx-eval/run-claw
+// invocation (OnyxEvalRun) and one row per question within it (OnyxEvalQuestion).
+// Written incrementally so a backend restart doesn't lose completed questions.
+// ---------------------------------------------------------------------------
+
+model OnyxEvalRun {
+  id             String    @id
+  startedAt      DateTime  @default(now()) @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  status         String    @default("running") // running | completed | stopped | failed
+  config         Json
+  aggregate      Json?
+  totalQuestions Int       @default(0) @map("total_questions")
+  processed      Int       @default(0)
+  corrections    Int       @default(0)
+  lastError      String?   @map("last_error")
+
+  questions OnyxEvalQuestion[]
+
+  @@map("onyx_eval_run")
+  @@schema("public")
+}
+
+model OnyxEvalQuestion {
+  runId                String   @map("run_id")
+  questionId           String   @map("question_id")
+  questionType         String   @map("question_type")
+  // (1) retrieval — full top-K with (syntheticId, dsid, title, rank, score)
+  retrieved            Json
+  // (2) answer — raw carries the EX-[nn] citations, answerText is what judges scored
+  rawAnswer            String?  @map("raw_answer")
+  answerText           String?  @map("answer_text")
+  citedDocIds          String[] @default([]) @map("cited_doc_ids")
+  // (3) correctness (paper §5.1 binary) + judge reasoning
+  correctness          Int?      // 0|1
+  correctnessReasoning String?  @map("correctness_reasoning")
+  // (4) completeness + per-fact verdicts (index-aligned to answer_facts)
+  completeness         Float?
+  factSupported        Boolean[] @default([]) @map("fact_supported")
+  // (5) 3-judge gold-set correction (paper §5.3). goldVotes[docId] = the
+  // majority label + the per-judge {label, note} votes — the judge NOTES are
+  // kept (not just labels) because the reasoning is what you audit post-run.
+  goldVotes            Json?     @map("gold_votes")
+  validDocIds          String[] @default([]) @map("valid_doc_ids")
+  invalidExtra         Int?      @map("invalid_extra")
+  documentRecall       Float?    @map("document_recall")
+  corrected            Boolean  @default(false)
+  goldDocIdsOriginal   String[] @default([]) @map("gold_doc_ids_original")
+  goldDocIdsCorrected  String[] @map("gold_doc_ids_corrected")
+  dsidToSynthetic      Json     @map("dsid_to_synthetic")
+  error                String?
+
+  run OnyxEvalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@id([runId, questionId])
+  @@index([runId, questionType])
+  @@map("onyx_eval_question")
+  @@schema("public")
+}
