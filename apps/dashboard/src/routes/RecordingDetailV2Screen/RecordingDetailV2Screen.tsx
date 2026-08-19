@@ -26,6 +26,7 @@ import {
   clearSummaryRequested,
   getSummaryProgress,
   getSummaryRequest,
+  getSummaryStage,
   markSummaryRequested,
   saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
@@ -683,7 +684,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recording, message, notesCanvasId]);
 
   const handleSummaryProgressPause = useCallback(
-    (progress: number): void => saveSummaryProgress(recordingId, progress),
+    (progress: number, stageIndex: number): void =>
+      saveSummaryProgress(recordingId, progress, stageIndex),
     [recordingId],
   );
 
@@ -718,6 +720,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return true;
     });
   }, [recordingId, transcriptText]);
+
+  // Seeds the summary-request record for the auto-detected pending state (server
+  // summarizing without an explicit "Generate summary" click), so its progress
+  // persists across unmounts the same way an explicit regenerate already does.
+  useEffect(() => {
+    if (!recordingId || recording?.externalId !== recordingId) return;
+    if (awaitingSummary || summaryFailed) return;
+    const hasDetailedSummaryNow =
+      !!recording?.detailedSummaryCanvasId && recording?.detailedSummaryReady !== false;
+    const hasTranscriptNow =
+      !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording?.hasTranscript;
+    if (hasDetailedSummaryNow || !hasTranscriptNow) return;
+    if (getSummaryRequest(recordingId)) return;
+    markSummaryRequested(recordingId);
+  }, [recordingId, recording, recordingRow, transcriptText, awaitingSummary, summaryFailed]);
 
   if (loading) {
     return <RecordingDetailV2Skeleton />;
@@ -1045,6 +1062,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
                   initialProgress={getSummaryProgress(recordingId)}
+                  initialStageIndex={getSummaryStage(recordingId)}
                   onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
