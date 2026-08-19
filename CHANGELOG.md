@@ -1,3 +1,10 @@
+## [1.196.1](https://github.com/juspay/xyne-spaces/compare/v1.196.0...v1.196.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* remove public create-user API endpoint and unused API_KEY_USER ([#719](https://github.com/juspay/xyne-spaces/issues/719)) ([082e079](https://github.com/juspay/xyne-spaces/commit/082e07998978e7c2744a20380a184c6cad326680))
+
 ## [1.196.0](https://github.com/juspay/xyne-spaces/compare/v1.195.4...v1.196.0) (2026-08-19)
 
 
