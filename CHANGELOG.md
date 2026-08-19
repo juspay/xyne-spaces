@@ -1,3 +1,11 @@
+## [1.199.3](https://github.com/juspay/xyne-spaces/compare/v1.199.2...v1.199.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* implement retry mechanism for fetching execution in AutomationWo… ([#705](https://github.com/juspay/xyne-spaces/issues/705)) ([58c1d8b](https://github.com/juspay/xyne-spaces/commit/58c1d8b840a01769ed451d79813c6b65a5e23a52))
+* recording shortcut issue for pill ([#755](https://github.com/juspay/xyne-spaces/issues/755)) ([258d929](https://github.com/juspay/xyne-spaces/commit/258d9295f3ac187a883a4298e171ca944375f12b))
+
 ## [1.199.2](https://github.com/juspay/xyne-spaces/compare/v1.199.1...v1.199.2) (2026-08-19)
 
 
