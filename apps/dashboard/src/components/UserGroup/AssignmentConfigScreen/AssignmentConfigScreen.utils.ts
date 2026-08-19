@@ -55,6 +55,14 @@ export interface AssignmentScoreRow<U> {
   /** Engine score for the selected board; null when no board is selected. */
   score: number | null;
   /**
+   * Display-only version of `score`, shifted so the lowest score among the
+   * currently shown rows reads as 0 (percentDiff can swing scores very
+   * negative, e.g. percentage=100 vs 0% share = -100, which reads as broken
+   * rather than "lowest wins"). Never used for sorting or any real decision —
+   * only `score` is real. Same value as `score` when nothing needed shifting.
+   */
+  displayScore: number | null;
+  /**
    * True when weightedActiveTasks (raw, not effective) is at or above
    * user_groups.maxWorkload. Mirrors the engine's hard cap — at capacity, this
    * member is skipped for new assignments. Always false when no cap is set.
@@ -146,7 +154,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     (userGroupMappings ?? []).map(m => [m.userId, m.startOffset ?? 0] as const),
   );
 
-  return users
+  const rows = users
     .map(user => {
       const userRows = (workloadMappings ?? []).filter(w => w.userId === user.id);
       const scopedRows = projectBoardIds
@@ -169,8 +177,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
       const currentPct = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
       const percentDiff = usePercentageForBoard ? percentage - currentPct : 0;
       const score = selectedBoardId ? effectiveActiveTasks - expertiseBonus - percentDiff : null;
-      // Cap check mirrors the engine: raw weightedActiveTasks, never the
-      // cold-start-adjusted value (the offset is queue position, not real work).
+
       const isAtCapacity =
         maxWorkload !== null && maxWorkload !== undefined && weightedActiveTasks >= maxWorkload;
       return {
@@ -186,4 +193,13 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
       };
     })
     .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));
+
+  const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
+  const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;
+  const shift = minScore < 0 ? -minScore : 0;
+
+  return rows.map(row => ({
+    ...row,
+    displayScore: row.score !== null ? row.score + shift : null,
+  }));
 }
