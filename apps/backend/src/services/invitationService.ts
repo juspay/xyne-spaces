@@ -12,7 +12,7 @@ import {
   CanvasRole,
   ChannelScopeType, OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { runAsServiceActor, withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
@@ -626,7 +626,9 @@ export class InvitationService {
       authProvider: string;
     }
   ): Promise<{ user: User; redirectPath: string | null }> {
-    return this.prisma.$transaction(async (tx) => {
+    // A verified invitation authorizes the not-yet-member user to enter its target workspace.
+    return runAsServiceActor(userData.id, invitation.workspaceId!, () =>
+      this.prisma.$transaction(async (tx) => {
       const orgMember = await tx.orgMember.findUnique({
         where: { email: userData.email.toLowerCase() },
       });
@@ -664,7 +666,8 @@ export class InvitationService {
       const redirectPath = await this.grantGuestEntityAccess(newWorkspaceUser.id, invitation, tx);
 
       return { user: newWorkspaceUser, redirectPath };
-    });
+      }),
+    );
   }
 
   /**
@@ -751,7 +754,8 @@ export class InvitationService {
           throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
         }
 
-        const guestResult = await this.prisma.$transaction(async (tx) => {
+        const guestResult = await runAsServiceActor(userData.id, invitation.workspaceId!, () =>
+          this.prisma.$transaction(async (tx) => {
           const reactivatedUser = await tx.user.update({
             where: { id: existingWorkspaceUser.id },
             data: {
@@ -761,7 +765,8 @@ export class InvitationService {
           });
           const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
           return { user: reactivatedUser, redirectPath: path };
-        });
+          }),
+        );
         newWorkspaceUser = guestResult.user;
         redirectPath = guestResult.redirectPath;
         logger.info(`[DEBUG] [acceptInvitation] Granted existing guest user id=${newWorkspaceUser.id} access to invitation entity`);

@@ -1243,7 +1243,7 @@ export class EmailService {
       });
 
       // Generate xyneId and create ticket
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId, channel.workspaceId);
       const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
       const ticketPriority = derivePriorityFromSubject(emailSubject);
       const createdTicket = await tx.ticket.create({
@@ -1699,7 +1699,7 @@ export class EmailService {
     const slaResolutionDue = await this.getSlaResolutionDue(boardId, ticketPriority, new Date());
     const ticket = await this.prisma.$transaction(async (tx) => {
       // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId, channel.workspaceId);
 
       return await tx.ticket.create({
         data: {
@@ -2227,7 +2227,7 @@ export class EmailService {
             },
           });
 
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId, channel.workspaceId);
           const createdTicket = await tx.ticket.create({
             data: {
               title: firstEmail.subject,

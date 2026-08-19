@@ -3070,6 +3070,13 @@ export class CallController {
         return;
       }
 
+      // The actionable leaves for Pulse carrying the call's host, so posting one is a
+      // statement about the call: the same audience that may read it may add to it.
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
       const creatorUser = await repositories.users.findById(call.createdByUserId);
       const host = (creatorUser as any)?.email ?? call.createdByUserId;
 

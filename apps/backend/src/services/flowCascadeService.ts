@@ -931,7 +931,7 @@ async function createFlowStepTicket(params: {
           doNotPostToChannel: false,
         },
       });
-      const xyneId = await TicketIdService.generateTicketId(tx, rootTicket.projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, rootTicket.projectId, rootTicket.workspaceId);
       const created = await ticketRepository.createTicket(
         {
           id: deterministicTicketId,

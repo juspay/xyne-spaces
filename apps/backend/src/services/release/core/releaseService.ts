@@ -15,6 +15,7 @@ import { Prisma } from '@prisma/client';
 // `ReleaseEventContext` in ./types.ts (per-event payload threaded through
 // commit-analysis and form-save paths).
 export interface ReleaseContext {
+	workspaceId: string;
 	workspace: string;
 	repoSlug: string;
 	projectId: string;
@@ -193,6 +194,7 @@ export class ReleaseService {
 			channelId,
 			conversationId,
 			createdBy: userId,
+			initiatorWorkspaceId: context.workspaceId,
 			affectedApplications: apps,
 			prLinksByApplication,
 			isHotFix,
@@ -252,7 +254,10 @@ export class ReleaseService {
 		);
 		if (recordsToCreate.length > 0) {
 			try {
-				const createResult = await this.applicationRepository.createApplicationReleaseTicketMappings(recordsToCreate);
+				const createResult = await this.applicationRepository.createApplicationReleaseTicketMappings(
+					recordsToCreate,
+					context.workspaceId,
+				);
 				logger.info(
 					`[Release] ART rows persisted: attempted=${recordsToCreate.length}, inserted=${createResult.count}, releaseId=${currentTicketId}`,
 				);
