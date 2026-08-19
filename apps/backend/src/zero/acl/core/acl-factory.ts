@@ -408,6 +408,8 @@ export class ACLFactory {
         return new ReleaseChangesACL(ctx);
       case 'release_events':
         return new ReleaseEventsACL(ctx);
+      case 'release_ticket_repos':
+        return new BaseACL<any>(ctx);
       case 'repos':
         return new ReposACL(ctx);
       case 'stage_approvers':

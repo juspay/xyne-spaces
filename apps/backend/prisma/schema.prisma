@@ -3581,6 +3581,24 @@ model ApplicationReleaseTicket {
   @@schema("public")
 }
 
+model ReleaseTicketRepo {
+  workspaceId        String
+  id                 String    @id @default(cuid())
+  releaseId          String
+  mainReleaseBoardId String
+  branch             String
+  deployedCommit     String
+  newCommit          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime? @updatedAt
+
+  @@unique([releaseId, mainReleaseBoardId])
+  @@index([releaseId])
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_ticket_repos_releaseId_createdAt_id_idx")
+  @@map("release_ticket_repos")
+  @@schema("public")
+}
+
 // Captures all events tied to the release for audit trail
 model ReleaseEvent {
   workspaceId String // denormalized tenant key (stamped on insert)

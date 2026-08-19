@@ -113,6 +113,7 @@ export { ReleaseAttributionsACL } from './release-attributions-acl';
 export { ReleaseChangeTypesACL } from './release-change-types-acl';
 export { ReleaseChangesACL } from './release-changes-acl';
 export { ReleaseEventsACL } from './release-events-acl';
+export { ReleaseTicketReposACL } from './release-ticket-repos-acl';
 export { SavedUserConfigurationValuesACL } from './saved-user-configuration-values-acl';
 export { StageApproversACL } from './stage-approvers-acl';
 export { SurfaceLinksACL } from './surface-links-acl';

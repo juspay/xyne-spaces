@@ -10,6 +10,7 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { MessageRepository } from '../database/repositories/messageRepository';
 import { MessageAttachmentRepository, CreateMessageAttachmentInput } from '../database/repositories/messageAttachmentRepository';
 import { EmailRepository } from '../database/repositories/emailRepository';
+import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
   CreateTicketRequest,
@@ -1366,19 +1367,48 @@ export class TicketController {
         const newCommitId = String(dynamicFields?.['newCommitId'] ?? '').trim();
         const branch = String(dynamicFields?.['branch'] ?? '').trim();
 
+        let completeRepoRows: Array<{
+          workspaceId: string;
+          releaseId: string;
+          mainReleaseBoardId: string;
+          branch: string;
+          deployedCommit: string;
+          newCommit: string;
+        }> = [];
+        try {
+          const raw = dynamicFields?.['releaseRepos'];
+          const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (Array.isArray(parsed)) {
+            completeRepoRows = parsed
+              .map((r: any) => ({
+                workspaceId: ticket.workspaceId,
+                releaseId: ticket.id,
+                mainReleaseBoardId: String(r?.mainReleaseBoardId ?? '').trim(),
+                branch: String(r?.branch ?? '').trim(),
+                deployedCommit: String(r?.deployedCommit ?? '').trim(),
+                newCommit: String(r?.newCommit ?? '').trim(),
+              }))
+              .filter((r) => r.mainReleaseBoardId && r.branch && r.deployedCommit && r.newCommit);
+            await new ReleaseRepository().createReleaseTicketRepos(completeRepoRows);
+          }
+        } catch (e) {
+          logger.error(`[ReleaseTrigger] failed to persist release repos for ticket ${ticket.xyneId}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        const hasRepoRows = completeRepoRows.length > 0;
+        const hasScalarRange = Boolean(deployedCommitId && newCommitId && branch);
+
         // Make silent-skip visible — log which condition(s) failed so this can be
         // debugged without staring at code. WARN level so it shows up by default.
-        if (!this.commitAnalysisController || !releaseTicket || !deployedCommitId || !newCommitId || !branch) {
+        if (!this.commitAnalysisController || !releaseTicket || (!hasRepoRows && !hasScalarRange)) {
           const missing: string[] = [];
           if (!this.commitAnalysisController) missing.push('commitAnalysisController(not initialized — check Bitbucket env vars)');
           if (!releaseTicket) missing.push(`ticketType(=${ticket.ticketType}, want Release/Hotfix)`);
-          if (!deployedCommitId) missing.push('dynamicFields.deployedCommitId');
-          if (!newCommitId) missing.push('dynamicFields.newCommitId');
-          if (!branch) missing.push('dynamicFields.branch');
+          if (!hasRepoRows && !hasScalarRange) missing.push('no complete ReleaseTicketRepo rows and no scalar deployedCommitId/newCommitId/branch');
           logger.warn(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: missing=${missing.join(', ')}`);
         }
 
-        if (this.commitAnalysisController && releaseTicket && deployedCommitId && newCommitId && branch) {
+        if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
           // from Application.repoUrl on the resolved project. We pass empty
           // placeholders to satisfy the existing param shape; the controller

@@ -1,0 +1,29 @@
+-- Per (release ticket × main release board/repo) commit range. Absence of rows
+-- for a release means single-repo legacy mode (range read from the ticket form).
+
+-- CreateTable
+CREATE TABLE "public"."release_ticket_repos" (
+    "workspaceId" TEXT NOT NULL,
+    "id" TEXT NOT NULL,
+    "releaseId" TEXT NOT NULL,
+    "mainReleaseBoardId" TEXT NOT NULL,
+    "branch" TEXT NOT NULL,
+    "deployedCommit" TEXT NOT NULL,
+    "newCommit" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3),
+
+    CONSTRAINT "release_ticket_repos_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "release_ticket_repos_releaseId_idx"
+    ON "public"."release_ticket_repos"("releaseId");
+
+-- CreateIndex
+CREATE INDEX "release_ticket_repos_releaseId_createdAt_id_idx"
+    ON "public"."release_ticket_repos"("releaseId", "createdAt" DESC, "id" DESC);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "release_ticket_repos_releaseId_mainReleaseBoardId_key"
+    ON "public"."release_ticket_repos"("releaseId", "mainReleaseBoardId");

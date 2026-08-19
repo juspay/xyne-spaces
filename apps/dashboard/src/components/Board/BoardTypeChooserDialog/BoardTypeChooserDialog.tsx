@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, Columns3, Rocket } from 'lucide-react';
+import { GitBranch, Columns3 } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog';
 
 interface BoardTypeChooserDialogProps {
@@ -7,7 +7,6 @@ interface BoardTypeChooserDialogProps {
   onClose: () => void;
   onChooseFlow: () => void;
   onChooseStandard: () => void;
-  onChooseRelease: () => void;
 }
 
 export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
@@ -15,7 +14,6 @@ export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
   onClose,
   onChooseFlow,
   onChooseStandard,
-  onChooseRelease,
 }) => (
   <Dialog
     open={isOpen}
@@ -33,7 +31,7 @@ export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
           Choose the kind of board you want to create.
         </p>
       </div>
-      <div className='grid grid-cols-3 gap-3'>
+      <div className='grid grid-cols-2 gap-3'>
         <button
           type='button'
           onClick={onChooseStandard}
@@ -63,21 +61,6 @@ export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
           <span className='text-[12px] text-muted-foreground leading-[18px]'>
             A designed graph of steps. Each run is a main ticket whose sub tickets are created
             automatically as the flow progresses.
-          </span>
-        </button>
-        <button
-          type='button'
-          onClick={onChooseRelease}
-          data-track-category='board_type_chooser'
-          data-track-name='choose_release_board'
-          className='flex flex-col items-start gap-2 rounded-xl border border-border hover:border-[#6276be] bg-background p-4 text-left transition-colors'
-        >
-          <span className='flex items-center justify-center w-9 h-9 rounded-lg bg-muted'>
-            <Rocket size={18} className='text-[#6276be]' />
-          </span>
-          <span className='text-[14px] font-semibold text-foreground'>Release board</span>
-          <span className='text-[12px] text-muted-foreground leading-[18px]'>
-            Tracks releases across applications with version and deployment workflows.
           </span>
         </button>
       </div>

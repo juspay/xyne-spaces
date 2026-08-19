@@ -117,6 +117,7 @@ import {
   ReleaseChangeTypesACL,
   ReleaseChangesACL,
   ReleaseEventsACL,
+  ReleaseTicketReposACL,
   SavedUserConfigurationValuesACL,
   StageApproversACL,
   SurfaceLinksACL,
@@ -343,6 +344,8 @@ export class QueryACLFactory {
         return new ReleaseChangesACL(ctx) as BaseQueryACL<TTable>;
       case 'release_events':
         return new ReleaseEventsACL(ctx) as BaseQueryACL<TTable>;
+      case 'release_ticket_repos':
+        return new ReleaseTicketReposACL(ctx) as BaseQueryACL<TTable>;
       case 'stage_approvers':
         return new StageApproversACL(ctx) as BaseQueryACL<TTable>;
       case 'surface_links':

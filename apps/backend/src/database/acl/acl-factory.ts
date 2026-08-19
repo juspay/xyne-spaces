@@ -70,6 +70,7 @@ import {
   ReleaseChangesACL,
   ReleaseChangeTypesACL,
   ReleaseEventsACL,
+  ReleaseTicketReposACL,
   ReposACL,
   RolesACL,
   SavedUserConfigurationsACL,
@@ -269,6 +270,8 @@ export class ACLFactory {
       return new ReleaseChangeTypesACL(ctx, prisma)
     case 'releaseEvent':
       return new ReleaseEventsACL(ctx, prisma)
+    case 'releaseTicketRepo':
+      return new ReleaseTicketReposACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
     case 'role':

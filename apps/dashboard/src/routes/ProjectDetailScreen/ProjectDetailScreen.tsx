@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { BoardType, deserializeFlowPlan, type FlowPlan } from '@xyne/shared';
-import { ArrowLeft, Edit2, LayoutGrid, Rocket } from 'lucide-react';
+import { ArrowLeft, Boxes, Edit2, LayoutGrid, Rocket } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -15,6 +15,13 @@ import { FlowBoardCreateScreen } from '../../components/Board/FlowBoardCreateScr
 import { ProjectForm } from '../../components/Project';
 import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizard/ReleaseConfigWizard';
 import { ReleasesSection } from './ReleasesSection';
+import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import {
+  RepoDot,
+  ProviderBadge,
+  repoColor,
+  repoHostPath,
+} from '../../components/Release/repoVisual';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { queries } from '../../zero/queries';
@@ -31,7 +38,7 @@ interface BoardData {
   [key: string]: unknown;
 }
 
-type TabValue = 'boards' | 'release';
+type TabValue = 'boards' | 'release' | 'releases';
 type ReleaseBoardFlow =
   | { kind: 'create'; projectId: string }
   | { kind: 'edit-main'; mainBoardId: string }
@@ -65,7 +72,12 @@ const ProjectDetailScreen = (): ReactElement => {
   // Initial tab can be overridden via `navigate(..., { state: { tab } })` —
   // ReleaseDetailScreen's "Back" button uses this to return to the Releases tab
   // instead of the default Boards tab.
-  const initialTab = (location.state as { tab?: TabValue } | null)?.tab ?? 'boards';
+  const navState = location.state as { tab?: TabValue; from?: string } | null;
+  const initialTab = navState?.tab ?? 'boards';
+  const backTo =
+    navState?.from === 'releaseManager'
+      ? { path: '/releaseManager', label: 'Back to Release Manager' }
+      : { path: '/listProjects', label: 'Back to Projects' };
   const [activeTab, setActiveTab] = useState<TabValue>(initialTab);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
@@ -85,6 +97,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
   const [copyConfigTargetBoard, setCopyConfigTargetBoard] = useState<BoardWithStages | null>(null);
+  const [creatingRelease, setCreatingRelease] = useState(false);
 
   // Fetch project details
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
@@ -126,22 +139,71 @@ const ProjectDetailScreen = (): ReactElement => {
     queries.applicationsByProjectId({ projectId: projectId || '' }),
     { enabled: !!projectId },
   );
+  const applicationList = useMemo(
+    () => (!applications || applications instanceof Error ? [] : applications),
+    [applications],
+  );
   // boardId is @unique on Application, so a board maps to at most one app. This
   // map serves the per-board lookup the (now-removed) applicationByBoardId query
   // used to do — the project's full app list is already synced here.
-  const applicationByBoardId = useMemo(() => {
-    const list = !applications || applications instanceof Error ? [] : applications;
-    return new Map(list.filter(app => app.boardId).map(app => [app.boardId, app] as const));
-  }, [applications]);
+  const applicationByBoardId = useMemo(
+    () =>
+      new Map(applicationList.filter(app => app.boardId).map(app => [app.boardId, app] as const)),
+    [applicationList],
+  );
 
   const applicationBoardIds = useMemo(
     () => new Set(applicationByBoardId.keys()),
     [applicationByBoardId],
   );
+  const nonReleaseBoards = useMemo(
+    () =>
+      (boards ?? []).filter(
+        b => b.boardType !== BoardType.RELEASE && !applicationBoardIds.has(b.id),
+      ),
+    [boards, applicationBoardIds],
+  );
   const boardNamesById = useMemo(
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
     [boards],
   );
+
+  const repositories = useMemo(() => {
+    const counts = new Map<string, number>();
+    const repoUrlByBoard = new Map<string, string>();
+    for (const app of applicationList) {
+      const id = app.mainReleaseBoardId;
+      if (!id) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+      if (app.repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, app.repoUrl);
+    }
+    return [...counts.entries()].map(([mainBoardId, appCount]) => ({
+      mainBoardId,
+      name: boardNamesById[mainBoardId] ?? mainBoardId,
+      appCount,
+      repoUrl: repoUrlByBoard.get(mainBoardId) ?? null,
+    }));
+  }, [applicationList, boardNamesById]);
+
+  const releaseChannelIds = useMemo(
+    () => [...new Set(applicationList.map(a => a.channelId).filter((c): c is string => !!c))],
+    [applicationList],
+  );
+  const releaseChannelId = releaseChannelIds[0] ?? null;
+
+  const openConnectRepository = (): void => {
+    if (!projectId) return;
+    setReleaseBoardFlow({ kind: 'create', projectId });
+    setShowReleaseConfigModal(true);
+  };
+  const openRepositoryConfig = (mainBoardId: string): void => {
+    setReleaseBoardFlow({ kind: 'edit-main', mainBoardId });
+    setShowReleaseConfigModal(true);
+  };
+  const openRepositoryWorkflow = (mainBoardId: string): void => {
+    const board = boards?.find(b => b.id === mainBoardId);
+    if (board) setEditingBoard(board);
+  };
 
   const editingFlowBoardPlan = useMemo<FlowPlan | null>(() => {
     if (!editingFlowBoard) return null;
@@ -213,11 +275,11 @@ const ProjectDetailScreen = (): ReactElement => {
           <p className='text-muted-foreground mb-4'>Invalid project ID</p>
           <Button
             variant='default'
-            onClick={() => void navigate('/listProjects')}
+            onClick={() => void navigate(backTo.path)}
             data-track-category='ProjectDetail'
             data-track-name='BackToProjectsInvalidId'
           >
-            Back to Projects
+            {backTo.label}
           </Button>
         </div>
       </div>
@@ -272,11 +334,11 @@ const ProjectDetailScreen = (): ReactElement => {
           <p className='text-muted-foreground mb-4'>Project not found</p>
           <Button
             variant='default'
-            onClick={() => void navigate('/listProjects')}
+            onClick={() => void navigate(backTo.path)}
             data-track-category='ProjectDetail'
             data-track-name='BackToProjectsNotFound'
           >
-            Back to Projects
+            {backTo.label}
           </Button>
         </div>
       </div>
@@ -290,13 +352,13 @@ const ProjectDetailScreen = (): ReactElement => {
           {/* Header with Back Button */}
           <button
             type='button'
-            onClick={() => void navigate('/listProjects')}
+            onClick={() => void navigate(backTo.path)}
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
             data-track-category='ProjectDetail'
             data-track-name='BackToProjects'
           >
             <ArrowLeft size={20} />
-            <span>Back to Projects</span>
+            <span>{backTo.label}</span>
           </button>
 
           {/* Project Details Section */}
@@ -329,7 +391,8 @@ const ProjectDetailScreen = (): ReactElement => {
             <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as TabValue)}>
               <Tabs.List className='flex gap-0 px-6'>
                 <TabTrigger value='boards' icon={LayoutGrid} label='Boards' />
-                <TabTrigger value='release' icon={Rocket} label='Release' />
+                <TabTrigger value='release' icon={Boxes} label='Repositories' />
+                <TabTrigger value='releases' icon={Rocket} label='Releases' />
               </Tabs.List>
             </Tabs.Root>
           </div>
@@ -339,7 +402,11 @@ const ProjectDetailScreen = (): ReactElement => {
             <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as TabValue)}>
               <div className='mb-6 flex items-center justify-between'>
                 <h2 className='text-2xl font-bold text-foreground'>
-                  {activeTab === 'boards' ? 'Boards' : 'Releases'}
+                  {activeTab === 'boards'
+                    ? 'Boards'
+                    : activeTab === 'release'
+                      ? 'Repositories'
+                      : 'Releases'}
                 </h2>
                 {activeTab === 'boards' && (
                   <Button
@@ -352,17 +419,39 @@ const ProjectDetailScreen = (): ReactElement => {
                     Create Board
                   </Button>
                 )}
+                {activeTab === 'release' && (
+                  <Button
+                    variant='default'
+                    onClick={openConnectRepository}
+                    data-track-category='ProjectDetail'
+                    data-track-name='ConnectRepository'
+                    data-track-metadata={JSON.stringify({ projectId })}
+                  >
+                    Connect Repository
+                  </Button>
+                )}
+                {activeTab === 'releases' && (
+                  <Button
+                    variant='default'
+                    disabled={!releaseChannelId}
+                    title={releaseChannelId ? undefined : 'Configure a repository first'}
+                    onClick={() => setCreatingRelease(true)}
+                    data-track-category='ProjectDetail'
+                    data-track-name='CreateRelease'
+                    data-track-metadata={JSON.stringify({ projectId })}
+                  >
+                    Create Release
+                  </Button>
+                )}
               </div>
 
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
-                  boards={boards}
+                  boards={nonReleaseBoards}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
-                  applicationBoardIds={applicationBoardIds}
-                  applicationByBoardId={applicationByBoardId}
                   {...(workspaceId && projectId
                     ? {
                         onBoardClick: (board: BoardWithStages) =>
@@ -373,12 +462,72 @@ const ProjectDetailScreen = (): ReactElement => {
               </Tabs.Content>
 
               <Tabs.Content value='release' className='outline-none'>
-                <ReleasesSection projectId={projectId} />
+                {repositories.length === 0 ? (
+                  <div className='rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-sm text-muted-foreground'>
+                    No repositories yet. Connect a repository to ship releases from this project.
+                  </div>
+                ) : (
+                  <div className='space-y-2.5'>
+                    {repositories.map(repo => (
+                      <div
+                        key={repo.mainBoardId}
+                        className='flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3.5'
+                      >
+                        <RepoDot color={repoColor(repo.mainBoardId)} />
+                        <div className='min-w-0 flex-1'>
+                          <div className='truncate text-sm font-semibold text-foreground'>
+                            {repo.name}
+                          </div>
+                          {repo.repoUrl && (
+                            <div className='truncate font-mono text-[11.5px] text-muted-foreground'>
+                              {repoHostPath(repo.repoUrl)}
+                            </div>
+                          )}
+                        </div>
+                        <ProviderBadge repoUrl={repo.repoUrl} />
+                        <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
+                          {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
+                        </span>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => openRepositoryWorkflow(repo.mainBoardId)}
+                        >
+                          Workflow & Fields
+                        </Button>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => openRepositoryConfig(repo.mainBoardId)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Tabs.Content>
+
+              <Tabs.Content value='releases' className='outline-none'>
+                {projectId ? <ReleasesSection projectId={projectId} /> : null}
               </Tabs.Content>
             </Tabs.Root>
           </div>
         </div>
       </div>
+
+      {creatingRelease && releaseChannelId && projectId && (
+        <CreateTicketModal
+          isOpen
+          channelId={releaseChannelId}
+          projectId={projectId}
+          initialTicketKind='release'
+          releaseOnly
+          releaseChannelIds={releaseChannelIds}
+          onClose={() => setCreatingRelease(false)}
+          onTicketCreated={() => setCreatingRelease(false)}
+        />
+      )}
 
       {showBoardTypeChooser && projectId && (
         <BoardTypeChooserDialog
@@ -391,11 +540,6 @@ const ProjectDetailScreen = (): ReactElement => {
           onChooseStandard={() => {
             setShowBoardTypeChooser(false);
             setShowCreateBoardModal(true);
-          }}
-          onChooseRelease={() => {
-            setShowBoardTypeChooser(false);
-            setReleaseBoardFlow({ kind: 'create', projectId });
-            setShowReleaseConfigModal(true);
           }}
         />
       )}

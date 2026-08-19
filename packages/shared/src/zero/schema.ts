@@ -1906,6 +1906,20 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
+export const releaseTicketRepoTable = table('release_ticket_repos')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    releaseId: string(),
+    mainReleaseBoardId: string(),
+    branch: string(),
+    deployedCommit: string(),
+    newCommit: string(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey('id');
+
 
 export const rcaTable = table('rcas')
   .columns({
@@ -4413,6 +4427,19 @@ export const releaseChangeTypeTableRelationships = relationships(releaseChangeTy
   }),
 }));
 
+export const releaseTicketRepoTableRelationships = relationships(releaseTicketRepoTable, ({ one }) => ({
+  release: one({
+    sourceField: ['releaseId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  mainReleaseBoard: one({
+    sourceField: ['mainReleaseBoardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
+}));
+
 // Saved Views Relationships
 export const savedUserConfigurationTableRelationships = relationships(
   savedUserConfigurationTable,
@@ -4645,6 +4672,7 @@ export const schema = createSchema({
     releaseEventTable,
     releaseChangeTable,
     releaseChangeTypeTable,
+    releaseTicketRepoTable,
     rcaTable,
     impactTable,
     coeTable,
@@ -4773,6 +4801,7 @@ export const schema = createSchema({
     applicationReleaseTicketTableRelationships,
     releaseEventTableRelationships,
     releaseChangeTypeTableRelationships,
+    releaseTicketRepoTableRelationships,
     rcaTableRelationships,
     impactTableRelationships,
     coeTableRelationships,
@@ -4908,6 +4937,7 @@ export type ApplicationReleaseTicket = Row<typeof schema.tables.application_rele
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 export type ReleaseChange = Row<typeof schema.tables.release_changes>;
 export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;
+export type ReleaseTicketRepo = Row<typeof schema.tables.release_ticket_repos>;
 export type RCA = Row<typeof schema.tables.rcas>;
 export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;

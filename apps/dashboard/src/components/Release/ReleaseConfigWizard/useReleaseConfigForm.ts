@@ -168,7 +168,7 @@ export function useReleaseConfigForm({
     const validApps = applications.filter(app => app.name.trim());
 
     if (validApps.length === 0) {
-      toast.error('Please configure at least one application');
+      toast.error('Please configure at least one service');
       return;
     }
     if (!sharedRepoUrl.trim()) {
@@ -176,11 +176,11 @@ export function useReleaseConfigForm({
       return;
     }
     if (!mainBoardName.trim()) {
-      toast.error('Repository name must produce a valid release board name');
+      toast.error('Repository name must produce a valid repository name');
       return;
     }
     if (validApps.some(app => !app.regex.trim())) {
-      toast.error('All applications must have an Application Regex');
+      toast.error('All services must have a Service Regex');
       return;
     }
     // Fall back to the group's stored channel: edit-application mode hides the
@@ -206,7 +206,7 @@ export function useReleaseConfigForm({
         migrationPaths: csvToArray(app.migrationPaths),
       }));
       if (applicationsData.some(app => !app.boardName.trim())) {
-        throw new Error('Repository and application names must produce valid release board names');
+        throw new Error('Repository and service names must produce valid repository names');
       }
 
       const result = zero.mutate(

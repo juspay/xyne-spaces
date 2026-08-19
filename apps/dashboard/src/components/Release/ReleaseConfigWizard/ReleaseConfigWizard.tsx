@@ -326,14 +326,14 @@ const ApplicationRow = ({
 }: ApplicationRowProps): ReactElement => (
   <div className='px-3 py-2 bg-muted rounded-md space-y-2'>
     <div className='flex items-center justify-between'>
-      <h4 className='font-medium text-sm'>Application {index + 1}</h4>
+      <h4 className='font-medium text-sm'>Service {index + 1}</h4>
       {canRemove && (
         <button
           type='button'
           onClick={() => onRemove(app.id)}
           className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
           aria-label={isLocked ? 'Delete on save' : 'Remove'}
-          title={isLocked ? 'This application will be deleted on Save' : 'Remove'}
+          title={isLocked ? 'This service will be deleted on Save' : 'Remove'}
         >
           <Trash2 size={14} />
         </button>
@@ -343,7 +343,7 @@ const ApplicationRow = ({
     <div className='grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-2'>
       <div>
         <label className={LABEL_CLASS} htmlFor={`application-name-${app.id}`}>
-          Application Name *
+          Service Name *
         </label>
         <input
           id={`application-name-${app.id}`}
@@ -358,7 +358,7 @@ const ApplicationRow = ({
 
       <div>
         <label className={LABEL_CLASS} htmlFor={`application-regex-${app.id}`}>
-          Application Regex *
+          Service Regex *
         </label>
         <input
           id={`application-regex-${app.id}`}
@@ -368,7 +368,7 @@ const ApplicationRow = ({
           placeholder='e.g., ^backend/'
           className={INPUT_CLASS}
         />
-        <p className={HELP_CLASS}>Matches commit file paths to identify this app</p>
+        <p className={HELP_CLASS}>Matches commit file paths to identify this service</p>
       </div>
 
       <div>
@@ -382,7 +382,7 @@ const ApplicationRow = ({
           value={app.envPaths}
           onChange={v => onUpdate(app.id, 'envPaths', v)}
           placeholder='config/env.yml, .env.prod'
-          ariaLabel={`Environment file paths for application ${index + 1}`}
+          ariaLabel={`Environment file paths for service ${index + 1}`}
         />
         <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
@@ -393,7 +393,7 @@ const ApplicationRow = ({
           value={app.migrationPaths}
           onChange={v => onUpdate(app.id, 'migrationPaths', v)}
           placeholder='migrations/, db/migrate/'
-          ariaLabel={`Migration file paths for application ${index + 1}`}
+          ariaLabel={`Migration file paths for service ${index + 1}`}
         />
         <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
@@ -444,9 +444,9 @@ const Step3Applications = ({
   return (
     <div className='space-y-3'>
       <div>
-        <h3 className='text-base font-semibold'>Configure Applications</h3>
+        <h3 className='text-base font-semibold'>Configure repository</h3>
         <p className='text-xs text-muted-foreground'>
-          Add applications, their file-path regexes, and app-specific env / migration paths.
+          Add services, their file-path regexes, and service-specific env / migration paths.
         </p>
       </div>
 
@@ -472,7 +472,7 @@ const Step3Applications = ({
                   size='sm'
                   onClick={() => void onTestConnection()}
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
-                  title='Verify the repo URL and token before configuring applications'
+                  title='Verify the repo URL and token before configuring services'
                 >
                   <PlugZap size={14} />
                   {isTestingConnection ? 'Testing…' : 'Test'}
@@ -490,7 +490,7 @@ const Step3Applications = ({
                 </p>
               ) : (
                 <p className={HELP_CLASS}>
-                  Verifies the repo URL + token before you configure applications.
+                  Verifies the repo URL + token before you configure services.
                 </p>
               )}
             </div>
@@ -558,7 +558,7 @@ const Step3Applications = ({
 
       {allowApplicationListChanges && (
         <Button variant='secondary' onClick={onAddApplication} className='w-full' size='sm'>
-          + Add Another Application
+          + Add service
         </Button>
       )}
     </div>
@@ -568,7 +568,7 @@ const Step3Applications = ({
 // ─── WizardProgressBar ───────────────────────────────────────────────────────
 const STEP_LABELS: Record<number, string> = {
   1: '1. VCS Provider',
-  2: '2. Applications',
+  2: '2. Services',
 };
 
 interface WizardProgressBarProps {
@@ -736,10 +736,10 @@ const ReleaseConfigWizardForm = ({
       onOpenChange={onClose}
       title={
         mode.kind === 'create'
-          ? 'Create Release Board'
+          ? 'Connect Repository'
           : isApplicationEdit
-            ? 'Edit Application Release Config'
-            : 'Edit Release Board Config'
+            ? 'Edit Service Release Config'
+            : 'Edit Repository Config'
       }
       className='max-w-5xl'
     >
@@ -799,7 +799,7 @@ const ReleaseConfigWizardForm = ({
               {form.isSaving
                 ? 'Saving...'
                 : isApplicationEdit
-                  ? 'Save Application'
+                  ? 'Save Service'
                   : form.isEditing
                     ? 'Next'
                     : 'Save Configuration'}
@@ -884,7 +884,7 @@ export const ReleaseConfigWizard = ({
     return (
       <Dialog open={isOpen} onOpenChange={onClose} title='Release configuration unavailable'>
         <div className='p-6 text-sm text-destructive'>
-          This release board does not have a valid owning release configuration.
+          This repository does not have a valid owning release configuration.
         </div>
       </Dialog>
     );

@@ -3653,6 +3653,9 @@ export const queries = defineQueries({
           }
           return devTicket;
         })
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -3692,6 +3695,16 @@ export const queries = defineQueries({
         .where('releaseId', releaseId)
         .related('application')
         .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  releaseTicketReposByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      return zql.release_ticket_repos
+        .where('releaseId', releaseId)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
     },
   ),
 

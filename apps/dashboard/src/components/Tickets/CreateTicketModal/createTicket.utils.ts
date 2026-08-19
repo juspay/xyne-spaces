@@ -111,6 +111,7 @@ interface MissingMandatoryFieldInput {
   mandatoryLabels: boolean;
   mandatoryMerchantId: boolean;
   mandatoryTicketType: boolean;
+  isRelease?: boolean;
 }
 
 // Returns the tooltip message for the first missing mandatory field on the
@@ -134,10 +135,12 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     mandatoryLabels,
     mandatoryMerchantId,
     mandatoryTicketType,
+    isRelease,
   } = input;
 
-  if (!formValues?.boardId?.trim()) return 'Select a board first';
-  if (boards && !boards.some(b => b.id === formValues.boardId)) return 'Select a board first';
+  const boardMissingMessage = isRelease ? 'Select at least one repository' : 'Select a board first';
+  if (!formValues?.boardId?.trim()) return boardMissingMessage;
+  if (boards && !boards.some(b => b.id === formValues.boardId)) return boardMissingMessage;
   if (!formValues?.title?.trim()) return 'Title is required';
   if (!formValues?.description?.trim()) return 'Description is required';
   if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value)

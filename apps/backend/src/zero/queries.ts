@@ -4185,6 +4185,10 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           }
           return devTicket;
         })
+        // MUST stay in sync with the shared copy.
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -4204,6 +4208,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('releaseId', releaseId)
         .related('application')
         .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  // MUST stay in sync with the shared copy.
+  releaseTicketReposByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      return zql.release_ticket_repos
+        .where('releaseId', releaseId)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
     },
   ),
 

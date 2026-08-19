@@ -59,7 +59,8 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
     const branch = String(formValues['branch'] ?? '').trim() || 'main';
 
-    if (!deployedCommitId || !newCommitId) {
+    const repoCount = await db.releaseTicketRepo.count({ where: { releaseId: ticketId } });
+    if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
       res.status(400).json({
         error:
           'This release ticket is missing deployedCommitId or newCommitId form fields — re-run is only supported for COMMIT_RANGE releases.',

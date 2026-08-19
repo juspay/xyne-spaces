@@ -77,6 +77,14 @@ export interface CommitAnalysisCanvasMetadata {
   workspaceId?: string;
 }
 
+export interface CommitAnalysisRepoSlice {
+  workspace: string;
+  repoSlug: string;
+  deployedCommitId: string;
+  newCommitId: string;
+  results: CommitAnalysisResult[];
+}
+
 // A "result" shape narrowed to what the PR/env/migration renderers read. Both
 // the main analysis and the hotfix delta feed the same renderers.
 type PrResult = {
@@ -301,6 +309,7 @@ async function buildMainAnalysisBlocks(
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
   metadata: CommitAnalysisCanvasMetadata,
   title: string,
+  repoSlices?: CommitAnalysisRepoSlice[],
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   const blocks: BlockNoteBlock[] = [];
   const mentionedUserIds = new Set<string>();
@@ -313,6 +322,8 @@ async function buildMainAnalysisBlocks(
   const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
   const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
+  const multiRepo = (repoSlices?.length ?? 0) > 1;
+
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -320,23 +331,46 @@ async function buildMainAnalysisBlocks(
     content: [{ type: 'text', text: title, styles: { bold: true } }],
   });
 
-  blocks.push({
-    id: uuidv4(),
-    type: 'paragraph',
-    content: [
-      { type: 'text', text: 'Repository: ', styles: { bold: true } },
-      { type: 'text', text: `${metadata.workspace}/${metadata.repoSlug}`, styles: {} },
-    ],
-  });
+  if (multiRepo && repoSlices) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Repositories ', styles: { bold: true } },
+        { type: 'text', text: `(${repoSlices.length})`, styles: {} },
+      ],
+    });
+    for (const slice of repoSlices) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content: [
+          { type: 'text', text: `${slice.workspace}/${slice.repoSlug}`, styles: { bold: true } },
+          { type: 'text', text: ' — ', styles: {} },
+          { type: 'text', text: `${slice.deployedCommitId.slice(0, 8)}...${slice.newCommitId.slice(0, 8)}`, styles: { code: true } },
+          { type: 'text', text: ` (${slice.results.length} commits)`, styles: {} },
+        ],
+      });
+    }
+  } else {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Repository: ', styles: { bold: true } },
+        { type: 'text', text: `${metadata.workspace}/${metadata.repoSlug}`, styles: {} },
+      ],
+    });
 
-  blocks.push({
-    id: uuidv4(),
-    type: 'paragraph',
-    content: [
-      { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
-      { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
-    ],
-  });
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
+        { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
+      ],
+    });
+  }
 
   blocks.push({
     id: uuidv4(),
@@ -426,10 +460,28 @@ async function buildMainAnalysisBlocks(
   const envChangesByPath = indexEnvChangesByPath(envChanges);
   const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
 
-  for (const result of uniquePrResults(results)) {
-    await appendPullRequestBlocks(
-      blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
-    );
+  if (multiRepo && repoSlices) {
+    for (const slice of repoSlices) {
+      const prResults = uniquePrResults(slice.results);
+      if (prResults.length === 0) continue;
+      blocks.push({
+        id: uuidv4(),
+        type: 'heading',
+        props: { level: 3 },
+        content: [{ type: 'text', text: `📦 ${slice.workspace}/${slice.repoSlug}`, styles: {} }],
+      });
+      for (const result of prResults) {
+        await appendPullRequestBlocks(
+          blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+        );
+      }
+    }
+  } else {
+    for (const result of uniquePrResults(results)) {
+      await appendPullRequestBlocks(
+        blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+      );
+    }
   }
 
   return { blocks, mentionedUserIds: [...mentionedUserIds] };
@@ -576,6 +628,7 @@ export interface UpsertCommitAnalysisCanvasArgs {
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined;
   createdByUserId: string;
   metadata: CommitAnalysisCanvasMetadata;
+  repoSlices?: CommitAnalysisRepoSlice[];
 }
 
 /**
@@ -595,7 +648,7 @@ export interface UpsertCommitAnalysisCanvasArgs {
 export async function upsertCommitAnalysisCanvas(
   args: UpsertCommitAnalysisCanvasArgs,
 ): Promise<string | null> {
-  const { section, results, affectedApplications, envChanges, migrationLinks, createdByUserId, metadata } = args;
+  const { section, results, affectedApplications, envChanges, migrationLinks, createdByUserId, metadata, repoSlices } = args;
 
   // Serialize the re-entrant find-then-update/create (Re-run + webhook) so
   // concurrent runs don't double-create or clobber the canvas. Fails open.
@@ -630,7 +683,7 @@ export async function upsertCommitAnalysisCanvas(
       mentionedUserIds = hotfix.mentionedUserIds;
     } else {
       const title = existing?.title || analysisCanvasTitle(metadata, now);
-      const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title);
+      const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title, repoSlices);
       const preservedHotfix = existing
         ? extractHotfixSection((existing.content as unknown as BlockNoteBlock[]) ?? [])
         : [];
@@ -667,7 +720,12 @@ export async function upsertCommitAnalysisCanvas(
         },
       });
       logger.info(`[CanvasService] Updated release analysis canvas ${existing.id} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
-      await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
+      // Non-fatal side-effects (see persistNewAnalysisCanvas).
+      try {
+        await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
+      } catch (sideEffectError) {
+        logger.error(`[CanvasService] Canvas ${existing.id} updated; side-effects/indexing failed (non-fatal):`, sideEffectError);
+      }
       return existing.id;
     }
 
@@ -762,7 +820,12 @@ async function persistNewAnalysisCanvas(args: {
     },
   });
 
-  await fireCanvasSideEffectsAndIndex(canvasId, createdByUserId, true);
+  // Side-effects/indexing must not abort canvas creation — degrade, keep the canvasId.
+  try {
+    await fireCanvasSideEffectsAndIndex(canvasId, createdByUserId, true);
+  } catch (sideEffectError) {
+    logger.error(`[CanvasService] Canvas ${canvasId} created; side-effects/indexing failed (non-fatal):`, sideEffectError);
+  }
   return canvasId;
 }
 
