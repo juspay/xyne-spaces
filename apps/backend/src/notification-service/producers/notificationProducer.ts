@@ -6,6 +6,7 @@ import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
+import { notificationLogService } from '../notificationLogService';
 
 export class NotificationProducer {
   private logger = logger.child({ module: 'NotificationProducer' });
@@ -127,6 +128,24 @@ export class NotificationProducer {
     session: { id: string; token: string; voipToken?: string; platform: string; appVersion?: string },
     payload: MobilePushPayload
   ): Promise<void> {
+    // SDLCT-0002: stamp a correlation id once, at pipeline entry, so every
+    // downstream event (queue -> worker -> provider) joins to this send.
+    if (!payload.correlationId) {
+      payload.correlationId = uuidv4();
+    }
+    const logCtx = {
+      workspaceId: payload.workspaceId,
+      correlationId: payload.correlationId,
+      notificationId: payload.notificationId,
+      channel: 'MOBILE_PUSH' as const,
+      provider: (session.platform === 'ios' ? 'APNS' : 'FCM') as 'APNS' | 'FCM',
+      metadata: {
+        notificationType: payload.type,
+        platform: session.platform,
+        appVersion: session.appVersion,
+        sessionId: session.id,
+      },
+    };
     try {
       const jobData: MobilePushJobData = {
         channel: DeliveryChannel.MOBILE_PUSH,
@@ -139,6 +158,8 @@ export class NotificationProducer {
         payload,
       };
 
+      void notificationLogService.recordDeliveryPlanned(logCtx);
+
       if (payload.type === 'INCOMING_CALL') {
         await notificationWorker.addIncomingCallJob(jobData);
         this.logger.info('Queued incoming call push (High Priority)', {
@@ -150,8 +171,11 @@ export class NotificationProducer {
           userId,
         });
       }
+
+      void notificationLogService.recordQueueEnqueued(logCtx);
     } catch (error) {
       this.logger.error('Failed to queue mobile push', { userId, error });
+      void notificationLogService.recordDeliveryFailedFinal({ ...logCtx, reasonCode: 'ENQUEUE_FAILED' });
       // Don't throw - just log
     }
   }

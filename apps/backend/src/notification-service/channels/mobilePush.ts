@@ -3,6 +3,7 @@ import { fcmPushService } from '@/services/fcmService';
 import { ApnsPayload, apnsService } from '@/services/apnsService';
 import { logger } from '@/utils/logger';
 import { getCallNotifications } from '@/services/otel';
+import { notificationLogService } from '../notificationLogService';
 
 export class MobilePushChannel {
   async deliver(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
@@ -38,6 +39,16 @@ export class MobilePushChannel {
   private async deliverFcm(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
     const { sessionId, token, platform, payload, userId, appVersion } = job;
     const isIncomingCall = payload.type === 'INCOMING_CALL';
+    // SDLCT-0002: FCM provider-handoff instrumentation.
+    const logCtx = {
+      workspaceId: payload.workspaceId,
+      correlationId: payload.correlationId,
+      notificationId: payload.notificationId,
+      channel: 'MOBILE_PUSH' as const,
+      provider: 'FCM' as const,
+      metadata: { notificationType: payload.type, platform },
+    };
+    void notificationLogService.recordProviderRequestStarted(logCtx);
 
     try {
       if (isIncomingCall) {
@@ -52,6 +63,7 @@ export class MobilePushChannel {
         logger.warn(`[MobilePush] FCM not enabled, skipping delivery`, {
           userId,
         });
+        void notificationLogService.recordDeliverySkipped({ ...logCtx, reasonCode: 'FCM_DISABLED' });
         return {
           success: false,
           error: 'FCM service not enabled',
@@ -82,6 +94,7 @@ export class MobilePushChannel {
         appVersion: appVersion,
       });
 
+      void notificationLogService.recordProviderAccepted(logCtx);
       return {
         success: true,
         deliveredAt: new Date(),
@@ -89,6 +102,7 @@ export class MobilePushChannel {
     } catch (error: any) {
       
       const errorCode = this.extractErrorCode(error);
+      void notificationLogService.recordProviderRejected({ ...logCtx, reasonCode: errorCode });
 
       if (payload.type === 'INCOMING_CALL') {
         getCallNotifications().add(1, { deliveryType: 'fcm', platform, status: 'failed', failureReason: errorCode });

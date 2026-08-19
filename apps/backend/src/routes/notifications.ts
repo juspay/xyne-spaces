@@ -23,6 +23,12 @@ router.patch('/mark-all-read', notificationController.markAllAsRead);
 router.patch('/:id/read', notificationController.markAsRead);
 router.patch('/:id/dismiss', notificationController.dismiss);
 
+// SDLCT-0002: Notification log pipeline completeness (workspace-scoped).
+// Static /logs is registered before the /:id param routes so it is not shadowed.
+router.get('/logs', notificationController.getLogsByCorrelationId);
+router.get('/:id/logs', notificationController.getNotificationLogs);
+router.get('/:id/completeness', notificationController.getNotificationCompleteness);
+
 // Preferences
 router.get('/preferences', notificationController.getPreferences);
 router.put('/preferences', notificationController.updatePreferences);

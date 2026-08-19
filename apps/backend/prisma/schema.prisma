@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
+  excludeTables = ["NotificationLogEvent", "WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
 }
 
 datasource db {
@@ -4523,5 +4523,88 @@ model EntityAlias {
   @@unique([workspaceId, type, normalizedForm])
   @@index([entityId])
   @@map("entity_aliases")
+  @@schema("non_zero")
+}
+
+// ---------------------------------------------------------------------------
+// Notification Log Pipeline Completeness Check (SDLCT-0002)
+//
+// Append-only, workspace-scoped audit trail of a notification's lifecycle as it
+// moves through creation -> producer -> Bull queue -> worker -> mobile-push
+// provider. Rows are never mutated; each lifecycle transition is a new event.
+// Lives in the `non_zero` schema because it is internal/support telemetry and
+// must NOT be synced to clients via Zero.
+// ---------------------------------------------------------------------------
+
+enum NotificationLogEventType {
+  NOTIFICATION_CREATED
+  DELIVERY_PLANNED
+  QUEUE_ENQUEUED
+  QUEUE_PROCESSING_STARTED
+  PROVIDER_REQUEST_STARTED
+  PROVIDER_ACCEPTED
+  PROVIDER_REJECTED
+  DELIVERY_RETRY_SCHEDULED
+  DELIVERY_FAILED_FINAL
+  DELIVERY_SKIPPED
+  CLIENT_RECEIVED
+  CLIENT_DISPLAYED
+  USER_OPENED
+  USER_ACKNOWLEDGED
+
+  @@schema("non_zero")
+}
+
+enum NotificationLogStatus {
+  STARTED
+  SUCCESS
+  FAILED
+  RETRYING
+  SKIPPED
+
+  @@schema("non_zero")
+}
+
+enum NotificationLogChannel {
+  MOBILE_PUSH
+  WEBSOCKET
+  EMAIL
+  IN_APP
+  UNKNOWN
+
+  @@schema("non_zero")
+}
+
+enum NotificationLogProvider {
+  FCM
+  APNS
+  INTERNAL
+  UNKNOWN
+
+  @@schema("non_zero")
+}
+
+model NotificationLogEvent {
+  id             String                   @id @default(cuid())
+  workspaceId    String // denormalized tenant key (stamped on insert)
+  notificationId String? // plain ref; no FK (repo uses relationMode = "prisma")
+  correlationId  String // end-to-end join key across the whole pipeline
+  eventType      NotificationLogEventType
+  channel        NotificationLogChannel
+  provider       NotificationLogProvider?
+  status         NotificationLogStatus
+  attempt        Int                      @default(0)
+  reasonCode     String?
+  metadata       Json? // redacted + allowlisted only
+  idempotencyKey String?
+  occurredAt     DateTime
+  createdAt      DateTime                 @default(now())
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, notificationId, occurredAt])
+  @@index([workspaceId, correlationId, occurredAt])
+  @@index([workspaceId, eventType, occurredAt])
+  @@index([workspaceId, channel, provider, occurredAt])
+  @@map("notification_log_events")
   @@schema("non_zero")
 }

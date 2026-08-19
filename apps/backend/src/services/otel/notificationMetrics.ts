@@ -99,3 +99,79 @@ export function getNotificationFcmPayloadTruncated(): Counter {
   }
   return _notificationFcmPayloadTruncated;
 }
+
+// ---------------------------------------------------------------------------
+// SDLCT-0002: Notification Log Pipeline Completeness metrics
+// ---------------------------------------------------------------------------
+
+// Total notification-log lifecycle events recorded (labels: eventType, channel, status)
+let _notificationLogEvents: Counter | null = null;
+export function getNotificationLogEvents(): Counter {
+  if (!_notificationLogEvents) {
+    _notificationLogEvents = getMeter().createCounter('notification_log_events_total', {
+      description: 'Total number of notification lifecycle log events recorded',
+      unit: '1',
+    });
+  }
+  return _notificationLogEvents;
+}
+
+// Fail-soft write failures (the audit path must never break delivery)
+let _notificationLogWriteFailures: Counter | null = null;
+export function getNotificationLogWriteFailures(): Counter {
+  if (!_notificationLogWriteFailures) {
+    _notificationLogWriteFailures = getMeter().createCounter(
+      'notification_log_write_failures_total',
+      {
+        description: 'Total number of notification-log write failures (swallowed, non-fatal)',
+        unit: '1',
+      },
+    );
+  }
+  return _notificationLogWriteFailures;
+}
+
+// Completeness classifications (labels: status = COMPLETE|INCOMPLETE|FAILED|UNKNOWN)
+let _notificationPipelineCompleteness: Counter | null = null;
+export function getNotificationPipelineCompleteness(): Counter {
+  if (!_notificationPipelineCompleteness) {
+    _notificationPipelineCompleteness = getMeter().createCounter(
+      'notification_pipeline_completeness_total',
+      {
+        description: 'Count of pipeline completeness classifications by resulting status',
+        unit: '1',
+      },
+    );
+  }
+  return _notificationPipelineCompleteness;
+}
+
+// Missing-stage occurrences observed during completeness classification (label: stage)
+let _notificationPipelineMissingStage: Counter | null = null;
+export function getNotificationPipelineMissingStage(): Counter {
+  if (!_notificationPipelineMissingStage) {
+    _notificationPipelineMissingStage = getMeter().createCounter(
+      'notification_pipeline_missing_stage_total',
+      {
+        description: 'Count of required pipeline stages found missing during classification',
+        unit: '1',
+      },
+    );
+  }
+  return _notificationPipelineMissingStage;
+}
+
+// End-to-end pipeline latency (first event -> terminal event), in ms
+let _notificationPipelineLatency: Histogram | null = null;
+export function getNotificationPipelineLatency(): Histogram {
+  if (!_notificationPipelineLatency) {
+    _notificationPipelineLatency = getMeter().createHistogram('notification_pipeline_latency_ms', {
+      description: 'End-to-end notification pipeline latency from first to terminal event',
+      unit: 'ms',
+      advice: {
+        explicitBucketBoundaries: [50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+      },
+    });
+  }
+  return _notificationPipelineLatency;
+}
