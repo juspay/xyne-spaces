@@ -207,7 +207,6 @@ export class CommitAnalysisController {
 
   private async deriveReleaseContext(
     releaseTicketId: string,
-    initiatorWorkspaceId: string,
   ): Promise<{
     projectId: string;
     mainReleaseBoardId: string;
@@ -217,7 +216,7 @@ export class CommitAnalysisController {
     vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   } | null> {
     const ticket = await db.ticket.findUnique({
-      where: { id: releaseTicketId, workspaceId: initiatorWorkspaceId },
+      where: { id: releaseTicketId },
       select: {
         projectId: true,
         boardId: true,
@@ -318,7 +317,7 @@ export class CommitAnalysisController {
     let loadingMessageId: string | null = null;
 
     try {
-      const derived = await this.deriveReleaseContext(currentTicketId, params.workspaceId);
+      const derived = await this.deriveReleaseContext(currentTicketId);
 
       if (!derived) {
         logger.warn('[ReleaseTrigger] skipped: no workspace/repoSlug available');
@@ -380,7 +379,6 @@ export class CommitAnalysisController {
         const releaseResult = await releaseService.release(
           analysisRequest,
           {
-            workspaceId: params.workspaceId,
             workspace: derivedProjectKey,
             repoSlug: derivedRepoSlug,
             projectId,

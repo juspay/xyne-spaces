@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
-import { currentWorkspaceId, runAsServiceActor } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { Prisma } from '@prisma/client';
 import { IngestionStatus } from '@xyne/shared';
 import {
@@ -39,7 +39,7 @@ const numberValue = (value: unknown, fallback = 0): number => {
 
 const fileFromRow = (row: RawRow): DoclingFile => ({
   fileId: String(row.file_id),
-  workspaceId: row.workspaceId ? String(row.workspaceId) : null,
+  workspaceId: row.workspace_id ? String(row.workspace_id) : null,
   collectionId: String(row.collection_id),
   sourcePath: String(row.source_path),
   sourceStorageKey: row.source_storage_key ? String(row.source_storage_key) : null,
@@ -70,7 +70,6 @@ const fileFromRow = (row: RawRow): DoclingFile => ({
 
 const partFromRow = (row: RawRow): DoclingPart => ({
   fileId: String(row.file_id),
-  workspaceId: row.workspaceId ? String(row.workspaceId) : null,
   partIndex: numberValue(row.part_index),
   docId: String(row.doc_id),
   currentJobId: row.current_job_id ? String(row.current_job_id) : null,
@@ -98,11 +97,10 @@ const partFromRow = (row: RawRow): DoclingPart => ({
 const setCollectionItemStatus = async (
   tx: Prisma.TransactionClient,
   fileId: string,
-  workspaceId: string,
   status: IngestionStatus,
 ): Promise<void> => {
   await tx.collectionItem.updateMany({
-    where: { fileId, workspaceId, isLatest: true },
+    where: { fileId, isLatest: true },
     data: { ingestionStatus: status },
   });
 };
@@ -183,8 +181,7 @@ export const markDoclingFileSplitComplete = async (
   stagedParts: DoclingStagedParts,
   resultsDir: string,
 ): Promise<boolean> => {
-  if (!file.workspaceId) throw new Error(`workspaceId missing for Docling file ${file.fileId}`);
-  return await runAsServiceActor('docling-splitter', file.workspaceId, () => db.$transaction(async (tx) => {
+  return await db.$transaction(async (tx) => {
     const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.QueuedForOcr},
@@ -200,7 +197,6 @@ export const markDoclingFileSplitComplete = async (
           available_at = NOW(),
           updated_at = NOW()
       WHERE file_id = ${file.fileId}
-        AND "workspaceId" = ${file.workspaceId}
         AND status = ${DOCLING_FILE_STATUS.Splitting}
         AND lease_owner = ${file.leaseOwner}
         AND lease_token = ${file.leaseToken}
@@ -211,9 +207,9 @@ export const markDoclingFileSplitComplete = async (
       return false;
     }
 
-    const workspaceId = file.workspaceId;
+    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'doclingAsyncFile', { fileId: file.fileId });
 
-    await tx.doclingAsyncPart.deleteMany({ where: { fileId: file.fileId, workspaceId } });
+    await tx.doclingAsyncPart.deleteMany({ where: { fileId: file.fileId } });
     await tx.doclingAsyncPart.createMany({
       data: stagedParts.parts.map((part) => ({
         fileId: file.fileId,
@@ -230,7 +226,7 @@ export const markDoclingFileSplitComplete = async (
       })),
     });
     return true;
-  }));
+  });
 };
 
 export const markDoclingFileSplitRetry = async (
@@ -430,12 +426,11 @@ export const getDoclingPartsForFile = async (
 
 export const markDoclingPartReady = async (input: {
   fileId: string;
-  workspaceId: string;
   partIndex: number;
   jobId: string;
   resultPath: string;
 }): Promise<void> => {
-  await runAsServiceActor('docling-result', input.workspaceId, () => db.$transaction(async (tx) => {
+  await db.$transaction(async (tx) => {
     const ready = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Ready},
@@ -445,7 +440,6 @@ export const markDoclingPartReady = async (input: {
           lease_until = NULL,
           updated_at = NOW()
       WHERE file_id = ${input.fileId}
-        AND "workspaceId" = ${input.workspaceId}
         AND part_index = ${input.partIndex}
         AND current_job_id = ${input.jobId}
         AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})
@@ -459,8 +453,7 @@ export const markDoclingPartReady = async (input: {
       UPDATE non_zero.docling_async_files
       SET ready_parts_count = ready_parts_count + 1,
           updated_at = NOW()
-      WHERE file_id = ${input.fileId}
-        AND "workspaceId" = ${input.workspaceId}`;
+      WHERE file_id = ${input.fileId}`;
 
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
@@ -468,34 +461,30 @@ export const markDoclingPartReady = async (input: {
           available_at = NOW(),
           updated_at = NOW()
       WHERE file_id = ${input.fileId}
-        AND "workspaceId" = ${input.workspaceId}
         AND status = ${DOCLING_FILE_STATUS.OcrActive}
         AND ready_parts_count >= total_parts`;
-  }));
+  });
 };
 
 export const failDoclingFile = async (
   fileId: string,
   errorMessage: string,
 ): Promise<void> => {
-  const workspaceId = await resolveWorkspaceIdFromModel(db, 'doclingAsyncFile', { fileId });
-  await runAsServiceActor('docling-failure', workspaceId, () => db.$transaction(async (tx) => {
+  await db.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Failed},
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = ${errorMessage}, updated_at = NOW()
-      WHERE file_id = ${fileId}
-        AND "workspaceId" = ${workspaceId}`;
+      WHERE file_id = ${fileId}`;
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Failed},
           error_message = ${errorMessage},
           lease_owner = NULL, lease_until = NULL, updated_at = NOW()
-      WHERE file_id = ${fileId}
-        AND "workspaceId" = ${workspaceId}`;
-    await setCollectionItemStatus(tx, fileId, workspaceId, IngestionStatus.FAILED);
-  }));
+      WHERE file_id = ${fileId}`;
+    await setCollectionItemStatus(tx, fileId, IngestionStatus.FAILED);
+  });
 };
 
 export const failDoclingFileIfOwned = async (
@@ -503,16 +492,13 @@ export const failDoclingFileIfOwned = async (
   expectedStatus: string,
   errorMessage: string,
 ): Promise<boolean> => {
-  if (!file.workspaceId) throw new Error(`workspaceId missing for Docling file ${file.fileId}`);
-  const workspaceId = file.workspaceId;
-  return await runAsServiceActor('docling-failure', workspaceId, () => db.$transaction(async (tx) => {
+  return await db.$transaction(async (tx) => {
     const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Failed},
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = ${errorMessage}, updated_at = NOW()
       WHERE file_id = ${file.fileId}
-        AND "workspaceId" = ${workspaceId}
         AND status = ${expectedStatus}
         AND lease_owner = ${file.leaseOwner}
         AND lease_token = ${file.leaseToken}
@@ -528,11 +514,10 @@ export const failDoclingFileIfOwned = async (
       SET status = ${DOCLING_PART_STATUS.Failed},
           error_message = ${errorMessage},
           lease_owner = NULL, lease_until = NULL, updated_at = NOW()
-      WHERE file_id = ${file.fileId}
-        AND "workspaceId" = ${workspaceId}`;
-    await setCollectionItemStatus(tx, file.fileId, workspaceId, IngestionStatus.FAILED);
+      WHERE file_id = ${file.fileId}`;
+    await setCollectionItemStatus(tx, file.fileId, IngestionStatus.FAILED);
     return true;
-  }));
+  });
 };
 
 export const claimNextDoclingFileToWrite = async (
@@ -583,12 +568,11 @@ export const markDoclingFileWriteRetry = async (
 
 export const markDoclingFileCompleted = async (input: {
   fileId: string;
-  workspaceId: string;
   statusMessage: string;
   leaseOwner?: string | null;
   leaseToken?: string | null;
 }): Promise<boolean> => {
-  return await runAsServiceActor('docling-writer', input.workspaceId, () => db.$transaction(async (tx) => {
+  return await db.$transaction(async (tx) => {
     const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Completed},
@@ -596,7 +580,6 @@ export const markDoclingFileCompleted = async (input: {
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = NULL, updated_at = NOW()
       WHERE file_id = ${input.fileId}
-        AND "workspaceId" = ${input.workspaceId}
         AND status = ${DOCLING_FILE_STATUS.Writing}
         AND lease_owner = ${input.leaseOwner}
         AND lease_token = ${input.leaseToken}
@@ -607,14 +590,13 @@ export const markDoclingFileCompleted = async (input: {
       return false;
     }
 
-    await setCollectionItemStatus(tx, input.fileId, input.workspaceId, IngestionStatus.COMPLETED);
+    await setCollectionItemStatus(tx, input.fileId, IngestionStatus.COMPLETED);
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Written}, written_at = NOW(), updated_at = NOW()
-      WHERE file_id = ${input.fileId}
-        AND "workspaceId" = ${input.workspaceId}`;
+      WHERE file_id = ${input.fileId}`;
     return true;
-  }));
+  });
 };
 
 /**
@@ -628,23 +610,20 @@ export const completeDoclingFileViaSyncFallback = async (
   fileId: string,
   statusMessage: string,
 ): Promise<void> => {
-  const workspaceId = await resolveWorkspaceIdFromModel(db, 'doclingAsyncFile', { fileId });
-  await runAsServiceActor('docling-fallback', workspaceId, () => db.$transaction(async (tx) => {
+  await db.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Completed},
           completed_at = NOW(),
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = ${statusMessage}, updated_at = NOW()
-      WHERE file_id = ${fileId}
-        AND "workspaceId" = ${workspaceId}`;
+      WHERE file_id = ${fileId}`;
     await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Written}, written_at = NOW(), updated_at = NOW()
-      WHERE file_id = ${fileId}
-        AND "workspaceId" = ${workspaceId}`;
-    await setCollectionItemStatus(tx, fileId, workspaceId, IngestionStatus.COMPLETED);
-  }));
+      WHERE file_id = ${fileId}`;
+    await setCollectionItemStatus(tx, fileId, IngestionStatus.COMPLETED);
+  });
 };
 
 export const requeueExpiredDoclingLeases = async (now = new Date()): Promise<void> => {

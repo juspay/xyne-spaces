@@ -488,26 +488,6 @@ const envSchema = Joi.object({
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
 
-  // Socket throttling. Defaults on; a deployment that needs the old behaviour sets this
-  // false, and the events are then counted and logged but never refused. The limits below
-  // are the thresholds the log lines have been reporting against, so raising one of those
-  // is the smaller lever when a deployment's own traffic sits above it.
-  WS_THROTTLE_ENABLED: Joi.boolean().default(true),
-  WS_EVENT_LIMIT: Joi.number().integer().min(1).default(300),
-  WS_EVENT_WINDOW_MS: Joi.number().integer().min(1000).default(10_000),
-  WS_BULK_SUBSCRIPTION_LIMIT: Joi.number().integer().min(1).default(500),
-
-  // Tenant-enforcement switches. Default true (refuse); only an explicit false relaxes,
-  // so a permissive deployment says so in its own config. Reported either way.
-  // A write naming a workspace other than the enforced one: refused when on, corrected to
-  // the enforced workspace and reported when off. The boundary holds either way.
-  ACL_ENFORCE_WORKSPACE_IMMUTABLE: Joi.boolean().default(true),
-  // A query on a workspace-scoped table with no workspace resolved. Covers INTERACTIVE AND
-  // BATCH TRANSACTIONS ONLY — deliberately not the ordinary query path, because
-  // authentication resolves a session before it knows a workspace and user_sessions carries
-  // one, so enforcing there would make it impossible to log in. Widening this needs those
-  // callers named from the `[acl] query ran with no tenant scope` line first.
-  ACL_ENFORCE_NO_CONTEXT: Joi.boolean().default(true),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -1045,15 +1025,5 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
-  },
-  websocket: {
-    throttleEnabled: envVars.WS_THROTTLE_ENABLED as boolean,
-    eventLimit: envVars.WS_EVENT_LIMIT as number,
-    eventWindowMs: envVars.WS_EVENT_WINDOW_MS as number,
-    bulkSubscriptionLimit: envVars.WS_BULK_SUBSCRIPTION_LIMIT as number,
-  },
-  aclEnforcement: {
-    workspaceImmutable: envVars.ACL_ENFORCE_WORKSPACE_IMMUTABLE as boolean,
-    noContext: envVars.ACL_ENFORCE_NO_CONTEXT as boolean,
   },
 };

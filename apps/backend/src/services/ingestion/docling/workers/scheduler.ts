@@ -1032,12 +1032,8 @@ const runWriterWorker = async (id: string, shouldStop: () => boolean) => {
       await releasePermit(permit);
       permit = null;
 
-      if (!file.workspaceId) {
-        throw new TerminalDoclingSchedulerError(`workspaceId missing for Docling file ${file.fileId}`);
-      }
       const completed = await markDoclingFileCompleted({
         fileId: file.fileId,
-        workspaceId: file.workspaceId,
         statusMessage: `OCR complete: ${aggregate.chunks.length + aggregate.image_chunks.length} chunks from ${fileName}`,
         leaseOwner: file.leaseOwner,
         leaseToken: file.leaseToken,

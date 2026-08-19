@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -1258,7 +1257,7 @@ export class ConfluenceImportService {
       throw new Error('workspaceId required: Confluence import config missing workspaceId');
     }
     const ownerUserIds = uniqueIds([creatorUserId, lastEditorUserId, actorUserId]);
-    await runAsServiceActor(actorUserId, workspaceId, () => db.$transaction([
+    await db.$transaction([
       db.canvas.create({
         data: {
           id: canvasId,
@@ -1294,7 +1293,7 @@ export class ConfluenceImportService {
         })),
         skipDuplicates: true,
       }),
-    ]));
+    ]);
 
     await initializeYSweetDoc(canvasId, safeContent as unknown as BlockNoteBlock[]);
   }

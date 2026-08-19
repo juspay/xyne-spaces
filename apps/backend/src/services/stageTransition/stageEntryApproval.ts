@@ -13,7 +13,6 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
 
 const LOG_PREFIX = '[StageApprovalNotify]';
 
@@ -105,17 +104,15 @@ export async function maybeCreateEntryApprovalRequest(
 
     let claimed: boolean;
     try {
-      claimed = await runAsServiceActor('stage-entry-approval', ticket.workspaceId, () =>
-        db.$transaction(tx =>
-          claimEntryApprovalRequest(
-            tx,
-            ticket,
-            targetStageId,
-            landedStageName,
-            targetStageName,
-            actorId,
-            actorName,
-          ),
+      claimed = await db.$transaction(tx =>
+        claimEntryApprovalRequest(
+          tx,
+          ticket,
+          targetStageId,
+          landedStageName,
+          targetStageName,
+          actorId,
+          actorName,
         ),
       );
     } catch (error) {
@@ -181,14 +178,12 @@ async function claimEntryApprovalRequest(
   actorName: string,
 ): Promise<boolean> {
   const [row] = await tx.$queryRaw<{ stageName: string }[]>`
-    SELECT "stageName" FROM "tickets"
-    WHERE "id" = ${ticket.id} AND "workspaceId" = ${ticket.workspaceId}
-    FOR UPDATE
+    SELECT "stageName" FROM "tickets" WHERE "id" = ${ticket.id} FOR UPDATE
   `;
   if (!row || row.stageName !== landedStageName) return false;
 
   const existing = await tx.ticketStageRequest.findUnique({
-    where: { ticketId_stageId: { ticketId: ticket.id, stageId }, workspaceId: ticket.workspaceId },
+    where: { ticketId_stageId: { ticketId: ticket.id, stageId } },
     select: { status: true },
   });
 
@@ -212,12 +207,7 @@ async function claimEntryApprovalRequest(
     // means at most one concurrent updateMany can affect the row: the loser's
     // WHERE no longer matches once the winner's UPDATE commits.
     const { count } = await tx.ticketStageRequest.updateMany({
-      where: {
-        ticketId: ticket.id,
-        stageId,
-        workspaceId: ticket.workspaceId,
-        status: { not: TicketStageRequestStatus.SUBMITTED },
-      },
+      where: { ticketId: ticket.id, stageId, status: { not: TicketStageRequestStatus.SUBMITTED } },
       data: {
         status: TicketStageRequestStatus.SUBMITTED,
         submittedBy: actorId,

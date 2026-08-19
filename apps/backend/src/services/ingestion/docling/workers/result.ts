@@ -65,7 +65,6 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   if (!jobId) return
   const part = await getDoclingPartByJobId(jobId)
   if (!part) return
-  if (!part.workspaceId) throw new Error(`workspaceId missing for Docling part ${part.fileId}/${part.partIndex}`)
   const t1 = part.submittedAt ? part.submittedAt.getTime() : null
   const t2 = Date.now()
   const ocrMs = t1 !== null ? t2 - t1 : null
@@ -127,7 +126,6 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   await writeJson(path, result)
   await markDoclingPartReady({
     fileId: part.fileId,
-    workspaceId: part.workspaceId,
     partIndex: part.partIndex,
     jobId,
     resultPath: path,

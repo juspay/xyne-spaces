@@ -75,38 +75,7 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
     }
   }
 
-  async canDelete(args: DeleteID<TableSchema<'conversation_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const participant = await tx.run(zql.conversation_participants.where('id', args.id).one());
-    if (!participant) {
-      throw new MutationACLError('Conversation participant delete failed: the participant does not exist', 'conversation_participants')
-    }
-    // The row's own channelId is denormalized and nullable, so take the channel from the
-    // conversation, which always has one.
-    const conversation = await tx.run(
-      zql.conversations.where('conversationId', participant.conversationId).related('channel').one(),
-    );
-    await this.verifyConversationInWorkspace(
-      participant.conversationId,
-      tx,
-      conversation?.channel?.workspaceId,
-    );
-
-    // Leaving is always yours to do. Removing someone else is the sender and mention
-    // bookkeeping, which runs on behalf of people already in the channel — the same
-    // audience canUpdate lets touch another row's system fields.
-    if (participant.userId === this.ctx.userID) {
-      return;
-    }
-
-    const isChannelParticipant = await tx.run(
-      zql.channel_participants
-        .where('userId', this.ctx.userID)
-        .where('channelId', conversation!.channelId)
-        .one(),
-    );
-
-    if (!isChannelParticipant) {
-      throw new MutationACLError('Conversation participant delete failed: only channel participants can remove others', 'conversation_participants')
-    }
+  async canDelete(_args: DeleteID<TableSchema<'conversation_participants'>>, _tx: Transaction<Schema>): Promise<void> {
+    // Need to think about rules for deleting conversation participants since mention/sender logic needs to be improved.
   }
 }

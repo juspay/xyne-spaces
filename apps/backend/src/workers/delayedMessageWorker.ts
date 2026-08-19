@@ -7,8 +7,6 @@ import { deliverDelayedMessage } from '@/zero/utils/delayedMessageDelivery';
 import { cleanupDelayedMessageAttachmentsPrisma } from '@/zero/utils/attachmentEntityCleanup';
 import { activityService } from '@/services/activity/activityService';
 import type { DelayedMessageJobData } from '@/queues/delayedMessageQueue';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
 const QUEUE_NAME = 'delayed-messages';
 
@@ -104,7 +102,6 @@ class DelayedMessageWorker {
         await queue.add(
           {
             delayedMessageId: record.id,
-            workspaceId: record.workspaceId,
             channelId: record.channelId,
             conversationId: record.conversationId,
             senderId: record.senderId,
@@ -120,7 +117,6 @@ class DelayedMessageWorker {
         await queue.add(
           {
             delayedMessageId: record.id,
-            workspaceId: record.workspaceId,
             channelId: record.channelId,
             conversationId: record.conversationId,
             senderId: record.senderId,
@@ -171,19 +167,6 @@ class DelayedMessageWorker {
   }
 
   private async processJob(job: Bull.Job<DelayedMessageJobData>): Promise<void> {
-    // New jobs carry workspaceId. Resolve from the parent for jobs queued before rollout.
-    const queuedWorkspaceId = (job.data as Partial<DelayedMessageJobData>).workspaceId;
-    const workspaceId = queuedWorkspaceId ?? await resolveWorkspaceIdFromModel(
-      DatabaseClient.getInstance(),
-      'delayedMessage',
-      { id: job.data.delayedMessageId },
-    );
-    return runAsServiceActor('delayed-message-delivery', workspaceId, () =>
-      this.processScopedJob(job),
-    );
-  }
-
-  private async processScopedJob(job: Bull.Job<DelayedMessageJobData>): Promise<void> {
     const { delayedMessageId, channelId, conversationId, senderId, content } = job.data;
 
     logger.info(

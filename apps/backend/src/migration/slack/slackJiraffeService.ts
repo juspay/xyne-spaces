@@ -416,11 +416,6 @@ async function ingestTicket(
     createdAt: new Date(ticket.created_at),
   });
 
-  const channel = await channelRepo.findById(channelId);
-  if (!channel?.workspaceId) {
-    throw new Error(`workspaceId required: channel ${channelId} not found or has no workspace`);
-  }
-
   // Build description: add JIRA link if title was AI-generated (not fallback)
   let description = ticket.task_description || '';
   if (titleText !== fallbackTitle) {
@@ -431,7 +426,8 @@ async function ingestTicket(
   // Generate xyneId and create ticket
   const { TicketIdService } = await import('../../services/ticketIdService');
   const createdTicket = await db.$transaction(async (tx) => {
-    const xyneId = await TicketIdService.generateTicketId(tx, projectId, channel.workspaceId);
+    const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+    const channel = await channelRepo.findById(channelId);
 
     const newTicket = await tx.ticket.create({
       data: {
@@ -442,7 +438,7 @@ async function ingestTicket(
         conversationId: conversation.conversation.conversationId,
         channelId: channelId,
         projectId: projectId,
-        workspaceId: channel.workspaceId,
+        workspaceId: channel?.workspaceId ?? '',
         boardId: boardId,
         ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
         stageName: resolvedStageName,

@@ -95,12 +95,7 @@ function stampObjectOrArray(value: unknown, stamp: (row: Row) => Row): unknown {
  * an explicit `null` for a deliberate cross-workspace row) or set a `workspace` relation
  * (setting the scalar too would trigger Prisma's scalar-plus-relation conflict).
  */
-function addWorkspaceId(
-  row: Row,
-  workspaceId: string,
-  model: string,
-  op: string,
-): Row {
+function addWorkspaceId(row: Row, workspaceId: string, model: string, op: string): Row {
   if (row.workspaceId !== undefined || 'workspace' in row) return row;
   const key = `${model}:${op}`;
   if (!stamped.has(key) && stamped.size < 500) {
@@ -123,23 +118,6 @@ function stampField(entry: Row, key: string, stamp: (row: Row) => Row): Row {
 
 // ── recursive stamping ───────────────────────────────────────────────────────
 
-/** Every occurrence: a repeat is itself the signal, and the count decides when to enforce. */
-function logForeignWorkspace(
-  model: string,
-  op: string,
-  given: string,
-  ws: string,
-  refused: boolean,
-): void {
-  logger.warn('[acl] create names a different workspace', {
-    model,
-    operation: op,
-    given,
-    enforced: ws,
-    refused,
-  });
-}
-
 /**
  * Stamp one write payload for `model`.
  *  - isInsert=true  → the row is being INSERTED: add its own workspaceId (if stampable),
@@ -149,62 +127,19 @@ function logForeignWorkspace(
  *                     themselves insert new rows.
  * Copy-on-write: returns `row` unchanged (same reference) when nothing needed stamping.
  */
-function stampPayload(
-  model: string,
-  row: Row,
-  ws: string,
-  isInsert: boolean,
-  op: string,
-  rejectForeignWorkspace: boolean,
-): Row {
+function stampPayload(model: string, row: Row, ws: string, isInsert: boolean, op: string): Row {
   if (!isObject(row)) return row;
 
-  let out: Row = row;
+  let out = isInsert && STAMPABLE.has(model) ? addWorkspaceId(row, ws, model, op) : row;
   const copyBeforeEdit = (): void => {
     if (out === row) out = { ...row };
   };
-
-  // A payload naming another workspace. Reported every time in both positions: refused when
-  // the switch is on, corrected to the enforced workspace when it is off — so the boundary
-  // holds either way, and the log says how much is relying on the correction.
-  if (STAMPABLE.has(model)) {
-    const given = row.workspaceId;
-    if (typeof given === 'string' && given !== ws) {
-      logForeignWorkspace(model, op, given, ws, rejectForeignWorkspace);
-      if (rejectForeignWorkspace) {
-        throw new Error(
-          `Cannot write ${model} for a different workspace inside a scoped transaction`,
-        );
-      }
-      copyBeforeEdit();
-      out.workspaceId = ws;
-    }
-    const relation = row.workspace;
-    if (isObject(relation)) {
-      const connect = relation.connect;
-      if (isObject(connect) && typeof connect.id === 'string' && connect.id !== ws) {
-        logForeignWorkspace(model, op, connect.id, ws, rejectForeignWorkspace);
-        if (rejectForeignWorkspace) {
-          throw new Error(
-            `Cannot connect ${model} to a different workspace inside a scoped transaction`,
-          );
-        }
-        copyBeforeEdit();
-        out.workspace = { ...relation, connect: { ...connect, id: ws } };
-      }
-    }
-  }
-
-  if (isInsert && STAMPABLE.has(model)) {
-    // Fills only when absent, so a value corrected above is left alone.
-    out = addWorkspaceId(out, ws, model, op);
-  }
 
   for (const { field, child, isList } of RELATIONS.get(model) ?? []) {
     const nestedWrite = row[field];
     if (!isObject(nestedWrite)) continue;
 
-    const stamped = stampNestedWrite(child, isList, nestedWrite, ws, op, rejectForeignWorkspace);
+    const stamped = stampNestedWrite(child, isList, nestedWrite, ws, op);
     if (stamped !== nestedWrite) {
       copyBeforeEdit();
       out[field] = stamped;
@@ -220,24 +155,15 @@ function stampPayload(
  * recursed for their own nested creates but never self-stamped. `isList` tells us the
  * shape of `update` (to-one vs to-many). Copy-on-write.
  */
-function stampNestedWrite(
-  child: string,
-  isList: boolean,
-  write: Row,
-  ws: string,
-  op: string,
-  rejectForeignWorkspace: boolean,
-): Row {
+function stampNestedWrite(child: string, isList: boolean, write: Row, ws: string, op: string): Row {
   let out = write;
   const replace = (key: string, value: unknown): void => {
     if (value === write[key]) return;
     if (out === write) out = { ...write };
     out[key] = value;
   };
-  const asInsert = (row: Row): Row =>
-    stampPayload(child, row, ws, true, op, rejectForeignWorkspace);
-  const asUpdate = (row: Row): Row =>
-    stampPayload(child, row, ws, false, op, rejectForeignWorkspace);
+  const asInsert = (row: Row): Row => stampPayload(child, row, ws, true, op);
+  const asUpdate = (row: Row): Row => stampPayload(child, row, ws, false, op);
 
   // create: {…} | [{…}]  → new row(s)
   if ('create' in write) replace('create', stampObjectOrArray(write.create, asInsert));
@@ -279,51 +205,6 @@ function isWriteOp(op: string): boolean {
   return op.startsWith('create') || op.startsWith('update') || op === 'upsert';
 }
 
-/**
- * Apply the workspace stamper to one Prisma operation.
- *
- * Kept separate from the client extension so the interactive-transaction guard can apply
- * exactly the same top-level and nested-create rules to Prisma's transaction client. Prisma
- * does not return the outer extended client to an interactive transaction callback.
- */
-export function stampArgsForWorkspace(
-  model: string,
-  operation: string,
-  args: unknown,
-  workspaceId: string,
-  rejectForeignWorkspace = false,
-): unknown {
-  if (!isWriteOp(operation) || !isObject(args)) return args;
-
-  // create* → every row in `data` is a new insert (plus its nested creates).
-  if (operation.startsWith('create')) {
-    const data = stampObjectOrArray(args.data, (row) =>
-      stampPayload(model, row, workspaceId, true, operation, rejectForeignWorkspace),
-    );
-    return data === args.data ? args : { ...args, data };
-  }
-
-  // upsert → `create` inserts (self + nested); `update` touches an existing row
-  // and therefore only its nested creates are stamped.
-  if (operation === 'upsert') {
-    const create = isObject(args.create)
-      ? stampPayload(model, args.create, workspaceId, true, operation, rejectForeignWorkspace)
-      : args.create;
-    const update = isObject(args.update)
-      ? stampPayload(model, args.update, workspaceId, false, operation, rejectForeignWorkspace)
-      : args.update;
-    return create === args.create && update === args.update
-      ? args
-      : { ...args, create, update };
-  }
-
-  // update* → do not stamp the existing row; only stamp nested creates.
-  const data = isObject(args.data)
-    ? stampPayload(model, args.data, workspaceId, false, operation, rejectForeignWorkspace)
-    : args.data;
-  return data === args.data ? args : { ...args, data };
-}
-
 /** Wrap a Prisma client so every write stamps workspaceId onto the rows it inserts, from context. */
 export function withWorkspaceStamp<T extends PrismaClient>(prisma: T): T {
   logger.info('[STAMP] withWorkspaceStamp extension, registered');
@@ -336,8 +217,25 @@ export function withWorkspaceStamp<T extends PrismaClient>(prisma: T): T {
           const ws = isWriteOp(op) ? currentWorkspaceId() : null;
           if (!ws) return query(args); // reads/deletes, or no tenant context → untouched
 
-          const stamped = stampArgsForWorkspace(model, op, args, ws);
-          return stamped === args ? query(args) : query(stamped as typeof args);
+          const a = args as Row;
+
+          // create* → every row in `data` is a new insert (plus its nested creates).
+          if (op.startsWith('create')) {
+            const data = stampObjectOrArray(a.data, (row) => stampPayload(model, row, ws, true, op));
+            return data === a.data ? query(args) : query({ ...a, data } as typeof args);
+          }
+
+          // upsert → `create` inserts (self + nested); `update` touches an existing row (nested only).
+          if (op === 'upsert') {
+            const create = isObject(a.create) ? stampPayload(model, a.create, ws, true, op) : a.create;
+            const update = isObject(a.update) ? stampPayload(model, a.update, ws, false, op) : a.update;
+            return create === a.create && update === a.update ? query(args) : query({ ...a, create, update } as typeof args);
+          }
+
+          // update / updateMany / updateManyAndReturn → existing rows: never stamp the row's
+          // own key; recurse `data` only for nested creates.
+          const data = isObject(a.data) ? stampPayload(model, a.data, ws, false, op) : a.data;
+          return data === a.data ? query(args) : query({ ...a, data } as typeof args);
         },
       },
     },

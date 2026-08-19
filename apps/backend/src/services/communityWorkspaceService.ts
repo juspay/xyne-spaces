@@ -23,7 +23,7 @@ import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
-import { runAsServiceActor, withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -312,10 +312,7 @@ export class CommunityWorkspaceService {
 
     const landingChannelId = requestedChannel?.id ?? params.workspace.landingChannelId ?? null;
 
-    // This public onboarding flow has no existing workspace principal. The validated OPEN
-    // join policy is the authority to enter the selected workspace scope.
-    const result = await runAsServiceActor('community-workspace-join', params.workspace.id, () =>
-      this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let orgMember = await tx.orgMember.findUnique({
         where: { email },
         select: { memberId: true },
@@ -371,8 +368,7 @@ export class CommunityWorkspaceService {
       }
 
       return { workspaceUser, isNewUser };
-      }),
-    );
+    });
 
     if (landingChannelId) {
       try {

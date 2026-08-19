@@ -48,8 +48,7 @@ export class EntitySequenceService {
 
   static async getNextProjectTicketSequence(
     tx: MainPrismaTransaction,
-    projectId: string,
-    workspaceId: string,
+    projectId: string
   ): Promise<number> {
     if (this.isCommonProjectTicketSequenceEnabled()) {
       try {
@@ -63,7 +62,7 @@ export class EntitySequenceService {
     }
 
     const project = await tx.project.update({
-      where: { id: projectId, workspaceId },
+      where: { id: projectId },
       data: { ticketSequence: { increment: 1 } },
       select: { ticketSequence: true },
     });

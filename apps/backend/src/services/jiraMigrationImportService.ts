@@ -3361,11 +3361,7 @@ export class JiraMigrationImportService {
                 },
               });
 
-              const xyneId = await TicketIdService.generateTicketId(
-                tx as any,
-                project.id,
-                workspaceId,
-              );
+              const xyneId = await TicketIdService.generateTicketId(tx as any, project.id);
 
               const dueDateRaw = issue.fields.duedate;
               const eta =

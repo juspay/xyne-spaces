@@ -18,11 +18,10 @@ export class TicketIdService {
    */
   static async generateTicketId(
     tx: PrismaTransaction,
-    projectId: string,
-    workspaceId: string,
+    projectId: string
   ): Promise<string> {
     const project = await tx.project.findUnique({
-      where: { id: projectId, workspaceId },
+      where: { id: projectId },
       select: { code: true },
     });
 
@@ -30,11 +29,7 @@ export class TicketIdService {
       throw new Error(`Project not found: ${projectId}`);
     }
 
-    const sequenceNumber = await EntitySequenceService.getNextProjectTicketSequence(
-      tx,
-      projectId,
-      workspaceId,
-    );
+    const sequenceNumber = await EntitySequenceService.getNextProjectTicketSequence(tx, projectId);
 
     return this.formatProjectScopedId(project.code, sequenceNumber);
   }

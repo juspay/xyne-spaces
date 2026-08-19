@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@framework';
 import { TicketIdService } from '@/services/ticketIdService';
 
@@ -6,7 +7,6 @@ const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
 import { ActivityType, TicketPriority } from '@xyne/shared';
 import { dualWriteTicketTag } from '@/services/ticketTagDualWriteService';
-import { runAsServiceActor } from '@/database/tenant/context';
 
 type CreateApplicationSubTicketsOpts = {
   parentTicketId: string;
@@ -15,7 +15,6 @@ type CreateApplicationSubTicketsOpts = {
   channelId: string;
   conversationId: string;
   createdBy: string;
-  initiatorWorkspaceId: string;
   affectedApplications: (Application & { matchedFiles: string[] })[];
   prLinksByApplication: Map<string, string[]>;
   isHotFix?: boolean;
@@ -61,39 +60,24 @@ export class ApplicationRepository {
    * snapshot those here. Dedup is handled by the @@unique([applicationReleaseId,
    * ticketId]) constraint via skipDuplicates.
    */
-  async createApplicationReleaseTicketMappings(
-    records: Array<{
-      applicationReleaseId: string;
-      releaseId: string;
-      devTicketId: string;
-      isHotfix?: boolean;
-    }>,
-    initiatorWorkspaceId: string,
-  ): Promise<{ count: number }> {
+  async createApplicationReleaseTicketMappings(records: Array<{
+    applicationReleaseId: string;
+    releaseId: string;
+    devTicketId: string;
+    isHotfix?: boolean;
+  }>): Promise<{ count: number }> {
     if (records.length === 0) return { count: 0 };
 
-    const devTicketIds = [...new Set(records.map(record => record.devTicketId))];
-    const releaseIds = [...new Set(records.map(record => record.releaseId))];
-    const subTicketIds = [...new Set(records.map(record => record.applicationReleaseId))];
-    const [devTicketCount, releaseCount, subTicketCount] = await Promise.all([
-      prisma.ticket.count({ where: { id: { in: devTicketIds }, workspaceId: initiatorWorkspaceId } }),
-      prisma.ticket.count({ where: { id: { in: releaseIds }, workspaceId: initiatorWorkspaceId } }),
-      prisma.subTicket.count({ where: { id: { in: subTicketIds }, workspaceId: initiatorWorkspaceId } }),
-    ]);
-    if (
-      devTicketCount !== devTicketIds.length
-      || releaseCount !== releaseIds.length
-      || subTicketCount !== subTicketIds.length
-    ) {
-      throw new Error('Application release mappings contain targets outside the initiator workspace');
-    }
+    // All ART rows for a release share the release's workspace; the dev ticket
+    // carries the denormalized tenant key, so resolve it once and stamp it.
+    const artWorkspaceId = await resolveWorkspaceIdFromModel(prisma, 'ticket', { id: records[0].devTicketId });
 
     const data = records.map(r => ({
       applicationReleaseId: r.applicationReleaseId,
       releaseId: r.releaseId,
       ticketId: r.devTicketId,
       isHotfix: r.isHotfix ?? false,
-      workspaceId: initiatorWorkspaceId,
+      workspaceId: artWorkspaceId,
     }));
 
     const result = await prisma.applicationReleaseTicket.createMany({
@@ -168,7 +152,6 @@ export class ApplicationRepository {
       channelId,
       conversationId,
       createdBy,
-      initiatorWorkspaceId,
       affectedApplications,
       prLinksByApplication,
       isHotFix,
@@ -195,37 +178,18 @@ export class ApplicationRepository {
       `[ApplicationRepository] Creating sub-tickets for ${missingApplications.length} of ${affectedApplications.length} apps (${affectedApplications.length - missingApplications.length} already existed)`,
     );
 
-    // Authorize every parent supplied to the transaction against the initiator. Resolving the
-    // workspace from a target id would only describe the target and would permit IDOR.
-    const [project, parentTicket, channel, conversation] = await Promise.all([
-      prisma.project.findFirst({ where: { id: projectId, workspaceId: initiatorWorkspaceId }, select: { id: true } }),
-      prisma.ticket.findFirst({ where: { id: parentTicketId, workspaceId: initiatorWorkspaceId }, select: { id: true } }),
-      prisma.channel.findFirst({ where: { id: channelId, workspaceId: initiatorWorkspaceId }, select: { id: true } }),
-      prisma.conversation.findFirst({
-        where: { conversationId, workspaceId: initiatorWorkspaceId },
-        select: { conversationId: true },
-      }),
-    ]);
-    if (!project || !parentTicket || !channel || !conversation) {
-      throw new Error('Release targets are not accessible in the initiator workspace');
-    }
+    // Project workspace doesn't change per-app; resolve once outside the loop.
+    const ticketWorkspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
 
     for (const application of missingApplications) {
-      if (application.workspaceId !== initiatorWorkspaceId) {
-        throw new Error(`Application ${application.id} is not accessible in the initiator workspace`);
-      }
       if (!application.boardId) {
         logger.warn(`Application ${application.name} has no boardId, skipping ticket creation`);
         continue;
       }
 
       try {
-        const txResult = await runAsServiceActor(createdBy, initiatorWorkspaceId, () => prisma.$transaction(async (tx) => {
-          const xyneId = await TicketIdService.generateTicketId(
-            tx,
-            projectId,
-            initiatorWorkspaceId,
-          );
+        const txResult = await prisma.$transaction(async (tx) => {
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
           const prLinks = prLinksByApplication.get(application.id) || [];
           const prLinksSection = prLinks.length > 0
@@ -237,7 +201,7 @@ export class ApplicationRepository {
           // configured first column instead of a hardcoded 'Release' label
           // that may not exist on the board.
           const firstStage = await tx.stage.findFirst({
-            where: { boardId: application.boardId!, workspaceId: initiatorWorkspaceId },
+            where: { boardId: application.boardId! },
             orderBy: { sequenceNumber: 'asc' },
             select: { name: true, defaultTicketStatusV2: true },
           });
@@ -252,7 +216,7 @@ export class ApplicationRepository {
               channelId,
               xyneId,
               projectId,
-              workspaceId: initiatorWorkspaceId,
+              workspaceId: ticketWorkspaceId,
               boardId: application.boardId,
               statusV2: firstStage?.defaultTicketStatusV2 ?? 'TODO',
               priority: TicketPriority.LOW,
@@ -266,7 +230,7 @@ export class ApplicationRepository {
               data: {
                 ticketId: ticket.id,
                 name: 'HotFix',
-                workspaceId: initiatorWorkspaceId,
+                workspaceId: ticketWorkspaceId,
               }
             })
             await dualWriteTicketTag(ticket.id, 'HotFix', tx);
@@ -281,18 +245,18 @@ export class ApplicationRepository {
               conversationId,
               mappedTicketId: ticket.id,
               assignedTo: null,
-              workspaceId: initiatorWorkspaceId,
+              workspaceId: ticketWorkspaceId,
             },
           });
 
           await tx.ticketSubTicketMapping.create({
-            data: { ticketId: parentTicketId, subTicketId: subTicket.id, workspaceId: initiatorWorkspaceId },
+            data: { ticketId: parentTicketId, subTicketId: subTicket.id, workspaceId: ticketWorkspaceId },
           });
 
           await tx.ticketActivity.create({
             data: {
               ticketId: parentTicketId,
-              workspaceId: initiatorWorkspaceId,
+              workspaceId: ticketWorkspaceId,
               updatedBy: createdBy,
               activityType: ActivityType.SUBTICKET_CREATED,
               value: {
@@ -307,7 +271,7 @@ export class ApplicationRepository {
           });
 
           return { subTicketId: subTicket.id, mappedTicketId: ticket.id, xyneId };
-        }));
+        });
 
         result.set(application.id, txResult);
         logger.info(`Created sub-ticket ${txResult.subTicketId}, ticket ${txResult.xyneId} (${txResult.mappedTicketId}) for application ${application.name}`);

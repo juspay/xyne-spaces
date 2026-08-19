@@ -14,7 +14,6 @@ import {
   FormEntityType,
   ReleaseTrackingMode,
   isReleaseTicket, PRStatus, TicketStatusV2 } from '@xyne/shared';
-import { runAsServiceActor } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -62,28 +61,23 @@ class VersionReleaseMappingService {
   // re-reads the current version, so the latest edit always wins.
   private readonly pendingSyncs = new Map<string, Promise<void>>();
 
-  async syncTicketById(ticketId: string, initiatorWorkspaceId: string): Promise<void> {
-    const syncKey = `${initiatorWorkspaceId}:${ticketId}`;
-    const previous = this.pendingSyncs.get(syncKey) ?? Promise.resolve();
-    const run = previous.then(() =>
-      runAsServiceActor('version-release-mapping', initiatorWorkspaceId, () =>
-        this.runSyncTicketById(ticketId, initiatorWorkspaceId),
-      ),
-    );
-    this.pendingSyncs.set(syncKey, run);
+  async syncTicketById(ticketId: string): Promise<void> {
+    const previous = this.pendingSyncs.get(ticketId) ?? Promise.resolve();
+    const run = previous.then(() => this.runSyncTicketById(ticketId));
+    this.pendingSyncs.set(ticketId, run);
     try {
       await run;
     } finally {
-      if (this.pendingSyncs.get(syncKey) === run) {
-        this.pendingSyncs.delete(syncKey);
+      if (this.pendingSyncs.get(ticketId) === run) {
+        this.pendingSyncs.delete(ticketId);
       }
     }
   }
 
-  private async runSyncTicketById(ticketId: string, initiatorWorkspaceId: string): Promise<void> {
+  private async runSyncTicketById(ticketId: string): Promise<void> {
     try {
       const ticket = await prisma.ticket.findUnique({
-        where: { id: ticketId, workspaceId: initiatorWorkspaceId },
+        where: { id: ticketId },
         include: { project: true, board: true },
       });
       if (!ticket) {
@@ -93,9 +87,9 @@ class VersionReleaseMappingService {
 
       const releaseVersion = await this.getTicketReleaseVersion(ticket.id);
       if (isReleaseTicket(ticket.ticketType as BaseTicketType)) {
-        await this.syncReleaseTicket(ticket, releaseVersion, initiatorWorkspaceId);
+        await this.syncReleaseTicket(ticket, releaseVersion);
       } else {
-        await this.syncDevTicket(ticket, releaseVersion, initiatorWorkspaceId);
+        await this.syncDevTicket(ticket, releaseVersion);
       }
     } catch (error) {
       logger.error(`[VersionReleaseMapping] failed for ticket ${ticketId}:`, error);
@@ -105,7 +99,6 @@ class VersionReleaseMappingService {
   private async syncReleaseTicket(
     releaseTicket: TicketWithReleaseBoard,
     releaseVersion: string | null,
-    initiatorWorkspaceId: string,
   ): Promise<void> {
     if (releaseTicket.board?.releaseTrackingMode !== ReleaseTrackingMode.VERSION) {
       return;
@@ -119,14 +112,13 @@ class VersionReleaseMappingService {
 
     const devTickets = await this.findDevTicketsByVersion(releaseTicket.projectId, releaseVersion);
     for (const devTicket of devTickets) {
-      await this.mapDevTicketToRelease(devTicket, releaseTicket, initiatorWorkspaceId);
+      await this.mapDevTicketToRelease(devTicket, releaseTicket);
     }
   }
 
   private async syncDevTicket(
     devTicket: TicketWithReleaseBoard,
     releaseVersion: string | null,
-    initiatorWorkspaceId: string,
   ): Promise<void> {
     await this.cleanupDevRowsForCurrentVersion(devTicket, releaseVersion);
     if (!releaseVersion) {
@@ -136,14 +128,13 @@ class VersionReleaseMappingService {
 
     const releases = await this.findReleaseTicketsByVersion(devTicket.projectId, releaseVersion);
     for (const releaseTicket of releases) {
-      await this.mapDevTicketToRelease(devTicket, releaseTicket, initiatorWorkspaceId);
+      await this.mapDevTicketToRelease(devTicket, releaseTicket);
     }
   }
 
   private async mapDevTicketToRelease(
     devTicket: TicketWithReleaseBoard,
     releaseTicket: TicketWithReleaseBoard,
-    initiatorWorkspaceId: string,
   ): Promise<void> {
     if (
       !releaseTicket.boardId
@@ -178,7 +169,6 @@ class VersionReleaseMappingService {
       releaseTicket,
       affectedApps,
       prLinksByApplication,
-      initiatorWorkspaceId,
     );
 
     const records = affectedApps
@@ -198,10 +188,7 @@ class VersionReleaseMappingService {
       return;
     }
 
-    const result = await this.applicationRepository.createApplicationReleaseTicketMappings(
-      records,
-      initiatorWorkspaceId,
-    );
+    const result = await this.applicationRepository.createApplicationReleaseTicketMappings(records);
     logger.info(
       `[VersionReleaseMapping] mapped dev ticket ${devTicket.xyneId} to release ${releaseTicket.xyneId}: ` +
       `attempted=${records.length}, inserted=${result.count}`,
@@ -417,7 +404,6 @@ class VersionReleaseMappingService {
     releaseTicket: TicketWithReleaseBoard,
     affectedApps: AffectedApplication[],
     prLinksByApplication: Map<string, string[]>,
-    initiatorWorkspaceId: string,
   ): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
     const existing = await this.findExistingApplicationReleaseSubTickets(releaseTicket.id, affectedApps);
     const missingApps = affectedApps.filter(app => !existing.has(app.id));
@@ -430,7 +416,6 @@ class VersionReleaseMappingService {
         channelId: releaseTicket.channelId,
         conversationId: releaseTicket.conversationId,
         createdBy: releaseTicket.createdBy,
-        initiatorWorkspaceId,
         affectedApplications: missingApps,
         prLinksByApplication,
         isHotFix: releaseTicket.ticketType === BaseTicketType.Hotfix,

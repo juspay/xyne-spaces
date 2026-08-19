@@ -15,7 +15,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { id: delayedMessageId },
       select: {
         id: true,
-        workspaceId: true,
         channelId: true,
         conversationId: true,
         senderId: true,
@@ -32,7 +31,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
 
     await delayedMessageQueue.scheduleMessage({
       delayedMessageId: record.id,
-      workspaceId: record.workspaceId,
       channelId: record.channelId,
       conversationId: record.conversationId,
       senderId: record.senderId,
@@ -54,7 +52,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { id: delayedMessageId },
       select: {
         id: true,
-        workspaceId: true,
         channelId: true,
         conversationId: true,
         senderId: true,
@@ -95,7 +92,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
       try {
         await delayedMessageQueue.scheduleMessage({
           delayedMessageId: record.id,
-          workspaceId: record.workspaceId,
           channelId: record.channelId,
           conversationId: record.conversationId,
           senderId: record.senderId,

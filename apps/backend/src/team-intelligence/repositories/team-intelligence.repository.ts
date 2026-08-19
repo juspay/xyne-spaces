@@ -7,7 +7,6 @@ import {
   TeamIntelligenceUserIngestionV2,
 } from '@prisma/client';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
 import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 
 export interface CreateTeamIntelligenceBatchData {
@@ -127,8 +126,7 @@ class TeamIntelligenceRepository {
     batchData: CreateTeamIntelligenceBatchData,
     usersData: CreateTeamIntelligenceUserData[]
   ): Promise<TeamIntelligenceBatchWithUsers> {
-    // S2S-authenticated global ingestion: these models intentionally opt out of workspace ACL.
-    return await runAsSystem(() => this.prisma.$transaction(async (transaction) => {
+    return await this.prisma.$transaction(async (transaction) => {
       const batch = await transaction.teamIntelligenceIngestionBatchV2.create({
         data: {
           ...batchData,
@@ -149,7 +147,7 @@ class TeamIntelligenceRepository {
       );
 
       return { batch, users };
-    }));
+    });
   }
 
   async updateBatchStatus(
@@ -472,7 +470,7 @@ class TeamIntelligenceRepository {
   }
 
   async getTeamProgress(batchId: string, teamId: string): Promise<TeamIntelligenceTeamProgress> {
-    const [totalUsers, completedUsers, failedUsers] = await runAsSystem(() => this.prisma.$transaction([
+    const [totalUsers, completedUsers, failedUsers] = await this.prisma.$transaction([
       this.prisma.teamIntelligenceUserIngestionV2.count({
         where: { batchId, teamId },
       }),
@@ -490,7 +488,7 @@ class TeamIntelligenceRepository {
           processingStatus: TeamIntelligenceUserIngestionStatus.FAILED,
         },
       }),
-    ]));
+    ]);
 
     return {
       totalUsers,
@@ -506,7 +504,7 @@ class TeamIntelligenceRepository {
       failedUsers,
       processingUsers,
       queuedUsers,
-    ] = await runAsSystem(() => this.prisma.$transaction([
+    ] = await this.prisma.$transaction([
       this.prisma.teamIntelligenceUserIngestionV2.count({ where: { batchId } }),
       this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
@@ -532,7 +530,7 @@ class TeamIntelligenceRepository {
           processingStatus: TeamIntelligenceUserIngestionStatus.QUEUED,
         },
       }),
-    ]));
+    ]);
 
     return {
       totalUsers,
@@ -544,7 +542,7 @@ class TeamIntelligenceRepository {
   }
 
   async getOrgProgress(batchId: string): Promise<TeamIntelligenceOrgProgress> {
-    const [totalTeams, completedTeams, failedTeams] = await runAsSystem(() => this.prisma.$transaction([
+    const [totalTeams, completedTeams, failedTeams] = await this.prisma.$transaction([
       this.prisma.teamIntelligenceTeamSummaryV2.count({
         where: { batchId },
       }),
@@ -560,7 +558,7 @@ class TeamIntelligenceRepository {
           status: TeamIntelligenceBatchStatus.FAILED,
         },
       }),
-    ]));
+    ]);
 
     return {
       totalTeams,

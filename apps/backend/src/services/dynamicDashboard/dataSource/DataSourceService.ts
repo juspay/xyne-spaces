@@ -5,7 +5,6 @@ import type { DataSource } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { dataSourceIngestQueue } from '@/queues/dataSourceIngestQueue';
 import { ConnectorFactory } from './connectors/ConnectorFactory';
-import { runAsServiceActor } from '@/database/tenant/context';
 import type {
   ConnectionConfig,
   DiscoveredTable,
@@ -274,7 +273,7 @@ export class DataSourceService {
   async remove(id: string, workspaceId: string, actorUserId: string): Promise<boolean> {
     const ds = await this.findWorkspace(id, workspaceId);
     if (!ds) return false;
-    await runAsServiceActor(actorUserId, workspaceId, () => db.$transaction([
+    await db.$transaction([
       db.dataSource.delete({ where: { id } }),
       db.dashboardActivity.create({
         data: {
@@ -286,7 +285,7 @@ export class DataSourceService {
           details: JSON.stringify({ name: ds.name }),
         },
       }),
-    ]));
+    ]);
     return true;
   }
 

@@ -54,7 +54,6 @@ export interface DoclingFile {
 
 export interface DoclingPart {
   fileId: string
-  workspaceId: string | null
   partIndex: number
   docId: string
   currentJobId: string | null
