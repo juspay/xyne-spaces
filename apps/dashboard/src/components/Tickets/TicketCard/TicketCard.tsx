@@ -24,6 +24,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
+import { StagePicker } from '../TicketListView/StagePicker';
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -648,6 +649,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   {ticket.xyneId}
                 </span>
                 {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
+                {isCompact && (
+                  <StagePicker
+                    ticketId={ticket.id}
+                    stageName={ticket.stageName}
+                    stageLabel={ticket.stageName || 'To Do'}
+                    boardId={ticket.boardId}
+                  />
+                )}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
                 {/*due date*/}
