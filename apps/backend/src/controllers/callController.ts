@@ -38,7 +38,9 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType, AttachmentEntityType } from '@xyne/shared';
+  RecordingType,
+  AttachmentEntityType,
+} from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -382,11 +384,20 @@ export class CallController {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
     let headlessNotesCanvasId: string | undefined;
+    let headlessDetailedSummaryCanvasId: string | undefined;
     // Tracks which stage was active when an error is thrown; used in catch log.
     let stage = 'setup';
 
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
+      const {
+        callType = 'AUDIO',
+        channelId,
+        invitedUserIds,
+        isHeadless,
+        sttModel,
+        conversationId,
+        artifactMessageId,
+      } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -417,6 +428,57 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
+        stage = 'detailed_summary_canvas_creation';
+        const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId(
+          'xyne-automatic',
+          req.user!.workspaceId!,
+        );
+        if (!xyneAutomaticBot) {
+          throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
+        }
+        const detailedSummaryCanvasId = await callDocumentService.createDetailedSummaryCanvas(
+          callExternalId,
+          '_Detailed summary will appear here once the recording ends._',
+          xyneAutomaticBot.id,
+          null,
+          null,
+          new Date(),
+          userId,
+          undefined,
+          undefined,
+          req.user!.workspaceId,
+        );
+        if (!detailedSummaryCanvasId) {
+          throw new Error('Failed to create detailed summary canvas');
+        }
+        headlessDetailedSummaryCanvasId = detailedSummaryCanvasId;
+
+        // Thread-linked recording: validate the conversation up front (fail
+        // fast with a 404 instead of creating a LiveKit room for nothing) and
+        // stamp channelId/conversationId onto the room metadata. The actual
+        // Call DB row — and the thread's single anchor message — are created
+        // together by noteTakerWebhookController on first participant_joined,
+        // so nothing is posted into the thread unless the recording actually
+        // starts (e.g. mic permission denied / room creation failure after
+        // this point never leaves a ghost message behind).
+        if (channelId && conversationId) {
+          stage = 'thread_conversation_lookup';
+          const conversation = await repositories.conversations.findByIdAndWorkspace(
+            conversationId,
+            req.user!.workspaceId!,
+          );
+          if (!conversation || conversation.channelId !== channelId) {
+            res.status(404).json({ success: false, error: 'Conversation not found' });
+            return;
+          }
+          stage = 'thread_channel_membership_check';
+          const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+          if (!isMember) {
+            res.status(403).json({ success: false, error: 'Not a member of this channel' });
+            return;
+          }
+        }
+
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
@@ -424,6 +486,8 @@ export class CallController {
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
+          detailedSummaryCanvasId,
+          ...(channelId && conversationId ? { channelId, conversationId } : {}),
         });
 
         stage = 'livekit_room_creation';
@@ -459,6 +523,8 @@ export class CallController {
           roomLink,
           channelId: null,
           notesCanvasId,
+          detailedSummaryCanvasId,
+          ...(conversationId ? { conversationId } : {}),
         });
         return;
       }
@@ -487,6 +553,12 @@ export class CallController {
         res.status(400).json({ success: false, error: 'Invalid call type' });
         return;
       }
+
+      // No pre-flight validation of artifactMessageId: every artifact write is
+      // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
+      // an id that does not belong to this channel matches zero rows.
+      const linkedArtifactMessageId =
+        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -627,6 +699,7 @@ export class CallController {
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
+        ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 
@@ -697,6 +770,19 @@ export class CallController {
         } catch (cleanupError) {
           logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
             canvasId: headlessNotesCanvasId,
+            cleanupError,
+          });
+        }
+      }
+      if (headlessDetailedSummaryCanvasId) {
+        try {
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessDetailedSummaryCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessDetailedSummaryCanvasId } }),
+          ]);
+        } catch (cleanupError) {
+          logger.error(`[${callIdForLog}] headless_detailed_summary_canvas_cleanup_failed`, {
+            canvasId: headlessDetailedSummaryCanvasId,
             cleanupError,
           });
         }
@@ -1302,6 +1388,16 @@ export class CallController {
           detailedSummaryCanvasId:
             typeof callMetadata?.detailedSummaryCanvasId === 'string'
               ? callMetadata.detailedSummaryCanvasId
+              : null,
+          // Tri-state, not a plain boolean: `true`/`false` are recordings
+          // created after this flag existed (still generating vs done);
+          // `null` means the key is entirely absent from metadata (a
+          // recording from before this flag existed at all) — those already
+          // finished generating long ago, so the frontend treats `null` the
+          // same as `true` and only treats an explicit `false` as "not ready".
+          detailedSummaryReady:
+            typeof callMetadata?.detailedSummaryReady === 'boolean'
+              ? callMetadata.detailedSummaryReady
               : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'

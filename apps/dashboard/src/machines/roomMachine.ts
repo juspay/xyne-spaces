@@ -161,6 +161,7 @@ export interface RoomContext {
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
+  artifactMessageId: string | null;
   targetUserIds: string[];
   roomLink: string | null;
   isChatOpen: boolean;
@@ -223,6 +224,7 @@ export type RoomMachineEvent =
       callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
       viewMode?: 'mini' | 'full';
       conversationId?: string; // Optional: for thread-initiated calls
+      artifactMessageId?: string; // Exact slash-command artifact that owns the call
     }
   | {
       type: 'JOIN_CALL';
@@ -335,9 +337,10 @@ export const roomMachine = setup({
           callType: CallType;
           targetUserIds?: string[];
           conversationId?: string;
+          artifactMessageId?: string;
         };
       }) => {
-        const { channelId, callType, targetUserIds, conversationId } = input;
+        const { channelId, callType, targetUserIds, conversationId, artifactMessageId } = input;
 
         // Backend now only generates LiveKit credentials, no DB writes
         // If targetUserIds is provided without channelId, backend will find/create DM or group DM channel
@@ -345,6 +348,7 @@ export const roomMachine = setup({
           ...(channelId && { channelId }),
           ...(targetUserIds && targetUserIds.length > 0 && { invitedUserIds: targetUserIds }),
           ...(conversationId && { conversationId }),
+          ...(artifactMessageId && { artifactMessageId }),
           callType,
         });
 
@@ -1286,6 +1290,7 @@ export const roomMachine = setup({
       externalId: () => null,
       invitedUserId: () => null,
       conversationId: () => null,
+      artifactMessageId: () => null,
       targetUserIds: () => [],
       roomLink: () => null,
       isChatOpen: () => false,
@@ -1441,6 +1446,7 @@ export const roomMachine = setup({
     scopeType: null,
     invitedUserId: null,
     conversationId: null,
+    artifactMessageId: null,
     targetUserIds: [],
     roomLink: null,
     isChatOpen: false,
@@ -1532,6 +1538,8 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
             conversationId: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.conversationId ?? null) : null,
+            artifactMessageId: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.artifactMessageId ?? null) : null,
             isInitiator: () => true,
           }),
         },
@@ -1601,6 +1609,7 @@ export const roomMachine = setup({
             callType: CallType;
             targetUserIds?: string[];
             conversationId?: string;
+            artifactMessageId?: string;
           } = {
             callType: context.callType,
           };
@@ -1612,6 +1621,9 @@ export const roomMachine = setup({
           }
           if (context.conversationId) {
             input.conversationId = context.conversationId;
+          }
+          if (context.artifactMessageId) {
+            input.artifactMessageId = context.artifactMessageId;
           }
           return input;
         },

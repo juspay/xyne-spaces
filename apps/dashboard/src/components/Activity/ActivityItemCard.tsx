@@ -35,6 +35,7 @@ interface ActivityItemCardProps {
   channelId: string | undefined;
   badgeIcon: ReactNode;
   badgeColorClass?: string;
+  titlePrefix?: ReactNode;
   description: ReactNode;
   targetPath: string;
   supportTargetPath?: string | undefined;
@@ -56,6 +57,7 @@ export const ActivityItemCard = ({
   isExpanded = true,
   badgeIcon,
   badgeColorClass,
+  titlePrefix,
   description,
   targetPath,
   supportTargetPath,
@@ -278,6 +280,7 @@ export const ActivityItemCard = ({
               activity.isRead ? 'text-muted-foreground' : 'text-foreground',
             )}
           >
+            {titlePrefix && <span className='mr-1.5 inline-flex align-middle'>{titlePrefix}</span>}
             {isMobile ? (
               <span className='font-semibold'>{actorName}</span>
             ) : (
