@@ -1,3 +1,10 @@
+## [1.199.0](https://github.com/juspay/xyne-spaces/compare/v1.198.0...v1.199.0) (2026-08-19)
+
+
+### Features
+
+* Update incoming call modal UI ([#731](https://github.com/juspay/xyne-spaces/issues/731)) ([0c7d543](https://github.com/juspay/xyne-spaces/commit/0c7d5437102f1c4e65766ca1d7beb53bb3944c0f))
+
 ## [1.198.0](https://github.com/juspay/xyne-spaces/compare/v1.197.1...v1.198.0) (2026-08-19)
 
 
