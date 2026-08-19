@@ -4,9 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // be created with vi.hoisted (also hoisted) — otherwise they're in the TDZ when
 // the factory runs. getMock stands in for redis.get(busyKey); getConnMock for
 // redisService.getConnection().
-const { getMock, getConnMock } = vi.hoisted(() => ({
+const { getMock, getConnMock, delMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   getConnMock: vi.fn(),
+  delMock: vi.fn(),
 }));
 
 vi.mock("../redis.js", () => ({
@@ -16,7 +17,35 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { isSlotBusy } from "./message-queue.js";
+import { isSlotBusy, releaseSlot } from "./message-queue.js";
+
+describe("releaseSlot key scoping (twin-slot leak regression, 2026-08-19)", () => {
+  beforeEach(() => {
+    delMock.mockReset();
+    getConnMock.mockReset();
+    getConnMock.mockReturnValue({ del: delMock });
+  });
+
+  it("releases the 3-part per-user key for a digital-twin run WHEN the scope is passed", async () => {
+    await releaseSlot("conv-1", "digital-twin", undefined, "user-9");
+    expect(delMock).toHaveBeenCalledWith("claw:busy:conv-1:digital-twin:user-9");
+  });
+
+  it("releases the WRONG (2-part) key for a twin run when the scope is omitted — the bug", async () => {
+    // This is exactly what webhook.ts:4817 did before the fix: releasing a twin
+    // slot without resultUserScope targets the 2-part key, misses the real
+    // 3-part marker, and leaks the slot for the full BUSY_TTL (20m). The run
+    // handler MUST pass the twin scope; this pins that the omission mis-keys.
+    await releaseSlot("conv-1", "digital-twin");
+    expect(delMock).toHaveBeenCalledWith("claw:busy:conv-1:digital-twin");
+    expect(delMock).not.toHaveBeenCalledWith("claw:busy:conv-1:digital-twin:user-9");
+  });
+
+  it("stays 2-part (unscoped) for a non-twin agent regardless of scope arg", async () => {
+    await releaseSlot("conv-1", "ask-ai", undefined, "user-9");
+    expect(delMock).toHaveBeenCalledWith("claw:busy:conv-1:ask-ai");
+  });
+});
 
 describe("isSlotBusy", () => {
   beforeEach(() => {

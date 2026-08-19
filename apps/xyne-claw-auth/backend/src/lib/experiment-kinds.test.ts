@@ -23,11 +23,12 @@ describe("/framework command", () => {
     expect(parseExperimentCommand("/framework findings")).toMatchObject({ sub: "findings" });
   });
 
-  it("keeps the four kinds distinct", () => {
+  it("keeps the kinds distinct", () => {
     expect((parseExperimentCommand("/experiment 2h focus=x") as { kind?: string }).kind).toBeUndefined();
     expect(parseExperimentCommand("/understanding 2h focus=x")).toMatchObject({ kind: "understanding" });
     expect(parseExperimentCommand("/framework 2h focus=x")).toMatchObject({ kind: "framework" });
     expect(parseExperimentCommand("/security-scan 2h focus=x")).toMatchObject({ kind: "security" });
+    expect(parseExperimentCommand("/repo-history 2h focus=abc123")).toMatchObject({ kind: "repo-history" });
   });
 
   it("/security-scan shares duration, focus, provider pin and subcommands", () => {
