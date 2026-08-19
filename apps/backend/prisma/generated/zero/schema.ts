@@ -1276,6 +1276,19 @@ export const conversationLabelMappingTable = table("conversation_label_mappings"
   })
   .primaryKey("id");
 
+export const deskAutoLabelRuleReferenceTable = table("desk_auto_label_rule_references")
+  .columns({
+    id: string(),
+    workflowId: string(),
+    labelId: string(),
+    workspaceId: string(),
+    ownerId: string(),
+    channelId: string(),
+    filterFingerprint: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const ticketUserMailboxTable = table("ticket_user_mailbox")
   .columns({
     id: string(),
@@ -3138,6 +3151,11 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     sourceField: ["ticketId"],
     destField: ["id"],
     destSchema: ticketTable,
+  }),
+  deskAutoLabelRuleReferences: many({
+    sourceField: ["id"],
+    destField: ["workflowId"],
+    destSchema: deskAutoLabelRuleReferenceTable,
   })
 }));
 
@@ -4087,6 +4105,27 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
   })
 }));
 
+export const conversationLabelTableRelationships = relationships(conversationLabelTable, ({ many }) => ({
+  deskAutoLabelRuleReferences: many({
+    sourceField: ["id"],
+    destField: ["labelId"],
+    destSchema: deskAutoLabelRuleReferenceTable,
+  })
+}));
+
+export const deskAutoLabelRuleReferenceTableRelationships = relationships(deskAutoLabelRuleReferenceTable, ({ one }) => ({
+  workflow: one({
+    sourceField: ["workflowId"],
+    destField: ["id"],
+    destSchema: workflowTable,
+  }),
+  label: one({
+    sourceField: ["labelId"],
+    destField: ["id"],
+    destSchema: conversationLabelTable,
+  })
+}));
+
 export const messageTableRelationships = relationships(messageTable, ({ one, many }) => ({
   conversation: one({
     sourceField: ["conversationId"],
@@ -4818,6 +4857,7 @@ export const schema = createSchema(
       emailReadTable,
       conversationLabelTable,
       conversationLabelMappingTable,
+      deskAutoLabelRuleReferenceTable,
       ticketUserMailboxTable,
       emailSignatureTable,
       emailChannelPreferenceTable,
@@ -4975,6 +5015,8 @@ export const schema = createSchema(
       conversationTableRelationships,
       conversationParticipantTableRelationships,
       emailTableRelationships,
+      conversationLabelTableRelationships,
+      deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
@@ -5106,6 +5148,7 @@ export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
+export type DeskAutoLabelRuleReference = Row<typeof schema.tables.desk_auto_label_rule_references>;
 export type TicketUserMailbox = Row<typeof schema.tables.ticket_user_mailbox>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;

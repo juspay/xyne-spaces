@@ -7,6 +7,7 @@ import {
   AttachmentEntityType,
   MessageType,
 } from '@xyne/shared';
+import { runAsServiceActor } from '../tenant/context';
 
 export interface SaveCallWhiteboardAttachmentInput {
   callId: string;
@@ -42,8 +43,8 @@ export class CallWhiteboardRepository {
   ): Promise<SaveCallWhiteboardAttachmentResult> {
     const lockKey = `whiteboard:${data.callId}:${data.pageId ?? 'call'}`;
 
-    return await this.db.$transaction(
-      async tx => {
+    return await runAsServiceActor('call-whiteboard', data.workspaceId, () =>
+      this.db.$transaction(async tx => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
 
         const existing = await tx.messageAttachment.findFirst({
@@ -147,8 +148,7 @@ export class CallWhiteboardRepository {
           alreadyExists: false,
           whiteboardMessageId: whiteboardMessage.messageId,
         };
-      },
-      { maxWait: 10_000, timeout: 30_000 },
+      }, { maxWait: 10_000, timeout: 30_000 }),
     );
   }
 }

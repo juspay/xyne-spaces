@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -225,7 +226,7 @@ export class CallValidationWorker {
         const endedAt = new Date();
 
         // Use transaction to atomically update call and system message
-        await db.$transaction(async (tx) => {
+        await runAsServiceActor('call-validation', call.workspaceId, () => db.$transaction(async (tx) => {
           // End the call
           await repositories.calls.endCall(callId, endedAt, tx);
 
@@ -244,7 +245,7 @@ export class CallValidationWorker {
           if (messageUpdated) {
             logger.info(`[CallValidationWorker] Updated system message for call ${externalId}`);
           }
-        });
+        }));
 
         logger.info('[CallValidationWorker] Transcript will be processed when user views the ended call message');
 

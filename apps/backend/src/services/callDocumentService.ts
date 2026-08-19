@@ -6,7 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { runAsServiceActor, withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
@@ -1890,7 +1890,7 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        await prisma.$transaction(async (tx) => {
+        await runAsServiceActor('call-document', callMessage.workspaceId, () => prisma.$transaction(async (tx) => {
           // Title generation and first-chunk Canvas publication can now update
           // this message concurrently. Lock the row and merge from the latest
           // metadata so neither write erases the other's key.
@@ -1898,6 +1898,7 @@ A comprehensive detailed summary has been generated from this call.
             SELECT "metadata"
             FROM "messages"
             WHERE "messageId" = ${callMessage.messageId}
+              AND "workspaceId" = ${callMessage.workspaceId}
             FOR UPDATE
           `;
           if (!lockedMessage) {
@@ -1913,10 +1914,10 @@ A comprehensive detailed summary has been generated from this call.
             nextMetadata[metadataKey] = canvasUrl;
           }
           await tx.message.update({
-            where: { messageId: callMessage.messageId },
+            where: { messageId: callMessage.messageId, workspaceId: callMessage.workspaceId },
             data: { metadata: nextMetadata },
           });
-        });
+        }));
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
       } else {
         logger.warn(`[CallDocumentService] Call message not found for callId ${callId}`);
@@ -1939,6 +1940,7 @@ A comprehensive detailed summary has been generated from this call.
     canvasId: string,
     conversationId: string,
     callId: string,
+    workspaceId: string,
   ): Promise<void> {
     logger.warn(`[CallDocumentService] Cleaning up failed detailed summary canvas ${canvasId} for call ${callId}`);
 
@@ -1976,12 +1978,14 @@ A comprehensive detailed summary has been generated from this call.
       // CanvasParticipant and CanvasUserStatus do not declare cascading deletes
       // in relationMode="prisma", so remove dependent rows explicitly. deleteMany
       // also keeps this cleanup idempotent if a previous attempt partially ran.
-      await prisma.$transaction([
-        prisma.canvasVersion.deleteMany({ where: { canvasId } }),
-        prisma.canvasParticipant.deleteMany({ where: { canvasId } }),
-        prisma.canvasUserStatus.deleteMany({ where: { canvasId } }),
-        prisma.canvas.deleteMany({ where: { id: canvasId } }),
-      ]);
+      await runAsServiceActor('call-document-cleanup', workspaceId, () =>
+        prisma.$transaction([
+          prisma.canvasVersion.deleteMany({ where: { canvasId } }),
+          prisma.canvasParticipant.deleteMany({ where: { canvasId } }),
+          prisma.canvasUserStatus.deleteMany({ where: { canvasId } }),
+          prisma.canvas.deleteMany({ where: { id: canvasId } }),
+        ]),
+      );
     } catch (error) {
       logger.error('[CallDocumentService] Cleanup: failed to delete canvas database rows:', error);
     }
@@ -2084,6 +2088,7 @@ A comprehensive detailed summary has been generated from this call.
     // Tracks a brand-new, lazily-created streaming canvas so any failure after
     // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
+    let cleanupWorkspaceId: string | null = null;
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -2102,6 +2107,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!channel?.workspaceId) {
         return { success: false, error: 'Channel workspace not found' };
       }
+      cleanupWorkspaceId = channel.workspaceId;
 
       // Number the transcript segments so the LLM can cite them, and build the
       // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
@@ -2362,7 +2368,7 @@ A comprehensive detailed summary has been generated from this call.
 
       if (!detailedSummaryMarkdown) {
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, channel.workspaceId);
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -2376,7 +2382,7 @@ A comprehensive detailed summary has been generated from this call.
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId || !canvasUrl) {
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, channel.workspaceId);
         }
         return {
           success: false,
@@ -2403,7 +2409,7 @@ A comprehensive detailed summary has been generated from this call.
         sideEffectContextPromise ?? undefined,
       );
       if (!finalized) {
-        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
+        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId, channel.workspaceId);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
 
@@ -2433,8 +2439,8 @@ A comprehensive detailed summary has been generated from this call.
       logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
       // If a brand-new canvas + link was already published before the throw,
       // tear it down so an exception doesn't leave a dangling canvas/message.
-      if (newCanvasId) {
-        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+      if (newCanvasId && cleanupWorkspaceId) {
+        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, cleanupWorkspaceId);
       }
       return {
         success: false,

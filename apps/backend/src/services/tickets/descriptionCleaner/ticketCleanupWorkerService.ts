@@ -6,6 +6,7 @@ import { config } from '@/config/env';
 import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';
 import { descCleaner } from './index';
+import { runAsSystem } from '@/database/tenant/context';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const MIN_INTERVAL_MS = 5000;
@@ -105,7 +106,8 @@ class TicketCleanupWorkerService {
   }
 
   private async claimFailedCleanupLogs(): Promise<VespaInsertionLogs[]> {
-    return db.$transaction(async tx => {
+    // This worker intentionally claims across workspaces; keep that privilege explicit.
+    return runAsSystem(() => db.$transaction(async tx => {
       const logs = await tx.vespaInsertionLogs.findMany({
         where: {
           type: VespaOperationType.POST_INGEST_CLEAN,
@@ -142,7 +144,7 @@ class TicketCleanupWorkerService {
         ...log,
         status: VespaInsertionStatus.PENDING,
       }));
-    });
+    }));
   }
 
   private async processLog(log: VespaInsertionLogs): Promise<void> {

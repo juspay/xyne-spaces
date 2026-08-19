@@ -92,7 +92,8 @@ import {
   normalizeNotificationKeywords,
   isDeskChannelType,
   deskTypeForChannelType,
-  Platform 
+  Platform,
+  UserStatus
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import {
@@ -524,6 +525,51 @@ async function assertCanvasChannelNotArchived(
 
   if (channel.isArchived) {
     throw new Error('Channel is archived');
+  }
+}
+
+/**
+ * The audience of a channel: everyone for a public one, its participants for a private one.
+ *
+ * This is the same line the read side draws, kept here so mutators that act on something
+ * owned by a channel decide it the same way rather than each inventing a rule.
+ */
+async function assertChannelAudience(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error('Channel not found');
+  }
+  if (channel.visibility === ChannelVisibility.PUBLIC) {
+    return;
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  if (!participant) {
+    throw new Error('You are not a participant of this channel');
+  }
+}
+
+/**
+ * Resolve a user id supplied by the caller, for the workspace the caller is acting in.
+ *
+ * Mutator reads go straight to the sync layer, so an id arriving in a payload has not
+ * been checked against anything. Anywhere one is written onto a row -- an assignee, an
+ * invitee -- it is resolved here first, so only a live member of the same workspace can
+ * be named.
+ */
+async function assertWorkspaceMember(
+  tx: Transaction<Schema>,
+  userId: string,
+  workspaceId: string,
+): Promise<void> {
+  const user = await tx.run(zql.users.where('id', userId).one());
+  if (!user || user.workspaceId !== workspaceId || user.status !== UserStatus.ACTIVE) {
+    throw new Error('User is not an active member of this workspace');
   }
 }
 
@@ -2647,6 +2693,10 @@ export function createMutators(
             throw new Error("Conversation doesn't exist");
           }
 
+          // Pinning writes to a conversation, so it needs the same audience that
+          // reading one does.
+          await assertChannelAudience(tx, conversation.channelId, authData.sub);
+
           await tx.mutate.conversations.update({
             conversationId,
             pinned: !conversation.pinned,
@@ -4662,10 +4712,26 @@ export function createMutators(
             throw new Error('Call not found');
           }
 
+          // Anyone in the audience of the call's channel may invite to it. A call with no
+          // channel has no such audience, so it falls back to the call's own membership.
+          if (call.channelId) {
+            await assertChannelAudience(tx, call.channelId, authData.sub);
+          } else {
+            const inviter = await tx.run(zql.call_participants
+              .where('callId', call.id)
+              .where('userId', authData.sub)
+              .one());
+            if (!inviter && call.createdByUserId !== authData.sub && call.organizerId !== authData.sub) {
+              throw new Error('You are not a participant of this call');
+            }
+          }
+
           const now = timestamp;
 
           // Invite each user
           for (const userId of userIds) {
+            await assertWorkspaceMember(tx, userId, authData.workspaceId);
+
             // Check if user already has a participant record
             const existingParticipant = await tx.run(zql.call_participants
               .where('callId', call.id)
@@ -6415,6 +6481,10 @@ export function createMutators(
             throw new Error("Ticket not found");
           }
 
+          if (assignedTo !== null) {
+            await assertWorkspaceMember(tx, assignedTo, authData.workspaceId);
+          }
+
           const oldAssignedTo = ticket.assignedTo;
 
           // Update ticket assignment
@@ -6724,6 +6794,19 @@ export function createMutators(
           assignedTo: z.string().optional().nullable(),
         }),
         async ({ tx, args: { subTicketId, timestamp, mappedTicketId, conversationId, assignedTo } }) => {
+          // Re-parenting moves the subticket under a different ticket, so the new parent
+          // has to be one the caller's workspace owns -- otherwise the id alone decides.
+          if (mappedTicketId !== undefined) {
+            const parent = await tx.run(zql.tickets.where('id', mappedTicketId).one());
+            if (!parent || parent.workspaceId !== authData.workspaceId) {
+              throw new Error('Ticket not found');
+            }
+          }
+
+          if (assignedTo !== undefined && assignedTo !== null) {
+            await assertWorkspaceMember(tx, assignedTo, authData.workspaceId);
+          }
+
           // Update the subticket
           await tx.mutate.sub_tickets.update({
             id: subTicketId,
@@ -11087,7 +11170,7 @@ export function createMutators(
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(entityId);
+                await versionReleaseMappingService.syncTicketById(entityId, authData.workspaceId);
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId, error });
               }
@@ -11206,7 +11289,7 @@ export function createMutators(
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(entityId);
+                await versionReleaseMappingService.syncTicketById(entityId, authData.workspaceId);
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId, error });
               }
@@ -11318,7 +11401,10 @@ export function createMutators(
           ) {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
+                await versionReleaseMappingService.syncTicketById(
+                  formEntityValue.entityId,
+                  authData.workspaceId,
+                );
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId: formEntityValue.entityId, error });
               }

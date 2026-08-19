@@ -8,7 +8,7 @@ import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { runAsSystem, withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -493,7 +493,9 @@ export class InvitationController {
       }
 
       // All creation steps in one transaction — rollback automatically on any failure
-      const { org, workspace } = await prisma.$transaction(async tx => {
+      // The authorized admin is provisioning a brand-new workspace, so no existing
+      // workspace can be the tenant scope for these creation-only writes.
+      const { org, workspace } = await runAsSystem(() => prisma.$transaction(async tx => {
         const org = await tx.organization.create({
           data: {
             orgId,
@@ -560,7 +562,7 @@ export class InvitationController {
         });
 
         return { org, workspace };
-      });
+      }));
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: org.orgId,

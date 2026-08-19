@@ -13,6 +13,7 @@ import { EmailClassificationRepository } from '@/database/repositories/emailClas
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();
@@ -288,7 +289,11 @@ export class DeskTagsConfigController {
     const userId = await this.assertAccess(req, res, channelId, true);
     if (!userId) return;
 
-    const workspaceId = req.user?.workspaceId!;
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      res.status(401).json({ error: 'Workspace context is required' });
+      return;
+    }
     const configKey = deskEmailConfigKey(channelId);
 
     try {
@@ -310,7 +315,7 @@ export class DeskTagsConfigController {
 
       // Advisory lock scoped to (sourceType, sourceId, category) serializes concurrent
       // manual tag adds for the same entity+category without requiring serializable isolation.
-      await db.$transaction(async (tx) => {
+      await runAsServiceActor('desk-tag-write', workspaceId, () => db.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tag-add:${DESK_EMAIL_SOURCE_TYPE}:${emailId}:${category}`}))`;
 
         const existing = await tx.tag.findFirst({
@@ -351,7 +356,7 @@ export class DeskTagsConfigController {
             isDeleted: false,
           },
         });
-      });
+      }));
 
       res.status(201).json({ success: true });
     } catch (error: any) {
