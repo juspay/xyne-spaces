@@ -58,6 +58,9 @@ class AutomationWorker {
       const delayMs = EXECUTION_FETCH_RETRY_BASE_DELAY_MS * 2 ** retry;
       await new Promise(resolve => setTimeout(resolve, delayMs));
       execution = await fetchExecution();
+      logger.warn(
+        `[AUTOMATION-WORKER-RETRY] execution=${executionId} fetch failed, retrying (${retry + 1})`,
+      );
     }
     if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
       logger.warn(
