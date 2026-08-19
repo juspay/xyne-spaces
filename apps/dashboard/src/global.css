@@ -153,6 +153,19 @@
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(15, 17, 20, 0.42);
+    --call-modal-shadow: 0 24px 60px -12px rgba(15, 17, 20, 0.28), 0 2px 8px rgba(15, 17, 20, 0.08);
+    --call-accept-bg: #16a34a;
+    --call-accept-fg: #ffffff;
+    --call-accept-bg-hover: #15803d;
+    --call-accept-bg-active: #126c34;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #16a34a;
+    --call-notice-icon: #d97706;
   }
 
   /* Classic theme - default theme with current design */
@@ -281,6 +294,19 @@
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(15, 17, 20, 0.42);
+    --call-modal-shadow: 0 24px 60px -12px rgba(15, 17, 20, 0.28), 0 2px 8px rgba(15, 17, 20, 0.08);
+    --call-accept-bg: #16a34a;
+    --call-accept-fg: #ffffff;
+    --call-accept-bg-hover: #15803d;
+    --call-accept-bg-active: #126c34;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #16a34a;
+    --call-notice-icon: #d97706;
   }
 
   /* Midnight theme - dark theme variant */
@@ -424,6 +450,19 @@
 
     --chat-composer-border: rgba(255, 255, 255, 0.06);
     --chat-composer-border-active: rgba(255, 255, 255, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(0, 0, 0, 0.55);
+    --call-modal-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+    --call-accept-bg: #4ade80;
+    --call-accept-fg: #0b2e1a;
+    --call-accept-bg-hover: #6ee7a0;
+    --call-accept-bg-active: #86efac;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #4ade80;
+    --call-notice-icon: #f59e0b;
   }
 }
 
@@ -1680,6 +1719,15 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   .highlight-message {
     animation: none;
     background-color: rgba(253, 244, 221, 0.5);
+  }
+}
+
+/* Incoming-call modal — the radar rings are also removed at the React level via
+   framer-motion's useReducedMotion; this is a backstop for any that still mount. */
+@media (prefers-reduced-motion: reduce) {
+  .incoming-call-card,
+  .incoming-call-radar {
+    animation: none !important;
   }
 }
 
