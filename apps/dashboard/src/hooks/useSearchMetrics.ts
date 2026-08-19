@@ -540,6 +540,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   const pendingSearchCountRef = useRef(0);
   const latestResultsRef = useRef<DisplaySearchResult[]>([]);
+  // The query that produced latestResultsRef, so onComplete always receives a
+  // matching pair. Without it a superseded run — which no longer commits its own
+  // results — would hand the callback fresh results labelled with its stale query.
+  const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
   // Guards out-of-order search responses. Each performSearch run claims the next
   // sequence number; only the latest run is allowed to commit. A slow/stale response
@@ -1407,6 +1411,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             setSearchResults(mergedResults);
             latestResultsRef.current = mergedResults;
+            latestQueryRef.current = searchText;
 
             setPaginationState(prev => ({
               ...prev,
@@ -1435,12 +1440,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           if (!isStale()) {
             setIsSearching(false);
           }
+          // Fires once every dispatched search has settled — including when a
+          // superseded run is the last to settle — so it must report the results
+          // that were actually committed and the query they came from, not this
+          // run's (possibly stale) searchText.
           if (
             pendingSearchCountRef.current === 0 &&
             latestResultsRef.current.length > 0 &&
             onComplete
           ) {
-            onComplete(latestResultsRef.current, searchText);
+            onComplete(latestResultsRef.current, latestQueryRef.current);
           }
         }
       } else {
