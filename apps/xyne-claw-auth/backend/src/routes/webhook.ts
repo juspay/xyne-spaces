@@ -91,7 +91,7 @@ import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middlewa
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
@@ -803,7 +803,6 @@ async function pendingActionTargetValidation(
   }
 }
 
-
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
  * agent's result as an approve/decline flow — with attachments when present.
@@ -1401,7 +1400,6 @@ async function postWriteApprovalAction(args: {
   }, token);
 }
 
-
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
 
 async function handleWebhook(req: Request, res: Response): Promise<void> {
@@ -1544,7 +1542,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (mentionedUserIds.length > 0) {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
-
 
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
@@ -4291,12 +4288,17 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
+  const forwardToInternal = isInternalCallbackOrigin(url);
+  if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
+    clog.warn(`[webhook/result] refusing to forward result to non-allowlisted url origin`);
+    return;
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,

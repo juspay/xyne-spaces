@@ -22,7 +22,7 @@ import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
-import { requireAuth, requireUserAuth } from "../middleware/require-auth.js";
+import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
@@ -58,6 +58,19 @@ function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
   return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
 }
 
+async function assertMemoryUserAccess(
+  req: Request,
+  res: Response,
+  targetUserId: string,
+): Promise<boolean> {
+  if (s2sKeyMatches(req.headers["x-s2s-key"])) return true;
+  const requesterId = getRequesterId(req);
+  if (requesterId && requesterId === targetUserId) return true;
+  if (requesterId && (await isClawAdmin(requesterId))) return true;
+  res.status(403).json({ success: false, error: "You can only access your own memory files." });
+  return false;
+}
+
 export const memoryRouter = Router();
 
 /**
@@ -80,6 +93,7 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
       res.json({ success: true, data: { files: [] } });
       return;
     }
+    if (!(await assertMemoryUserAccess(req, res, userId))) return;
     const files = await getPromptFiles(agentSlug, userId);
     res.json({
       success: true,
@@ -110,6 +124,7 @@ memoryRouter.get("/agent-file", requireAuth, async (req, res) => {
       res.json({ success: true, data: { file: null, files: [] } });
       return;
     }
+    if (!(await assertMemoryUserAccess(req, res, userId))) return;
     if (name) {
       const f = await getAgentFile(agentSlug, userId, name);
       res.json({
@@ -153,6 +168,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
       res.status(400).json({ success: false, error: "userId, valid name, and content are required" });
       return;
     }
+    if (!(await assertMemoryUserAccess(req, res, userId))) return;
     let finalContent = content;
     if (mode === "append") {
       const current = await getAgentFile(agentSlug, userId, name);
@@ -1883,6 +1899,21 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
       });
       return;
     }
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+    if (!agent) {
+      logger.warn(`[memory/backfill] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can backfill this agent's memory." });
+      return;
+    }
     const body = (req.body ?? {}) as { from?: string; to?: string; days?: number };
 
     let from: string;
@@ -2051,6 +2082,15 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
+      return;
+    }
 
     const config = { ...((agent.config as Record<string, unknown>) ?? {}) };
     config["memoryEnabled"] = true;
@@ -2090,6 +2130,15 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
     if (!agent) {
       logger.warn(`[memory/disable] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
       return;
     }
 

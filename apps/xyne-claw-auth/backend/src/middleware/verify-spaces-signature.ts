@@ -31,6 +31,47 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
 
+const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
+const SEEN_SIGNATURE_TTL_MS = MAX_TIMESTAMP_SKEW_MS;
+const MAX_SEEN_SIGNATURES = 10_000;
+const seenSignatures = new Map<string, number>();
+
+function pruneSeenSignatures(now: number): void {
+  if (seenSignatures.size < MAX_SEEN_SIGNATURES) return;
+  for (const [sig, expiry] of seenSignatures) {
+    if (expiry <= now) seenSignatures.delete(sig);
+  }
+  if (seenSignatures.size >= MAX_SEEN_SIGNATURES) {
+    const overflow = seenSignatures.size - MAX_SEEN_SIGNATURES + 1;
+    let i = 0;
+    for (const sig of seenSignatures.keys()) {
+      seenSignatures.delete(sig);
+      if (++i >= overflow) break;
+    }
+  }
+}
+
+function parseSignedEpochMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric > 1e12 ? numeric : numeric * 1000;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function signedTimestampMs(rawBody: Buffer): number | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawBody.toString("utf8")); } catch { return null; }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as { timestamp?: unknown; payload?: { createdAt?: unknown } };
+  return parseSignedEpochMs(obj.timestamp) ?? parseSignedEpochMs(obj.payload?.createdAt);
+}
+
 function parseGcmBundle(blob: string): [string, string, string] | null {
   const parts = blob.split(":");
   if (parts.length !== 3) return null;
@@ -148,6 +189,20 @@ export async function verifySpacesSignature(
     verificationFailure("mismatch", "invalid signature", `bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
     return;
   }
+
+  const now = Date.now();
+  const signedTs = signedTimestampMs(rawBody);
+  if (signedTs !== null && Math.abs(now - signedTs) > MAX_TIMESTAMP_SKEW_MS) {
+    verificationFailure("stale_timestamp", "signature timestamp outside allowed window", `skewMs=${now - signedTs}`);
+    return;
+  }
+  const priorExpiry = seenSignatures.get(received);
+  if (priorExpiry !== undefined && priorExpiry > now) {
+    verificationFailure("replayed_signature", "duplicate signature");
+    return;
+  }
+  pruneSeenSignatures(now);
+  seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
 
   next();
 }

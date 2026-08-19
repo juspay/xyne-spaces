@@ -730,6 +730,11 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     // scoped (e.g. an admin binding for another user, or "*" for any user).
     const targetUserId = userId?.trim() || requesterId;
 
+    if (targetUserId !== requesterId && !(await isClawAdmin(requesterId))) {
+      res.status(403).json({ success: false, error: "Only an admin can bind a workflow for another user" });
+      return;
+    }
+
     const workflow = await agentChainWorkflowRepository.findWorkflowById(workflowId.trim());
     if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
 

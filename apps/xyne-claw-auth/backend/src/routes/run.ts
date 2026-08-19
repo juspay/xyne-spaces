@@ -881,6 +881,14 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: "callbackUrl is not an allowed target" });
       return;
     }
+    if (progressUrl !== undefined && typeof progressUrl !== "string") {
+      res.status(400).json({ success: false, error: "progressUrl must be a string" });
+      return;
+    }
+    if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
+      res.status(400).json({ success: false, error: "progressUrl is not an allowed target" });
+      return;
+    }
     if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
       res
         .status(400)
