@@ -23,7 +23,6 @@ import {
 } from '@/services/organizationDomainService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 interface ResetCodePayload {
@@ -450,12 +449,12 @@ export class EmailAuthController {
 
       res.cookie('google_access_token', jwtToken, {
         ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
       res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
         ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       res.cookie('user_session_id', session.id, {

@@ -639,7 +639,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         // Legacy cookie for backward compatibility with older dashboards
@@ -995,7 +995,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         res.cookie('user_session_id', sessionId, {
@@ -1282,7 +1282,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         if (sessionId) {
