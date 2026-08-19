@@ -43,6 +43,8 @@ export interface CanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Called when user clicks "Convert to tickets" on a canvas table */
+  onConvertToTickets?: (titles: string[], descriptions: string[]) => void;
 }
 
 export interface CollaborativeCanvasEditorRef {

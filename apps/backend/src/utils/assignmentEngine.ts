@@ -184,29 +184,31 @@ export async function evaluateAssignmentRule(
   const hasExpertiseForBoard = (userId: string) => expertiseMap.get(userId)?.hasExpertise === true;
 
   // 1. On-call + active + expertise
+  // Treat missing UserAssignmentState rows as active + on-call (matching
+  // the schema defaults: isActiveForAssignment = true, onCall = true).
   let eligibleUserIds = userIds.filter(userId => {
     const state = getUserState(userId);
-    return state?.isActiveForAssignment === true && state?.onCall === true && hasExpertiseForBoard(userId);
+    return state?.isActiveForAssignment !== false && state?.onCall !== false && hasExpertiseForBoard(userId);
   });
   if (eligibleUserIds.length === 0) {
     // 2. On-call + active (any expertise)
     eligibleUserIds = userIds.filter(userId => {
       const state = getUserState(userId);
-      return state?.isActiveForAssignment === true && state?.onCall === true;
+      return state?.isActiveForAssignment !== false && state?.onCall !== false;
     });
   }
   if (eligibleUserIds.length === 0) {
     // 3. Active + expertise
     eligibleUserIds = userIds.filter(userId => {
       const state = getUserState(userId);
-      return state?.isActiveForAssignment === true && hasExpertiseForBoard(userId);
+      return state?.isActiveForAssignment !== false && hasExpertiseForBoard(userId);
     });
   }
   if (eligibleUserIds.length === 0) {
     // 4. Active (any expertise)
     eligibleUserIds = userIds.filter(userId => {
       const state = getUserState(userId);
-      return state?.isActiveForAssignment === true;
+      return state?.isActiveForAssignment !== false;
     });
   }
   if (eligibleUserIds.length === 0) {
@@ -364,14 +366,14 @@ export async function evaluateAssignmentRule(
     // Try Level 2: On-call + active (any expertise)
     let fallbackUserIds = userIds.filter(userId => {
       const state = getUserState(userId);
-      return state?.isActiveForAssignment === true && state?.onCall === true;
+      return state?.isActiveForAssignment !== false && state?.onCall !== false;
     });
     
     if (fallbackUserIds.length === 0) {
       // Try Level 3: Active + expertise
       fallbackUserIds = userIds.filter(userId => {
         const state = getUserState(userId);
-        return state?.isActiveForAssignment === true && hasExpertiseForBoard(userId);
+        return state?.isActiveForAssignment !== false && hasExpertiseForBoard(userId);
       });
     }
     
@@ -379,7 +381,7 @@ export async function evaluateAssignmentRule(
       // Try Level 4: Active (any expertise)
       fallbackUserIds = userIds.filter(userId => {
         const state = getUserState(userId);
-        return state?.isActiveForAssignment === true;
+        return state?.isActiveForAssignment !== false;
       });
     }
     
@@ -521,8 +523,14 @@ function pickBest(
   const t1: string[] = [], t2: string[] = [], t3: string[] = [], t4: string[] = [];
   for (const id of userIds) {
     const s = getUserState(id);
-    if (s?.isActiveForAssignment !== true) continue;
-    const onCall  = s.onCall === true;
+    // Treat missing UserAssignmentState rows as active + on-call (matching
+    // the schema defaults: isActiveForAssignment = true, onCall = true).
+    // Rows are not auto-created when users join a group, so without this
+    // fallback, users who never had on-call settings configured would be
+    // permanently excluded from auto-assignment.
+    const isActive = s?.isActiveForAssignment !== false;
+    if (!isActive) continue;
+    const onCall  = s?.onCall !== false;
     const expert  = hasExpertise(id);
     if (onCall && expert)  { t1.push(id); continue; }
     if (onCall)            { t2.push(id); continue; }

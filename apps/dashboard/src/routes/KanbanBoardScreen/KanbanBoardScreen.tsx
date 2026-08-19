@@ -452,6 +452,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [bulkDraftCount, setBulkDraftCount] = useState(0);
   const [createTicketSeed, setCreateTicketSeed] = useState<{
     status?: TicketStatusV2 | undefined;
     stageName?: string | undefined;
@@ -803,6 +804,57 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filters = state.context.filters;
   const channelViewType = state.context.viewType;
   const showOverdueOnly = state.context.showOverdueOnly;
+
+  const hasActiveFilters = useMemo(() => {
+    const f = filters ?? {};
+    return !!(
+      f.priority?.length ||
+      f.assignee?.length ||
+      f.userGroups?.length ||
+      f.createdBy?.length ||
+      f.roleAssignments?.length ||
+      f.dueDateStart ||
+      f.dueDateEnd ||
+      f.createdDateStart ||
+      f.createdDateEnd ||
+      f.lastEmailAtStart ||
+      f.lastEmailAtEnd ||
+      (f.boards && f.boards.length > 1) ||
+      f.sourceChannels?.length ||
+      f.tags?.length ||
+      f.assigned ||
+      f.created ||
+      f.stages?.length ||
+      f.ticketTypes?.length ||
+      f.aiCategory?.length ||
+      f.hasAiDraft ||
+      f.dynamicFields
+    );
+  }, [filters]);
+
+  const canAddDraftRows = layoutView === 'table' && !hasActiveFilters && groupBy === 'none';
+
+  const handleAddRowsClick = () => {
+    if (layoutView !== 'table') {
+      toast.message('Switch to table view', {
+        description: 'Bulk row creation is only available in table view.',
+      });
+      return;
+    }
+    if (hasActiveFilters) {
+      toast.message('Remove filters first', {
+        description: 'Clear all filters to use bulk row creation.',
+      });
+      return;
+    }
+    if (groupBy !== 'none') {
+      toast.message('Remove grouping', {
+        description: 'Set group-by to None to use bulk row creation.',
+      });
+      return;
+    }
+    setBulkDraftCount(c => c + 2);
+  };
 
   // Don't query a workspace view until a board is picked (else it fans out across the workspace).
   const workspaceViewReady = !isWorkspaceView || (filters.boards?.length ?? 0) > 0;
@@ -3586,22 +3638,37 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             </div>
           )}
           {canCreateTicket && channel && !channel.isArchived && (
-            <button
-              data-testid='kanban-create-ticket-button'
-              data-track-event='BUTTON_CLICK'
-              data-track-category='TICKETS'
-              data-track-name='CREATE_TICKET_KANBAN'
-              data-track-metadata={JSON.stringify({ boardId, channelId })}
-              onClick={() => {
-                setCreateTicketSeed(null);
-                setIsCreateModalOpen(true);
-              }}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
-            >
-              <Plus className='w-4 h-4' />
-              <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
-              <span className='sm:hidden'>Create</span>
-            </button>
+            <div className='flex items-center gap-2'>
+              <button
+                data-testid='kanban-create-ticket-button'
+                data-track-event='BUTTON_CLICK'
+                data-track-category='TICKETS'
+                data-track-name='CREATE_TICKET_KANBAN'
+                data-track-metadata={JSON.stringify({ boardId, channelId })}
+                onClick={() => {
+                  setCreateTicketSeed(null);
+                  setIsCreateModalOpen(true);
+                }}
+                className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
+              >
+                <Plus className='w-4 h-4' />
+                <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
+                <span className='sm:hidden'>Create</span>
+              </button>
+              {canAddDraftRows && (
+                <button
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='TICKETS'
+                  data-track-name='ADD_ROWS_KANBAN'
+                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  onClick={handleAddRowsClick}
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-foreground bg-muted hover:bg-accent rounded-lg border border-border transition-colors flex-shrink-0'
+                >
+                  <TextAlignJustify className='w-4 h-4' />
+                  <span className='hidden sm:inline font-semibold text-sm'>Add rows</span>
+                </button>
+              )}
+            </div>
           )}
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
@@ -4856,6 +4923,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       availableTags={availableTags || []}
                       visibleColumns={tableVisibleColumns}
                       isComfortView={isComfortView}
+                      draftRowCount={bulkDraftCount}
+                      onDraftCountChange={setBulkDraftCount}
+                      channelId={channel?.id}
+                      projectId={effectiveProjectId}
+                      boardId={currentBoardId}
                     />
                   </div>
                 )}

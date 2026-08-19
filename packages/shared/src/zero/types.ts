@@ -809,6 +809,7 @@ export enum NudgeKind {
   FORWARD_MESSAGE_LINK = 'FORWARD_MESSAGE_LINK',
   DELETE_MESSAGE_CLEANUP = 'DELETE_MESSAGE_CLEANUP',
   SCHEDULE_CALL_FROM_THREAD = 'SCHEDULE_CALL_FROM_THREAD',
+  BULK_TICKET_CREATION_FAILED = 'BULK_TICKET_CREATION_FAILED',
 }
 
 // @ts-ignore TS1294
@@ -1213,4 +1214,9 @@ export enum BaseTicketType {
   Support = 'Support',
   DESK = 'DESK',
   Epic = 'Epic',
+}
+
+export enum BulkTicketMode {
+  PARENT_SUB = 'parent-sub',
+  ALL_PARENTS = 'all-parents',
 }

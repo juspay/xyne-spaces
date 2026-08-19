@@ -27,10 +27,12 @@ import {
   ProjectType,
 } from '@xyne/shared';
 import { encrypt } from '../src/services/encryptionService';
+import { createCommunityWorkspaceDefaults } from '../src/utils/communityWorkspaceDefaults';
 
 const prisma = new PrismaClient();
 
-// Essential resources that the application needs
+// All resources that the application needs — kept in sync with the ResourceName
+// union in src/services/permissionMatrix.ts plus route-level authorize() calls.
 const ESSENTIAL_RESOURCES = [
   { name: 'PROJECTS', description: 'Project management endpoints (/api/projects/*)' },
   { name: 'TICKETS', description: 'Ticket management endpoints (/api/tickets/*)' },
@@ -63,11 +65,17 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'TICKETS', accessType: AccessType.WRITE },
       { resourceName: 'WORKFLOWS', accessType: AccessType.WRITE },
       { resourceName: 'AGENTS', accessType: AccessType.WRITE },
-      { resourceName: 'TOOLS', accessType: AccessType.READ },
-      { resourceName: 'MODELS', accessType: AccessType.READ },
+      { resourceName: 'MODELS', accessType: AccessType.WRITE },
+      { resourceName: 'TOOLS', accessType: AccessType.WRITE },
+      { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
       { resourceName: 'ANALYTICS', accessType: AccessType.READ },
+      { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
+      { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
+      { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
+      { resourceName: 'CANVASES', accessType: AccessType.WRITE },
       { resourceName: 'HEALTH', accessType: AccessType.READ },
       { resourceName: 'AUTH', accessType: AccessType.READ },
+      { resourceName: 'DATA_SOURCES', accessType: AccessType.READ },
     ]
   },
   {
@@ -80,7 +88,12 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'TOOLS', accessType: AccessType.READ },
       { resourceName: 'MODELS', accessType: AccessType.READ },
       { resourceName: 'ANALYTICS', accessType: AccessType.READ },
+      { resourceName: 'PROJECTS', accessType: AccessType.READ },
+      { resourceName: 'CHANNELS', accessType: AccessType.READ },
+      { resourceName: 'CANVASES', accessType: AccessType.READ },
+      { resourceName: 'XYNE-APPS', accessType: AccessType.READ },
       { resourceName: 'HEALTH', accessType: AccessType.READ },
+      { resourceName: 'DATA_SOURCES', accessType: AccessType.READ },
     ]
   }
 ];
@@ -246,6 +259,15 @@ async function main() {
           }
         });
         console.log('  ✅ Created DM project for default workspace');
+
+        // Create general channel + default project + board/stages
+        await createCommunityWorkspaceDefaults({
+          db: prisma,
+          workspaceId: defaultWorkspace.id,
+          workspaceName: defaultWorkspace.name,
+          createdBy: 'system',
+        });
+        console.log('  ✅ Created general channel and workspace defaults');
       } else {
         console.log('  ✅ Default workspace already exists');
       }
@@ -363,14 +385,14 @@ async function main() {
         console.log('  ✅ Updated admin user workspace role and orgMemberId');
       }
 
-      // Grant direct ADMIN access to XYNE-APPS resource for admin user
-      const xyneAppsResourceId = createdResources.get('XYNE-APPS');
-      if (xyneAppsResourceId) {
+      // Grant direct ADMIN access to ALL resources for admin user
+      console.log('  🔐 Granting direct ADMIN access to all resources for admin user...');
+      for (const [resourceName, resourceId] of createdResources) {
         try {
           const existingDirectAccess = await prisma.resourceAccess.findFirst({
             where: {
               userId: adminUser.id,
-              resourceId: xyneAppsResourceId,
+              resourceId: resourceId,
               accessType: AccessType.ADMIN
             }
           });
@@ -378,16 +400,16 @@ async function main() {
           if (!existingDirectAccess) {
             await repositories.resourceAccess.create({
               userId: adminUser.id,
-              resourceId: xyneAppsResourceId,
+              resourceId: resourceId,
               accessType: AccessType.ADMIN
             });
-            console.log('  ✅ Granted direct ADMIN access to XYNE-APPS for admin user');
+            console.log(`    ✅ Granted direct ADMIN access to ${resourceName}`);
           } else {
-            console.log('  ✅ Admin user already has direct ADMIN access to XYNE-APPS');
+            console.log(`    ✅ Admin user already has direct ADMIN access to ${resourceName}`);
           }
         } catch (error) {
-          console.error('  ❌ Failed to grant direct XYNE-APPS access:', error);
-          // Don't throw - this is not critical
+          console.error(`    ❌ Failed to grant direct ADMIN access to ${resourceName}:`, error);
+          // Don't throw - continue with remaining resources
         }
       }
     } catch (error) {

@@ -20,7 +20,10 @@ import {
   TicketBoardCandidate,
   TicketBoardAnalysis,
   TicketBoardSuggestionResponse,
+  CreateBulkTicketRequest,
+  CreateBulkTicketResponse,
 } from '../types/ticket';
+import { enqueueBulkCreationJob } from '../services/bulkTicketCreationService';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf, secondaryAssignmentsOf } from '../services/ticketAssignmentService';
@@ -44,6 +47,7 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
+import { validateChannelAccess, sendChannelAccessError } from '@/utils/channelAccess';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
@@ -53,6 +57,7 @@ import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
+  BulkTicketMode,
   FormContextType,
   FormEntityType,
   ReleaseTrackingMode,
@@ -217,7 +222,8 @@ export class TicketController {
     description: string;
     createdBy: string;
     updatedBy: string;
-    conversationId: string;
+    conversationId?: string;
+    channelId?: string;
     projectId: string;
     boardId: string;
     assignedTo?: string;
@@ -226,13 +232,16 @@ export class TicketController {
     metadata?: Record<string, any>;
     messageContent?: string;
     messageSubtype?: string;
+    showInChannel?: boolean;
+    doNotPostToChannel?: boolean;
   }): Promise<Ticket> {
     const {
       title,
       description,
       createdBy,
       updatedBy,
-      conversationId,
+      conversationId: existingConversationId,
+      channelId: createChannelId,
       projectId,
       boardId,
       assignedTo,
@@ -241,17 +250,42 @@ export class TicketController {
       metadata = {},
       messageContent,
       messageSubtype = 'ai_ticket',
+      showInChannel = false,
+      doNotPostToChannel = false,
     } = params;
+
+    if (!existingConversationId && !createChannelId) {
+      throw new Error('createTicketWithConversation: either conversationId or channelId must be provided');
+    }
 
     const db = DatabaseClient.getInstance();
 
     const ticket = await prisma.$transaction(async (tx) => {
-      // Get channelId from conversation
-      const conversation = await this.conversationRepository.findById(conversationId);
-      if (!conversation) {
-        throw new Error(`Conversation ${conversationId} not found`);
+      let conversationId: string;
+      let channelId: string;
+
+      if (existingConversationId) {
+        const conversation = await this.conversationRepository.findById(existingConversationId);
+        if (!conversation) {
+          throw new Error(`Conversation ${existingConversationId} not found`);
+        }
+        conversationId = conversation.conversationId;
+        channelId = conversation.channelId;
+      } else {
+        channelId = createChannelId!;
+        const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
+        const initialMessageId = randomUUID();
+        const conversation = await tx.conversation.create({
+          data: {
+            channelId,
+            createdBy,
+            workspaceId: channelWorkspaceId,
+            initialMessageId,
+            doNotPostToChannel,
+          },
+        });
+        conversationId = conversation.conversationId;
       }
-      const channelId = conversation.channelId;
 
       // Get workspaceId from channel
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -278,7 +312,7 @@ export class TicketController {
 
       // Post ticket notification as SYSTEM message in conversation
       const now = new Date();
-      await db.message.create({
+      const createdMessage = await tx.message.create({
         data: {
           messageId: randomUUID(),
           conversationId,
@@ -286,7 +320,7 @@ export class TicketController {
           workspaceId: channelWorkspaceId,
           content: messageContent || `Ticket created: ${title}`,
           msgType: MessageType.SYSTEM,
-          showInChannel: false,
+          showInChannel,
           metadata: {
             messageSubtype,
             ticketId: ticket.id,
@@ -297,24 +331,50 @@ export class TicketController {
         },
       });
 
-      // Update conversation reply count and set ticketId
-      await db.conversation.update({
+      // Update conversation: set initialMessageId to the system message only for
+      // bulk-created conversations (showInChannel=true), which start with a
+      // placeholder UUID. Other callers reuse existing conversations that already
+      // have a real initialMessageId. Increment reply count and set ticketId.
+      await tx.conversation.update({
         where: { conversationId },
         data: {
+          ...(showInChannel ? { initialMessageId: createdMessage.messageId } : {}),
           replyCount: { increment: 1 },
           lastActivityAt: now,
           ticketId: ticket.id,
         },
       });
 
+      const ticketMd = serializeTicketMd({
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+        statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+        priority: ticket.priority as TicketCardSummary['priority'],
+        assignedTo: ticket.assignedTo ?? null,
+        createdBy: ticket.createdBy,
+        createdAt: ticket.createdAt.getTime(),
+        eta: ticket.eta ? ticket.eta.getTime() : null,
+        xyneId: ticket.xyneId,
+        stageName: ticket.stageName,
+        ticketType: ticket.ticketType ?? null,
+        channelId: ticket.channelId,
+        conversationId: ticket.conversationId,
+      });
+
+      await tx.conversation.update({
+        where: { conversationId },
+        data: { ticket_md: ticketMd },
+      });
+
       // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
-      await db.conversationParticipant.updateMany({
+      await tx.conversationParticipant.updateMany({
         where: { conversationId },
         data: { lastReplyAt: now },
       });
 
       // Add/update ticket creator as MENTIONED participant (subscribed by default)
-      await db.conversationParticipant.upsert({
+      await tx.conversationParticipant.upsert({
         where: {
           conversationId_userId: {
             conversationId,
@@ -341,6 +401,10 @@ export class TicketController {
 
       return ticket;
     });
+
+    // Sync message metadata after the transaction commits — syncInitialMessageMd
+    // uses the db client (not tx), so it can only see committed conversations.
+    await messageMetadataService.syncInitialMessageMd(ticket.conversationId);
 
     // Ticket committed on its initial stage — auto-create the on-entry approval
     // request if that stage's single outgoing transition is configured for it.
@@ -1451,6 +1515,263 @@ export class TicketController {
       res.status(200).json(result);
     } catch (error) {
       next(error);
+    }
+  };
+
+  private async getTicketCreationMessageId(conversationId: string, ticketId: string): Promise<string | null> {
+    const messages = await db.message.findMany({
+      where: { conversationId, msgType: MessageType.SYSTEM },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { messageId: true, metadata: true },
+    });
+    for (const message of messages) {
+      const meta = message.metadata as Record<string, unknown> | null;
+      if (meta?.ticketId === ticketId) {
+        return message.messageId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * POST /api/tickets/bulk-from-message
+   * Creates a parent ticket synchronously (via the same validated createTicket path),
+   * then enqueues sub-tickets for async creation by the sub-ticket creation worker.
+   * Each sub-ticket becomes a full Ticket row in its own new conversation, linked to
+   * the parent via a TicketSubTicketMapping.
+   */
+  createBulkTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { mode = BulkTicketMode.PARENT_SUB, existingParentTicketId, sourceConversationId, sourceMessageId, parent, subTickets, tickets, projectId: bodyProjectId, channelId: bodyChannelId, boardId: bodyBoardId } =
+        req.body as CreateBulkTicketRequest;
+
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'WorkspaceId missing' });
+        return;
+      }
+
+      const effectiveChannelId = mode === BulkTicketMode.ALL_PARENTS
+        ? (bodyChannelId || tickets?.[0]?.channelId)
+        : (parent?.channelId ?? bodyChannelId);
+
+      if (effectiveChannelId) {
+        const accessResult = await validateChannelAccess(effectiveChannelId, userId, workspaceId);
+        if (!accessResult.ok) {
+          sendChannelAccessError(res, accessResult);
+          return;
+        }
+      }
+
+      if (mode === BulkTicketMode.ALL_PARENTS) {
+        if (!Array.isArray(tickets) || tickets.length === 0) {
+          res.status(400).json({ error: 'tickets must be a non-empty array' });
+          return;
+        }
+        const projectId = bodyProjectId || tickets[0]?.projectId;
+        const channelId = bodyChannelId || tickets[0]?.channelId;
+        const boardId = bodyBoardId || tickets[0]?.boardId;
+        if (!projectId || !channelId || !boardId) {
+          res.status(400).json({ error: 'projectId, channelId, and boardId are required' });
+          return;
+        }
+
+        const firstTicketInput = tickets[0]!;
+
+        const firstTicket = await this.createTicketWithConversation({
+          title: firstTicketInput.title,
+          description: firstTicketInput.description ?? '',
+          createdBy: userId,
+          updatedBy: userId,
+          channelId: firstTicketInput.channelId ?? channelId,
+          projectId,
+          boardId: firstTicketInput.boardId ?? boardId,
+          assignedTo: firstTicketInput.assignedTo,
+          priority: firstTicketInput.priority,
+          statusV2: firstTicketInput.statusV2,
+          metadata: {},
+          messageContent: `Ticket created: ${firstTicketInput.title}`,
+          messageSubtype: 'ai_ticket',
+          showInChannel: true,
+        });
+
+        const firstMessageId = await this.getTicketCreationMessageId(firstTicket.conversationId, firstTicket.id);
+
+        const remaining = tickets.slice(1);
+        await enqueueBulkCreationJob({
+          mode: BulkTicketMode.ALL_PARENTS,
+          parentTicketId: null,
+          sourceMessageId: firstMessageId ?? undefined,
+          channelId,
+          projectId,
+          workspaceId,
+          userId,
+          subTickets: remaining.map(t => ({
+            title: t.title,
+            description: t.description,
+            priority: t.priority,
+            statusV2: t.statusV2,
+            eta: t.eta,
+            channelId: t.channelId ?? channelId,
+            boardId: t.boardId ?? boardId,
+            assignedTo: t.assignedTo,
+            userGroupId: t.userGroupId,
+            tags: t.tags,
+            ticketType: t.ticketType,
+            stageName: t.stageName,
+            dynamicFields: t.dynamicFields,
+            merchantId: t.merchantId,
+            workflowType: t.workflowType,
+            clientRowId: t.clientRowId,
+          })),
+        });
+
+        const response: CreateBulkTicketResponse = {
+          parentTicketId: firstTicket.id,
+          parentXyneId: firstTicket.xyneId,
+          conversationId: firstTicket.conversationId,
+          enqueuedSubTickets: remaining.length,
+          failedSubTickets: 0,
+          createdTicketIds: [firstTicket.id],
+        };
+        res.status(201).json(response);
+        return;
+      }
+
+      if (existingParentTicketId) {
+        if (!Array.isArray(subTickets) || subTickets.length === 0) {
+          res.status(400).json({ error: 'subTickets must be a non-empty array' });
+          return;
+        }
+
+        const existingParent = await prisma.ticket.findFirst({
+          where: { id: existingParentTicketId, workspaceId },
+        });
+        if (!existingParent) {
+          res.status(404).json({ error: 'Parent ticket not found' });
+          return;
+        }
+
+        await enqueueBulkCreationJob({
+          mode: BulkTicketMode.PARENT_SUB,
+          parentTicketId: existingParent.id,
+          sourceMessageId,
+          channelId: existingParent.channelId,
+          projectId: existingParent.projectId,
+          workspaceId,
+          userId,
+          subTickets: subTickets.map(s => ({
+            title: s.title,
+            description: s.description,
+            priority: s.priority,
+            statusV2: s.statusV2,
+            eta: s.eta,
+            channelId: s.channelId ?? existingParent.channelId,
+            boardId: s.boardId ?? existingParent.boardId,
+            assignedTo: s.assignedTo,
+            userGroupId: s.userGroupId,
+            tags: s.tags,
+            ticketType: s.ticketType,
+            stageName: s.stageName,
+            dynamicFields: s.dynamicFields,
+            merchantId: s.merchantId,
+            workflowType: s.workflowType,
+            clientRowId: s.clientRowId,
+          })),
+        });
+
+        const response: CreateBulkTicketResponse = {
+          parentTicketId: existingParent.id,
+          parentXyneId: existingParent.xyneId,
+          conversationId: existingParent.conversationId,
+          enqueuedSubTickets: subTickets.length,
+          failedSubTickets: 0,
+        };
+        res.status(201).json(response);
+        return;
+      }
+
+      if (!parent || !parent.title || !parent.projectId) {
+        res.status(400).json({ error: 'parent.title, parent.projectId are required' });
+        return;
+      }
+      if (!Array.isArray(subTickets) || subTickets.length === 0) {
+        res.status(400).json({ error: 'subTickets must be a non-empty array' });
+        return;
+      }
+
+      const createdParent = await this.createTicketWithConversation({
+        title: parent.title,
+        description: parent.description,
+        createdBy: userId,
+        updatedBy: userId,
+        ...(sourceConversationId
+          ? { conversationId: sourceConversationId }
+          : { channelId: parent.channelId }),
+        projectId: parent.projectId,
+        boardId: parent.boardId,
+        assignedTo: parent.assignedTo,
+        priority: parent.priority,
+        statusV2: parent.statusV2,
+        metadata: {},
+        messageContent: `Ticket created: ${parent.title}`,
+        messageSubtype: 'ai_ticket',
+        showInChannel: true,
+      });
+
+      const parentMessageId = await this.getTicketCreationMessageId(createdParent.conversationId, createdParent.id);
+
+      const parentTicket: { id: string; xyneId: string; conversationId: string } = {
+        id: createdParent.id,
+        xyneId: createdParent.xyneId,
+        conversationId: createdParent.conversationId,
+      };
+
+      await enqueueBulkCreationJob({
+        mode: BulkTicketMode.PARENT_SUB,
+        parentTicketId: parentTicket.id,
+        sourceMessageId: parentMessageId ?? undefined,
+        channelId: parent.channelId,
+        projectId: parent.projectId,
+        workspaceId,
+        userId,
+        subTickets: subTickets.map(s => ({
+          title: s.title,
+          description: s.description,
+          priority: s.priority,
+          statusV2: s.statusV2,
+          eta: s.eta,
+          channelId: s.channelId ?? parent.channelId,
+          boardId: s.boardId ?? parent.boardId,
+          assignedTo: s.assignedTo,
+          userGroupId: s.userGroupId,
+          tags: s.tags,
+          ticketType: s.ticketType,
+          stageName: s.stageName,
+          dynamicFields: s.dynamicFields,
+          merchantId: s.merchantId,
+          workflowType: s.workflowType,
+          clientRowId: s.clientRowId,
+        })),
+      });
+
+      const response: CreateBulkTicketResponse = {
+        parentTicketId: parentTicket.id,
+        parentXyneId: parentTicket.xyneId,
+        conversationId: parentTicket.conversationId,
+        enqueuedSubTickets: subTickets.length,
+        failedSubTickets: 0,
+      };
+      res.status(201).json(response);
+    } catch (error) {
+      logger.error('Error in createBulkTicket:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   };
 

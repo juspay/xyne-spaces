@@ -1,7 +1,9 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BulkTicketMode } from '@xyne/shared';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import { TicketSuggestion, TicketCreatedInfo } from '../../../utils/markdownTicketSuggestions.ts';
 import { useChannel } from '../../../hooks/useChannels';
 import { conversationService } from '../../../services/Chat/conversationService';
@@ -13,6 +15,11 @@ interface TicketSuggestionsProps {
   channelId: string;
   messageId: string;
   conversationId: string;
+  existingParentTicket?: {
+    id: string;
+    xyneId?: string;
+    conversationId: string;
+  } | null;
 }
 
 const previewDescription = (text: string, limit = 100) =>
@@ -24,12 +31,14 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
   channelId,
   messageId,
   conversationId,
+  existingParentTicket,
 }) => {
   // Queue-based state management (single source of truth)
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [creationQueue, setCreationQueue] = useState<string[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [initialQueueLength, setInitialQueueLength] = useState(0);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
   const currentChannel = useChannel(channelId || '');
   const navigate = useNavigate();
@@ -157,15 +166,63 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
 
       {/* Create button */}
       {selectedIds.length > 0 && (
-        <div className='pt-1'>
+        <div className='pt-1 flex items-center gap-3'>
           <button
             onClick={startCreation}
             disabled={isUpdating}
             className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
+            data-track-category='Tickets'
+            data-track-name='TicketSuggestionsCreateSelected'
           >
             {isUpdating ? 'Creating...' : `Create Tickets (${selectedIds.length})`}
           </button>
         </div>
+      )}
+
+      {/* Bulk create button - shown when there are 2+ uncreated suggestions */}
+      {suggestions.length >= 2 && (
+        <div className='pt-1'>
+          <button
+            onClick={() => setIsBulkModalOpen(true)}
+            disabled={isUpdating}
+            className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
+            data-track-category='Tickets'
+            data-track-name='TicketSuggestionsCreateBulk'
+          >
+            Create all as sub-tickets
+          </button>
+        </div>
+      )}
+
+      {/* Bulk Create Tickets Modal */}
+      {isBulkModalOpen && currentChannel && (
+        <BulkCreateTicketsModal
+          isOpen={true}
+          onClose={() => setIsBulkModalOpen(false)}
+          channelId={channelId}
+          projectId={currentChannel.projectId ?? ''}
+          mode={BulkTicketMode.PARENT_SUB}
+          parentTitle={existingParentTicket ? undefined : (suggestions[0]?.title ?? '')}
+          subTitleTitles={
+            existingParentTicket
+              ? suggestions.map(s => s.title)
+              : suggestions.slice(1).map(s => s.title)
+          }
+          subDescriptions={[
+            suggestions[0]?.description ?? '',
+            ...suggestions.slice(1).map(s => s.description),
+          ]}
+          clientRowIds={suggestions.map(s => s.suggestionId)}
+          existingParentTicket={existingParentTicket ?? undefined}
+          sourceMessageId={existingParentTicket ? messageId : undefined}
+          sourceConversationId={existingParentTicket ? undefined : conversationId}
+          onTicketCreated={() => {
+            setIsBulkModalOpen(false);
+            toast.success('Tickets queued', {
+              description: 'Tickets will be created shortly.',
+            });
+          }}
+        />
       )}
 
       {/* Create Ticket Modal - driven by derived state */}

@@ -87,6 +87,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { BulkCreateTicketsModal } from '../../Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
@@ -214,6 +215,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [showVersionDiff, setShowVersionDiff] = useState(false);
   const [restoringVersionId, setRestoringVersionId] = useState<string | undefined>(undefined);
   const [renamingVersionId, setRenamingVersionId] = useState<string | undefined>(undefined);
+  const [isBulkTicketModalOpen, setIsBulkTicketModalOpen] = useState(false);
+  const [bulkParentTitle, setBulkParentTitle] = useState('');
+  const [bulkSubTitles, setBulkSubTitles] = useState<string[]>([]);
+  const [bulkDescriptions, setBulkDescriptions] = useState<string[]>([]);
 
   // Ref for CanvasEditor to access presentation methods
   const editorRef = useRef<CanvasEditorRef | CollaborativeCanvasEditorRef | null>(null);
@@ -535,6 +540,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     void navigate(-1);
   }, [baseRoute, isCreatingMessage, isEditingMessage, isMobile, isOnChatCanvasPage, navigate]);
+
+  const handleConvertToTickets = useCallback((titles: string[], descriptions: string[]): void => {
+    if (titles.length === 0) return;
+    setBulkParentTitle(titles[0] ?? '');
+    setBulkSubTitles(titles.slice(1));
+    setBulkDescriptions(descriptions);
+    setIsBulkTicketModalOpen(true);
+  }, []);
 
   const handleConfirmSend = (): void => {
     if (!selectedCanvas || !state?.channelId) return;
@@ -1497,6 +1510,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
                   currentUserRole={selectedCanvas?.accessLevel ?? null}
+                  onConvertToTickets={handleConvertToTickets}
                 />
               ) : selectedCanvas?.id &&
                 selectedCanvas.isCollaborative &&
@@ -1521,6 +1535,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
                   currentUserRole={selectedCanvas.accessLevel ?? null}
+                  onConvertToTickets={handleConvertToTickets}
                 />
               ) : (
                 <CanvasEditor
@@ -1543,6 +1558,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
                   currentUserRole={selectedCanvas?.accessLevel ?? null}
+                  onConvertToTickets={handleConvertToTickets}
                 />
               )}
             </div>
@@ -1713,6 +1729,19 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           />
         </Dialog>
       )}
+
+      <BulkCreateTicketsModal
+        isOpen={isBulkTicketModalOpen}
+        onClose={() => setIsBulkTicketModalOpen(false)}
+        channelId={selectedCanvas?.channelId || state?.channelId || undefined}
+        projectId={selectedCanvas?.projectId || undefined}
+        parentTitle={bulkParentTitle}
+        subTitleTitles={bulkSubTitles}
+        subDescriptions={bulkDescriptions}
+        onTicketCreated={() => {
+          toast.success('Tickets created from table');
+        }}
+      />
     </div>
   );
 };

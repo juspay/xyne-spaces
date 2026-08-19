@@ -212,6 +212,8 @@ function getNudgeDirection(
       return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE };
     case NudgeKind.SCHEDULE_CALL_FROM_THREAD:
       return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.CALL };
+    case NudgeKind.BULK_TICKET_CREATION_FAILED:
+      return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.TICKET };
     default:
       return null;
   }

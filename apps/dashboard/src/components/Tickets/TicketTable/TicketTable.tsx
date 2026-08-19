@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import {
   AllCommunityModule,
@@ -14,11 +14,21 @@ import {
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { BoardType, isDeskChannelType } from '@xyne/shared';
+import {
+  BaseTicketType,
+  BulkTicketMode,
+  ChannelScopeType,
+  TicketPriority,
+  TicketStatusV2,
+} from '@xyne/shared';
 import { toast } from 'sonner';
+import { Loader2, Trash2 } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
-import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUser, useUsers, useActiveUserSearch } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Calendar, Check, User } from 'lucide-react';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
@@ -40,9 +50,30 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useAuth } from '../../../hooks/useAuth';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { cn } from '../../../utils/classNames';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
+import { getPriorityOptions } from '../CreateTicketModal/createTicket.utils';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
+
+interface DraftTicketRow {
+  id: string;
+  isDraft: true;
+  title: string;
+  description: string;
+  priority: TicketPriority;
+  channelId: string;
+  boardId: string;
+  statusV2: TicketStatusV2;
+  assignedTo: string | null;
+  ticketType: BaseTicketType;
+  eta: Date | null;
+}
 
 interface TicketTableProps {
   tickets: Ticket[];
@@ -55,7 +86,46 @@ interface TicketTableProps {
   extraColumns?: ColDef<Ticket>[];
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (tickets: Ticket[]) => void;
+  draftRowCount?: number;
+  onDraftCountChange?: (count: number) => void;
+  channelId?: string | undefined;
+  projectId?: string | undefined;
+  boardId?: string | null | undefined;
 }
+
+const isDraftRow = (data: Ticket | DraftTicketRow | undefined): data is DraftTicketRow => {
+  return !!data && 'isDraft' in data && data.isDraft === true;
+};
+
+const DraftCellWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div
+    className='h-full flex items-center px-1'
+    onClick={e => e.stopPropagation()}
+    onKeyDown={e => e.stopPropagation()}
+    role='presentation'
+    data-track-category='Tickets'
+    data-track-name='DraftCell'
+  >
+    {children}
+  </div>
+);
+
+let draftRowSeq = 0;
+const newDraftId = (): string => `draft-${++draftRowSeq}`;
+
+const newDraftRow = (channelId: string, boardId: string): DraftTicketRow => ({
+  id: newDraftId(),
+  isDraft: true,
+  title: '',
+  description: '',
+  priority: TicketPriority.MEDIUM,
+  channelId,
+  boardId,
+  statusV2: TicketStatusV2.TODO,
+  assignedTo: null,
+  ticketType: BaseTicketType.Fix,
+  eta: null,
+});
 
 // Index header renderer component
 const IndexHeaderRenderer = (params: IHeaderParams) => {
@@ -163,12 +233,127 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   extraColumns,
   selectedIds,
   onSelectionChange,
+  draftRowCount = 0,
+  onDraftCountChange,
+  channelId: propChannelId,
+  projectId: propProjectId,
+  boardId: propBoardId,
 }) => {
   const zero = useZero();
   const users = useUsers();
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+  const allVisibleChannels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const [assigneeSearch, setAssigneeSearch] = useState('');
+  const assigneeResults = useActiveUserSearch(assigneeSearch, 50);
+  const { user: currentUser } = useAuth();
+
+  const [draftRows, setDraftRows] = useState<DraftTicketRow[]>([]);
+  const [isSubmittingDrafts, setIsSubmittingDrafts] = useState(false);
+  const draftRowCountRef = useRef(0);
+
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: propProjectId ?? '' }), {
+    enabled: !!propProjectId,
+  });
+
+  useEffect(() => {
+    if (draftRowCount === draftRowCountRef.current) return;
+    const prev = draftRowCountRef.current;
+    draftRowCountRef.current = draftRowCount;
+    if (draftRowCount === 0) {
+      setDraftRows([]);
+      return;
+    }
+    if (draftRowCount > prev) {
+      const toAdd = draftRowCount - prev;
+      const ref = draftRows[draftRows.length - 1];
+      const chId = ref?.channelId ?? propChannelId ?? '';
+      const bId = ref?.boardId ?? propBoardId ?? '';
+      setDraftRows(prevRows => [
+        ...prevRows,
+        ...Array.from({ length: toAdd }, () => newDraftRow(chId, bId)),
+      ]);
+    }
+  }, [draftRowCount, propChannelId, propBoardId, draftRows]);
+
+  const updateDraftRow = useCallback(
+    (id: string, patch: Partial<DraftTicketRow>): void => {
+      setDraftRows(prev => {
+        let needsAppend = false;
+        const updated = prev.map(r => {
+          if (r.id !== id) return r;
+          const next = { ...r, ...patch };
+          if (patch.title !== undefined && patch.title.trim() && !r.title.trim()) {
+            needsAppend = true;
+          }
+          return next;
+        });
+        if (needsAppend && !updated.some(r => !r.title.trim())) {
+          const ref = updated[updated.length - 1];
+          const chId = ref?.channelId ?? propChannelId ?? '';
+          const bId = ref?.boardId ?? propBoardId ?? '';
+          return [...updated, newDraftRow(chId, bId)];
+        }
+        return updated;
+      });
+    },
+    [propChannelId, propBoardId],
+  );
+
+  const removeDraftRow = useCallback(
+    (id: string): void => {
+      setDraftRows(prev => {
+        const filtered = prev.filter(r => r.id !== id);
+        const newCount = filtered.length;
+        onDraftCountChange?.(newCount);
+        draftRowCountRef.current = newCount;
+        if (filtered.length === 0) return [];
+        return filtered;
+      });
+    },
+    [onDraftCountChange],
+  );
+
+  const filledDrafts = draftRows.filter(r => r.title.trim().length > 0);
+  const validDraftCount = filledDrafts.length;
+  const draftsValid = validDraftCount > 0;
+
+  const defaultBoardId = useMemo(() => boards?.[0]?.id ?? '', [boards]);
+
+  useEffect(() => {
+    if (!defaultBoardId) return;
+    setDraftRows(prev => {
+      const needsUpdate = prev.some(r => !r.boardId);
+      if (!needsUpdate) return prev;
+      return prev.map(r => ({ ...r, boardId: r.boardId || defaultBoardId }));
+    });
+  }, [defaultBoardId]);
+
+  const userGroups = useUserGroups();
+
+  const draftAssigneeOptions: SelectorOption[] = useMemo(() => {
+    const userOpts: SelectorOption[] = assigneeResults.map(u => ({
+      label: getUserDisplayName(u),
+      value: u.id,
+      icon: <Avatar userId={u.id} size='xs' className='mr-1' />,
+    }));
+    const groupOpts: SelectorOption[] = (userGroups ?? []).map(g => ({
+      label: g.name ?? g.id,
+      value: `group:${g.id}`,
+      icon: null,
+    }));
+    return [...userOpts, ...groupOpts];
+  }, [assigneeResults, userGroups]);
+
+  const draftPriorityOptions: SelectorOption[] = useMemo(
+    () =>
+      getPriorityOptions().map(p => ({
+        ...p,
+        icon: p.icon ?? null,
+      })),
+    [],
+  );
 
   // Aggregate ticket lists mix channels, so resolve each row's channel type to
   // route desk/support tickets to the Support desk instead of the chat panel.
@@ -229,8 +414,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     });
   }, [gridApi, selectedIds, tickets]);
 
-  const userGroups = useUserGroups();
-
   const theme = themeQuartz.withParams({
     headerBackgroundColor: 'hsl(var(--card))',
     headerTextColor: 'hsl(var(--muted-foreground))',
@@ -262,7 +445,28 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         lockPosition: true,
         suppressMovable: true,
         headerComponent: IndexHeaderRenderer,
-        cellRenderer: IndexCellRenderer,
+        cellRenderer: (params: ICellRendererParams<Ticket>) => {
+          if (isDraftRow(params.data)) {
+            const draftRow = params.data;
+            return (
+              <div className='flex items-center justify-center h-full w-full'>
+                <button
+                  className='size-5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 flex items-center justify-center transition'
+                  onClick={e => {
+                    e.stopPropagation();
+                    removeDraftRow(draftRow.id);
+                  }}
+                  title='Remove row'
+                  data-track-category='Tickets'
+                  data-track-name='DraftRemoveRow'
+                >
+                  <Trash2 className='size-3.5' />
+                </button>
+              </div>
+            );
+          }
+          return <IndexCellRenderer {...params} />;
+        },
         cellStyle: { padding: 0 },
       },
 
@@ -707,6 +911,12 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     onTitleClick,
     extraColumns,
     channelsById,
+    draftRows,
+    allVisibleChannels,
+    boards,
+    draftAssigneeOptions,
+    draftPriorityOptions,
+    updateDraftRow,
   ]);
 
   const handleBulkUpdate = useCallback(
@@ -777,9 +987,105 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     [gridApi, zero, ticketTags],
   );
 
+  const handleSubmitDrafts = async (): Promise<void> => {
+    if (!draftsValid || !currentUser || !propProjectId || filledDrafts.length === 0) return;
+    setIsSubmittingDrafts(true);
+    try {
+      const completeRows = filledDrafts;
+      const resolveAssignee = (assigneeId: string | null) => {
+        if (!assigneeId) return { assignedTo: undefined, userGroupId: undefined };
+        if (assigneeId.startsWith('group:')) {
+          return { assignedTo: undefined, userGroupId: assigneeId.slice(6) };
+        }
+        return { assignedTo: assigneeId, userGroupId: undefined };
+      };
+      const ticketsPayload = completeRows.map(r => ({
+        title: r.title.trim(),
+        description: r.title.trim(),
+        priority: r.priority,
+        statusV2: r.statusV2,
+        eta: r.eta ?? undefined,
+        ...resolveAssignee(r.assignedTo),
+        tags: [],
+        ticketType: BaseTicketType.Fix,
+        clientRowId: r.id,
+      }));
+      const body = {
+        mode: BulkTicketMode.ALL_PARENTS,
+        tickets: ticketsPayload,
+        projectId: propProjectId,
+        channelId: propChannelId,
+        boardId: propBoardId ?? defaultBoardId,
+      };
+      const res = await apiInstance.post('/tickets/bulk-from-message', body);
+      const data = res.data as {
+        enqueuedSubTickets: number;
+        failedSubTickets?: number;
+        failedTitles?: string[];
+      };
+      if (data.failedSubTickets && data.failedSubTickets > 0) {
+        toast.warning('Partial success', {
+          description: `${data.enqueuedSubTickets} queued, ${data.failedSubTickets} failed: ${data.failedTitles?.join(', ')}`,
+        });
+      } else {
+        toast.success('Tickets will be created shortly', {
+          description: `${data.enqueuedSubTickets} ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
+        });
+      }
+      setDraftRows([]);
+      draftRowCountRef.current = 0;
+      onDraftCountChange?.(0);
+    } catch (error) {
+      console.error('Failed to create bulk tickets:', error);
+      toast.error('Failed to create tickets', {
+        description: 'Please try again or contact support.',
+      });
+    } finally {
+      setIsSubmittingDrafts(false);
+    }
+  };
+
+  const combinedRowData = useMemo(() => {
+    return [...draftRows, ...tickets] as unknown as Ticket[];
+  }, [draftRows, tickets]);
+
   return (
     <>
       <div className='flex flex-col'>
+        {draftRows.length > 0 && (
+          <div className='flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border bg-muted/30'>
+            <span className='text-[12px] text-muted-foreground font-medium mr-auto'>
+              {validDraftCount} ready
+            </span>
+            <button
+              type='button'
+              onClick={() => {
+                setDraftRows([]);
+                draftRowCountRef.current = 0;
+                onDraftCountChange?.(0);
+              }}
+              className='text-[12px] font-medium text-foreground px-2 py-1 rounded-md hover:bg-accent transition'
+              data-track-category='Tickets'
+              data-track-name='DraftCancelAll'
+            >
+              Cancel
+            </button>
+            <button
+              type='button'
+              onClick={() => void handleSubmitDrafts()}
+              disabled={!draftsValid || isSubmittingDrafts}
+              className={cn(
+                'text-[12px] font-medium text-primary-foreground bg-primary px-3 py-1 rounded-md flex items-center gap-1 transition',
+                (!draftsValid || isSubmittingDrafts) && 'opacity-50 cursor-not-allowed',
+              )}
+              data-track-category='Tickets'
+              data-track-name='DraftSubmit'
+            >
+              {isSubmittingDrafts ? <Loader2 className='size-3.5 animate-spin' /> : null}
+              Create tickets
+            </button>
+          </div>
+        )}
         <div className='w-full min-h-[80px]'>
           <AgGridReact
             getRowId={params => (params.data as Ticket).id}
@@ -803,12 +1109,12 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               setSelectedCount(selectedRows.length);
               onSelectionChange?.(selectedRows);
             }}
-            rowData={tickets}
+            rowData={combinedRowData}
             columnDefs={columnDefs}
             rowHeight={44}
             headerHeight={44}
             onRowClicked={(p: RowClickedEvent<Ticket>) => {
-              if (!p.event?.defaultPrevented && p.data) {
+              if (!p.event?.defaultPrevented && p.data && !isDraftRow(p.data)) {
                 onRowClick?.(p.data);
               }
             }}

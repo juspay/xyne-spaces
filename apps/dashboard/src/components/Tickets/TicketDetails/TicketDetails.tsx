@@ -1238,11 +1238,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return ticket?.stageEtaEntries?.find(entry => entry.stageLeftAt === null);
   }, [ticket?.stageEtaEntries]);
 
-  // Get current stage info (including eta) to determine if status deadline should be shown
-  const currentStageInfo = useMemo(() => {
-    return stages?.find(s => s.name === ticket?.stageName);
-  }, [stages, ticket?.stageName]);
-
   // Query ticket attachments
   const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId }));
 
@@ -3727,8 +3722,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 )
               }
             />
-            {/* Status Deadline - only show if current stage has eta configured */}
-            {currentStageInfo?.eta && (
+            {/* Status Deadline - show when ticket has an active stage entry */}
+            {currentStageEntry && (
               <TicketKeyValuePair
                 ticketKey='Status Deadline'
                 value={

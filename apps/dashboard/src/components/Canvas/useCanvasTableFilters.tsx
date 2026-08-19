@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FC, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
+import { ChevronDown, Filter, Plus, Search, Ticket, X } from 'lucide-react';
 import { Input } from '../ui/Input';
 
 const TABLE_FILTER_ID_ATTR = 'data-canvas-table-filter-id';
@@ -30,6 +30,7 @@ interface TableFilterWidgetProps {
   blockContent: HTMLElement;
   table: HTMLTableElement;
   wrapper: HTMLElement;
+  onConvertToTickets?: ((titles: string[], descriptions: string[]) => void) | undefined;
 }
 
 interface MatchCount {
@@ -87,6 +88,28 @@ const createTableFilter = (): TableFilterState => {
   };
   nextWidgetFilterId += 1;
   return filter;
+};
+
+const extractTableRowData = (
+  table: HTMLTableElement,
+): { titles: string[]; descriptions: string[] } => {
+  const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'));
+  const headerRow = rows[0]?.querySelector('th') ? rows[0] : null;
+  const dataRows = rows.filter(row => row !== headerRow);
+  const titles: string[] = [];
+  const descriptions: string[] = [];
+
+  for (const row of dataRows) {
+    const cells = Array.from(row.cells);
+    const cellTexts = cells.map(cell => normalizeCellText(cell.textContent));
+    const title = cellTexts[0] ?? '';
+    if (!title) continue;
+    titles.push(title);
+    const descParts = cellTexts.slice(1).filter(Boolean);
+    descriptions.push(descParts.length > 0 ? descParts.join(' — ') : title);
+  }
+
+  return { titles, descriptions };
 };
 
 const getTableFilterId = (blockContent: HTMLElement): string => {
@@ -442,7 +465,12 @@ const getFilterRowGridClass = (filterCount: number): string => {
   return 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)]';
 };
 
-const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, table, wrapper }) => {
+const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({
+  blockContent,
+  table,
+  wrapper,
+  onConvertToTickets,
+}) => {
   const initialMetadataRef = useRef<TableMetadata | null>(null);
   const getInitialMetadata = (): TableMetadata => {
     initialMetadataRef.current ??= getTableMetadata(table);
@@ -708,20 +736,40 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
     >
       <style ref={styleRef} />
       {!isOpen ? (
-        <button
-          type='button'
-          className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
-          data-active={hasActiveFilters ? 'true' : 'false'}
-          data-track-category='CANVAS'
-          data-track-name='table_filter_open'
-          aria-label='Filter table rows'
-          aria-pressed={hasActiveFilters}
-          title='Filter table rows'
-          onMouseDown={event => event.preventDefault()}
-          onClick={() => setIsOpen(true)}
-        >
-          <Filter size={14} strokeWidth={2} />
-        </button>
+        <div className='flex items-center gap-1'>
+          <button
+            type='button'
+            className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
+            data-active={hasActiveFilters ? 'true' : 'false'}
+            data-track-category='CANVAS'
+            data-track-name='table_filter_open'
+            aria-label='Filter table rows'
+            aria-pressed={hasActiveFilters}
+            title='Filter table rows'
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => setIsOpen(true)}
+          >
+            <Filter size={14} strokeWidth={2} />
+          </button>
+          {onConvertToTickets && (
+            <button
+              type='button'
+              className='inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border bg-popover px-2 text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground'
+              data-track-category='CANVAS'
+              data-track-name='table_convert_to_tickets'
+              aria-label='Convert table to tickets'
+              title='Convert table to tickets'
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => {
+                const { titles, descriptions } = extractTableRowData(table);
+                if (titles.length > 0) onConvertToTickets(titles, descriptions);
+              }}
+            >
+              <Ticket size={14} strokeWidth={2} />
+              <span className='text-[11px] font-medium'>To Tickets</span>
+            </button>
+          )}
+        </div>
       ) : (
         <div
           className={`flex ${panelWidthClass} max-w-[calc(100vw-96px)] flex-col items-stretch gap-[7px] overflow-visible rounded-md border bg-popover p-2 text-popover-foreground shadow-md`}
@@ -981,9 +1029,14 @@ const cleanupRegistration = (registration: RegisteredTableFilter): void => {
   registration.wrapper.classList.remove(TABLE_FILTER_OPEN_PADDING_CLASS);
 };
 
-export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null>): void => {
+export const useCanvasTableFilters = (
+  containerRef: RefObject<HTMLElement | null>,
+  onConvertToTickets?: (titles: string[], descriptions: string[]) => void,
+): void => {
   const registrationsRef = useRef<Map<HTMLElement, RegisteredTableFilter>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
+  const onConvertRef = useRef(onConvertToTickets);
+  onConvertRef.current = onConvertToTickets;
 
   const syncFilters = useCallback(() => {
     const container = containerRef.current;
@@ -1020,7 +1073,12 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
 
       const reactRoot = createRoot(mount);
       reactRoot.render(
-        <CanvasTableFilterWidget blockContent={blockContent} table={table} wrapper={wrapper} />,
+        <CanvasTableFilterWidget
+          blockContent={blockContent}
+          table={table}
+          wrapper={wrapper}
+          onConvertToTickets={onConvertRef.current}
+        />,
       );
 
       registrationsRef.current.set(wrapper, {
@@ -1077,4 +1135,18 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
       registrationsRef.current.clear();
     };
   }, [containerRef, scheduleSyncFilters, syncFilters]);
+
+  useEffect(() => {
+    if (!onConvertToTickets) return;
+    for (const registration of registrationsRef.current.values()) {
+      registration.reactRoot.render(
+        <CanvasTableFilterWidget
+          blockContent={registration.blockContent}
+          table={registration.table}
+          wrapper={registration.wrapper}
+          onConvertToTickets={onConvertToTickets}
+        />,
+      );
+    }
+  }, [onConvertToTickets]);
 };

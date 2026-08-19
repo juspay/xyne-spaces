@@ -1309,6 +1309,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       channelId={channelId}
                       messageId={message.messageId}
                       conversationId={message.conversationId}
+                      existingParentTicket={
+                        conversation?.ticket_md
+                          ? (() => {
+                              const parsed = parseTicketMd(conversation.ticket_md);
+                              if (!parsed?.id) return null;
+                              const parent: { id: string; conversationId: string } = {
+                                id: parsed.id,
+                                conversationId: parsed.conversationId ?? message.conversationId,
+                              };
+                              if (parsed.xyneId) {
+                                (parent as { xyneId?: string }).xyneId = parsed.xyneId;
+                              }
+                              return parent;
+                            })()
+                          : null
+                      }
                     />
                   )}
                   {(parsedAppActions.appActions.length > 0 ||

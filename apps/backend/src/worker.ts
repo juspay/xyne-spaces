@@ -38,6 +38,7 @@ import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
+import { bulkTicketCreationWorker } from '@/workers/BulkTicketCreationWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
@@ -293,6 +294,9 @@ class WorkerService {
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
 
+      logger.info('Starting sub-ticket creation worker...');
+      await bulkTicketCreationWorker.start();
+
       if (appConfig.entityExtraction.enabled) {
         logger.info('Starting entity extraction worker...');
         await entityExtractionWorker.start();
@@ -469,6 +473,8 @@ class WorkerService {
       }
 
       await autoDraftWorker.shutdown();
+
+      await bulkTicketCreationWorker.shutdown();
 
       if (appConfig.enableTagGenerationPipeline) {
         await tagGenerationPipeline.close();

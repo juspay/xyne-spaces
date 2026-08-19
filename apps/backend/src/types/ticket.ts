@@ -1,4 +1,5 @@
 import { TicketStatusV2, TicketPriority } from '@xyne/shared';
+import { BulkTicketMode } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   /** Internal idempotency hook (used by FLOW materialization). */
@@ -133,4 +134,93 @@ export interface TicketBoardSuggestionRequest {
 export interface TicketBoardSuggestionResponse {
   candidates: TicketBoardCandidate[];
   analysis: TicketBoardAnalysis;
+}
+
+export interface BulkSubTicketInput {
+  title: string;
+  description?: string;
+  priority?: TicketPriority;
+  statusV2?: TicketStatusV2;
+  eta?: Date;
+  channelId: string;
+  boardId?: string;
+  assignedTo?: string;
+  userGroupId?: string;
+  tags?: string[];
+  ticketType?: string;
+  stageName?: string;
+  dynamicFields?: Record<string, string>;
+  merchantId?: string;
+  workflowType?: string;
+  clientRowId?: string;
+}
+
+export interface CreateBulkTicketRequest {
+  mode?: BulkTicketMode;
+  existingParentTicketId?: string;
+  sourceConversationId?: string;
+  sourceMessageId?: string;
+  parent?: {
+    title: string;
+    description: string;
+    projectId: string;
+    boardId: string;
+    channelId: string;
+    priority?: TicketPriority;
+    statusV2?: TicketStatusV2;
+    eta?: Date;
+    assignedTo?: string;
+    userGroupId?: string;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
+    dynamicFields?: Record<string, string>;
+    merchantId?: string;
+    workflowType?: string;
+    sourceConversationId?: string;
+    excludedChatAttachmentIds?: string[];
+    draftAttachmentIds?: string[];
+  };
+  subTickets?: BulkSubTicketInput[];
+  tickets?: BulkTicketInput[];
+  projectId?: string;
+  channelId?: string;
+  boardId?: string;
+}
+
+export interface BulkTicketCreationFailure {
+  clientRowId: string;
+  title: string;
+  error?: string;
+}
+
+export interface CreateBulkTicketResponse {
+  parentTicketId?: string;
+  parentXyneId?: string;
+  conversationId?: string;
+  enqueuedSubTickets: number;
+  failedSubTickets?: number;
+  failedTitles?: string[];
+  failures?: BulkTicketCreationFailure[];
+  createdTicketIds?: string[];
+}
+
+export interface BulkTicketInput {
+  title: string;
+  description?: string;
+  projectId?: string;
+  boardId?: string;
+  channelId?: string;
+  priority?: TicketPriority;
+  statusV2?: TicketStatusV2;
+  eta?: Date;
+  assignedTo?: string;
+  userGroupId?: string;
+  tags?: string[];
+  ticketType?: string;
+  stageName?: string;
+  dynamicFields?: Record<string, string>;
+  merchantId?: string;
+  workflowType?: string;
+  clientRowId?: string;
 }

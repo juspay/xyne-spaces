@@ -135,6 +135,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      onConvertToTickets,
     },
     ref,
   ) => {
@@ -378,7 +379,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-    useCanvasTableFilters(containerRef);
+    useCanvasTableFilters(containerRef, onConvertToTickets);
     const getCanvasCommentEditor = useCallback(
       () => (editor ? asBlockNoteEditorForView(editor) : null),
       [editor],

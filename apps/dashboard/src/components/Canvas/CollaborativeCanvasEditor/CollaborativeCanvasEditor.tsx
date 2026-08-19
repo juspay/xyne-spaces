@@ -115,6 +115,8 @@ interface CollaborativeCanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Called when user clicks "Convert to tickets" on a canvas table */
+  onConvertToTickets?: (titles: string[], descriptions: string[]) => void;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -141,6 +143,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      onConvertToTickets,
     },
     ref,
   ) => {
@@ -488,7 +491,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
 
-    useCanvasTableFilters(containerRef);
+    useCanvasTableFilters(containerRef, onConvertToTickets);
     const getCanvasCommentEditor = useCallback(
       () =>
         editor

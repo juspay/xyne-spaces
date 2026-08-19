@@ -169,6 +169,7 @@ import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
+import { bulkTicketCreationQueue } from '@/queues/BulkTicketCreationQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
 
@@ -848,6 +849,9 @@ export class App {
 
       logger.info('Initializing auto draft queue...');
       await autoDraftQueue.initialize();
+
+      logger.info('Initializing sub-ticket creation queue...');
+      await bulkTicketCreationQueue.initialize();
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -1043,6 +1047,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close sub-ticket creation queue
+      await bulkTicketCreationQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
