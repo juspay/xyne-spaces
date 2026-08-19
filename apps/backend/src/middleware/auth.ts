@@ -186,7 +186,7 @@ export class AuthMiddleware {
         isApiKeyUser: false,
         scopes: [],
         role: user.role,
-        orgRole: user.orgMember.role,
+        orgRole: user.orgRole,
         memberId: user.orgMemberId,
       };
 

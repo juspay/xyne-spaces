@@ -43,7 +43,7 @@ interface GoogleUserData {
 }
 
 export interface UserWithOrgRole extends User {
-  orgRole?: string;
+  orgRole: string;
 }
 
 export class UserService {
@@ -385,7 +385,8 @@ export class UserService {
         }
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -406,7 +407,8 @@ export class UserService {
         });
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -417,7 +419,8 @@ export class UserService {
       isNewUser = true;
 
       // Fetch org role for new user
-      const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+      const orgRole = await this.getOrgRole(user.orgMemberId);
+      if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
       // Note: ensureUserPresence is called in createUser(), so no need to call it here
 
