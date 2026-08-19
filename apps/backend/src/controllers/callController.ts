@@ -689,7 +689,10 @@ export class CallController {
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
       if (headlessNotesCanvasId) {
         try {
-          await db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } });
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessNotesCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } }),
+          ]);
         } catch (cleanupError) {
           logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
             canvasId: headlessNotesCanvasId,

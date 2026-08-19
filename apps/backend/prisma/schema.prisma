@@ -2437,7 +2437,7 @@ model ExternalSource {
   displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
   channelId       String?                   // Target workspace channel for messages
   externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
-  workspaceId     String?
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // Owner for user-scoped integrations (calendar, gmail search)
   credentials     String                    // Encrypted credentials (IV:ciphertext format)

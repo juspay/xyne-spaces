@@ -409,10 +409,15 @@ class CanvasAuthService {
             ...(folderId ? { folderId } : {}),
           },
         }),
-        db.canvasParticipant.create({
-          data: {
+        db.canvasParticipant.upsert({
+          where: { canvasId_userId: { canvasId, userId } },
+          create: {
             canvasId,
             userId,
+            workspaceId,
+            role: CanvasRole.OWNER,
+          },
+          update: {
             workspaceId,
             role: CanvasRole.OWNER,
           },

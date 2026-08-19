@@ -1,3 +1,45 @@
+## [1.187.1-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.6...v1.187.1-release-20260817.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* log whether a link opened in the in-app or external browser ([#706](https://github.com/juspay/xyne-spaces/issues/706)) ([bc35035](https://github.com/juspay/xyne-spaces/commit/bc350352c882d3e9301439d6a27349f3b9ad5aca))
+
+## [1.187.1-release-20260817.6](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.5...v1.187.1-release-20260817.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* dashboard url ([#701](https://github.com/juspay/xyne-spaces/issues/701)) ([1a88765](https://github.com/juspay/xyne-spaces/commit/1a8876589aecfff6b1448ea74b44eec5cb65bce3))
+
+## [1.187.1-release-20260817.5](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.4...v1.187.1-release-20260817.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* making workspaceId non nullable in external_sources table ([#687](https://github.com/juspay/xyne-spaces/issues/687)) ([f8f62b3](https://github.com/juspay/xyne-spaces/commit/f8f62b3b41b30a35cbc9050c8f7c20b9c95e8923))
+
+## [1.187.1-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.3...v1.187.1-release-20260817.4) (2026-08-18)
+
+
+### Bug Fixes
+
+* pass caller as rank-only terms for personalized message ranking ([#693](https://github.com/juspay/xyne-spaces/issues/693)) ([0001b60](https://github.com/juspay/xyne-spaces/commit/0001b601f0d64c62a5ee25be892c31c297964fe0))
+
+## [1.187.1-release-20260817.3](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.2...v1.187.1-release-20260817.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* build ([#668](https://github.com/juspay/xyne-spaces/issues/668)) ([d92a171](https://github.com/juspay/xyne-spaces/commit/d92a1712b3ffd44763d548185966d2b714b7ebc2))
+
+## [1.187.1-release-20260817.2](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.1...v1.187.1-release-20260817.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* optimize Y-Sweet routes and database cleanup logic ([#644](https://github.com/juspay/xyne-spaces/issues/644)) ([a90f855](https://github.com/juspay/xyne-spaces/commit/a90f85582f532fff34a8284395fd34e63b374b84))
+
 ## [1.187.1-release-20260817.1](https://github.com/juspay/xyne-spaces/compare/v1.187.0...v1.187.1-release-20260817.1) (2026-08-17)
 
 
