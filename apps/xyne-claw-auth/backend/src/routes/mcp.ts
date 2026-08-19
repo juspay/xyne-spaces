@@ -1141,6 +1141,74 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       writeTools: [],
     });
 
+    // ── Automation MCP swap ────────────────────────────────────────────────
+    // Anurag's directive: automation (app-user) runs must use the APP surface
+    // only. So for those runs we drop the user `xyne-spaces` MCP entirely and
+    // keep only `xyne-spaces-app-tools`, which now mounts the full Spaces
+    // registry in app mode (see xyne-spaces-app-tools-server.ts). This is a
+    // clean server swap — not a per-tool patch.
+    //
+    // `resolveMentions === true` is set ONLY by the automation webhook path
+    // (never by interactive or email auto-draft), so it is the reliable
+    // automation signal; `externalResultCallback` covers the external-callback
+    // automation variant. We additionally require that the app token actually
+    // resolves — if it does NOT, we do NOT swap (that would strip Spaces access
+    // and silently break the run); we keep xyne-spaces and log loudly instead.
+    {
+      const { getSession } = await import("./webhook.js");
+      const swapRunCtx = await getSession(req.params.sessionId).catch(() => null);
+      const isAutomationRun =
+        swapRunCtx?.resolveMentions === true || !!swapRunCtx?.externalResultCallback;
+      const appToolsPresent = data.some((s2) => s2.serverType === "xyne-spaces-app-tools");
+
+      if (isAutomationRun) {
+        const appCreds = await getAppTokenCredentials(userId);
+        if (appCreds && appToolsPresent) {
+          const before = data.length;
+          for (let i = data.length - 1; i >= 0; i--) {
+            if (data[i]!.serverType === "xyne-spaces") data.splice(i, 1);
+          }
+          log.info(
+            `[mcp/tools] automation swap: dropped xyne-spaces user MCP (${before - data.length} server group(s)); ` +
+            `xyne-spaces-app-tools now serves Spaces tools in app mode for userId=${userId}`,
+          );
+        } else {
+          log.warn(
+            `[mcp/tools] automation swap SKIPPED for userId=${userId}: ` +
+            `appCreds=${!!appCreds} appToolsPresent=${appToolsPresent}. ` +
+            "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
+            "If this is an automation run, the agent's app is likely not installed / app token missing.",
+          );
+        }
+      } else if (appToolsPresent) {
+        // ── Interactive de-dup ───────────────────────────────────────────────
+        // Interactive runs list BOTH servers. Now that app-tools mounts the full
+        // registry, its tool names would collide with xyne-spaces (the user
+        // server) and could route a user's call to the app/bot identity. Strip
+        // from app-tools every tool that xyne-spaces already provides, leaving
+        // only the app-only tools (ping, apps-send-message, …). Interactive
+        // behaviour is therefore unchanged.
+        const spacesServer = data.find((s2) => s2.serverType === "xyne-spaces");
+        const appToolsIdx = data.findIndex((s2) => s2.serverType === "xyne-spaces-app-tools");
+        if (spacesServer && appToolsIdx >= 0) {
+          const userToolNames = new Set(spacesServer.tools.map((t) => t.name));
+          const appTools = data[appToolsIdx]!;
+          const kept = appTools.tools.filter((t) => !userToolNames.has(t.name));
+          const removed = appTools.tools.length - kept.length;
+          // McpServerTools.tools/writeTools are readonly — replace the object.
+          data[appToolsIdx] = {
+            ...appTools,
+            tools: kept,
+            writeTools: appTools.writeTools.filter((n) => !userToolNames.has(n)),
+          };
+          log.info(
+            `[mcp/tools] interactive de-dup: removed ${removed} registry tool(s) from ` +
+            `xyne-spaces-app-tools (already provided by xyne-spaces) for userId=${userId}`,
+          );
+        }
+      }
+    }
+
     if (strictAgentToolsConfig && sessionAgentTools) {
       const entryTypes = new Map<string, EnforcementLogType>();
       for (const entry of entries) {

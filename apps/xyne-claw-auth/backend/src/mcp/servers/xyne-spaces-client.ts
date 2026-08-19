@@ -263,6 +263,35 @@ export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAu
   return response.json();
 }
 
+/**
+ * Binary download over the APP-token surface (`/api/apps/*`). The app twin of
+ * spacesFetchBuffer: authenticates with the agent's app token (Bearer) instead
+ * of a user session, so it works in headless/automation runs where there is no
+ * user JWT. Used by tools that must pull raw bytes (e.g. attachment download)
+ * through an app endpoint such as `/api/apps/files/download/:attachmentId`.
+ */
+export async function appFetchBuffer(
+  path: string,
+  auth?: SpacesAuthContext,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+  if (!baseUrl) throw new Error("Spaces base URL is not configured.");
+  if (!token) throw new Error("Spaces app token is missing for this request.");
+
+  const url = `${baseUrl}/api/apps${path}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 300)}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
+}
+
 export interface QueryAST {
   model: string;
   operation: "findMany" | "count";
