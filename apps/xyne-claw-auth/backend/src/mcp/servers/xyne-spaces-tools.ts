@@ -13,6 +13,7 @@ import {
   spacesFetchBuffer,
   spacesFetchText,
   appFetch,
+  appFetchBuffer,
 } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
@@ -5790,6 +5791,80 @@ const spacesThreadAttachments: ToolDef = {
   },
 };
 
+/**
+ * Shared render tail for spaces-fetch-attachment. Given resolved bytes (as a
+ * signed URL or base64 `data`) + metadata, ingest readable docs to markdown or
+ * return small raw files inline. Both the user-session `handler` and the
+ * app-token `appHandler` funnel through here so the two auth surfaces produce
+ * identical output — only the byte-fetch step differs.
+ */
+async function renderFetchedAttachment(params: {
+  source: AttachmentSource;
+  resolvedName: string;
+  resolvedMime: string;
+  declaredSize: number;
+  sourceLabel: string;
+  inlineBuffer?: Buffer | undefined;
+}): Promise<ToolResult> {
+  const { source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer } = params;
+      // Sanitise filename to keep it within .context/ — strip path separators
+      // and leading dots so the agent can't be tricked into reading outside.
+      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+
+      if (isReadableAttachment(safeName, resolvedMime)) {
+        try {
+          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
+          if (files.length === 0) {
+            return ok(
+              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
+              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
+            );
+          }
+          const rendered = files
+            .map((f) => `# ${f.path}\n\n${f.content}`)
+            .join("\n\n---\n\n");
+          return ok(
+            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
+            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
+          );
+        } catch (ingestErr) {
+          return err(
+            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
+            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
+          );
+        }
+      }
+
+      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+        return err(
+          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
+          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
+          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
+          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+        );
+      }
+
+      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
+      // already pulled for the /download fallback; otherwise fetch them from the
+      // signed URL now.
+      const buffer = inlineBuffer ?? (
+        "url" in source
+          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
+              .catch((downloadErr) => {
+                throw new Error(
+                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+                );
+              })
+          : Buffer.from(source.data, "base64")
+      );
+
+      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
+      // base64 and writes the buffer to .context/<fileName> in the workspace.
+      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
+}
+
 const spacesFetchAttachment: ToolDef = {
   name: "spaces-fetch-attachment",
   description:
@@ -5873,62 +5948,60 @@ const spacesFetchAttachment: ToolDef = {
         }
       }
 
-      // Sanitise filename to keep it within .context/ — strip path separators
-      // and leading dots so the agent can't be tricked into reading outside.
-      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+      return renderFetchedAttachment({ source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer });
+    } catch (e) {
+      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+  /**
+   * App-token download. Headless/automation runs (no user session) cannot use
+   * the user-only `/api/attachments/:id/{signed-url,download}` routes — they
+   * 401. This path pulls the bytes through the app surface
+   * `/api/apps/files/download/:attachmentId` (authenticateApp + files:read,
+   * workspace-scoped) using the agent's app token, then funnels through the
+   * SAME renderFetchedAttachment tail so output matches the user path exactly.
+   */
+  async appHandler(args) {
+    try {
+      const attachmentId = String(args["attachmentId"] ?? "");
+      if (!attachmentId) return err("attachmentId is required");
 
-      if (isReadableAttachment(safeName, resolvedMime)) {
-        try {
-          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
-          if (files.length === 0) {
-            return ok(
-              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
-              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
-            );
-          }
-          const rendered = files
-            .map((f) => `# ${f.path}\n\n${f.content}`)
-            .join("\n\n---\n\n");
-          return ok(
-            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
-            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
-          );
-        } catch (ingestErr) {
-          return err(
-            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
-            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
-          );
-        }
+      // Metadata via /api/query/claw (dual-auth — accepts the app token).
+      const meta = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
+        take: 1,
+      })) as MessageAttachmentRow[];
+      if (!meta || meta.length === 0) {
+        return err(`Attachment ${attachmentId} not found or deleted`);
       }
+      const m = meta[0]!;
 
-      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+      let dl: { buffer: Buffer; contentType: string };
+      try {
+        dl = await appFetchBuffer(`/files/download/${encodeURIComponent(attachmentId)}`);
+      } catch (e) {
+        // The app download route runs the real workspace/ACL check, so a
+        // failure here is the honest signal — the file is gone, or the agent's
+        // installed app is missing the `files:read` scope (403). Surface that
+        // plainly rather than masquerading as a storage outage.
         return err(
-          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
-          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
-          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
-          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+          `Could not fetch attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(m.size)}) ` +
+          `via the app download route: ${e instanceof Error ? e.message : String(e)}. ` +
+          "If this is a 403, grant the agent's app the `files:read` scope; if 404, the file was deleted.",
         );
       }
 
-      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
-      // already pulled for the /download fallback; otherwise fetch them from the
-      // signed URL now.
-      const buffer = inlineBuffer ?? (
-        "url" in source
-          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
-              .catch((downloadErr) => {
-                throw new Error(
-                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-                );
-              })
-          : Buffer.from(source.data, "base64")
-      );
-
-      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
-      // base64 and writes the buffer to .context/<fileName> in the workspace.
-      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
+      const resolvedMime = m.mimetype || dl.contentType || "application/octet-stream";
+      return renderFetchedAttachment({
+        source: { data: dl.buffer.toString("base64") },
+        resolvedName: m.originalFilename,
+        resolvedMime,
+        declaredSize: dl.buffer.length,
+        sourceLabel: "an app-token direct download",
+        inlineBuffer: dl.buffer,
+      });
     } catch (e) {
       return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
     }
