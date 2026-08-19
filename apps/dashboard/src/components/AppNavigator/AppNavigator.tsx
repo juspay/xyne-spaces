@@ -5,6 +5,7 @@ import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import { toast } from 'sonner';
+import { buildShareableUrl } from '../../utils/shareableUrl';
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
@@ -24,7 +25,7 @@ const AppNavigator = (): ReactElement => {
   const handleShareWorkspace = async (): Promise<void> => {
     if (!workspaceId) return;
 
-    const shareUrl = `${window.location.origin}/auth?workspaceId=${encodeURIComponent(workspaceId)}`;
+    const shareUrl = buildShareableUrl(`/auth?workspaceId=${encodeURIComponent(workspaceId)}`);
 
     try {
       await navigator.clipboard.writeText(shareUrl);

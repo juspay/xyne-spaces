@@ -79,6 +79,7 @@ import { AnimatePresence } from 'framer-motion';
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
+import { buildShareableUrl } from '../../../utils/shareableUrl';
 
 const canvasDictionary = {
   ...en,
@@ -317,7 +318,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         const path = params.blockId
           ? `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}&blockId=${encodeURIComponent(params.blockId)}`
           : `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}`;
-        const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
+        const slackUrl = buildShareableUrl(`/launch?path=${encodeURIComponent(path)}`);
         apiInstance
           .post(`/canvas/${canvasId}/mentions`, {
             mentionType: params.type,

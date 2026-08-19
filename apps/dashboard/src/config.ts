@@ -85,3 +85,28 @@ export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
 // Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
 export const DEFAULT_WORKSPACE_ID: string =
   (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';
+
+// ---------------------------------------------------------------------------
+// Canonical base URL for user-shareable / deep links (copy-link, invites,
+// canvas/ticket/message links, etc.).
+//
+// This is the SINGLE source of truth for the public origin of shareable URLs.
+// Do NOT read window.location.origin at individual call sites — use
+// `useShareableOrigin()` (adds the workspace segment) or `buildShareableUrl()`
+// from `utils/shareableUrl.ts`.
+//
+// Resolution order:
+//   1. VITE_SHAREABLE_BASE_URL env override (any environment can pin its own).
+//   2. Per-environment fallback: prod → canonical domain, sandbox → sandbox
+//      domain, everything else (local/test) → the current window origin.
+// Never includes a trailing slash or a workspace segment.
+const SHAREABLE_BASE_URL_ENV = (
+  import.meta.env['VITE_SHAREABLE_BASE_URL'] as string | undefined
+)?.trim();
+
+export const SHAREABLE_BASE_URL: string = (() => {
+  if (SHAREABLE_BASE_URL_ENV) return SHAREABLE_BASE_URL_ENV.replace(/\/+$/, '');
+  if (isProd) return 'https://spaces.xyne.juspay.net';
+  if (isSandBox) return 'https://spaces.sandbox.xyne.juspay.net';
+  return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+})();

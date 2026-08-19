@@ -25,6 +25,7 @@ import { formatRelativeCommentTime } from '../canvasCommentTime';
 import type { CanvasCommentAnchor } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import { OverlayZIndexContext } from '../../../contexts/OverlayZIndexContext';
 import type { CanvasCommentHighlightThread } from '../useCanvasCommentHighlights';
+import { buildShareableUrl } from '../../../utils/shareableUrl';
 
 type UserLite = {
   id: string;
@@ -322,7 +323,7 @@ export function CanvasInlineCommentThread({
     if (!blockId || !commentThreadId) return;
 
     const path = `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}&blockId=${encodeURIComponent(blockId)}&commentThreadId=${encodeURIComponent(commentThreadId)}`;
-    const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
+    const slackUrl = buildShareableUrl(`/launch?path=${encodeURIComponent(path)}`);
 
     uniqueMentionedUserIds.forEach(mentionId => {
       apiInstance

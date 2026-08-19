@@ -25,6 +25,7 @@ import { formatElapsedTime } from '../../utils/recordingUtils';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { WorkspaceJoinPolicy } from '@xyne/shared';
+import { buildShareableUrl } from '../../utils/shareableUrl';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -276,7 +277,7 @@ const WorkspaceInviteButton = (): ReactElement | null => {
   }
 
   const handleCopyInviteLink = async (): Promise<void> => {
-    const inviteUrl = `${window.location.origin}/community/join?workspaceId=${encodeURIComponent(workspaceId)}`;
+    const inviteUrl = buildShareableUrl(`/community/join?workspaceId=${encodeURIComponent(workspaceId)}`);
 
     try {
       await navigator.clipboard.writeText(inviteUrl);

@@ -102,6 +102,7 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
+import { buildShareableUrl } from '../../../utils/shareableUrl';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -883,7 +884,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       const path = params.blockId
         ? `redirected?type=canvas&canvasId=${encodeURIComponent(canvas.id)}&blockId=${encodeURIComponent(params.blockId)}`
         : `redirected?type=canvas&canvasId=${encodeURIComponent(canvas.id)}`;
-      const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
+      const slackUrl = buildShareableUrl(`/launch?path=${encodeURIComponent(path)}`);
       apiInstance
         .post(`/canvas/${canvas.id}/mentions`, {
           mentionType: params.type,

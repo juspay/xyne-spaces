@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
+import { getFrontendUrl } from '@/utils/publicUrls';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -302,7 +303,8 @@ export async function createKnowledgeCanvas(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  // Config-driven canonical base (env FRONTEND_URL) — single source of truth.
+  const frontendUrl = getFrontendUrl();
   const path = workspaceId
     ? `/${workspaceId}/chat/canvas/${canvasId}`
     : `/chat/canvas/${canvasId}`;
