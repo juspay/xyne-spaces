@@ -74,9 +74,6 @@ function addBusinessHours(start: Date, hours: number, policy: SlaPolicy): Date {
   // Misconfigured policy — workdayEnd must be strictly greater than workdayStart.
   // Returning a calendar-hours fallback is safer than an infinite loop or garbage.
   if (workdayEnd <= workdayStart) {
-    console.warn(
-      `[slaCalculator] Invalid workday window: workdayStart=${workdayStart} workdayEnd=${workdayEnd}. Falling back to calendar hours.`,
-    );
     return new Date(start.getTime() + hours * 60 * 60 * 1000);
   }
 

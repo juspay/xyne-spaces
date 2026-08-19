@@ -48,6 +48,21 @@ export function filterStarredCanvases(canvases: Canvas[], showStarredOnly: boole
   return canvases.filter(canvas => canvas.isStarred);
 }
 
+export function filterArchivedCanvases(
+  canvases: Canvas[],
+  options: { includeArchived?: boolean; onlyArchived?: boolean },
+): Canvas[] {
+  if (options.onlyArchived) {
+    return canvases.filter(canvas => canvas.isArchived);
+  }
+
+  if (options.includeArchived) {
+    return canvases;
+  }
+
+  return canvases.filter(canvas => !canvas.isArchived);
+}
+
 export function withStarredCanvasState(canvases: Canvas[]): Canvas[] {
   return canvases.map(canvas => ({
     ...canvas,

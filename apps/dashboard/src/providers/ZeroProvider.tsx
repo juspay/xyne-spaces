@@ -25,11 +25,9 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const [zero, setZero] = useState<Zero | null>(null);
 
   useEffect(() => {
-    console.log('ZeroProvider useEffect triggered', { user, encryptionReady, refreshCount });
     if (!user || !encryptionReady) {
       return;
     }
-    console.log('Initializing Zero with user', { id: user.id, workspaceId: user.workspaceId });
 
     const authFunction = undefined;
 

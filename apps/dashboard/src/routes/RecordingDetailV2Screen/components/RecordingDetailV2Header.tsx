@@ -301,7 +301,7 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          {recording.detailedSummaryCanvasId && (
+          {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
               canEdit={isOwner}
@@ -314,7 +314,7 @@ export const RecordingDetailV2Header = ({
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          {isOwner && recording.detailedSummaryCanvasId && (
+          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
             <>
               <RecordingSharedWithAvatars
                 recordingExternalId={recording.externalId}
@@ -354,7 +354,7 @@ export const RecordingDetailV2Header = ({
           )}
         </div>
 
-        {isOwner && showShareModal && recording.detailedSummaryCanvasId && (
+        {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
           <Dialog
             open={showShareModal}
             onOpenChange={open => !open && setShowShareModal(false)}

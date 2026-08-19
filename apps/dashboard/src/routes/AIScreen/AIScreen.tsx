@@ -225,7 +225,6 @@ const AIScreen = (): ReactElement => {
         mobileOpen={mobileSidebarOpen}
         onMobileOpenChange={setMobileSidebarOpen}
         mainRef={dropZoneRef}
-        mainClassName='ai-page-bg'
       >
         {isDragging && !showChatView && (
           <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>

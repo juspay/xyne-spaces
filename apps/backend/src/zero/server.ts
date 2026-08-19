@@ -544,7 +544,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
       queries: Array<{ name: string; args?: any }>;  
     };
 
-    console.log(`ZQL-to-SQL executing ${queryRequests.length} queries`);
+    logger.info(`ZQL-to-SQL executing ${queryRequests.length} queries`);
 
     const serverSchema = await fetchServerSchema();
     const prisma = DatabaseClient.getInstance();
@@ -562,7 +562,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           // @ts-ignore - asQueryInternals works with any Query type at runtime
           const { ast, format } = asQueryInternals(query);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
 
           // Use z2s to compile ZQL → SQL
           const compiledOutput = compile(serverSchema, schema, ast, format);
@@ -570,7 +570,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             compiledOutput
           );
 
-          console.log(`Executing SQL via Prisma:`, sqlQuery.text);
+          logger.info(`Executing SQL via Prisma:`, sqlQuery.text);
 
           // Execute via Prisma
           const pgResult = await prisma.$queryRawUnsafe(
@@ -590,17 +590,17 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           // Extract ZQL result from JSON-wrapped response
           const data = extractZqlResult(pgArrayResult);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
-          console.log('Full SQL query:', sqlQuery.text);
-          console.log('SQL length:', sqlQuery.text.length);
-          console.log('Values:', sqlQuery.values);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
+          logger.info('Full SQL query:', sqlQuery.text);
+          logger.info('SQL length:', sqlQuery.text.length);
+          logger.info('Values:', sqlQuery.values);
 
           return {
             name: req.name,
             data,
           };
         } catch (error) {
-          console.error(`ZQL-to-SQL query ${req.name} failed:`, error);
+          logger.error(`ZQL-to-SQL query ${req.name} failed`, error);
           throw error;
         }
       })
@@ -608,7 +608,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
 
     return { results };
   } catch (error) {
-    console.error('ZQL-to-SQL request failed:', error);
+    logger.error('ZQL-to-SQL request failed', error);
     throw error;
   }
 }
@@ -630,7 +630,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
       args: any;
     };
 
-    console.log(`Fallback executing mutation: ${mutation.name}`);
+    logger.info(`Fallback executing mutation: ${mutation.name}`);
 
     await dbProvider.transaction(async (tx) => {
       const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
@@ -678,8 +678,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
               },
             });
           } catch (dbError) {
-            console.error(`Failed to log insertion error to database:
-              ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+            logger.error('Failed to log insertion error to database', dbError);
           }
         }
       })
@@ -701,7 +700,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     );
     return { success: true };
   } catch (error) {
-    console.error('Fallback mutate request failed:', error);
+    logger.error('Fallback mutate request failed', error);
     return {
       success: false,
       error: "app",

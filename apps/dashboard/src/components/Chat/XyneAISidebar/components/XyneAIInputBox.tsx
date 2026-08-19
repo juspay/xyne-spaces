@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import React, { type ReactElement } from 'react';
 import {
   useState,
@@ -638,7 +639,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
         // Validate context data for security
         if (!context || typeof context !== 'object') {
-          console.warn('[XyneAI] Invalid browser context received');
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('[XyneAI] Invalid browser context received'),
+          });
           return;
         }
 
@@ -651,7 +655,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         const sanitizedTitle = String(context.title || '').slice(0, 500);
 
         if (!sanitizedText || !sanitizedUrl) {
-          console.warn('[XyneAI] Browser context missing required fields');
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('[XyneAI] Browser context missing required fields'),
+          });
           return;
         }
 
@@ -669,7 +676,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         try {
           sessionStorage.removeItem('xyne-ai-browser-context');
         } catch (error) {
-          console.error('[XyneAI] Failed to clear browser context from storage:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[XyneAI] Failed to clear browser context from storage:'),
+            error: error,
+          });
         }
 
         // Don't auto-populate - let user type their own question
@@ -692,7 +703,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           );
         }
       } catch (error) {
-        console.error('[XyneAI] Failed to parse browser context from storage:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAI] Failed to parse browser context from storage:'),
+          error: error,
+        });
       }
 
       return () => {
@@ -1265,9 +1280,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
               // Validate that detected MIME type matches file.type
               if (detectedMimeType !== file.type) {
-                console.warn(
-                  `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
-                );
+                logger.warn(LogEvent.FRONTEND_ERROR, {
+                  type: 'migrated_console_warn',
+                  message: String(
+                    `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
+                  ),
+                });
               }
 
               // Validate base64 format
@@ -1395,9 +1413,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
                 // Validate that detected MIME type matches file.type
                 if (detectedMimeType !== file.type) {
-                  console.warn(
-                    `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
-                  );
+                  logger.warn(LogEvent.FRONTEND_ERROR, {
+                    type: 'migrated_console_warn',
+                    message: String(
+                      `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
+                    ),
+                  });
                 }
 
                 // Validate base64 format

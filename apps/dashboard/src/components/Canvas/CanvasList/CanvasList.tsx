@@ -6,6 +6,8 @@ import {
   Copy,
   Search,
   MoreVertical,
+  Archive,
+  ArchiveRestore,
   Globe,
   Lock,
   Star,
@@ -54,6 +56,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
 import { toast } from 'sonner';
 import {
+  filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
   filterStarredCanvases,
   isExcludedCallGeneratedCanvas,
@@ -590,9 +593,20 @@ const CanvasPageSubscription: React.FC<{
   pageSize: number;
   channelId?: string | undefined;
   searchQuery?: string | undefined;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   onPageComplete: (page: Canvas[], previousPageIds: Set<string>, pageSize: number) => void;
   onLoadingChange: (isLoading: boolean) => void;
-}> = ({ cursor, pageSize, channelId, searchQuery, onPageComplete, onLoadingChange }) => {
+}> = ({
+  cursor,
+  pageSize,
+  channelId,
+  searchQuery,
+  includeArchived,
+  onlyArchived,
+  onPageComplete,
+  onLoadingChange,
+}) => {
   const previousPageIdsRef = useRef<Set<string>>(new Set());
 
   const query = useMemo(() => {
@@ -602,6 +616,8 @@ const CanvasPageSubscription: React.FC<{
         channelId,
         limit: pageSize,
         start: cursor,
+        includeArchived,
+        onlyArchived,
         ...(trimmedSearchQuery ? { searchQuery: trimmedSearchQuery } : {}),
       });
     }
@@ -609,9 +625,11 @@ const CanvasPageSubscription: React.FC<{
     return queries.userCanvasesPaginated({
       limit: pageSize,
       start: cursor,
+      includeArchived,
+      onlyArchived,
       ...(trimmedSearchQuery ? { searchQuery: trimmedSearchQuery } : {}),
     });
-  }, [channelId, cursor, pageSize, searchQuery]);
+  }, [channelId, cursor, includeArchived, onlyArchived, pageSize, searchQuery]);
 
   const [page, pageDetails] = useCachedQuery(query as never, { cursorEnabled: true });
   const isLoading = pageDetails.type !== 'complete';
@@ -644,6 +662,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onlyCallGeneratedCanvases: boolean;
   excludeCallGeneratedCanvases: boolean;
   showStarredOnly: boolean;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   onToggleFolder: (folderId: string) => void;
   onVisibleCanvasCountChange: (folderId: string, count: number | null) => void;
   renderCanvasItem: (canvas: Canvas) => React.ReactNode;
@@ -660,6 +680,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onlyCallGeneratedCanvases,
   excludeCallGeneratedCanvases,
   showStarredOnly,
+  includeArchived,
+  onlyArchived,
   onToggleFolder,
   onVisibleCanvasCountChange,
   renderCanvasItem,
@@ -668,6 +690,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
     queries.hierarchyCanvases({
       scope: 'folder',
       folderId: folder.id,
+      includeArchived,
+      onlyArchived,
     }),
     { enabled: true },
   );
@@ -675,10 +699,14 @@ const ChannelScopeFolderGroupSection: React.FC<{
     () => withStarredCanvasState(toCanvasArray<Canvas>(folderCanvasesResult)),
     [folderCanvasesResult],
   );
+  const archiveFilteredFolderCanvases = useMemo(
+    () => filterArchivedCanvases(folderCanvases, { includeArchived, onlyArchived }),
+    [folderCanvases, includeArchived, onlyArchived],
+  );
   const folderFilteredCanvases = useMemo(
     () =>
       getFilteredCanvasItems({
-        canvases: folderCanvases,
+        canvases: archiveFilteredFolderCanvases,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
         showStarredOnly,
@@ -693,9 +721,9 @@ const ChannelScopeFolderGroupSection: React.FC<{
       }),
     [
       activeFilter,
+      archiveFilteredFolderCanvases,
       currentUserId,
       excludeCallGeneratedCanvases,
-      folderCanvases,
       onlyCallGeneratedCanvases,
       searchQuery,
       searchScope,
@@ -773,6 +801,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   onSelect,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   currentUserId,
   activeFilter: externalActiveFilter,
   onFilterChange,
@@ -782,6 +811,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   excludeCallGeneratedCanvases = true,
   onlyCallGeneratedCanvases = false,
   showStarredOnly = false,
+  includeArchived = false,
+  onlyArchived = false,
   onToggleStar,
 }) => {
   const navigate = useNavigate();
@@ -885,9 +916,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       ? queries.hierarchyCanvases({
           scope: 'channel_root',
           channelId: effectiveSelectedScopeChannelId,
+          includeArchived,
+          onlyArchived,
         })
       : queries.hierarchyCanvases({
           scope: 'personal_root',
+          includeArchived,
+          onlyArchived,
         }),
     { enabled: isSpecificChannelScope },
   );
@@ -915,7 +950,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     () => mergeCanvasItems(canvasItems, channelCanvasItems),
     [canvasItems, channelCanvasItems],
   );
-  const itemsWithStarState = useMemo(() => withStarredCanvasState(rawItems), [rawItems]);
+  const archiveFilteredRawItems = useMemo(
+    () => filterArchivedCanvases(rawItems, { includeArchived, onlyArchived }),
+    [includeArchived, onlyArchived, rawItems],
+  );
+  const itemsWithStarState = useMemo(
+    () => withStarredCanvasState(archiveFilteredRawItems),
+    [archiveFilteredRawItems],
+  );
   const nextCursor = useMemo(() => getCanvasCursorFromLastItem(canvasItems), [canvasItems]);
   const isChannelSourceLoading = useMemo(
     () =>
@@ -946,6 +988,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     activeFilter,
     channelId,
     excludeCallGeneratedCanvases,
+    includeArchived,
+    onlyArchived,
     onlyCallGeneratedCanvases,
     paginated,
     debouncedSearchQuery,
@@ -1139,6 +1183,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
+    onlyArchived ||
     showStarredOnly ||
     activeFilter !== 'all' ||
     effectiveSearchScope !== 'all' ||
@@ -1152,7 +1197,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     trimmedSearchQuery || 'no-search'
   }:${onlyCallGeneratedCanvases ? 'only-call' : 'mixed-call'}:${
     excludeCallGeneratedCanvases ? 'exclude-call' : 'include-call'
-  }:${showStarredOnly ? 'starred' : 'all-stars'}`;
+  }:${onlyArchived ? 'only-archived' : includeArchived ? 'with-archived' : 'without-archived'}:${
+    showStarredOnly ? 'starred' : 'all-stars'
+  }`;
   const shouldAutoPaginate =
     !hasPrimaryCanvasFilters ||
     filteredCanvases.length >= CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
@@ -1193,7 +1240,12 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const selectedChannelRootCanvases = useMemo(
     () =>
       getFilteredCanvasItems({
-        canvases: withStarredCanvasState(toCanvasArray<Canvas>(selectedChannelRootCanvasesResult)),
+        canvases: withStarredCanvasState(
+          filterArchivedCanvases(toCanvasArray<Canvas>(selectedChannelRootCanvasesResult), {
+            includeArchived,
+            onlyArchived,
+          }),
+        ),
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
         showStarredOnly,
@@ -1211,6 +1263,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
+      includeArchived,
+      onlyArchived,
       onlyCallGeneratedCanvases,
       debouncedSearchQuery,
       selectedChannelRootCanvasesResult,
@@ -1228,6 +1282,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     effectiveSearchScope,
     effectiveSelectedScopeChannelId,
     excludeCallGeneratedCanvases,
+    includeArchived,
+    onlyArchived,
     onlyCallGeneratedCanvases,
     debouncedSearchQuery,
     selectedLabel,
@@ -1496,6 +1552,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         : userNameById.get(editorUserId) || (editorUserId ? 'Unknown' : 'someone');
     const labels = getCanvasLabels(canvas);
     const isBotGeneratedCanvas = isExcludedCallGeneratedCanvas(canvas);
+    const isCanvasCreator = canvas.createdBy === currentUserId;
     const menuItems: CanvasCardMenuItem[] = [
       ...(onToggleStar
         ? [
@@ -1545,7 +1602,27 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           source: 'card_context_menu',
         },
       },
-      ...(onDelete
+      ...(onArchiveToggle && isCanvasCreator
+        ? [
+            {
+              key: canvas.isArchived ? 'unarchive' : 'archive',
+              label: canvas.isArchived ? 'Unarchive' : 'Archive',
+              icon: canvas.isArchived ? (
+                <ArchiveRestore className='size-3.5' strokeWidth={2.1} />
+              ) : (
+                <Archive className='size-3.5' strokeWidth={2.1} />
+              ),
+              onSelect: () => onArchiveToggle(canvas),
+              separatorBefore: true,
+              trackName: canvas.isArchived ? 'UNARCHIVE_CANVAS' : 'ARCHIVE_CANVAS',
+              trackMetadata: {
+                canvasId: canvas.id,
+                source: 'card_context_menu',
+              },
+            },
+          ]
+        : []),
+      ...(onDelete && isCanvasCreator
         ? [
             {
               key: 'delete',
@@ -1553,7 +1630,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               icon: <Trash2 className='size-3.5' strokeWidth={2.1} />,
               onSelect: () => setDeletingCanvasId(canvas.id),
               variant: 'destructive' as const,
-              separatorBefore: true,
+              separatorBefore: !onArchiveToggle,
               testId: 'canvas-delete-button',
               trackName: 'DELETE_CANVAS',
               trackMetadata: {
@@ -1661,6 +1738,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             </Tooltip>
             {canvas.visibility !== CanvasVisibility.PUBLIC && (
               <Lock className='size-3 shrink-0 text-sidebar-foreground/40' strokeWidth={2.1} />
+            )}
+            {canvas.isArchived && (
+              <span className='inline-flex h-4 shrink-0 items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium leading-none text-amber-700'>
+                Archived
+              </span>
             )}
           </div>
 
@@ -1778,6 +1860,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
                 excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
                 showStarredOnly={showStarredOnly}
+                includeArchived={includeArchived}
+                onlyArchived={onlyArchived}
                 onToggleFolder={toggleChannelFolder}
                 onVisibleCanvasCountChange={handleChannelFolderVisibleCanvasCountChange}
                 renderCanvasItem={renderCanvasItem}
@@ -1806,6 +1890,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           pageSize={canvasPageSize}
           channelId={channelId}
           searchQuery={trimmedSearchQuery}
+          includeArchived={includeArchived}
+          onlyArchived={onlyArchived}
           onPageComplete={handlePageComplete}
           onLoadingChange={handlePageLoadingChange}
         />
@@ -1823,6 +1909,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               pageSize={CANVAS_FILTERED_PAGE_SIZE}
               channelId={sourceChannelId}
               searchQuery={trimmedSearchQuery}
+              includeArchived={includeArchived}
+              onlyArchived={onlyArchived}
               onPageComplete={(page, previousPageIds, pageSize) =>
                 handleChannelPageComplete(sourceChannelId, page, previousPageIds, pageSize)
               }

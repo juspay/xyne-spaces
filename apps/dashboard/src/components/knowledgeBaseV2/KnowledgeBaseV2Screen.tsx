@@ -715,7 +715,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   return (
     <div
-      className='flex h-full flex-col ai-page-bg'
+      className='flex h-full flex-col bg-background'
       onDragOver={e => {
         e.preventDefault();
         if (collectionId) {
@@ -729,7 +729,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       }}
       onDrop={onDrop}
     >
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border ai-page-bg px-5 py-2.5'>
+      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-5 py-2.5'>
         <div className='flex min-w-0 flex-1 items-center gap-2'>
           <button
             type='button'

@@ -417,6 +417,18 @@ export class HindsightProvider implements MemoryProvider {
     });
     if (!res.ok && res.status !== 404) {
       const txt = await res.text().catch(() => "");
+      // Observations are derived from world/experience facts and Hindsight
+      // deliberately refuses direct curation. Give callers a stable marker so
+      // they can return an actionable response instead of an opaque 500.
+      if (
+        res.status === 400 &&
+        (/\bis an observation\b/i.test(txt) || /only world\/experience facts can be curated/i.test(txt))
+      ) {
+        throw new Error(
+          "HINDSIGHT_DERIVED_OBSERVATION: derived observations cannot be deleted directly; " +
+            "invalidate their supporting world/experience facts instead",
+        );
+      }
       // 405 = this Hindsight deployment predates reversible curation (the PATCH
       // /memories/{id} invalidate endpoint, added upstream 2026-06-10 / PR #1976).
       // There is NO other per-memory delete/invalidate endpoint, so this can only
@@ -435,32 +447,28 @@ export class HindsightProvider implements MemoryProvider {
   }
 
   /**
-   * Hard-delete every memory in the bank carrying `tag`. Hindsight's list
-   * endpoint can't filter by tag, so we page the RAW list here (where we can
-   * see `items.length` vs the page size to know when to stop — something the
-   * listMemories abstraction can't expose), collect matching ids, then DELETE
-   * each. Best-effort per id; returns the count actually deleted.
+   * Soft-retire every raw world/experience memory carrying `tag`. Derived
+   * observations are reconciled asynchronously by Hindsight. Its list endpoint
+   * cannot filter by tag, so the shared sweep filters locally.
    */
   async deleteByTag(bankId: string, tag: string): Promise<number> {
     return this.sweepDelete(bankId, tag);
   }
 
   /**
-   * Hard-delete EVERY memory in the bank ("clear all memories" reset). The
-   * bank row and its config overrides survive — only memories go. Callers own
-   * the authorization; pair with a re-seed (backfill) when the user wants a
-   * fresh start rather than an empty brain.
+   * Soft-retire every raw world/experience memory in the bank. The bank row
+   * and its config overrides survive; derived observations are reconciled
+   * asynchronously by Hindsight. Callers own the authorization.
    */
   async clearAll(bankId: string): Promise<number> {
     return this.sweepDelete(bankId);
   }
 
   /**
-   * Shared sweep: page the RAW list (where `items.length` vs page size tells
-   * us when to stop — the listMemories abstraction can't expose that), collect
-   * ids (optionally only those carrying `tag` — Hindsight's list endpoint
-   * can't filter by tag server-side), then DELETE each. Best-effort per id;
-   * returns the count actually deleted.
+   * Shared sweep: page the RAW list, collect raw fact ids (optionally only
+   * those carrying `tag`), then invalidate each. Observations are deliberately
+   * skipped because Hindsight rebuilds them from the remaining valid sources.
+   * Best-effort per id; returns the count actually retired.
    */
   private async sweepDelete(bankId: string, tag?: string): Promise<number> {
     if (!this.enabled) return 0;
@@ -480,6 +488,11 @@ export class HindsightProvider implements MemoryProvider {
       for (const it of items) {
         const tags = (it["tags"] as string[] | undefined) ?? [];
         const id = String(it["id"] ?? "");
+        const factType = String(it["fact_type"] ?? it["type"] ?? "").toLowerCase();
+        // Observations cannot be invalidated directly. Invalidating the raw
+        // world/experience sources below makes Hindsight recompute (or remove)
+        // their derived observations asynchronously.
+        if (factType === "observation") continue;
         if (id && (!tag || tags.includes(tag))) ids.push(id);
       }
       if (items.length < PAGE) break; // last page

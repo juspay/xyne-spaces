@@ -5797,7 +5797,7 @@ export function createMutators(
                     }
                   }
                 } catch (error) {
-                  console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
+                  logger.error('Failed to retrigger autoassignment for board change', error);
                 }
               });
             }

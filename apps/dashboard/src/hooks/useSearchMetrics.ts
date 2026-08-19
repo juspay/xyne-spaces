@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
 import Fuse from 'fuse.js';
 import { searchMetricsService } from '../services/searchMetricsService';
@@ -178,13 +179,34 @@ export const CMDK_USER_LIMIT = 25;
  * 1:1 DM list (0 = most recent). Users not in the map fall through to the
  * incoming alphabetical order from `searchUsers`.
  */
-export function rankUsers<T extends { id: string; name: string; status?: string | null }>(
-  users: T[],
-  query: string,
-  dmContactRecency: Map<string, number>,
-): T[] {
+export function rankUsers<
+  T extends {
+    id: string;
+    name: string;
+    status?: string | null;
+    displayName?: string | null;
+    email?: string;
+  },
+>(users: T[], query: string, dmContactRecency: Map<string, number>): T[] {
   const q = query.toLowerCase().trim();
-  const isPrefixMatch = (name: string): boolean => !!q && name.toLowerCase().startsWith(q);
+
+  // Relevance tier per user (the outer sort key), mirroring searchUsers' cascade:
+  // 0 prefix, 1 substring, 2 email, 3 fuzzy-only. Empty query → all tier 0.
+  const matchBucket = (u: T): number => {
+    if (!q) return 0;
+    const name = u.name.toLowerCase();
+    const display = (u.displayName || u.name).toLowerCase();
+    if (display.startsWith(q) || name.startsWith(q)) return 0;
+    if (display.includes(q) || name.includes(q)) return 1;
+    if (u.email?.toLowerCase().includes(q)) return 2;
+    return 3;
+  };
+  const relevanceBucket = new Map(users.map(u => [u.id, matchBucket(u)] as const));
+
+  // MFU (most-frequently-used) weight per user from the personalization pipeline,
+  // read once up front since the comparator runs O(n log n) times. 0 when
+  // personalization is off or unsynced, which makes the MFU tier below a no-op.
+  const mfuWeight = new Map(users.map(u => [u.id, affinityService.getUserWeight(u.id)] as const));
 
   // Stable sort (ES2019+) preserves the incoming `searchUsers` order
   // (alphabetical for non-DM users) when all keys tie.
@@ -197,21 +219,95 @@ export function rankUsers<T extends { id: string; name: string; status?: string 
     const bDeactivated = isUserDeactivated(b);
     if (aDeactivated !== bDeactivated) return aDeactivated ? 1 : -1;
 
-    // 2. name-prefix matches (the relevance signal) within each activation group
-    const aPrefix = isPrefixMatch(a.name);
-    const bPrefix = isPrefixMatch(b.name);
-    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+    // 2. relevance tier (outer key): prefix (0) < suffix (1) < email (2) < fuzzy (3).
+    //    MFU + DM tiers below only reorder WITHIN a tier, never across it.
+    const aBucket = relevanceBucket.get(a.id) ?? 3;
+    const bBucket = relevanceBucket.get(b.id) ?? 3;
+    if (aBucket !== bBucket) return aBucket - bBucket;
 
-    // 3. DM contacts before non-contacts
+    // 3. higher MFU weight first — the primary personalization signal. Sits above
+    //    the DM tiers so a frequently-used person outranks a stale DM contact;
+    //    weight 0 (no MFU data) falls through to DM recency, preserving DM order
+    //    for un-weighted users.
+    const aMfu = mfuWeight.get(a.id) ?? 0;
+    const bMfu = mfuWeight.get(b.id) ?? 0;
+    if (aMfu !== bMfu) return bMfu - aMfu;
+
+    // 4. DM contacts before non-contacts
     const aDM = dmContactRecency.has(a.id);
     const bDM = dmContactRecency.has(b.id);
     if (aDM !== bDM) return aDM ? -1 : 1;
 
-    // 4. more-recent DM first (0 = most recent)
+    // 5. more-recent DM first (0 = most recent)
     const aRecency = dmContactRecency.get(a.id);
     const bRecency = dmContactRecency.get(b.id);
     if (aRecency !== undefined && bRecency !== undefined) return aRecency - bRecency;
     return 0;
+  });
+}
+
+/**
+ * Like `rankUsers`, but guarantees MFU-weighted users that match the query are
+ * ranked, even when `searchUsers` sliced them out of the candidate window first.
+ * `searchUsers` limits *before* ranking, so a frequently-used user can be dropped
+ * entirely (e.g. hundreds of same-name matches). This recovers them from
+ * `allUsers` (the full workspace list) so the MFU tier in `rankUsers` can float
+ * them back up.
+ */
+export function rankUsersWithMfu<
+  T extends {
+    id: string;
+    name: string;
+    status?: string | null;
+    displayName?: string | null;
+    email?: string;
+  },
+>(candidates: T[], allUsers: T[], query: string, dmContactRecency: Map<string, number>): T[] {
+  const q = query.trim().toLowerCase();
+  const inCandidates = new Set(candidates.map(u => u.id));
+  const matchesQuery = (u: T): boolean => {
+    if (!q) return true;
+    return (
+      (u.displayName || u.name).toLowerCase().includes(q) ||
+      u.name.toLowerCase().includes(q) ||
+      (u.email?.toLowerCase().includes(q) ?? false)
+    );
+  };
+  const weightedExtras = allUsers.filter(
+    u => !inCandidates.has(u.id) && affinityService.getUserWeight(u.id) > 0 && matchesQuery(u),
+  );
+  return rankUsers([...candidates, ...weightedExtras], query, dmContactRecency);
+}
+
+/**
+ * Rank channels/DMs by personalization weight (desc), tie-break on recency
+ * (`channelStats.lastActivityAt`). Mirrors the empty-browse ordering used by the
+ * Cmd+K channel groups so the `/chat`/`/call` pickers surface the same
+ * most-used conversations first.
+ *
+ * Weights are precomputed into a Map up front — never call `getChannelWeight`
+ * inside the comparator, since its stale-cache background refetch would re-check
+ * on every comparison. No weights → all-0 ties → pure recency, i.e. the incoming
+ * order is preserved. `channelStats` is optional so base `Channel` lists (no
+ * relation loaded) degrade to weight-only, while `VisibleChannel` lists keep the
+ * recency tie-break.
+ */
+export function rankChannelsByAffinity<
+  T extends {
+    id: string;
+    // `| undefined` is required: VisibleChannel's channelStats is a Zero `one()` relation typed
+    // `{…} | undefined`, which exactOptionalPropertyTypes rejects for a plain optional field.
+    channelStats?: { lastActivityAt?: number | null } | null | undefined;
+  },
+>(channels: T[]): T[] {
+  const weightById = new Map(
+    channels.map(c => [c.id, affinityService.getChannelWeight(c.id)] as const),
+  );
+  return [...channels].sort((a, b) => {
+    const wa = weightById.get(a.id) ?? 0;
+    const wb = weightById.get(b.id) ?? 0;
+    if (wa !== wb) return wb - wa;
+    return (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0);
   });
 }
 
@@ -1626,7 +1722,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         }));
       }
     } catch (searchError) {
-      console.error('Failed to load more results:', searchError);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load more results:'),
+        error: searchError,
+      });
     } finally {
       setIsLoadingMore(false);
     }

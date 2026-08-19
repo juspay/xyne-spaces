@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
   useEffect,
@@ -1750,7 +1751,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           return;
         }
       } catch (error) {
-        console.error('[AIChatThread] Failed to load session:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to load session:'),
+          error: error,
+        });
       } finally {
         isLoadingSession.current = false;
       }
@@ -1995,7 +2000,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         });
         if (!res.ok) throw new Error(`Feedback request failed: ${res.status}`);
       } catch (error) {
-        console.error('[AIChatThread] Failed to submit feedback:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to submit feedback:'),
+          error: error,
+        });
         // Revert to the previous feedback on failure
         setMessages(prevMessages =>
           prevMessages.map(msg =>

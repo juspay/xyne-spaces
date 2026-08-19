@@ -2287,6 +2287,32 @@ model Message {
   @@schema("public")
 }
 
+// Lifecycle row for structured message artifacts (slash commands). The banner
+// renders and authorizes from this row alone: relating it to `messages` would
+// push every message delta through the global artifact subscription, so the few
+// fields needed to route to the message are projected here instead.
+// `status`/`callExternalId` are the single source of truth for lifecycle and are
+// never mirrored back into message content.
+model MessageArtifact {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  messageId        String   @unique
+  channelId        String
+  conversationId   String
+  isInitialMessage Boolean
+  messagePreview   String
+  messageCreatedAt DateTime
+  command          String
+  status           String
+  callExternalId   String?
+  updatedAt        DateTime
+
+  @@index([workspaceId, status, messageCreatedAt])
+  @@index([channelId])
+  @@map("message_artifacts")
+  @@schema("public")
+}
+
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
@@ -2463,7 +2489,7 @@ model ExternalSource {
   displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
   channelId       String?                   // Target workspace channel for messages
   externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
-  workspaceId     String?
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // Owner for user-scoped integrations (calendar, gmail search)
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
