@@ -6862,6 +6862,11 @@ export function createMutators(
             throw new Error('A sub-ticket must belong to the same project');
           }
 
+          const mappedBoard = await tx.run(zql.boards.where('id', mappedTicket.boardId).one());
+          if (!isManualSubTicketBoard(mappedBoard?.boardType)) {
+            throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
+          }
+
           // Trees stay one level deep. `create` checks only the parent side because its
           // new row has no children; an existing ticket can break it from either side.
           const parentAsSubTickets = await tx.run(
@@ -6982,16 +6987,19 @@ export function createMutators(
             throw new Error('Parent ticket not found');
           }
 
-          const parentBoard = await tx.run(zql.boards.where('id', parentTicket.boardId).one());
-          if (!isManualSubTicketBoard(parentBoard?.boardType)) {
-            throw new Error('Sub-tickets on this board are managed automatically');
-          }
-
           const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
           // A drafted sub-ticket (mappedTicketId null) holds its own content — dropping
           // it would destroy data, so only real links are unlinkable.
           if (!subTicket?.mappedTicketId) {
             throw new Error('Only linked sub-tickets can be unlinked');
+          }
+
+          // Gate on what the ROW is, not on the parent's current board: moving the
+          // parent onto a RELEASE board later would otherwise strand the link with no
+          // way to remove it. A row this mutator's twin created carries the derived id;
+          // flow- and release-made rows do not, so they stay protected.
+          if (subTicket.id !== linkedSubTicketId(mapping.ticketId, subTicket.mappedTicketId)) {
+            throw new Error('This sub-ticket is managed automatically');
           }
 
           const mappedTicket = await tx.run(

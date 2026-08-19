@@ -50,6 +50,7 @@ import {
   LookupType,
   BoardType,
   isManualSubTicketBoard,
+  linkedSubTicketId,
   ApproverType,
   ReenterMode,
   isFieldActive,
@@ -1363,16 +1364,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets, parentSubTicketsDetails] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // A row only makes this ticket somebody's child while it still has a mapping —
-  // counting rows alone would leave it wedged as "already a sub-ticket" after unlink.
+  // Gates the Create Sub-Ticket button, and mirrors subTicket.create's own guard
+  // (row existence, not mappings) so the button and the mutator agree.
+  const canCreateNestedSubTicket =
+    (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
+
+  // The link picker needs its own predicate, because subTicket.linkExisting's guard is
+  // mappings-aware: a row with no mapping left no longer makes this ticket a child.
   // The array is [] both before and after resolving, so readiness comes from the
   // details; 'error' counts as resolved so a failed query cannot hide the picker.
   const hasResolvedParentSubTickets = parentSubTicketsDetails.type !== 'unknown';
   const isSubTicketOfAnotherTicket = (parentSubTickets ?? []).some(
     parentSubTicket => (parentSubTicket.ticketMappings?.length ?? 0) > 0,
   );
-  const canCreateNestedSubTicket =
-    !isSubTicketOfAnotherTicket || boardData?.boardType === BoardType.FLOW;
+  const canLinkSubTicket = !isSubTicketOfAnotherTicket;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -3018,10 +3023,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-    // Direct children only: canManageSubTicketLinks describes the board on screen,
-    // which is the parent for depth-0 rows alone. Drafted sub-tickets hold their own
-    // content and are removed by other means.
-    const canUnlink = Boolean(mappedTicketId) && canManageSubTicketLinks && node.depth === 0;
+    // Mirrors subTicket.unlink: only a row this feature created is unlinkable, matched
+    // on its derived id rather than on the board, so moving the parent's board later
+    // cannot strand the link. Direct children only — node.depth 0 is the ticket on
+    // screen, and a nested row hangs off a different parent.
+    const canUnlink =
+      node.depth === 0 &&
+      Boolean(mappedTicketId) &&
+      subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
     const isUnlinking = unlinkingMappingIds.has(node.mappingId);
 
     const handleRowClick = (): void => {
@@ -3174,7 +3183,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Hidden on machine-owned boards, on a ticket that is itself a sub-ticket (the
   // Create Sub-Ticket button carries the explanation), and until that query resolves.
   const addSubTicketPicker =
-    !canManageSubTicketLinks || !hasResolvedParentSubTickets || !canCreateNestedSubTicket ? null : (
+    !canManageSubTicketLinks || !hasResolvedParentSubTickets || !canLinkSubTicket ? null : (
       <div
         className={cn(
           'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',

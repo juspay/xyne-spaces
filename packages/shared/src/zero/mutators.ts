@@ -4318,6 +4318,14 @@ export const mutators = defineMutators({
           throw new Error('Cannot add a sub-ticket under a sub-ticket');
         }
 
+        const mappedTicket = await tx.run(zql.tickets.where('id', mappedTicketId).one());
+        const mappedBoard = mappedTicket
+          ? await tx.run(zql.boards.where('id', mappedTicket.boardId).one())
+          : null;
+        if (mappedBoard && !isManualSubTicketBoard(mappedBoard.boardType)) {
+          throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
+        }
+
         const targetHasSubTickets = await tx.run(
           zql.ticket_sub_ticket_mappings.where('ticketId', mappedTicketId).one(),
         );
@@ -4376,17 +4384,12 @@ export const mutators = defineMutators({
           throw new Error('Sub-ticket link not found');
         }
 
-        const parentTicket = await tx.run(zql.tickets.where('id', mapping.ticketId).one());
-        const parentBoard = parentTicket
-          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-          : null;
-        if (!isManualSubTicketBoard(parentBoard?.boardType)) {
-          throw new Error('Sub-tickets on this board are managed automatically');
-        }
-
         const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
         if (!subTicket?.mappedTicketId) {
           throw new Error('Only linked sub-tickets can be unlinked');
+        }
+        if (subTicket.id !== linkedSubTicketId(mapping.ticketId, subTicket.mappedTicketId)) {
+          throw new Error('This sub-ticket is managed automatically');
         }
 
         await tx.mutate.ticket_sub_ticket_mappings.delete({ id: mappingId });
