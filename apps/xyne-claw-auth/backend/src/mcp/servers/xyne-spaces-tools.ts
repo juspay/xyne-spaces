@@ -856,8 +856,6 @@ const spacesSearch: ToolDef = {
       // Only forward groupBy when not already forced to "" by the offset path above.
       if (args["groupBy"] && !params["groupBy"]) params["groupBy"] = String(args["groupBy"]);
 
-      console.error(`[spaces-search] argKeys=[${Object.keys(args).join(",")}]`);
-
       let data: {
         success: boolean;
         data?: {
