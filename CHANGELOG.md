@@ -1,3 +1,12 @@
+## [1.199.1](https://github.com/juspay/xyne-spaces/compare/v1.199.0...v1.199.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* call summary citation prompt ([#750](https://github.com/juspay/xyne-spaces/issues/750)) ([f336c2d](https://github.com/juspay/xyne-spaces/commit/f336c2d8d6b6a900ef6a660955af9ef5bf7c67bd))
+* close ACL channel/org gaps + SNS webhook SSRF ([#676](https://github.com/juspay/xyne-spaces/issues/676)) ([c2484bc](https://github.com/juspay/xyne-spaces/commit/c2484bc44a3bb3ed1ec13fffea1e21641dd483b4))
+* scope automation approval DM send to service actor to stop empty duplicate DMs ([#741](https://github.com/juspay/xyne-spaces/issues/741)) ([24977eb](https://github.com/juspay/xyne-spaces/commit/24977eba923d0be55f19ef8c65c418c6a97aa8e0)), closes [#517](https://github.com/juspay/xyne-spaces/issues/517)
+
 ## [1.199.0](https://github.com/juspay/xyne-spaces/compare/v1.198.0...v1.199.0) (2026-08-19)
 
 
