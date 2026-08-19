@@ -15,6 +15,8 @@ import {
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -187,6 +189,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     }
 
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
+    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
     const baseEditorOptions = {
       schema: canvasSchema,
@@ -272,8 +275,14 @@ export const CollaborativeCanvasEditor = forwardRef<
       const whiteboardItems = getWhiteboardSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
+      const mathItems = getMathSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      const diagramItems = getDiagramSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
 
-      return [...whiteboardItems];
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
     // Get slash menu items with custom blocks
@@ -666,7 +675,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 overflowWrap: 'break-word',
               }}
             >
-              {editor && (
+              {editor && canMountEditor && (
                 <CanvasMentionContext.Provider value={mentionContextValue}>
                   <BlockNoteView
                     editor={
