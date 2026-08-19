@@ -72,7 +72,6 @@ async function fetchAuthToken(
   // Check cache first
   const cached = await tokenCache.getToken(tenantId, serviceName, authEmail);
   if (cached) {
-    console.log(`[auth] Token retrieved from cache for service=${serviceName}`);
     return cached;
   }
 

@@ -292,7 +292,6 @@ export function loadCustomTools(
           log.error(`[custom-tool] ${ct.slug} threw:`, errMsg);
           result = `Error: ${errMsg}`;
         }
-        log.info(`[custom-tool] ${ct.slug} result: ${result.length} chars`);
 
         // Sandbox-capacity deferral (flag-gated, default off): the inner catch
         // above stringifies every tool throw and hands it to the LLM, which for a
