@@ -1,3 +1,4 @@
+import { logger } from '@/utils/logger';
 /**
  * Build a cron pattern from user-provided scheduling options.
  *
@@ -13,9 +14,9 @@ export function buildCronPattern(
 ): string {
   const [hh, mm] = scheduledTime.split(':');
 
-  console.log(`[CRON-UTILS] Building cron from UTC time ${scheduledTime}, days=${daysOfWeek}`);
+  logger.info(`[CRON-UTILS] Building cron from UTC time ${scheduledTime}, days=${daysOfWeek}`);
 
   const pattern = `${mm} ${hh} * * ${daysOfWeek}`;
-  console.log(`[CRON-UTILS] Generated cron: ${pattern}`);
+  logger.info(`[CRON-UTILS] Generated cron: ${pattern}`);
   return pattern;
 }

@@ -8,6 +8,7 @@ BRAND NAME CORRECTION:
 
 FORMATTING:
 - Use Markdown headings, short paragraphs, and bullet lists. DO NOT use markdown tables anywhere.
+- Never leave a bare paragraph line as the last line of a section, directly above a \`---\` separator — Markdown turns it into a setext heading. Write such content as a bullet instead.
 - Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji.
 - Never convert a template heading into plain text, bold text, or a list item.
 - Keep bullets concise; put supporting detail inline after an em dash.
@@ -37,7 +38,7 @@ INSTRUCTIONS:
 - Include specific names, numbers, dates mentioned
 - Preserve chronological order where it matters
 - Keep all template section titles as level-three Markdown headings (\`###\`)
-- Skip sections that have no relevant content (write "Not discussed" rather than inventing detail)
+- Skip sections that have no relevant content — write the single bullet \`- Not discussed\` rather than inventing detail. It MUST be a bullet: a bare \`Not discussed\` line sits directly above the template's \`---\` separator, which Markdown then parses as a setext heading and renders in huge heading text.
 - Add Chapters ONLY for long calls, per the STRUCTURE rule above; never force chapters onto a short or medium call
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation

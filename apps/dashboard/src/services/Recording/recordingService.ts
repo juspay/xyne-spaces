@@ -133,6 +133,7 @@ export interface RecordingSharingResult {
 export interface RegenerateRecordingSummaryResult {
   summaryTemplateId: string;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean;
 }
 
 export interface ExportRecordingGoogleDocResult {
@@ -175,6 +176,7 @@ export interface RecordingDetail extends Recording {
   messageId: string | null;
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;
@@ -222,6 +224,7 @@ interface InitiateCallResponse {
   callId?: string;
   channelId: string | null;
   notesCanvasId: string;
+  conversationId?: string;
 }
 
 interface RecordingsResponse {
@@ -239,10 +242,15 @@ interface RecordingDetailResponse {
 class RecordingService {
   /**
    * Start a headless recording session
-   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials
+   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials.
+   * When `conversationId` + `channelId` are provided (recording started from a
+   * thread), the backend posts a single anchor message into that conversation
+   * that live-updates as the recording progresses and ends.
    */
   async startRecording(params?: {
     sttModel?: 'google' | 'azure' | 'deepgram';
+    conversationId?: string;
+    channelId?: string;
   }): Promise<RecordingSession> {
     const response: AxiosResponse<InitiateCallResponse> = await apiInstance.post(
       '/calls/initiate',
@@ -250,6 +258,8 @@ class RecordingService {
         isHeadless: true,
         callType: CallType.AUDIO,
         sttModel: params?.sttModel || 'google',
+        ...(params?.conversationId && { conversationId: params.conversationId }),
+        ...(params?.channelId && { channelId: params.channelId }),
       },
     );
 

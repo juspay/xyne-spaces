@@ -25,10 +25,12 @@ import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
 import { Dialog } from "./ui/Dialog";
 import { SelectField, type SelectOption } from "./ui/SelectField";
+import { TextField } from "./ui/TextField";
 import {
   listSearchEvalSheets,
   uploadSearchEvalSheet,
   startSearchEvalRun,
+  getSearchEvalRankProfiles,
   getSearchEvalRun,
   listSearchEvalRuns,
   downloadSearchEvalRunExport,
@@ -85,67 +87,40 @@ const PERMISSION_OPTIONS: SelectOption[] = [
   { value: "with", label: "With permission (private + public, as you)" },
 ];
 
-// Both permission modes run entirely through search-eval-vespa.ts's own YQL
-// builder (see the architecture note at the top of that file) — neither
-// calls the real main backend — but each SEARCH_AREA in vespa-search-areas.ts
-// now declares its own `allowedRankProfiles`, read directly off the deployed
-// .sd schemas (see the ground-truth comment there, cross-checked against
-// /Users/priyanshu.c/Desktop/codeeee/vespa-core/vespa/common/schemas/*.sd), so
-// the options here are genuinely per-entity-type, matching what's really
-// declared in Vespa — not a client-invented generic list. "tunable" is a
-// REAL rank-profile name declared per-schema. When picked, its sliders use
-// that entity type's real `inputs {}` block (see TUNABLE_INPUTS_BY_AREA).
-const BASE_RANK_PROFILE_OPTIONS: SelectOption[] = [
-  { value: "", label: "default_native (default)" },
-];
+// Rank-profile choices are fetched live per entity type from
+// getSearchEvalRankProfiles() (rank-profiles.ts on the backend), which reads
+// Vespa's actually-deployed .sd schema and regexes out `rank-profile <name>`
+// — not a hardcoded list here, so a profile added to a schema and redeployed
+// (e.g. "unified") shows up without a frontend change. "" always means "let
+// the backend auto-pick default_native" (see buildYqlFromParams) rather than
+// sending an explicit name. "All types" gets the intersection across every
+// area's schema, since Vespa applies exactly ONE ranking.profile to a
+// federated query (see buildFederatedYqlFromParams).
+const DEFAULT_RANK_PROFILE_OPTION: SelectOption = { value: "", label: "default_native (default)" };
 
-const MESSAGE_RANK_PROFILE_OPTIONS: SelectOption[] = [
-  ...BASE_RANK_PROFILE_OPTIONS,
-  { value: "tunable", label: "tunable (custom weights)" },
-  { value: "personalized", label: "personalized" },
-  { value: "default_random", label: "default_random" },
-  { value: "default_fuzzy", label: "default_fuzzy" },
-  { value: "default_native_tb", label: "default_native_tb" },
-  { value: "default_native_tb2", label: "default_native_tb2" },
-  ...Array.from({ length: 23 }, (_, i) => ({ value: `default_native_${i}`, label: `default_native_${i}` })),
-];
+/** A couple of well-known profiles get a friendlier label; anything else
+ *  (a brand-new profile) just shows its own name as-is. */
+const RANK_PROFILE_LABELS: Record<string, string> = {
+  tunable: "tunable (custom weights)",
+};
 
-const TICKET_RANK_PROFILE_OPTIONS: SelectOption[] = [
-  ...BASE_RANK_PROFILE_OPTIONS,
-  { value: "tunable", label: "tunable (custom weights)" },
-  { value: "semantic_ranking", label: "semantic_ranking" },
-  { value: "default_fuzzy", label: "default_fuzzy" },
-];
+/** Covers a profile added to (or renamed in) the .sd schema after the live
+ *  fetch ran, or one that getSearchEvalRankProfiles() otherwise doesn't
+ *  return — the name is passed straight through to Vespa unvalidated (see
+ *  buildYqlFromParams in vespa-search-areas.ts), so a typo or a profile
+ *  missing from the queried schema just fails that run with Vespa's own
+ *  error, shown in the results. */
+const CUSTOM_RANK_PROFILE_VALUE = "__custom__";
+const CUSTOM_RANK_PROFILE_OPTION: SelectOption = { value: CUSTOM_RANK_PROFILE_VALUE, label: "Custom..." };
 
-const FILE_RANK_PROFILE_OPTIONS: SelectOption[] = [
-  ...BASE_RANK_PROFILE_OPTIONS,
-  { value: "tunable", label: "tunable (custom weights)" },
-  { value: "default_fuzzy", label: "default_fuzzy" },
-];
-
-const MAIL_RANK_PROFILE_OPTIONS: SelectOption[] = [
-  ...BASE_RANK_PROFILE_OPTIONS,
-  { value: "tunable", label: "tunable (custom weights)" },
-  { value: "global_sorted", label: "global_sorted" },
-  { value: "default_bm25", label: "default_bm25" },
-  { value: "default_ai", label: "default_ai" },
-  { value: "default_fuzzy", label: "default_fuzzy" },
-  { value: "default_native_best_chunk_025", label: "default_native_best_chunk_025" },
-  { value: "default_native_top_chunk_lexical_025", label: "default_native_top_chunk_lexical_025" },
-];
-
-/** "All types" merges N single-schema queries (see search-eval-vespa.ts) each
- *  against a different schema — only default_native (every schema's base
- *  profile) is safe to pick there. Pick a single entity type to unlock its
- *  full, real profile list (including tunable). */
-function rankProfileOptionsForType(queryType: string): SelectOption[] {
-  switch (queryType) {
-    case "messages": return MESSAGE_RANK_PROFILE_OPTIONS;
-    case "tickets": return TICKET_RANK_PROFILE_OPTIONS;
-    case "files": return FILE_RANK_PROFILE_OPTIONS;
-    case "emails": return MAIL_RANK_PROFILE_OPTIONS;
-    default: return BASE_RANK_PROFILE_OPTIONS;
-  }
+function rankProfileOptionsFromNames(names: string[]): SelectOption[] {
+  return [
+    DEFAULT_RANK_PROFILE_OPTION,
+    ...names
+      .filter((name) => name !== "default_native")
+      .map((name) => ({ value: name, label: RANK_PROFILE_LABELS[name] ?? name })),
+    CUSTOM_RANK_PROFILE_OPTION,
+  ];
 }
 
 interface TunableField {
@@ -551,23 +526,52 @@ function RunConfigDialog({
 }) {
   const [queryType, setQueryType] = useState<string>("");
   const [rankProfile, setRankProfile] = useState<string>("");
+  const [customRankProfile, setCustomRankProfile] = useState<string>("");
   const [tunableInputs, setTunableInputs] = useState<Record<string, number>>({});
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const rankProfileOptions = rankProfileOptionsForType(queryType);
+  // Fetched live from Vespa's deployed schema per queryType (see
+  // getSearchEvalRankProfiles) rather than a hardcoded per-type list.
+  const [rankProfileOptions, setRankProfileOptions] = useState<SelectOption[]>([DEFAULT_RANK_PROFILE_OPTION]);
+  const [rankProfilesLoading, setRankProfilesLoading] = useState(false);
+  const [rankProfilesErr, setRankProfilesErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRankProfilesLoading(true);
+    setRankProfilesErr(null);
+    getSearchEvalRankProfiles(queryType, userId)
+      .then((names) => {
+        if (cancelled) return;
+        setRankProfileOptions(rankProfileOptionsFromNames(names));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setRankProfilesErr(e instanceof Error ? e.message : String(e));
+        setRankProfileOptions([DEFAULT_RANK_PROFILE_OPTION]);
+      })
+      .finally(() => { if (!cancelled) setRankProfilesLoading(false); });
+    return () => { cancelled = true; };
+  }, [queryType, userId]);
+
   const tunableFields = TUNABLE_INPUTS_BY_AREA[queryType] ?? [];
   const isTunable = rankProfile === "tunable" && tunableFields.length > 0;
+  const isCustomRankProfile = rankProfile === CUSTOM_RANK_PROFILE_VALUE;
+  // The name actually sent to the backend — the sentinel is a UI-only pick.
+  const effectiveRankProfile = isCustomRankProfile ? customRankProfile.trim() : rankProfile;
 
   function handleQueryTypeChange(v: string) {
     setQueryType(v);
     setRankProfile("");
+    setCustomRankProfile("");
     setTunableInputs(defaultTunableInputs(TUNABLE_INPUTS_BY_AREA[v] ?? []));
   }
 
   function handleRankProfileChange(v: string) {
     setRankProfile(v);
     if (v === "tunable") setTunableInputs(defaultTunableInputs(tunableFields));
+    if (v !== CUSTOM_RANK_PROFILE_VALUE) setCustomRankProfile("");
   }
 
   async function submit() {
@@ -578,7 +582,7 @@ function RunConfigDialog({
         sheet.id,
         {
           queryType: queryType ? [queryType] : [],
-          ...(rankProfile ? { rankProfile } : {}),
+          ...(effectiveRankProfile ? { rankProfile: effectiveRankProfile } : {}),
           ...(isTunable ? { rankProfileInputs: tunableInputs } : {}),
         },
         userId,
@@ -605,7 +609,13 @@ function RunConfigDialog({
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" leadingIcon={<PlayIcon size={14} />} disabled={starting} onClick={submit}>
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<PlayIcon size={14} />}
+            disabled={starting || (isCustomRankProfile && customRankProfile.trim() === "")}
+            onClick={submit}
+          >
             {starting ? "Starting…" : "Run"}
           </Button>
         </>
@@ -616,8 +626,23 @@ function RunConfigDialog({
       )}
       <SelectField label="Entity type" options={TYPE_OPTIONS} value={queryType} onValueChange={(v) => handleQueryTypeChange(v ?? "")} />
       <SelectField label="Rank profile" options={rankProfileOptions} value={rankProfile} onValueChange={(v) => handleRankProfileChange(v ?? "")} />
-      {queryType === "" && (
-        <p className="text-[11px] text-xyne-fg-tertiary">Pick a single entity type to unlock its full rank-profile list (incl. tunable).</p>
+      {isCustomRankProfile && (
+        <TextField
+          label="Custom rank profile name"
+          placeholder="e.g. a profile just added to the .sd schema"
+          hint="Sent to Vespa as-is — not validated against a known list. A typo or a profile missing from the queried schema fails that run with Vespa's error."
+          value={customRankProfile}
+          onChange={(e) => setCustomRankProfile(e.target.value)}
+        />
+      )}
+      {rankProfilesLoading && (
+        <p className="text-[11px] text-xyne-fg-tertiary">Reading rank profiles from Vespa…</p>
+      )}
+      {rankProfilesErr && (
+        <p className="text-[11px] text-xyne-error-fg">Couldn't fetch rank profiles from Vespa ({rankProfilesErr}) — only the default is available.</p>
+      )}
+      {!rankProfilesLoading && !rankProfilesErr && queryType === "" && (
+        <p className="text-[11px] text-xyne-fg-tertiary">"All types" only offers profiles common to every schema. Pick a single entity type to unlock its full list (incl. tunable).</p>
       )}
       {isTunable && (
         <TunableRankInputsEditor fields={tunableFields} value={tunableInputs} onChange={setTunableInputs} />
@@ -730,9 +755,10 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
       leftOffset={100}
       maxWidth={1560}
       maxHeight="85vh"
+      bodyClassName="flex-1 overflow-hidden p-[var(--comp-dialog-padding)]"
       footer={<Button variant="secondary" size="sm" onClick={onClose}>Close</Button>}
     >
-      <div className="max-h-[calc(85vh-140px)] w-full space-y-[20px] overflow-y-auto">
+      <div className="max-h-[calc(85vh-140px)] min-w-0 w-full space-y-[20px] overflow-y-auto pr-[4px]">
         {(!row.debug || row.debug.length === 0) && (
           <p className="text-[12px] text-xyne-fg-tertiary">No YQL/debug info captured for this row.</p>
         )}
@@ -746,7 +772,7 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
               </p>
               {/* Side by side once there's room — inputs table stays a fixed
                   readable width, YQL takes the rest, instead of stacking. */}
-              <div className="flex flex-col gap-[12px] lg:flex-row">
+              <div className="flex min-w-0 flex-col gap-[12px] lg:flex-row">
                 {inputs.length > 0 && (
                   <table className="w-full shrink-0 self-start text-[11px] lg:w-[340px]">
                     <tbody>
@@ -759,7 +785,7 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
                     </tbody>
                   </table>
                 )}
-                <pre className="max-h-[220px] min-w-0 flex-1 overflow-auto rounded-lg bg-xyne-surface-sunken p-[8px] text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
+                <pre className="max-h-[220px] min-w-0 flex-1 overflow-auto break-words rounded-lg bg-xyne-surface-sunken p-[8px] text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
                   {stage.yql}
                 </pre>
               </div>
@@ -771,8 +797,8 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
           <p className="mb-[8px] text-[11px] font-medium uppercase tracking-[0.06em] text-xyne-fg-tertiary">
             Top {results.length} results — click a row to inspect its full values
           </p>
-          <div className="grid grid-cols-1 gap-[12px] lg:grid-cols-[380px_1fr]">
-            <div className="max-h-[420px] overflow-y-auto rounded-xl border border-xyne-border">
+          <div className="grid min-w-0 grid-cols-1 gap-[12px] lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+            <div className="min-w-0 max-h-[420px] overflow-auto rounded-xl border border-xyne-border">
               <table className="w-full text-[11.5px]">
                 <thead className="sticky top-0">
                   <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-xyne-fg-tertiary">
@@ -813,13 +839,13 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
               </table>
             </div>
 
-            <div className="max-h-[420px] overflow-y-auto rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[10px]">
+            <div className="min-w-0 max-h-[420px] overflow-auto rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[10px]">
               {selected ? (
                 <>
                   <p className="mb-[6px] text-[11px] font-medium text-xyne-fg-tertiary">
                     #{selectedIdx + 1} — all values
                   </p>
-                  <pre className="text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
+                  <pre className="break-words text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
                     {JSON.stringify(selected.raw ?? selected, null, 2)}
                   </pre>
                 </>
@@ -854,7 +880,7 @@ function MatchFeaturesTable({ results, goldId }: { results: SearchEvalTopResult[
       <p className="mb-[8px] text-[11px] font-medium uppercase tracking-[0.06em] text-xyne-fg-tertiary">
         Match features
       </p>
-      <div className="overflow-x-auto rounded-xl border border-xyne-border">
+      <div className="min-w-0 overflow-x-auto rounded-xl border border-xyne-border">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-xyne-fg-tertiary">

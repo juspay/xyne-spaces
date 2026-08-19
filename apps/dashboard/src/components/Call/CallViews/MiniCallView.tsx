@@ -544,7 +544,6 @@ export function MiniCallView({
                     <div className='h-full'>
                       <ScreenShareView
                         focusedScreenShare={focusedScreenShare}
-                        screenSharingCount={screenSharingParticipants.length}
                         participants={participants}
                         onScreenShareClick={handleScreenShareClick}
                         className='h-full'

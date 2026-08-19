@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { X509Certificate } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -152,6 +153,15 @@ const positionsBody = z.object({
 });
 
 // ---- Data source schemas ----
+function isParseableCertificate(pem: string): boolean {
+  try {
+    new X509Certificate(pem);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const includedTableSchema = z.object({
   schemaName: z.string().min(1).max(255),
   tableName: z.string().min(1).max(255),
@@ -168,6 +178,18 @@ const createDataSourceBodySchema = z.object({
     password: z.string().min(1).max(1024),
     database: z.string().min(1).max(255),
     ssl: z.boolean().default(true),
+    ca: z
+      .string()
+      .max(32_768)
+      .refine(
+        (s) => !/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(s),
+        'This looks like a private key. Upload the CA certificate (server-ca.pem), not the key.',
+      )
+      .refine(
+        isParseableCertificate,
+        'Not a valid PEM certificate. Upload the CA file, e.g. server-ca.pem.',
+      )
+      .optional(),
   }),
   includedTables: z.array(includedTableSchema).max(10000).optional(),
 });

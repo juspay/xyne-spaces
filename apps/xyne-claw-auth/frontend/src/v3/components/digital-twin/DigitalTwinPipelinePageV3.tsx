@@ -48,7 +48,7 @@ interface Props {
   initialEventId?: string | null;
 }
 
-type RunTypeFilter = "" | "backfill" | "daily" | "upload" | "twin-approval" | "gate";
+type RunTypeFilter = "" | "backfill" | "daily" | "upload" | "twin-approval" | "synthesize" | "gate";
 type StatusFilter = "" | "ok" | "empty" | "error" | "running" | "retry";
 
 const RUN_TYPE_OPTIONS: { label: string; value: RunTypeFilter }[] = [
@@ -57,6 +57,7 @@ const RUN_TYPE_OPTIONS: { label: string; value: RunTypeFilter }[] = [
   { label: "Daily",     value: "daily" },
   { label: "Upload",    value: "upload" },
   { label: "Twin reply", value: "twin-approval" },
+  { label: "Persona rebuild", value: "synthesize" },
   { label: "Respond gate", value: "gate" },
 ];
 
@@ -78,6 +79,7 @@ const RUN_TYPE_META: Record<string, { label: string; icon: React.ReactNode }> = 
 };
 
 const DROP_REASON_LABELS: Record<string, string> = {
+  "empty":             "empty",
   "empty-or-too-long": "empty / too long",
   "bad-subsystem":     "invalid subsystem",
   "low-signal":        "score < 0.7",
@@ -656,21 +658,77 @@ function GateDetail({ detail, trace }: { detail: PipelineEventDetail; trace: Gat
 }
 
 function SynthFileRow({ f }: { f: SynthFileResult }) {
+  const [open, setOpen] = useState(false);
   const tone =
     f.action === "updated"
       ? "text-xyne-success-fg"
       : f.action === "error"
       ? "text-xyne-error-fg"
       : "text-xyne-fg-muted";
+  const hasExchange = !!(f.systemPrompt || f.userPrompt || f.rawOutput);
+  const available = f.factsAvailable ?? f.factsUsed;
+  const tokens = f.usage
+    ? `${f.usage.promptTokens ?? "?"} in / ${f.usage.completionTokens ?? "?"} out`
+    : "—";
   return (
-    <div className="flex items-center gap-[10px] bg-xyne-surface px-[12px] py-[8px]">
-      <span className="font-mono text-[12px] text-xyne-fg-primary">{f.name}</span>
-      <span className="text-[11px] text-xyne-fg-tertiary">
-        {f.factsUsed} fact{f.factsUsed === 1 ? "" : "s"}
-        {f.chars ? ` · ${f.chars.toLocaleString()} chars` : ""}
-        {f.error ? ` · ${f.error}` : ""}
-      </span>
-      <span className={`ml-auto text-[10px] font-semibold uppercase tracking-[0.04em] ${tone}`}>{f.action}</span>
+    <div className="bg-xyne-surface">
+      <button
+        type="button"
+        onClick={() => hasExchange && setOpen((v) => !v)}
+        className={`flex w-full items-center gap-[8px] px-[12px] py-[8px] text-left ${hasExchange ? "cursor-pointer hover:bg-xyne-surface-sunken" : "cursor-default"}`}
+      >
+        {hasExchange
+          ? open ? <CaretDownIcon size={11} className="text-xyne-fg-muted" /> : <CaretRightIcon size={11} className="text-xyne-fg-muted" />
+          : <span className="w-[11px]" />}
+        <span className="font-mono text-[12px] text-xyne-fg-primary">{f.name}</span>
+        <span className="text-[11px] text-xyne-fg-tertiary">
+          {f.factsUsed}{available !== f.factsUsed ? ` of ${available}` : ""} fact{available === 1 ? "" : "s"}
+          {f.chars ? ` · ${f.chars.toLocaleString()} chars` : ""}
+          {f.error ? ` · ${f.error}` : ""}
+        </span>
+        {f.contextLimited && (
+          <span
+            className="flex items-center gap-[3px] text-[10px] font-medium text-xyne-warning-fg"
+            title={`Input capped: ${f.factsDropped ?? available - f.factsUsed} memories omitted${f.factsClipped ? `, ${f.factsClipped} clipped` : ""}.`}
+          >
+            <WarningIcon size={10} /> context limited
+          </span>
+        )}
+        <span className={`ml-auto text-[10px] font-semibold uppercase tracking-[0.04em] ${tone}`}>{f.action}</span>
+      </button>
+      {open && hasExchange && (
+        <div className="flex flex-col gap-[8px] border-t border-xyne-border-subtle bg-xyne-surface-subtle px-[12px] py-[10px]">
+          <div className="grid grid-cols-2 gap-x-[16px] gap-y-[6px] sm:grid-cols-4">
+            {[
+              ["Model", f.model ?? "—"],
+              ["LLM duration", fmtDuration(f.durationMs ?? 0)],
+              ["Prompt", f.promptChars != null ? `${f.promptChars.toLocaleString()} chars` : "—"],
+              ["Tokens", tokens],
+              ["Facts", `${f.factsUsed} used / ${available} available`],
+              ["Fact budget", f.factInputBudgetChars != null ? `${(f.factInputChars ?? 0).toLocaleString()} / ${f.factInputBudgetChars.toLocaleString()} chars` : "—"],
+              ["Finish reason", f.finishReason ?? "—"],
+              ["Output", f.chars != null ? `${f.chars.toLocaleString()} chars stored` : "—"],
+            ].map(([k, v]) => (
+              <div key={k} className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.06em] text-xyne-fg-muted">{k}</p>
+                <p className="truncate text-[12px] text-xyne-fg-primary" title={v}>{v}</p>
+              </div>
+            ))}
+          </div>
+          {f.contextLimited && (
+            <div className="rounded-lg border border-xyne-warning-border bg-xyne-warning-bg px-[10px] py-[8px] text-[11px] text-xyne-warning-fg">
+              The input guard included {f.factsUsed} of {available} memories and omitted {f.factsDropped ?? available - f.factsUsed}
+              {f.factsClipped ? `; ${f.factsClipped} oversized memories were clipped by the previous per-memory limit` : ""}. The exact text sent is visible in the user prompt below.
+            </div>
+          )}
+          <div className="flex items-center gap-[6px] pt-[2px] text-[11px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-muted">
+            <SparkleIcon size={12} className="text-xyne-brand" weight="fill" /> LLM exchange
+          </div>
+          {f.systemPrompt && <CodeBlock label="System prompt" text={f.systemPrompt} icon={<ScrollIcon size={11} />} />}
+          {f.userPrompt && <CodeBlock label="User prompt" text={f.userPrompt} icon={<ChatTextIcon size={11} />} />}
+          {f.rawOutput && <CodeBlock label="LLM output" text={f.rawOutput} icon={<CodeIcon size={11} />} defaultOpen />}
+        </div>
+      )}
     </div>
   );
 }
