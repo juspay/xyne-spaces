@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.3](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.2...v1.188.0-release-20260817.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* backport redirect fix ([#555](https://github.com/juspay/xyne-spaces/issues/555)) and XYNE-56551 runAsSystem syncBotUsers ([#807](https://github.com/juspay/xyne-spaces/issues/807)) to release-20260817 ([#809](https://github.com/juspay/xyne-spaces/issues/809)) ([dca2218](https://github.com/juspay/xyne-spaces/commit/dca2218053550e3c6af8d89f40e527d80d8c1217))
+
 ## [1.188.0-release-20260817.2](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.1...v1.188.0-release-20260817.2) (2026-08-20)
 
 
