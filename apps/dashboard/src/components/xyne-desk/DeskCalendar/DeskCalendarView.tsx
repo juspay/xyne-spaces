@@ -1,4 +1,4 @@
-import { useEffect, type ReactElement } from 'react';
+import { useEffect, useMemo, type ReactElement } from 'react';
 import type { Ticket, TicketPriority } from '@xyne/shared';
 import { CalendarView } from '../../Tickets/CalendarView';
 import { queries } from '../../../zero/queries';
@@ -62,12 +62,16 @@ export const DeskCalendarView = ({
       dir: 'forward',
     }),
   );
-  const tickets = rowsDetails?.type === 'complete' ? ((rows ?? []) as unknown as Ticket[]) : [];
+  // Memoized so the identity only changes when the query result does — that keeps the
+  // notify-parent effect below honest about its dependencies instead of suppressing them.
+  const tickets = useMemo(
+    () => (rowsDetails?.type === 'complete' ? ((rows ?? []) as unknown as Ticket[]) : []),
+    [rows, rowsDetails?.type],
+  );
 
   useEffect(() => {
     onTicketsLoaded?.(tickets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, rowsDetails?.type]);
+  }, [tickets, onTicketsLoaded]);
 
   return <CalendarView tickets={tickets} onTicketClick={onTicketClick} />;
 };
