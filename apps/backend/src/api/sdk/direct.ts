@@ -16,7 +16,6 @@
 
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { ZodTypeAny } from 'zod';
-import { ZodError } from 'zod';
 import { searchQuerySchema, searchSchemaQuerySchema } from '@xyne/spaces-contract';
 import type { AuthenticatedUser } from '@/types/express';
 import { ChannelController } from '@/controllers/channelController';
@@ -28,7 +27,7 @@ import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import { uploadMultiple } from '@/middleware/upload';
 import { ApiError } from './errors';
-import { rateLimit } from './middleware/rateLimit';
+import { handle } from './handler';
 import type { ErrorCode } from '@xyne/spaces-contract';
 
 const channelController = new ChannelController();
@@ -127,23 +126,18 @@ export function createDirectRouter(): Router {
   for (const route of ROUTES) {
     router[route.method](
       route.path,
-      rateLimit(route.method === 'get' ? 'read' : 'write'),
       ...(route.middleware ?? []),
-      async (req: Request, res: Response, next) => {
-        try {
-          const result = await callController(route, req);
-          for (const [name, value] of Object.entries(result.headers)) {
-            res.setHeader(name, value);
-          }
-          if (result.status === 204 || result.body === undefined) {
-            res.status(result.status).end();
-            return;
-          }
-          res.status(result.status).json(result.body);
-        } catch (err) {
-          next(err instanceof ZodError ? ApiError.validation(err) : err);
+      handle(async (req: Request, res: Response) => {
+        const result = await callController(route, req);
+        for (const [name, value] of Object.entries(result.headers)) {
+          res.setHeader(name, value);
         }
-      },
+        if (result.status === 204 || result.body === undefined) {
+          res.status(result.status).end();
+          return;
+        }
+        res.status(result.status).json(result.body);
+      }),
     );
   }
 
