@@ -13,12 +13,12 @@ export interface AnalyticsFilters {
 }
 
 // Calls and recordings are the same table, split by callType (HEADLESS = recording)
-export interface CallsBreakdown {
+interface CallsBreakdown {
   calls: number;      // Regular calls (every callType except HEADLESS)
   recordings: number; // Recordings (HEADLESS)
 }
 
-export interface CallsTimeSeriesPoint {
+interface CallsTimeSeriesPoint {
   date: string;
   calls: number;      // Call count for the bucket (recordings excluded)
   recordings: number; // Recording count for the bucket
@@ -38,7 +38,7 @@ function floorToMinute(date: Date): Date {
  * Helper method to get date filter SQL condition
  * ALL DATE OPERATIONS USE UTC TO AVOID TIMEZONE ISSUES
  */
-export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
+function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
   const now = floorToMinute(new Date());
 
   // Handle custom date range
@@ -332,15 +332,8 @@ export class AnalyticsRepository {
     return typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
   }
 
-  private getDateRange(dateCondition: Date | { gte: Date; lte?: Date }): { startDate: Date; endDate: Date } {
-    const startDate = typeof dateCondition === 'object' && 'gte' in dateCondition 
-      ? dateCondition.gte 
-      : dateCondition;
-    const endDate = typeof dateCondition === 'object' && 'lte' in dateCondition && dateCondition.lte 
-      ? dateCondition.lte 
-      : new Date();
-    
-    return { startDate, endDate };
+  private getDateRange(dateCondition: { gte: Date; lte?: Date }): { startDate: Date; endDate: Date } {
+    return { startDate: dateCondition.gte, endDate: dateCondition.lte ?? new Date() };
   }
 
   /**
@@ -384,15 +377,6 @@ export class AnalyticsRepository {
     });
 
     return groupedData;
-  }
-
-  /**
-   * UNIFIED: Get messages exchanged statistics - ALWAYS returns time-series data
-   * This replaces the old getMessagesExchanged() and ensures consistency
-   */
-  async getMessagesExchanged(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
-    // Always use day groupby for consistency - no more "none" option
-    return this.getMessagesExchangedTimeSeries(filters, groupBy);
   }
 
   /**
@@ -471,7 +455,7 @@ export class AnalyticsRepository {
    * Get messages exchanged time-series data using optimized Prisma ORM aggregation
    * Fetches all messages within date range and processes aggregation in application memory
    */
-  async getMessagesExchangedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
+  async getMessagesExchanged(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
     // Per-bucket total plus per-scope breakdown, aggregated in Postgres. Rows in
@@ -936,7 +920,7 @@ export class AnalyticsRepository {
    */
   private async getValidCalls(filters: AnalyticsFilters): Promise<{
     validCalls: { startedAt: Date; durationSeconds: number; isRecording: boolean }[];
-    dateCondition: Date | { gte: Date; lte?: Date };
+    dateCondition: { gte: Date; lte?: Date };
   }> {
     const { workspaceId, dateCondition } = this.resolveScope(filters);
     const userIds = await this.getUsersId(workspaceId);
