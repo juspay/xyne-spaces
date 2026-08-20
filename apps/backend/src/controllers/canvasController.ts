@@ -27,10 +27,11 @@ import {
 const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
 const CANVAS_LABEL_CATEGORY = 'generic';
 const MAX_CANVAS_LABEL_BULK_IDS = 200;
+const MAX_CANVAS_LABEL_NAMES_PER_REQUEST = 20;
 
 const CanvasLabelBodySchema = z.object({
   // Canvas labels are freeform user labels, unlike configured desk tags.
-  name: z.string().min(1).max(64),
+  names: z.array(z.string().min(1).max(64)).min(1).max(MAX_CANVAS_LABEL_NAMES_PER_REQUEST),
 });
 
 const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
@@ -179,7 +180,28 @@ export class CanvasController {
 
       const canonicalToRequested = new Map<string, string[]>();
 
-      // Batch-load canvases and related mappings to perform access checks in-memory
+      // This query is doing two jobs at once, and both are required - there's no
+      // Tag-table-only shortcut here:
+      //
+      // 1. ID resolution. `requestedCanvasIds` can contain either a canonical
+      //    canvas id, or a legacy `viewAccessId`/`editAccessId` share-link id
+      //    (old chat message URLs, y-sweet client cache, bookmarks predating the
+      //    canonical-id migration - see canvasAuthService.checkCanvasAccess for
+      //    the same fallback on the single-canvas path). `tags.sourceId` is
+      //    always the canonical id, so if a legacy id isn't resolved to its
+      //    canonical id first, the later `tagRepository` lookup finds nothing
+      //    and labels silently vanish for that canvas. Example: user opens an
+      //    old shared link `/canvas/<viewAccessId>`; without this OR-match, that
+      //    id never maps to a canvas row and every label lookup for it 404s in
+      //    practice even though the canvas and its labels both exist.
+      //
+      // 2. Permission data. Whether the user canView/canEdit a canvas depends on
+      //    `createdBy`, `visibility`, `channelId`, `projectId` - none of which
+      //    exist on the Tag row (which only stores `sourceId` = canvas id).
+      //    `canvasParticipant` alone can't answer "is this canvas public" or
+      //    "what channel does it belong to" either - only the `canvas` table has
+      //    these columns, so an access decision requires reading them from here
+      //    regardless of how the id was resolved.
       const prisma = DatabaseClient.getInstance();
       const canvases = await prisma.canvas.findMany({
         where: {
@@ -438,69 +460,74 @@ export class CanvasController {
 
       const parsedBody = CanvasLabelBodySchema.safeParse(req.body);
       if (!parsedBody.success) {
-        res.status(400).json({ error: 'Label name is required' });
+        res.status(400).json({ error: 'At least one label name is required' });
         return;
       }
 
-      const labelName = normalizeCanvasLabelName(parsedBody.data.name);
-      const labelKey = normalizeCanvasLabelKey(labelName);
-      if (!labelKey) {
+      const seenKeys = new Set<string>();
+      const requestedLabels: { name: string; key: string }[] = [];
+      for (const rawName of parsedBody.data.names) {
+        const name = normalizeCanvasLabelName(rawName);
+        const key = normalizeCanvasLabelKey(name);
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        requestedLabels.push({ name, key });
+      }
+      if (requestedLabels.length === 0) {
         res.status(400).json({ error: 'Label name cannot be empty' });
         return;
       }
 
-      try {
-        const result = await tagRepository.getDb().$transaction(async (tx) => {
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tag-add:${CANVAS_LABEL_SOURCE_TYPE}:${canonicalCanvasId}:${labelKey}`}))`;
+      const existingRows = await tagRepository.findActiveTags(
+        canonicalCanvasId,
+        CANVAS_LABEL_SOURCE_TYPE,
+        CANVAS_LABEL_CATEGORY
+      );
+      const existingByKey = new Map(
+        existingRows.map((row) => [normalizeCanvasLabelKey(row.tag), row])
+      );
 
-          const existingRows = await tagRepository.findActiveTags(
-            canonicalCanvasId,
-            CANVAS_LABEL_SOURCE_TYPE,
-            CANVAS_LABEL_CATEGORY,
-            tx
-          );
-          const existing = existingRows.find(
-            (row) => normalizeCanvasLabelKey(row.tag) === labelKey
-          );
-          if (existing) {
-            return { label: existing, created: false };
-          }
-
-          const label = await tagRepository.insertTagRow(
-            {
-              sourceId: canonicalCanvasId,
-              sourceType: CANVAS_LABEL_SOURCE_TYPE,
-              workspaceId,
-              configKey: null,
-              tagCategory: CANVAS_LABEL_CATEGORY,
-              tag: labelName,
-              method: TagMethod.MANUAL,
-              reason: null,
-              createdBy: userId,
-              updatedBy: userId,
-            },
-            tx
-          );
-
-          return { label, created: true };
-        });
-
-        res.status(result.created ? 201 : 200).json({ label: toCanvasLabelResponse(result.label) });
-      } catch (error) {
-        if (isUniqueConstraintError(error)) {
-          const fallback = await tagRepository.findActiveTag(
-            canonicalCanvasId,
-            CANVAS_LABEL_SOURCE_TYPE,
-            CANVAS_LABEL_CATEGORY,
-            labelName
-          );
-          if (fallback) {
-            res.status(200).json({ label: toCanvasLabelResponse(fallback) });
-            return;
-          }
+      const labels: ReturnType<typeof toCanvasLabelResponse>[] = [];
+      for (const { name, key } of requestedLabels) {
+        const existing = existingByKey.get(key);
+        if (existing) {
+          labels.push(toCanvasLabelResponse(existing));
+          continue;
         }
-        throw error;
+
+        try {
+          const label = await tagRepository.insertTagRow({
+            sourceId: canonicalCanvasId,
+            sourceType: CANVAS_LABEL_SOURCE_TYPE,
+            workspaceId,
+            configKey: null,
+            tagCategory: CANVAS_LABEL_CATEGORY,
+            tag: name,
+            method: TagMethod.MANUAL,
+            reason: null,
+            createdBy: userId,
+            updatedBy: userId,
+          });
+          existingByKey.set(key, label);
+          labels.push(toCanvasLabelResponse(label));
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            const fallback = await tagRepository.findActiveTag(
+              canonicalCanvasId,
+              CANVAS_LABEL_SOURCE_TYPE,
+              CANVAS_LABEL_CATEGORY,
+              name
+            );
+            if (fallback) {
+              labels.push(toCanvasLabelResponse(fallback));
+              continue;
+            }
+          }
+          throw error;
+        }
       }
+
+      res.status(200).json({ labels });
     } catch (error) {
       logger.error('[CANVAS-LABELS] Failed to add label:', error);
       res.status(500).json({ error: 'Failed to add canvas label' });
