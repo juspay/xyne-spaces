@@ -91,7 +91,6 @@ export const planningRiskStateValues = ['NONE', 'ACTIVE', 'ACKNOWLEDGED', 'RESOL
 
 export type ForecastStatus = (typeof forecastStatusValues)[number];
 export type EstimateSource = (typeof estimateSourceValues)[number];
-export type PlanningRiskState = (typeof planningRiskStateValues)[number];
 
 const activeVisitSchema = z.object({
   stageVisitId: z.string().nullable(),
@@ -121,22 +120,6 @@ const planningRiskSchema = z.object({
   acknowledgmentReason: z.string().nullable(),
 });
 
-/**
- * Tracks an in-progress deviation from the board's Standard Path (NON_LINEAR only).
- * Populated when the ticket's current stage isn't on the configured path; cleared when it
- * returns. Kept as cheap ticket-level state rather than reconstructed from TicketActivity
- * history on every evaluation, since return-handling needs "off-path since" on every stage
- * move while deviated, not just once at return time.
- */
-const deviationSchema = z.object({
-  /** Epoch ms - when the ticket first moved off the Standard Path this deviation. */
-  startedAt: z.number(),
-  /** Every off-path stage id visited during this deviation, in visit order (may repeat). */
-  offPathStageIds: z.array(z.string()),
-});
-
-export type TicketEtaManagementDeviation = z.infer<typeof deviationSchema>;
-
 export const ticketEtaManagementSchema = z.object({
   schemaVersion: z.literal(1),
   lastEvaluatedAt: z.number().nullable(),
@@ -146,8 +129,6 @@ export const ticketEtaManagementSchema = z.object({
   forecastIncompleteStageIds: z.array(z.string()),
   activeVisit: activeVisitSchema,
   planningRisk: planningRiskSchema,
-  /** Null when not currently deviated from the Standard Path. */
-  deviation: deviationSchema.nullable(),
 });
 
 export type TicketEtaManagementActiveVisit = z.infer<typeof activeVisitSchema>;
@@ -181,7 +162,6 @@ export const DEFAULT_TICKET_ETA_MANAGEMENT: TicketEtaManagement = {
     acknowledgedBy: null,
     acknowledgmentReason: null,
   },
-  deviation: null,
 };
 
 export function validateTicketEtaManagement(data: unknown) {
@@ -228,14 +208,4 @@ export function mergeTicketEtaManagement(
   };
   base.etaManagement = merged;
   return base;
-}
-
-export function formatEtaManagementValidationErrors(result: {
-  success: false;
-  error: z.ZodError;
-}): string[] {
-  return result.error.issues.map((issue) => {
-    const path = issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
-    return `${path}${issue.message}`;
-  });
 }

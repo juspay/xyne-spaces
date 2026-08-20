@@ -3,9 +3,7 @@ import type {
   EstimateSource,
   EtaChangeTrigger,
   TicketEtaManagement,
-  TicketEtaManagementDeviation,
 } from '@xyne/shared';
-import { calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { resolveForecastRoute } from './routeResolution';
 import { buildForecast } from './forecastBuilder';
 import { decideEtaUpdate } from './extendOnly';
@@ -32,6 +30,8 @@ export type { EtaActivityWriteContext } from './etaActivityWriters';
 export type { EtaActivityIntent, BuildActivityIntentsContext } from './activityIntents';
 export { loadBoardEtaContext, isTerminalStatus } from './prismaContext';
 export type { LoadedBoardEtaContext } from './prismaContext';
+export { loadZeroEtaContext } from './zeroContext';
+export type { LoadedZeroEtaContext } from './zeroContext';
 export { msToDate, dateToMs } from './dateAdapter';
 export { resolveAwarenessRecipients, resolveActionRecipients } from './etaRecipients';
 export {
@@ -78,25 +78,6 @@ export interface EvaluateEtaResult {
     activeVisit?: Partial<TicketEtaManagement['activeVisit']>;
     planningRisk?: Partial<TicketEtaManagement['planningRisk']>;
   };
-  /**
-   * True only the first time this evaluation observes the current
-   * incompleteness (vs. already being incomplete for the same set of
-   * stages) - governs ETA_FORECAST_INCOMPLETE activity dedup per PRD §10.5.
-   */
-  forecastNewlyIncomplete: boolean;
-  /** Set only on the evaluation where the ticket returns to the Standard Path from a deviation (PRD §6.6). */
-  deviationReturned: {
-    offPathStageIds: string[];
-    offPathWorkingDurationMs: number;
-    returnStageId: string;
-  } | null;
-}
-
-function stageIdSetsEqual(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((v, i) => v === sortedB[i]);
 }
 
 /**
@@ -135,8 +116,6 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
         changedInputs: [],
       },
       ticketEtaManagementPatch: {},
-      forecastNewlyIncomplete: false,
-      deviationReturned: null,
     };
   }
 
@@ -175,38 +154,6 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
     isTerminal,
   });
 
-  const forecastNewlyIncomplete =
-    forecast.status === 'INCOMPLETE' &&
-    (currentTicketEtaManagement.forecastStatus !== 'INCOMPLETE' ||
-      !stageIdSetsEqual(currentTicketEtaManagement.forecastIncompleteStageIds, forecast.incompleteStageIds));
-
-  // Standard Path deviation tracking (NON_LINEAR only - route.kind is only ever 'DEVIATED'
-  // when a Standard Path is configured and the current stage isn't on it). Auto-extension is
-  // already inert while deviated (buildForecast marks it NOT_APPLICABLE, so decideEtaUpdate
-  // is a no-op above); this only tracks state for the eventual return.
-  const wasDeviated = currentTicketEtaManagement.deviation !== null;
-  const isDeviatedNow = route.kind === 'DEVIATED';
-  let deviationPatch: TicketEtaManagementDeviation | null = currentTicketEtaManagement.deviation;
-  let deviationReturned: EvaluateEtaResult['deviationReturned'] = null;
-
-  if (isDeviatedNow) {
-    const existing = currentTicketEtaManagement.deviation;
-    deviationPatch = {
-      startedAt: existing?.startedAt ?? now.getTime(),
-      offPathStageIds: existing?.offPathStageIds.includes(currentStageId)
-        ? existing.offPathStageIds
-        : [...(existing?.offPathStageIds ?? []), currentStageId],
-    };
-  } else if (wasDeviated) {
-    const existing = currentTicketEtaManagement.deviation!;
-    deviationReturned = {
-      offPathStageIds: existing.offPathStageIds,
-      offPathWorkingDurationMs: calculateWorkingDurationMs(new Date(existing.startedAt), now),
-      returnStageId: currentStageId,
-    };
-    deviationPatch = null;
-  }
-
   const ticketEtaManagementPatch: EvaluateEtaResult['ticketEtaManagementPatch'] = {
     lastEvaluatedAt: now.getTime(),
     lastBoardConfigVersion: boardEtaManagement.configVersion,
@@ -221,8 +168,7 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
       estimateHours: activeVisit.estimateHours,
     },
     planningRisk: planningRisk.nextState,
-    deviation: deviationPatch,
   };
 
-  return { forecast, etaDecision, planningRisk, ticketEtaManagementPatch, forecastNewlyIncomplete, deviationReturned };
+  return { forecast, etaDecision, planningRisk, ticketEtaManagementPatch };
 }

@@ -88,13 +88,13 @@ export function etaSignalsFromMetadataDiff(input: {
 }
 
 /**
- * Post-commit notification delivery, per the PRD §8.2 event table:
+ * Post-commit notification delivery:
  *  - planning risk detected/reopened -> action recipients (awareness
  *    recipients who also hold the board's ETA-update permission).
  *  - automatic or manual due-date change -> awareness recipients.
  *  - resolved / unchanged / no date change -> nothing.
- *  - acknowledgment is intentionally NOT handled here (PRD: record + system
- *    message only, no additional notification) - see `ticket.acknowledgeEtaRisk`.
+ *  - acknowledgment is intentionally NOT handled here (record + system
+ *    message only, no notification) - see `ticket.acknowledgeEtaRisk`.
  *
  * Always call this AFTER the mutation has committed - it does its own
  * reads/writes via `notificationService` and must never be able to roll back

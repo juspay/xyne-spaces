@@ -7,7 +7,7 @@ import { UserResponsibility, type BoardMetadata } from '@xyne/shared';
  * caller supplies the two lookups via whatever client it holds - Prisma `tx`
  * or Zero `tx.run(zql...)`.
  *
- * PRD §13.2: the backend is the only security boundary for this check -
+ * the backend is the only security boundary for this check -
  * frontend visibility must never be treated as one, so this logic is not
  * shared with or duplicated in the dashboard.
  */

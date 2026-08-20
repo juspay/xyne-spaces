@@ -42,7 +42,7 @@ export interface RouteStep {
    * True when this step is a Standard-Path step on a graphed NON_LINEAR
    * board, where an explicit or global StageTransition row is REQUIRED to
    * resolve an estimate - a null `transition` in that case is a config
-   * error (PRD §6.3 "no matching transition on a graphed board"), not a
+   * error ("no matching transition on a graphed board"), not a
    * legitimate "unrestricted move". False for linear/DEFAULT/RELEASE
    * boards, where a null transition just means "use the stage default".
    */
