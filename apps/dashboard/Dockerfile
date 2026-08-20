@@ -48,7 +48,26 @@ ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
 # Accept build argument for API URL
 ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
-ENV VITE_ZERO_SERVER=https://spaces.xyne.juspay.net/zero
+
+# --- Deployment lane -------------------------------------------------------
+# Defaults build the main bundle. The SDLC image adds:
+#   --build-arg BUILD_SCRIPT=build:sdlc --build-arg STATIC_SUBDIR=sdlc-app \
+#   --build-arg ZERO_SERVER=/sdlc-zero
+# The rest comes from .env.sdlc via `vite build --mode sdlc`. ZERO_SERVER must
+# stay an ARG: a shell env var outranks every .env file in Vite, so an ENV here
+# would silently point the SDLC bundle at the main zero-cache.
+ARG BUILD_SCRIPT=build
+
+ARG ZERO_SERVER=https://spaces.xyne.juspay.net/zero
+ENV VITE_ZERO_SERVER=${ZERO_SERVER}
+
+# Only read by the main bundle; defaults to /sdlc-app in config.ts.
+ARG SDLC_APP_BASE_PATH=""
+ENV VITE_SDLC_APP_BASE_PATH=${SDLC_APP_BASE_PATH}
+
+# Subdirectory the assets are stored under, matching the base path they were
+# built with, so the edge needs no rewriting. Empty for the main bundle.
+ARG STATIC_SUBDIR=""
 
 # Mixpanel token (public client-side analytics; injected at build time)
 ARG VITE_MIXPANEL_TOKEN=""
@@ -65,7 +84,7 @@ ENV VITE_DEFAULT_WORKSPACE_ID=6642623f-cca7-43ad-9a6b-5e49c33226b4
 
 # Build the Vite React app with increased memory
 ENV NODE_OPTIONS="--max-old-space-size=8192"
-RUN pnpm --filter xyne-spaces-dashboard run build
+RUN pnpm --filter xyne-spaces-dashboard run ${BUILD_SCRIPT}
 
 # Create ZIP of the built assets for Electron OTA updates
 # The ZIP will be served at /releases/dashboard.zip
@@ -86,9 +105,12 @@ RUN addgroup --system --gid 1001 frontend && \
 # Copy nginx configuration as template for envsubst
 COPY --chown=frontend:frontend apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
 
+# Re-declare in the runner stage: ARGs do not cross stage boundaries.
+ARG STATIC_SUBDIR=""
+
 # Only the built assets cross into the runner, so the builder's workspace layout
 # does not matter here — no node_modules or symlinks are carried over.
-COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/dist /usr/share/nginx/html
+COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/dist /usr/share/nginx/html/${STATIC_SUBDIR}
 
 # Copy releases folder with dashboard.zip for Electron OTA updates
 COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/releases /usr/share/nginx/html/releases
