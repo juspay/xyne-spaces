@@ -43,17 +43,17 @@ export const APPS_PUBLIC_BASE_URL = isLocalhost
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-// SDLC lane: same-origin path to its own zero-cache. A separate variable from
-// VITE_ZERO_SERVER on purpose — overloading that one let the Dockerfile's baked
-// absolute URL win over the host, pinning every deployment to one host.
+// SDLC lane: same-origin path to its own zero-cache. Everything else derives from
+// the serving host. VITE_ZERO_SERVER is deliberately not read here — it is used
+// server-side (vite preview's /zero proxy, sandbox's traefik rule), and reading it
+// client-side let a baked absolute URL pin every host to one origin.
 const laneZeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) || '';
 
 export const VITE_ZERO_SERVER = laneZeroPath
   ? `${window.location.origin}${laneZeroPath}`
-  : (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
-    (isElectronBundled
-      ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-      : `${protocol}://${hostname}${zeroServerPort}/zero`);
+  : isElectronBundled
+    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+    : `${protocol}://${hostname}${zeroServerPort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
