@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button/Button';
 import { AppsTable } from '../../components/Apps/AppsTable/AppsTable';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import CreateAppForm from '../../components/Apps/CreateAppForm/CreateAppForm';
+import ApiKeysModal from '../../components/Apps/ApiKeysModal/ApiKeysModal';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -14,7 +15,7 @@ import { useMutation } from '@tanstack/react-query';
 import { appsService } from '../../services/Apps/appsService';
 import { mutators } from '../../zero/mutators';
 import { toast } from 'sonner';
-import { Plus, AppWindow, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Plus, AppWindow, ChevronLeft, ChevronRight, Search, KeyRound } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { AccessType } from '@xyne/shared';
 
@@ -41,6 +42,7 @@ const AppsScreen = (): ReactElement => {
     ? (searchParams.get('view') as AppsView)
     : 'org';
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isApiKeysModalOpen, setIsApiKeysModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Per-view cursor history so paging in one tab doesn't corrupt another.
@@ -377,17 +379,38 @@ const AppsScreen = (): ReactElement => {
                 Manage your xyne-apps and their configurations
               </p>
             </div>
-            {canCreateApp && (
+            <div className='flex items-center gap-2'>
               <Button
-                onClick={() => setIsCreateModalOpen(true)}
+                variant='outline'
+                onClick={() => setIsApiKeysModalOpen(true)}
                 data-track-category='Apps'
-                data-track-name='OpenCreateAppModal'
+                data-track-name='OpenApiKeysModal'
               >
-                <Plus size={16} className='mr-1' />
-                Create App
+                <KeyRound size={16} className='mr-1' />
+                API Keys
               </Button>
-            )}
+              {canCreateApp && (
+                <Button
+                  onClick={() => setIsCreateModalOpen(true)}
+                  data-track-category='Apps'
+                  data-track-name='OpenCreateAppModal'
+                >
+                  <Plus size={16} className='mr-1' />
+                  Create App
+                </Button>
+              )}
+            </div>
           </div>
+
+          <Dialog
+            open={isApiKeysModalOpen}
+            onOpenChange={setIsApiKeysModalOpen}
+            title='API keys'
+            description='Keys for the Spaces SDK. Each acts with your own permissions, in this workspace.'
+            className='max-w-xl max-h-[85vh]'
+          >
+            <ApiKeysModal />
+          </Dialog>
 
           <Dialog
             open={isCreateModalOpen}
