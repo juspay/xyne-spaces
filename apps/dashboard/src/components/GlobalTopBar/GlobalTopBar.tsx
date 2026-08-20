@@ -277,7 +277,9 @@ const WorkspaceInviteButton = (): ReactElement | null => {
   }
 
   const handleCopyInviteLink = async (): Promise<void> => {
-    const inviteUrl = buildShareableUrl(`/community/join?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const inviteUrl = buildShareableUrl(
+      `/community/join?workspaceId=${encodeURIComponent(workspaceId)}`,
+    );
 
     try {
       await navigator.clipboard.writeText(inviteUrl);
