@@ -15,7 +15,7 @@
 
 import type { Request, Response } from 'express';
 import type { AuthenticatedUser } from '@/types/express';
-import { readScope, searchQuerySchema, searchSchemaQuerySchema } from '@xyne/spaces-contract';
+import { searchQuerySchema, searchSchemaQuerySchema } from '@xyne/spaces-contract';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import { ApiError } from '../errors';
@@ -124,7 +124,6 @@ function principalOf(ctx: RouteContext): AuthenticatedUser {
     role: authData.role,
     orgRole: authData.orgRole,
     memberId: authData.memberId,
-    scopes: [...ctx.auth.scopes],
   };
 }
 
@@ -134,8 +133,6 @@ export const searchRoutes: readonly RouteDefinition[] = [
     path: '/search',
     operationId: 'search',
     summary: 'Search across messages, tickets, files, channels, calls, and users.',
-    scope: readScope('search'),
-    idempotency: 'none',
     request: { query: searchQuerySchema },
     async handler(ctx) {
       const query = ctx.query as Record<string, unknown>;
@@ -156,8 +153,6 @@ export const searchRoutes: readonly RouteDefinition[] = [
     path: '/search/schema',
     operationId: 'getSearchSchema',
     summary: 'Field definitions for a search index, for building advanced queries.',
-    scope: readScope('search'),
-    idempotency: 'none',
     request: { query: searchSchemaQuerySchema },
     async handler(ctx) {
       const captured = await capture(

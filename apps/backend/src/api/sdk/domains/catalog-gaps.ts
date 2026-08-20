@@ -4,7 +4,6 @@
  */
 
 import { z } from 'zod';
-import { readScope, writeScope } from '@xyne/spaces-contract';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
@@ -129,8 +128,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/channels',
     operationId: 'createChannel',
     summary: 'Create a channel and its server-owned associated rows.',
-    scope: writeScope('channels'),
-    idempotency: 'optional',
     request: { body: createChannelBody },
     async handler(ctx) {
       return callLegacyHandler(channelController.createChannel, ctx);
@@ -141,8 +138,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/channels/check-duplicate',
     operationId: 'checkDuplicateChannel',
     summary: 'Check whether a channel name is already in use.',
-    scope: readScope('channels'),
-    idempotency: 'optional',
     request: { body: checkDuplicateChannelBody },
     async handler(ctx) {
       return callLegacyHandler(channelController.checkDuplicate, ctx);
@@ -153,8 +148,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/tickets',
     operationId: 'createTicket',
     summary: 'Create a ticket using the project sequence allocator.',
-    scope: writeScope('tickets'),
-    idempotency: 'optional',
     middleware: [uploadMultiple],
     request: { body: createTicketBody },
     async handler(ctx) {
@@ -168,8 +161,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/channels/:channelId/conversations',
     operationId: 'createConversationWithAttachments',
     summary: 'Start a conversation while uploading its attachments.',
-    scope: writeScope('conversations'),
-    idempotency: 'optional',
     middleware: [uploadMultiple],
     request: { params: channelIdParams, body: createConversationBody },
     async handler(ctx) {
@@ -181,8 +172,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/attachments',
     operationId: 'uploadAttachments',
     summary: 'Upload attachment bytes for an impact or form value.',
-    scope: writeScope('attachments'),
-    idempotency: 'optional',
     middleware: [uploadMultiple],
     request: { body: uploadAttachmentsBody },
     async handler(ctx) {
@@ -197,8 +186,6 @@ export const catalogGapRoutes: readonly RouteDefinition[] = [
     path: '/draft-attachments',
     operationId: 'uploadDraftAttachments',
     summary: 'Upload attachment bytes and associate them with a draft.',
-    scope: writeScope('attachments'),
-    idempotency: 'optional',
     middleware: [uploadMultiple],
     request: { body: uploadDraftAttachmentsBody },
     async handler(ctx) {

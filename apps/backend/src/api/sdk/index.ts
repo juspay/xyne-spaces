@@ -1,36 +1,32 @@
 /**
  * The Xyne Spaces public SDK API.
  *
- * Both authorization server and resource server for SDK clients: OAuth endpoints
- * mint RS256 access tokens which the same process verifies on resource requests.
- * No external auth service dependency.
+ * A thin authenticated surface over machinery that already exists. It owns
+ * exactly five concerns:
  *
- * Route definitions live in `domains/*` as manifest data; this file assembles
- * them into a router and owns the middleware chain shared by every endpoint.
+ *   auth.ts      authenticate an API key into an `AuthData`
+ *   query.ts     run one catalog query
+ *   mutation.ts  run one catalog mutator
+ *   direct.ts    call the product controllers behind the catalog gaps
+ *   handler.ts   request id, rate limit, and one error envelope
+ *
+ * Everything else — ACL, Vespa indexing, side effects, sequence allocation — is
+ * reached through code the app itself uses, never reimplemented here.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { API_VERSION } from '@xyne/spaces-contract';
 import { requestId } from './middleware/requestId';
-import { authn } from './middleware/authn';
+import { apiKeyAuth } from './auth';
 import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
 import { registerRoutes } from './manifest/register';
 import { readsAvailable } from './engine/queries';
 import { searchRoutes } from './domains/search';
 import { catalogGapRoutes } from './domains/catalog-gaps';
 import type { RouteDefinition } from './manifest/types';
-import { oauthRouter } from './oauth';
-import { oauthConfig } from './oauth/config';
 import { catalogRouter } from './domains/catalog';
 
-/**
- * Routes that require custom API handlers (not available via Zero fallback).
- *
- * Most SDK operations use /zero/query-fallback and /zero/push-fallback to
- * reuse existing Zero queries/mutators. Only operations that need custom
- * logic (Vespa search, server-side allocation, and multipart uploads) are
- * defined here.
- */
+/** Direct API routes: operations that are not Zero catalog queries or mutators. */
 export const allRoutes: readonly RouteDefinition[] = [
   ...catalogGapRoutes,
   ...searchRoutes,
@@ -41,15 +37,14 @@ export function createSdkRouter(): Router {
 
   router.use(requestId);
 
-  // Unauthenticated service endpoints. Deliberately before `authn` so a probe
-  // can tell "the API is misconfigured" from "your token is bad".
+  // Unauthenticated service endpoints. Deliberately before `apiKeyAuth` so a
+  // probe can tell "the API is misconfigured" from "your key is bad".
   router.get('/version', (_req: Request, res: Response) => {
     res.json({ version: API_VERSION, service: 'xyne-spaces-api' });
   });
 
   router.get('/health', (_req: Request, res: Response) => {
     const reads = readsAvailable();
-    const authConfigured = oauthConfig.isConfigured;
     res.status(reads ? 200 : 503).json({
       status: reads ? 'ok' : 'degraded',
       reads: reads
@@ -59,19 +54,10 @@ export function createSdkRouter(): Router {
             reason:
               'No read replica configured (DATABASE_READ_REPLICA_POOL_URL) and SDK_QUERIES_ALLOW_PRIMARY is off.',
           },
-      auth: authConfigured
-        ? { configured: true }
-        : { configured: false, reason: 'SDK_JWT_PRIVATE_KEY or SDK_JWT_KEY_ID is unset.' },
     });
   });
 
-  // OAuth endpoints (authorization server). Mounted before authn because they
-  // use Spaces session authentication, not SDK access tokens.
-  if (oauthConfig.enabled) {
-    router.use('/oauth', oauthRouter);
-  }
-
-  router.use(authn);
+  router.use(apiKeyAuth);
   router.use('/catalog', catalogRouter);
   router.use(registerRoutes(allRoutes));
 

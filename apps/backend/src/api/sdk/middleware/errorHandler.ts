@@ -28,7 +28,7 @@ export function v1ErrorHandler(err: unknown, req: Request, res: Response, next: 
     method: req.method,
     path: req.originalUrl,
     userId: req.sdkAuth?.authData.sub,
-    clientId: req.sdkAuth?.clientId,
+    keyId: req.sdkAuth?.keyId,
     err: apiError.cause ?? apiError,
   };
   if (isServerError) logger.error('[sdk] request failed', logPayload);
