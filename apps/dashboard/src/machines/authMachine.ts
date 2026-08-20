@@ -4,7 +4,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isTestEnv } from '../config';
+import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -19,7 +19,7 @@ import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
-import { dropZeroDatabases } from '../zero/dropZeroDatabases';
+import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -1338,7 +1338,9 @@ export const authMachine = createMachine(
           /* empty */
         }
 
-        await dropZeroDatabases();
+        // Logout is the one place a cross-lane drop is right: both bundles are going
+        // away. The lane must not take out its host's store, so it only drops its own.
+        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
         await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
