@@ -20,7 +20,7 @@ import { requestId } from './middleware/requestId';
 import { apiKeyAuth } from './auth';
 import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
 import { registerRoutes } from './manifest/register';
-import { readsAvailable } from './engine/queries';
+import { readsAvailable } from './query';
 import { searchRoutes } from './domains/search';
 import { catalogGapRoutes } from './domains/catalog-gaps';
 import type { RouteDefinition } from './manifest/types';
