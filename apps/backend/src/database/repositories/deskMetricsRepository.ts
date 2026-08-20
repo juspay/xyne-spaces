@@ -160,22 +160,20 @@ export class DeskMetricsRepository {
     // Cohort: active tickets created in range, optionally scoped by the selected filters.
     let customFieldExists: Prisma.Sql = Prisma.sql``;
     if (customFieldFilter && customFieldFilter.keys.length > 0) {
-      // Value conditions — OR across keys that have values/terms selected
-      const valueConditions: Prisma.Sql[] = [];
+      // One EXISTS per field, AND'd together — values within a field are OR'd, different fields are AND'd
+      const perKeyExists: Prisma.Sql[] = [];
       for (const key of customFieldFilter.keys) {
         const kf = customFieldFilter.perKeyFilters?.[key];
         const hasValues = kf?.values && kf.values.length > 0;
         const hasTerms = kf?.textTerms && kf.textTerms.length > 0;
-        if (!hasValues && !hasTerms) continue;
         const fieldNameMatch = Prisma.sql`COALESCE(gf."fieldName", ff."fieldName") = ${key}`;
         const fieldCol = Prisma.sql`COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))`;
-        let valueCondition: Prisma.Sql;
+        let valueCondition: Prisma.Sql | undefined;
         if (hasTerms) {
-          // OR across all text terms within this field
           valueCondition = kf!
             .textTerms!.map((t) => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
             .reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`));
-        } else {
+        } else if (hasValues) {
           valueCondition = Prisma.sql`(
             ${fieldCol} IN (${Prisma.join(kf!.values!)})
             OR (
@@ -187,22 +185,19 @@ export class DeskMetricsRepository {
             )
           )`;
         }
-        valueConditions.push(Prisma.sql`(${fieldNameMatch} AND (${valueCondition}))`);
-      }
-      // Single EXISTS: field-level pre-filter (fieldName IN keys) + optional value-level AND
-      const valueClause =
-        valueConditions.length > 0
-          ? Prisma.sql`AND (${valueConditions.reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`))})`
-          : Prisma.sql``;
-      customFieldExists = Prisma.sql`AND EXISTS (
+        perKeyExists.push(Prisma.sql`AND EXISTS (
           SELECT 1 FROM "public"."form_entity_values" fev
           LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
           LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
           WHERE fev."entityId" = ta."ticketId"
             AND fev."entityType" = 'TICKET'
-            AND COALESCE(gf."fieldName", ff."fieldName") IN (${Prisma.join(customFieldFilter.keys)})
-            ${valueClause}
-        )`;
+            AND ${fieldNameMatch}
+            ${valueCondition !== undefined ? Prisma.sql`AND (${valueCondition})` : Prisma.sql``}
+        )`);
+      }
+      if (perKeyExists.length > 0) {
+        customFieldExists = perKeyExists.reduce((acc, c) => Prisma.sql`${acc} ${c}`);
+      }
     }
 
     // Tag filter: parse "category:tag" composite values (format used by GeneratedTagsSubmenu)
