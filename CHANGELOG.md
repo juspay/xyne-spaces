@@ -1,3 +1,10 @@
+## [1.201.0](https://github.com/juspay/xyne-spaces/compare/v1.200.1...v1.201.0) (2026-08-20)
+
+
+### Features
+
+* Create Google doc list for recordi ([#791](https://github.com/juspay/xyne-spaces/issues/791)) ([e411963](https://github.com/juspay/xyne-spaces/commit/e411963f6796dc2316310e40c08bba195445eb2d))
+
 ## [1.200.1](https://github.com/juspay/xyne-spaces/compare/v1.200.0...v1.200.1) (2026-08-20)
 
 
