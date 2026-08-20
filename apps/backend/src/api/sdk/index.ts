@@ -8,18 +8,16 @@
  *   query.ts     run one catalog query
  *   mutation.ts  run one catalog mutator
  *   direct.ts    call the product controllers behind the catalog gaps
- *   handler.ts   request id, rate limit, and one error envelope
+ *   handler.ts   request id and one error envelope
  *
  * Everything else — ACL, Vespa indexing, side effects, sequence allocation — is
  * reached through code the app itself uses, never reimplemented here.
  */
 
-import { Router, type NextFunction, type Request, type Response } from 'express';
-import { z, ZodError } from 'zod';
+import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { API_VERSION } from '@xyne/spaces-contract';
-import { requestId } from './middleware/requestId';
-import { rateLimit } from './middleware/rateLimit';
-import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
+import { errorHandler, handle, notFound, requestId } from './handler';
 import { apiKeyAuth } from './auth';
 import { callQuery, readsAvailable } from './query';
 import { callMutator } from './mutation';
@@ -37,24 +35,20 @@ const catalogRequest = z.object({
 });
 
 function catalogHandler(kind: 'query' | 'mutator') {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const auth = req.sdkAuth;
-      if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+  return handle(async (req: Request, res: Response) => {
+    const auth = req.sdkAuth;
+    if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
 
-      const { name, args } = catalogRequest.parse(req.body);
+    const { name, args } = catalogRequest.parse(req.body);
 
-      if (kind === 'query') {
-        res.status(200).json({ data: await callQuery(name, args, auth.ctx) });
-        return;
-      }
-
-      await callMutator(name, args, auth.authData);
-      res.status(200).json({ success: true });
-    } catch (err) {
-      next(err instanceof ZodError ? ApiError.validation(err) : err);
+    if (kind === 'query') {
+      res.status(200).json({ data: await callQuery(name, args, auth.ctx) });
+      return;
     }
-  };
+
+    await callMutator(name, args, auth.authData);
+    res.status(200).json({ success: true });
+  });
 }
 
 export function createSdkRouter(): Router {
@@ -84,12 +78,12 @@ export function createSdkRouter(): Router {
 
   router.use(apiKeyAuth);
 
-  router.post('/catalog/query', rateLimit('read'), catalogHandler('query'));
-  router.post('/catalog/mutate', rateLimit('write'), catalogHandler('mutator'));
+  router.post('/catalog/query', catalogHandler('query'));
+  router.post('/catalog/mutate', catalogHandler('mutator'));
   router.use(createDirectRouter());
 
-  router.use(v1NotFound);
-  router.use(v1ErrorHandler);
+  router.use(notFound);
+  router.use(errorHandler);
 
   return router;
 }

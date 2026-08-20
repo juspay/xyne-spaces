@@ -4,7 +4,6 @@
  * Read straight from the environment rather than threaded through the Joi
  * schema in `config/env.ts`, so enabling the SDK surface in a deployment is
  * additive and cannot break boot for deployments that do not run it.
- *
  */
 
 export const sdkConfig = {
@@ -31,19 +30,6 @@ export const sdkConfig = {
     get ttlDays(): number {
       const raw = Number(process.env['SDK_API_KEY_TTL_DAYS'] ?? 30);
       return Number.isFinite(raw) && raw > 0 ? raw : 30;
-    },
-  },
-
-  rateLimit: {
-    /** Token bucket capacity per (user, client) for read endpoints. */
-    get readPerMinute(): number {
-      return Number(process.env['SDK_RATE_LIMIT_READ_PER_MIN'] ?? 300);
-    },
-    get writePerMinute(): number {
-      return Number(process.env['SDK_RATE_LIMIT_WRITE_PER_MIN'] ?? 60);
-    },
-    get burstMultiplier(): number {
-      return Number(process.env['SDK_RATE_LIMIT_BURST_MULTIPLIER'] ?? 2);
     },
   },
 } as const;
