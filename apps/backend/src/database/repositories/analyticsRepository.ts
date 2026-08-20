@@ -25,6 +25,8 @@ export interface CallsTimeSeriesPoint {
 }
 
 const MINUTE_MS = 60 * 1000;
+/** Calls shorter than this many seconds are ignored across all call analytics. */
+const MIN_CALL_DURATION_SECONDS = 60;
 /**
  * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]
  */
@@ -913,12 +915,27 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get the calls that lasted more than 60 seconds in the selected time period
-   * Calls and recordings live in the same table - HEADLESS calls are note taker recordings,
-   * every other call type is a regular call
+   * Duration in seconds of a call that qualifies for analytics - it has an end
+   * time and lasted longer than MIN_CALL_DURATION_SECONDS - or null when the
+   * call does not qualify. The single place the 60s rule and the
+   * (endedAt - startedAt) arithmetic live; every call metric goes through it.
+   */
+  private qualifyingDurationSeconds(call: { startedAt: Date; endedAt: Date | null }): number | null {
+    if (!call.endedAt) return null;
+    const durationSeconds = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+    return durationSeconds > MIN_CALL_DURATION_SECONDS ? durationSeconds : null;
+  }
+
+  /**
+   * Single fetch + qualify path for every call metric. Loads the calls in the
+   * date range once, keeps only those lasting more than 60 seconds, and carries
+   * each qualifying call's duration and recording flag so callers never re-run
+   * the query or recompute the threshold.
+   * Calls and recordings live in the same table - HEADLESS calls are note taker
+   * recordings, every other call type is a regular call.
    */
   private async getValidCalls(filters: AnalyticsFilters): Promise<{
-    validCalls: { startedAt: Date; isRecording: boolean }[];
+    validCalls: { startedAt: Date; durationSeconds: number; isRecording: boolean }[];
     dateCondition: Date | { gte: Date; lte?: Date };
   }> {
     const { workspaceId, dateCondition } = this.resolveScope(filters);
@@ -937,17 +954,17 @@ export class AnalyticsRepository {
       }
     }));
 
-    // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls
-      .filter(call => {
-        if (!call.endedAt) return false;
-        const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-        return duration > 60;
-      })
-      .map(call => ({
+    // Keep only calls longer than 60s, carrying the qualifying duration so no
+    // caller recomputes (endedAt - startedAt) or re-applies the threshold.
+    const validCalls = calls.flatMap(call => {
+      const durationSeconds = this.qualifyingDurationSeconds(call);
+      if (durationSeconds === null) return [];
+      return [{
         startedAt: call.startedAt,
-        isRecording: call.callType === CallType.HEADLESS
-      }));
+        durationSeconds,
+        isRecording: call.callType === CallType.HEADLESS,
+      }];
+    });
 
     return { validCalls, dateCondition };
   }
@@ -972,36 +989,23 @@ export class AnalyticsRepository {
    */
   async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<CallsTimeSeriesPoint[]> {
     const { validCalls, dateCondition } = await this.getValidCalls(filters);
-
-    // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Generate time buckets based on groupBy
     const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
-    const callBuckets = new Map<string, number>();
-    const recordingBuckets = new Map<string, number>();
 
-    // Initialize buckets
-    timeBuckets.forEach(bucket => {
-      callBuckets.set(bucket, 0);
-      recordingBuckets.set(bucket, 0);
-    });
+    // Bucket regular calls and recordings separately through the shared
+    // bucketCounts helper, then zip the two series together by date. Both series
+    // are built from the same timeBuckets, so their dates line up 1:1.
+    const bucketByStart = (call: { startedAt: Date }) => this.getBucketKey(call.startedAt, groupBy);
+    const callSeries = this.bucketCounts(validCalls.filter(call => !call.isRecording), timeBuckets, bucketByStart);
+    const recordingSeries = this.bucketCounts(validCalls.filter(call => call.isRecording), timeBuckets, bucketByStart);
 
-    // Group calls by time buckets
-    validCalls.forEach(call => {
-      const bucketKey = this.getBucketKey(call.startedAt, groupBy);
-      const bucketData = call.isRecording ? recordingBuckets : callBuckets;
-      if (bucketData.has(bucketKey)) {
-        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
-      }
-    });
-
-    // Convert to array format
-    return timeBuckets.map(bucketKey => ({
-      date: bucketKey,
-      calls: callBuckets.get(bucketKey) || 0,
-      recordings: recordingBuckets.get(bucketKey) || 0
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    const recordingsByDate = new Map(recordingSeries.map(point => [point.date, point.value]));
+    return callSeries.map(point => ({
+      date: point.date,
+      calls: point.value,
+      recordings: recordingsByDate.get(point.date) ?? 0,
+    }));
   }
 
   /**
@@ -1009,33 +1013,12 @@ export class AnalyticsRepository {
    * Only counts calls that lasted more than 60 seconds
    */
   async getTotalCallsDuration(filters: AnalyticsFilters): Promise<number> {
-    const { workspaceId, dateCondition } = this.resolveScope(filters);
-    const userIds = await this.getUsersId(workspaceId);
+    const { validCalls } = await this.getValidCalls(filters);
 
-    // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
-      where: {
-        startedAt: dateCondition,
-        endedAt: { not: null },
-        ...this.getCallWorkspaceFilter(workspaceId, userIds)
-      },
-      select: {
-        startedAt: true,
-        endedAt: true
-      }
-    }));
+    // Sum the qualifying durations (already filtered to >60s) and return the
+    // total in minutes, rounded to 1 decimal place.
+    const totalDurationSeconds = validCalls.reduce((sum, call) => sum + call.durationSeconds, 0);
 
-    // Filter for calls that lasted more than 60 seconds and sum their durations
-    let totalDurationSeconds = 0;
-    calls.forEach(call => {
-      if (!call.endedAt) return;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      if (duration <= 60) return;
-
-      totalDurationSeconds += duration;
-    });
-
-    // Return total duration in minutes (rounded to 1 decimal place)
     return Math.round((totalDurationSeconds / 60) * 10) / 10;
   }
 
@@ -1044,31 +1027,17 @@ export class AnalyticsRepository {
    * Only counts calls that lasted more than 60 seconds
    */
   async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
-    const userIds = await this.getUsersId(workspaceId);
+    const { validCalls, dateCondition } = await this.getValidCalls(filters);
+    const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
-      where: {
-        startedAt: dateCondition,
-        endedAt: { not: null },
-        ...this.getCallWorkspaceFilter(workspaceId, userIds)
-      },
-      select: {
-        startedAt: true,
-        endedAt: true
-      }
-    }));
-
-    // Generate time buckets based on groupBy
     const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     // Sum qualifying call durations (seconds) per bucket, then convert to minutes
     const durationSecondsSeries = this.bucketCounts(
-      calls.filter(call => call.endedAt && (call.endedAt.getTime() - call.startedAt.getTime()) / 1000 > 60),
+      validCalls,
       timeBuckets,
       call => this.getBucketKey(call.startedAt, groupBy),
-      call => (call.endedAt!.getTime() - call.startedAt.getTime()) / 1000,
+      call => call.durationSeconds,
     );
 
     return durationSecondsSeries.map(point => ({
