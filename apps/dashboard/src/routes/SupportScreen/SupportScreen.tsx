@@ -758,6 +758,7 @@ const SupportScreen = (): ReactElement => {
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const pointerDownInSubmenuRef = useRef(false);
 
   useEffect(() => {
     if (!moreFiltersOpen) {
@@ -2833,6 +2834,11 @@ const SupportScreen = (): ReactElement => {
                               sideOffset={6}
                               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
                               onInteractOutside={e => {
+                                if (pointerDownInSubmenuRef.current) {
+                                  pointerDownInSubmenuRef.current = false;
+                                  e.preventDefault();
+                                  return;
+                                }
                                 const target = e.target;
                                 if (
                                   target instanceof Element &&
@@ -2956,6 +2962,9 @@ const SupportScreen = (): ReactElement => {
                               <div
                                 ref={submenuRef}
                                 data-filter-submenu='true'
+                                onPointerDownCapture={() => {
+                                  pointerDownInSubmenuRef.current = true;
+                                }}
                                 className='fixed z-[60]'
                                 style={{
                                   left:
