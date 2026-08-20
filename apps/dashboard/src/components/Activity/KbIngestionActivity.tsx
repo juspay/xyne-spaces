@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useParams } from 'react-router-dom';
 import { IngestionStatus } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
@@ -22,6 +23,11 @@ export const KbIngestionActivity = ({
 }): ReactElement | null => {
   const actor = useUser(activity.actorId);
   const collectionId = activity.actionSourceId ?? '';
+  // Every app route lives under /:workspaceId, and the KB route is
+  // /:workspaceId/knowledge-base — so the deep link MUST carry the workspace
+  // segment (matching the toast's actionUrl), else it binds :workspaceId to
+  // "knowledge-base" and renders a broken workspace.
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
 
   // Counts are frozen at creation time in blockId as "succeeded,failed" (see
   // collectionIngestionNotifier), so each notification keeps its own numbers.
@@ -65,7 +71,8 @@ export const KbIngestionActivity = ({
     succeeded = Math.max(total - failed - inFlight, 0);
   }
 
-  const targetPath = collectionId ? `/knowledge-base?cl=${collectionId}` : '';
+  const targetPath =
+    collectionId && workspaceId ? `/${workspaceId}/knowledge-base?cl=${collectionId}` : '';
 
   // Outcome line: a colored status word + a plain-language summary, mirroring the
   // three real end-states of a collection import.

@@ -62,6 +62,15 @@ export const CollectionStatusBadgeV2: React.FC<CollectionStatusBadgeV2Props> = (
             ev.stopPropagation();
             onOpenStatus(entry);
           }}
+          onKeyDown={ev => {
+            // The parent folder card is a role="button" div whose own onKeyDown
+            // navigates into the folder on Enter/Space. Stop those keys here so
+            // activating the badge opens the drawer only (the native button still
+            // fires onClick) — without also bubbling up and navigating.
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.stopPropagation();
+            }
+          }}
           data-track-category='knowledge-base'
           data-track-name='open-collection-status'
           className={cn(baseClass, 'transition hover:ring-ring/50')}
