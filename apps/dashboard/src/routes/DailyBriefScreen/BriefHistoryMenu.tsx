@@ -1,45 +1,72 @@
-import { ReactElement, useState } from 'react';
-import { ChevronBigDown, ClockDefault, File02Default } from '@xyne/icons';
+import { ReactElement, Ref, useCallback, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useMeasure } from 'react-use';
+import { ClockDefault } from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
 import { cn } from '../../utils/classNames';
 import { APP_NO_DRAG_STYLE } from '../../utils/electronApp';
+import { BriefListView } from './BriefListView';
+import { CalendarView } from './CalendarView';
 import type { DailyBriefHistoryItem } from '../../api/dailyBriefApi';
 
 export const HEADER_ICON_CLASS =
   'flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground ' +
   'transition-colors hover:bg-accent hover:text-foreground';
 
-function briefMenuLabel(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return `Morning Brief ${date}`;
-  const day = parsed.getDate();
-  const month = parsed.toLocaleDateString(undefined, { month: 'short' });
-  return `Morning Brief ${day} ${month}`;
-}
+type BriefMenuView = 'list' | 'calendar';
 
 interface BriefHistoryMenuProps {
   history: DailyBriefHistoryItem[];
+  availableDates: string[];
   selectedDate: string | null;
-  onSelect: (date: string) => void;
+  onSelect: (date: string, source: 'history_menu' | 'date_picker') => void;
 }
-
-const COLLAPSED_COUNT = 5;
 
 export function BriefHistoryMenu({
   history,
+  availableDates,
   selectedDate,
   onSelect,
 }: BriefHistoryMenuProps): ReactElement {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [view, setView] = useState<BriefMenuView>('list');
+  const [elementRef, bounds] = useMeasure();
 
-  const handleOpenChange = (next: boolean): void => {
+  const handleOpenChange = useCallback((next: boolean): void => {
     setOpen(next);
-    if (!next) setExpanded(false);
-  };
+    if (next) setView('list');
+  }, []);
 
-  const visible = expanded ? history : history.slice(0, COLLAPSED_COUNT);
-  const hiddenCount = history.length - visible.length;
+  const handleSelect = useCallback(
+    (date: string, source: 'history_menu' | 'date_picker'): void => {
+      onSelect(date, source);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+
+  const content = useMemo(() => {
+    switch (view) {
+      case 'list':
+        return (
+          <BriefListView
+            history={history}
+            selectedDate={selectedDate}
+            onSelect={handleSelect}
+            onBrowseDates={() => setView('calendar')}
+          />
+        );
+      case 'calendar':
+        return (
+          <CalendarView
+            availableDates={availableDates}
+            selectedDate={selectedDate}
+            onSelect={handleSelect}
+            onBack={() => setView('list')}
+          />
+        );
+    }
+  }, [view, history, availableDates, selectedDate, handleSelect]);
 
   return (
     <Popover
@@ -49,7 +76,7 @@ export function BriefHistoryMenu({
       align='end'
       sideOffset={8}
       collisionPadding={12}
-      className='w-[232px] max-h-[250px] overflow-y-auto rounded-[12px] border-border bg-popover p-1.5 shadow-lg'
+      className='w-[276px] overflow-hidden rounded-[12px] border-border bg-popover p-1.5 shadow-lg'
       trigger={
         <button
           type='button'
@@ -63,54 +90,30 @@ export function BriefHistoryMenu({
         </button>
       }
     >
-      {history.length === 0 ? (
-        <div className='px-2.5 py-2 text-[13px] text-muted-foreground'>No past briefs.</div>
-      ) : (
-        <ul className='flex flex-col gap-px'>
-          {visible.map(item => {
-            const isActive = selectedDate === item.date;
-            return (
-              <li key={item.date}>
-                <button
-                  type='button'
-                  onClick={() => {
-                    onSelect(item.date);
-                    setOpen(false);
-                  }}
-                  data-track-category='DailyBrief'
-                  data-track-name='daily-brief-history-item'
-                  className={cn(
-                    'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left',
-                    'text-[14px] tracking-[-0.1px] transition-colors',
-                    isActive
-                      ? 'bg-accent font-medium text-foreground'
-                      : 'font-normal text-muted-foreground hover:bg-accent hover:text-foreground',
-                  )}
-                >
-                  <File02Default size={16} className='shrink-0 text-muted-foreground' />
-                  <span className='truncate'>{briefMenuLabel(item.date)}</span>
-                </button>
-              </li>
-            );
-          })}
-          {hiddenCount > 0 && (
-            <li>
-              <button
-                type='button'
-                onClick={() => setExpanded(true)}
-                data-track-category='DailyBrief'
-                data-track-name='daily-brief-history-show-all'
-                className='flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[13px] font-medium tracking-[-0.1px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              >
-                <span className='flex size-4 shrink-0 items-center justify-center'>
-                  <ChevronBigDown size={14} />
-                </span>
-                <span className='truncate'>Show all ({history.length})</span>
-              </button>
-            </li>
-          )}
-        </ul>
-      )}
+      <motion.div
+        className='~overflow-hidden'
+        animate={{
+          height: bounds.height,
+          transition: {
+            duration: 0.27,
+            ease: [0.25, 1, 0.5, 1],
+          },
+        }}
+      >
+        <div ref={elementRef as Ref<HTMLDivElement> | undefined}>
+          <AnimatePresence initial={false} mode='popLayout' custom={view}>
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, scale: 1 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1 }}
+              transition={{ duration: 0.27, ease: [0.26, 0.08, 0.25, 1] }}
+            >
+              {content}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </motion.div>
     </Popover>
   );
 }

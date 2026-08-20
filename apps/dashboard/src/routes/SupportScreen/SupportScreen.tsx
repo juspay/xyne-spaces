@@ -2243,6 +2243,7 @@ const SupportScreen = (): ReactElement => {
             />
             <DeskLabelsSidebar
               channelId={c.id}
+              isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
@@ -3532,6 +3533,7 @@ const SupportScreen = (): ReactElement => {
           open={autoLabelWizardOpen}
           onOpenChange={setAutoLabelWizardOpen}
           channelId={selectedChannelId}
+          isMember={isSelectedChannelJoined}
         />
       )}
 
@@ -4247,12 +4249,20 @@ export const SupportTicketDetail = ({
   // Get channel info and user status
   const channel = useChannel(channelId);
   const [mailboxRows] = useCachedQuery(
-    queries.myTicketMailbox({ ticketId: mailboxTicketId ?? '' }),
+    queries.myTicketMailboxV2({
+      ticketId: mailboxTicketId ?? '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: channel?.type === ChannelType.EMAIL && !!mailboxTicketId },
   );
   const mailboxOverlay = mailboxRows?.[0];
   const [conversationLabelMappings] = useCachedQuery(
-    queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
+    queries.conversationLabelMappingsByConversationIdV2({
+      conversationId: conversationId || '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: !!conversationId },
   );
   // Subscribe to channel for real-time updates
@@ -4335,6 +4345,7 @@ export const SupportTicketDetail = ({
                       <ConversationLabels
                         conversationId={conversationId}
                         channelId={channelId}
+                        isMember={isMember}
                         slot='picker'
                         appliedMappings={conversationLabelMappings ?? []}
                       />
@@ -4589,6 +4600,7 @@ export const SupportTicketDetail = ({
                         <ConversationLabels
                           conversationId={conversationId}
                           channelId={channelId}
+                          isMember={isMember}
                           slot='chips'
                           appliedMappings={conversationLabelMappings ?? []}
                         />

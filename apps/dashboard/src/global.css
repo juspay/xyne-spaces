@@ -2793,6 +2793,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding-bottom: 10px;
 }
 .canvas-surface .bn-editor [data-content-type="codeBlock"] {
+  width: 100%;
+  min-width: 0;
   background-color: hsl(var(--foreground) / 0.04);
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--foreground) / 0.06);
@@ -2805,9 +2807,69 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   line-height: 1.55;
   padding: 12px;
 }
+.canvas-surface .bn-editor .canvas-highlighted-code pre {
+  width: max-content;
+  min-width: 100%;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px;
+  white-space: pre;
+  overflow: visible;
+}
+.canvas-surface .bn-editor .canvas-highlighted-code {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.canvas-surface .bn-editor .canvas-highlighted-code .hljs {
+  min-height: 100%;
+  background: transparent;
+}
+/* Keep BlockNote's editable text/caret above the highlighted, inert mirror.
+   The glyphs are transparent so the token spans below remain visible. */
+.canvas-surface .bn-editor .canvas-highlighted-code .canvas-code-editor {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: hsl(var(--foreground));
+}
+.canvas-surface .bn-editor .canvas-highlighted-code .canvas-code-editor::selection {
+  background: hsl(var(--primary) / 0.24);
+}
 /* Language dropdown (revealed on hover) picks up the theme text colour. */
 .canvas-surface .bn-editor [data-content-type="codeBlock"] > div > select {
   color: hsl(var(--muted-foreground));
+}
+
+/* Mermaid renders its own unified Diagram/Code surface. Remove the generic
+   code-block card around it so the Canvas does not show nested cards. */
+.canvas-surface .bn-editor [data-content-type="codeBlock"]:has([data-wiki-mermaid="true"]) {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Repository source citations are emitted only by the trusted Wiki backend as
+   canonical GitHub blob links. Distinguish them from ordinary prose links. */
+.canvas-surface .bn-editor a[href^="https://github.com/"][href*="/blob/"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.3rem;
+  background: hsl(var(--muted) / 0.55);
+  padding: 0.08rem 0.38rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.canvas-surface .bn-editor a[href^="https://github.com/"][href*="/blob/"]::before {
+  content: "<>";
+  color: hsl(var(--muted-foreground));
+  font-size: 0.82em;
 }
 
 /* Table — token-based borders + subtle header row (BlockNote hardcodes #ddd). */
@@ -3539,12 +3601,16 @@ img.inline-emoji,
  * The blend design system uses styled-components with hardcoded light-mode colors
  * from module-level defaults (R.colors.gray). Hover states use !important CSS
  * which can't be overridden by inline styles from the ThemeProvider context.
+ *
+ * `.rdp-root` is excluded because react-day-picker builds a real <table>: each
+ * week is a <tr> of day <td>s, so without the guard hovering any day paints the
+ * whole week row. :where() keeps the exclusion specificity-free.
  */
-[data-theme="midnight"] tr:hover > td {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) > td {
   background-color: #222530 !important;
 }
 
-[data-theme="midnight"] tr:hover {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) {
   background-color: #222530 !important;
 }
 
@@ -3868,22 +3934,32 @@ img.inline-emoji,
 /* Blend DataTable header cells - ensure proper dark mode text color.
    These target app data grids. Message tables must be excluded: the markdown
    renderer emits a real <thead> (the composer does not), so without the guard
-   the two paths get different header colours in midnight. */
+   the two paths get different header colours in midnight. `.rdp-root` is
+   excluded for the same reason — react-day-picker's weekday row is a real
+   <thead><th>, which otherwise picks up the data-grid header surface. */
 [data-theme="midnight"]
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  span:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  span:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 
 /* Specific targeting for table header text with lower contrast */
 [data-theme="midnight"]
   thead
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
   background-color: #1a1a1a !important;
 }
@@ -3892,7 +3968,7 @@ img.inline-emoji,
 [data-theme="midnight"]
   th
   :is(p, div, span):not(
-    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ) {
   color: #d1d5db !important;
 }
@@ -3900,7 +3976,9 @@ img.inline-emoji,
 /* Ensure high contrast for all header content */
 [data-theme="midnight"]
   thead
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 

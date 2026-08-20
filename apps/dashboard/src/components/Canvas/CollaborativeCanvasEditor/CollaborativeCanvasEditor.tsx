@@ -775,7 +775,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={
+              editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>
+            }
+          />
+        )}
       </div>
     );
   },

@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
 
 // Labels are a shared, channel-wide palette (the app fetches ALL labels for a channel,
 // e.g. conversationLabelsByChannelId). A user may read a label when they can see its
@@ -14,7 +15,26 @@ export class ConversationLabelsACL extends BaseQueryACL<'conversation_labels'> {
 
   canSelect<TReturn>(
     query: Query<'conversation_labels', Schema, TReturn>,
+    args?: SelectArgs,
   ): Query<'conversation_labels', Schema, TReturn> {
+    const channelId = args?.channelId as string | undefined;
+
+    if (args?.isMember && channelId) {
+      return query.whereExists('channel', (ch) =>
+        ch.whereExists('participants', (p) =>
+          p.where('userId', this.ctx.userID).where('channelId', channelId),
+          { scalar: true }
+        ),
+      );
+    }
+
+    if (args?.isMember === false && channelId) {
+      return query.whereExists('channel', (ch) =>
+        ch.where('id', channelId).where('visibility', ChannelVisibility.PUBLIC),
+        { scalar: true }
+      );
+    }
+
     return query
       .whereExists('channel', (ch) =>
         ch.where(({ or, cmp, exists }) =>

@@ -104,6 +104,18 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
+  SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
+  SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(24 * 60 * 60 * 1000),
+  SDLC_CAPACITY_RETRY_DELAY_MS: Joi.number().integer().min(1000).default(30_000),
+  SDLC_CLAW_RUN_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(60_000)
+    .default(3 * 60 * 60 * 1000),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -149,8 +161,15 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  // The development key pair ships in LiveKit's own published sample config, so a
+  // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
+  // deployments without calls do not configure LiveKit at all.
+  LIVEKIT_API_KEY: Joi.string().allow('').invalid('devkey').default('').messages({
+    'any.invalid': 'LIVEKIT_API_KEY must not be the published development key',
+  }),
+  LIVEKIT_API_SECRET: Joi.string().allow('').invalid('devsecret').default('').messages({
+    'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+  }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
@@ -189,7 +208,7 @@ const envSchema = Joi.object({
         'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
         'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
         'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.'
     ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
@@ -480,6 +499,7 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -603,6 +623,12 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
+  sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
+  sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
+  sdlcCapacityRetryDelayMs: envVars.SDLC_CAPACITY_RETRY_DELAY_MS as number,
+  sdlcClawRunTimeoutMs: envVars.SDLC_CLAW_RUN_TIMEOUT_MS as number,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
