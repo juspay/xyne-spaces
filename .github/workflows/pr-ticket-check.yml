@@ -1,0 +1,72 @@
+name: PR Ticket Check
+
+# The repo's only ticket gate: .husky/commit-msg (the old commitlint check) is
+# disabled. Squash-merge makes the PR title the commit message on main, so the
+# title is the thing worth validating — individual branch commits never land.
+# `edited` is required in the trigger list: without it a PR whose title is fixed
+# after the fact keeps its stale red check.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: >-
+    ${{ github.head_ref != 'main'
+        && github.head_ref != 'master'
+        && github.head_ref != 'staging'
+        && !startsWith(github.head_ref, 'release') }}
+
+# Community Spaces only. The internal deployment is deliberately never queried
+# from CI: the jira-compat endpoint is unauthenticated and exposes ticket
+# titles, and fork PRs would reach it from arbitrary IPs.
+env:
+  SPACES_HOST: https://spaces.xyne.ai
+  TICKET_PROJECT: TESTCORP
+  # Repository Actions variable, not committed: no workspace id appears anywhere
+  # else in this repo. Unset => the existence check degrades to format-only.
+  TICKET_WORKSPACE: ${{ vars.TICKET_WORKSPACE }}
+
+jobs:
+  ticket-id:
+    name: PR ticket ID
+    runs-on: ubuntu-latest
+    steps:
+      # PR titles are contributor-controlled: pass through env, never interpolate
+      # ${{ }} into the shell.
+      - name: Ticket ID in PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          KEY="$(printf '%s' "$PR_TITLE" | grep -oE '\b[A-Z][A-Z0-9]{2,}-[0-9]+\b' | head -1 || true)"
+          if [ -z "$KEY" ]; then
+            echo "::error::PR title needs a ticket ID, e.g. 'fix: TESTCORP-0002 reset filters when the space changes'"
+            exit 1
+          fi
+          echo "TICKET_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "Found $KEY"
+
+      # Keys from other projects (legacy XYNE-####) pass on format alone — they
+      # live in the internal instance, which CI must not query.
+      - name: Ticket exists in community Spaces
+        run: |
+          set -euo pipefail
+          if [ "${TICKET_KEY%%-*}" != "$TICKET_PROJECT" ]; then
+            echo "::notice::${TICKET_KEY} is not a ${TICKET_PROJECT} key — format check only."
+            exit 0
+          fi
+          if [ -z "${TICKET_WORKSPACE:-}" ]; then
+            echo "::warning::vars.TICKET_WORKSPACE is not set — existence check skipped. Add it under Settings > Secrets and variables > Actions > Variables."
+            exit 0
+          fi
+          URL="$SPACES_HOST/api/webhooks/bitbucket/$TICKET_WORKSPACE/rest/api/2/issue/$TICKET_KEY"
+          CODE="$(curl -sS --max-time 15 --retry 2 -o /dev/null -w '%{http_code}' "$URL" || echo 000)"
+          case "$CODE" in
+            200) echo "${TICKET_KEY} exists in community Spaces" ;;
+            404) echo "::error::${TICKET_KEY} does not exist in community Spaces (${SPACES_HOST})"; exit 1 ;;
+            *)   echo "::warning::community Spaces returned ${CODE} — existence check skipped" ;;
+          esac
