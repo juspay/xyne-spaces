@@ -1,4 +1,6 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
+import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
+import { createReactInlineMathSpec, createReactMathBlockSpec } from '@blocknote/math-block';
 import { Extension, type EditorOptions } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -17,10 +19,14 @@ import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCom
 // Helper isolates the type assertion so ESLint no-unsafe-assignment does not trigger at call site.
 function createCanvasSchema() {
   return BlockNoteSchema.create({
-    blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs),
+    blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs, {
+      diagram: createReactDiagramBlockSpec(),
+      mathBlock: createReactMathBlockSpec(),
+    }),
   } as Parameters<typeof BlockNoteSchema.create>[0]).extend({
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
+      math: createReactInlineMathSpec(),
       mention: mentionInlineContentSpec,
       citation: citationInlineContentSpec,
     },

@@ -151,7 +151,7 @@ const CanvasPanel = (): ReactElement => {
       }
 
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
-      // Navigate to the canvas in the right panel
+      // Navigate to the canva in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
