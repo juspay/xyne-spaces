@@ -11,9 +11,16 @@ interface EntryGridV2Props {
    *  Same predicate applies as `onDelete`: passing a handler enables it
    *  for the entry. */
   onRename?: (entry: CollectionChild) => void;
-  /** Surfaces a hover-revealed share button on FOLDER cards. Wired by
-   *  the root-level collections view only; files are not shareable. */
+  /** Surfaces a hover-revealed share button on FOLDER cards only. The
+   *  screen only passes this at root (collections view). */
   onShare?: (entry: CollectionChild) => void;
+  /** Surfaces a hover-revealed Ask AI button on every card, folder or file.
+   *  Files scope precisely (kbDocId); folders fall back to their owning
+   *  collection — see KnowledgeBaseV2Screen's onAskAIAboutEntry. */
+  onAskAI?: (entry: CollectionChild) => void;
+  /** Surfaces a hover-revealed Copy link button on every card, folder or
+   *  file. Copies a deep link straight to that item. */
+  onCopyLink?: (entry: CollectionChild) => void;
   /** Opens the per-collection ingestion status drawer (root collections view). */
   onOpenStatus?: (entry: CollectionChild) => void;
   /** Entry id currently in inline-rename mode (only one at a time). When
@@ -62,6 +69,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
   onDelete,
   onRename,
   onShare,
+  onAskAI,
+  onCopyLink,
   editingId,
   onRenameCommit,
   onRenameCancel,
@@ -118,6 +127,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
                       onShare={onShare ? () => onShare(e) : undefined}
+                      onAskAI={onAskAI ? () => onAskAI(e) : undefined}
+                      onCopyLink={onCopyLink ? () => onCopyLink(e) : undefined}
                       onOpenStatus={onOpenStatus}
                       isRenaming={isRenaming}
                       onRenameCommit={commitFor}
@@ -129,6 +140,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       onClick={() => onOpen(e)}
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
+                      onAskAI={onAskAI ? () => onAskAI(e) : undefined}
+                      onCopyLink={onCopyLink ? () => onCopyLink(e) : undefined}
                       isRenaming={isRenaming}
                       onRenameCommit={commitFor}
                       onRenameCancel={onRenameCancel}
