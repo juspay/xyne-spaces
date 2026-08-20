@@ -1,3 +1,10 @@
+## [1.205.0](https://github.com/juspay/xyne-spaces/compare/v1.204.0...v1.205.0) (2026-08-20)
+
+
+### Features
+
+* add calendar view component to support screen ([#772](https://github.com/juspay/xyne-spaces/issues/772)) ([10bdad5](https://github.com/juspay/xyne-spaces/commit/10bdad562edec2ee03577c5fcbee4013bffe68a9))
+
 ## [1.204.0](https://github.com/juspay/xyne-spaces/compare/v1.203.4...v1.204.0) (2026-08-20)
 
 
