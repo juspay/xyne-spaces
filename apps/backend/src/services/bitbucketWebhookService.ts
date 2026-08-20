@@ -14,6 +14,7 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { prCommitAnalysisService } from '@/services/prCommitAnalysisService';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -427,6 +428,45 @@ export class BitbucketWebhookService {
     // agent opened this PR). Fully decoupled from the ticket sync below.
     this.forwardPrCardStatus(context, 'merged');
 
+    // Analyze commit authorship
+    let authorshipData: {
+      authorshipType?: string;
+      botCommitCount?: number;
+      humanCommitCount?: number;
+      commitDetails?: any;
+    } = {};
+
+    try {
+      const commitAnalysis = await prCommitAnalysisService.analyzeCommits({
+        provider: VCSProviderType.BITBUCKET_SERVER,
+        projectKey: context.projectName,
+        repoSlug: context.repoName,
+        prId: context.prId,
+      });
+
+      if (commitAnalysis) {
+        authorshipData = {
+          authorshipType: commitAnalysis.authorshipType,
+          botCommitCount: commitAnalysis.botCommitCount,
+          humanCommitCount: commitAnalysis.humanCommitCount,
+          commitDetails: commitAnalysis.commitDetails,
+        };
+
+        logger.info('[Bitbucket-Webhook] Analyzed PR commits', {
+          prUrl: context.prUrl,
+          authorshipType: commitAnalysis.authorshipType,
+          botCommitCount: commitAnalysis.botCommitCount,
+          humanCommitCount: commitAnalysis.humanCommitCount,
+        });
+      }
+    } catch (error) {
+      logger.error('[Bitbucket-Webhook] Failed to analyze commits', {
+        prUrl: context.prUrl,
+        error,
+      });
+      // Continue without authorship data - don't block webhook
+    }
+
     const result = await this.prMetricsRepository.markMergedPr({
       prId: context.prId,
       prUrl: context.prUrl,
@@ -435,6 +475,7 @@ export class BitbucketWebhookService {
       sourceBranchName: context.sourceBranch,
       destinationBranchName: context.destinationBranch,
       numberOfComments: context.numberOfComments,
+      ...authorshipData,
     });
 
     if (result) {

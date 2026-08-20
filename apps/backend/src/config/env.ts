@@ -310,9 +310,11 @@ const envSchema = Joi.object({
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
+  BITBUCKET_BOT_USERNAME: Joi.string().optional().allow(''),
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   GITHUB_TOKEN: Joi.string().allow('').default(''),
   GITHUB_API_URL: Joi.string().uri().default('https://api.github.com'),
+  GITHUB_BOT_USERNAME: Joi.string().default('xynespaces-bot'),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -766,11 +768,13 @@ export const config = {
     sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
     baseUrl: envVars.BITBUCKET_BASE_URL,
     password: envVars.BITBUCKET_PASSWORD,
+    botUsername: envVars.BITBUCKET_BOT_USERNAME,
   },
   github: {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,
     token: envVars.GITHUB_TOKEN,
     apiUrl: envVars.GITHUB_API_URL,
+    botUsername: envVars.GITHUB_BOT_USERNAME,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,

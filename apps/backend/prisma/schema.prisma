@@ -1226,11 +1226,19 @@ model PullRequests {
   status                  String
   ticketId                String?   // Ticket reference for prs raised by devs
 
+  // Authorship tracking (commit-level analysis)
+  authorshipType          String?   // "BOT" | "BOT_ASSISTED" | "HUMAN"
+  botCommitCount          Int       @default(0)
+  humanCommitCount        Int       @default(0)
+  commitDetails           Json?     // Full commit history with author details
+
   // Relations
   workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([authorshipType])
+  @@index([date, authorshipType])
   @@map("pull_requests")
   @@schema("public")
 }

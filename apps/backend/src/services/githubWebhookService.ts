@@ -1,17 +1,17 @@
 // GitHub Webhook Service
 // Handles different GitHub webhook event types based on X-GitHub-Event header
 
-import { PRStatus } from '@xyne/shared';
+import { PRStatus, VCSProviderType, PRStatusEvent } from '@xyne/shared';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
 import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
-import { PRStatusEvent } from '@xyne/shared';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { prCommitAnalysisService } from '@/services/prCommitAnalysisService';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
-import { VCSProviderType } from '@xyne/shared';
 
 /**
  * GitHub webhook event types for pull requests
@@ -161,18 +161,19 @@ export class GitHubWebhookService {
     payload: GitHubPullRequestPayload,
     workspaceId: string,
   ): Promise<{ success: boolean; message: string }> {
-    try {
-      const action = payload.action;
-      const pr = payload.pull_request;
+    return runAsServiceActor('github-webhook', workspaceId, async () => {
+      try {
+        const action = payload.action;
+        const pr = payload.pull_request;
 
-      logger.info(`[GitHub-Webhook] Processing pull_request.${action} for PR #${pr.number}`);
+        logger.info(`[GitHub-Webhook] Processing pull_request.${action} for PR #${pr.number}`);
 
-      if (!pr) {
-        logger.warn('[GitHub-Webhook] PR event received but pull_request data missing');
-        return { success: true, message: 'No pull_request data in payload' };
-      }
+        if (!pr) {
+          logger.warn('[GitHub-Webhook] PR event received but pull_request data missing');
+          return { success: true, message: 'No pull_request data in payload' };
+        }
 
-      const context = this.extractPRContext(payload, workspaceId);
+        const context = this.extractPRContext(payload, workspaceId);
 
       // Release sync is BRANCH-scoped (matched on base branch + repo), not gated
       // on PR-title validation. A hotfix whose dev ticket doesn't exist in the
@@ -206,13 +207,14 @@ export class GitHubWebhookService {
         return { success: true, message: 'PR validation failed, event skipped' };
       }
 
-      await this.routePREvent(action, context, validationResult);
+        await this.routePREvent(action, context, validationResult);
 
-      return { success: true, message: `Event pull_request.${action} processed successfully` };
-    } catch (error) {
-      logger.error('[GitHub-Webhook] Error handling pull_request event:', error);
-      return { success: true, message: 'Error acknowledged' };
-    }
+        return { success: true, message: `Event pull_request.${action} processed successfully` };
+      } catch (error) {
+        logger.error('[GitHub-Webhook] Error handling pull_request event:', error);
+        return { success: true, message: 'Error acknowledged' };
+      }
+    });
   }
 
   /**
@@ -466,6 +468,45 @@ export class GitHubWebhookService {
   ): Promise<void> {
     logger.info(`[GitHub-Webhook] PR merged: ${context.prId} - ${context.prUrl}`);
 
+    // Analyze commit authorship
+    let authorshipData: {
+      authorshipType?: string;
+      botCommitCount?: number;
+      humanCommitCount?: number;
+      commitDetails?: any;
+    } = {};
+
+    try {
+      const commitAnalysis = await prCommitAnalysisService.analyzeCommits({
+        provider: VCSProviderType.GITHUB,
+        owner: context.projectName,
+        repo: context.repoName,
+        prNumber: context.prId,
+      });
+
+      if (commitAnalysis) {
+        authorshipData = {
+          authorshipType: commitAnalysis.authorshipType,
+          botCommitCount: commitAnalysis.botCommitCount,
+          humanCommitCount: commitAnalysis.humanCommitCount,
+          commitDetails: commitAnalysis.commitDetails,
+        };
+
+        logger.info('[GitHub-Webhook] Analyzed PR commits', {
+          prUrl: context.prUrl,
+          authorshipType: commitAnalysis.authorshipType,
+          botCommitCount: commitAnalysis.botCommitCount,
+          humanCommitCount: commitAnalysis.humanCommitCount,
+        });
+      }
+    } catch (error) {
+      logger.error('[GitHub-Webhook] Failed to analyze commits', {
+        prUrl: context.prUrl,
+        error,
+      });
+      // Continue without authorship data - don't block webhook
+    }
+
     const result = await this.prMetricsRepository.markMergedPr({
       prId: context.prId,
       prUrl: context.prUrl,
@@ -474,6 +515,7 @@ export class GitHubWebhookService {
       sourceBranchName: context.sourceBranch,
       destinationBranchName: context.destinationBranch,
       numberOfComments: context.numberOfComments,
+      ...authorshipData,
     });
 
     if (result) {

@@ -21,6 +21,11 @@ interface PRInsertProps extends BasePRProps {
 
 interface PRCrudProps extends BasePRProps {
   numberOfComments: number;
+  // Authorship tracking (optional)
+  authorshipType?: string;
+  botCommitCount?: number;
+  humanCommitCount?: number;
+  commitDetails?: any;
 }
 
 
@@ -153,7 +158,11 @@ export class PRMetricsRepository {
     prId,
     repoUrl,
     prUrl,
-    numberOfComments
+    numberOfComments,
+    authorshipType,
+    botCommitCount,
+    humanCommitCount,
+    commitDetails
   }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
@@ -174,7 +183,12 @@ export class PRMetricsRepository {
         data: {
           status: PRStatus.MERGED,
           numberOfComments,
-          repositoryUrl: repoUrl
+          repositoryUrl: repoUrl,
+          // Authorship fields (if provided)
+          ...(authorshipType && { authorshipType }),
+          ...(botCommitCount !== undefined && { botCommitCount }),
+          ...(humanCommitCount !== undefined && { humanCommitCount }),
+          ...(commitDetails && { commitDetails })
         }
       });
 
