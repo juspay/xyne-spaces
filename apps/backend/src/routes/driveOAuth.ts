@@ -134,25 +134,32 @@ router.get('/google/callback', async (req: Request, res: Response) => {
   let returnPath = '/';
 
   try {
+    // Resolve the callback against SERVER-issued, single-use state FIRST, so every
+    // subsequent decision keys off this server-controlled result rather than the raw
+    // query params. A forged / absent / expired `state` consumes to null and is
+    // rejected before anything sensitive runs — the authorization gate cannot be
+    // bypassed by user-supplied input (CodeQL js/user-controlled-bypass,
+    // CWE-807 / CWE-290). `consume` is atomic (GET+DEL), so it also self-cleans.
+    const state: DriveOAuthState | null = stateParam
+      ? await driveOAuthStateService.consume(stateParam)
+      : null;
+    if (!state) {
+      redirectToFrontend(req, res, { driveOAuthError: 'missing_or_expired_state' }, returnPath);
+      return;
+    }
+    returnPath = state.returnPath;
+
+    // The request is now bound to valid server state; branch on Google's response.
     if (req.query.error) {
-      if (stateParam) await driveOAuthStateService.delete(stateParam);
       redirectToFrontend(req, res, { driveOAuthError: 'authorization_denied' }, returnPath);
       return;
     }
 
     const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code || !stateParam) {
-      if (stateParam) await driveOAuthStateService.delete(stateParam);
+    if (!code) {
       redirectToFrontend(req, res, { driveOAuthError: 'missing_or_expired_state' }, returnPath);
       return;
     }
-
-    const state: DriveOAuthState | null = await driveOAuthStateService.consume(stateParam);
-    if (!state) {
-      redirectToFrontend(req, res, { driveOAuthError: 'invalid_oauth_state' }, returnPath);
-      return;
-    }
-    returnPath = state.returnPath;
 
     const user = await repositories.users.findById(state.ownerUserId);
     if (!user || user.workspaceId !== state.workspaceId) {
