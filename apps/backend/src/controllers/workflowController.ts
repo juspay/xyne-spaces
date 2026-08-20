@@ -1058,6 +1058,8 @@ export class WorkflowController {
           ignoreDuration: 0,
           mode: WorkflowExecutionMode.MANUAL,
           createdBy: execution.createdBy || null,
+          entityType: execution.entityType,
+          entityId: execution.entityId,
         });
 
         logger.info(`[WORKFLOW-CONTROLLER] Created rerun execution ${rerunExecution.id} for step ${stepId} with existing output`);

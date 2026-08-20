@@ -4,9 +4,12 @@ import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useDebugAutomationsEnabled } from '../../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../../providers/AutomationDebugProvider';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
 import ThreadMessages from '../../Chat/ThreadPannel';
-import { ChevronLeft, X } from 'lucide-react';
+import Tooltip from '../../ui/Tooltip';
+import { ChevronLeft, X, Zap } from 'lucide-react';
 
 const TicketView = (): ReactElement => {
   const ticketViewContainerRef = useRef<HTMLDivElement>(null);
@@ -17,6 +20,7 @@ const TicketView = (): ReactElement => {
   }>();
 
   const navigate = useNavigate();
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
 
   // Query ticket data to get xyneId and channelId
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
@@ -62,17 +66,33 @@ const TicketView = (): ReactElement => {
             />
             <span className='text-[14px] text-foreground font-mono'>{ticket.xyneId}</span>
           </div>
-          <Link
-            to={
-              ticket.channelId
-                ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
-                : `/projects/${projectId}/${boardId}`
-            }
-            className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors duration-200'
-            aria-label='Close thread panel'
-          >
-            <X size={20} />
-          </Link>
+          <div className='flex items-center gap-1'>
+            {debugAutomationsEnabled && (
+              <Tooltip content='Debug automations'>
+                <button
+                  onClick={(): void => openAutomationDebug({ type: 'TICKET', id: ticketId })}
+                  className='p-1 rounded-md text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors duration-200'
+                  aria-label='Debug automations'
+                  data-track-category='automation-run-debug'
+                  data-track-name='open-from-ticket-view'
+                  data-track-metadata={JSON.stringify({ ticketId })}
+                >
+                  <Zap size={20} />
+                </button>
+              </Tooltip>
+            )}
+            <Link
+              to={
+                ticket.channelId
+                  ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
+                  : `/projects/${projectId}/${boardId}`
+              }
+              className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors duration-200'
+              aria-label='Close thread panel'
+            >
+              <X size={20} />
+            </Link>
+          </div>
         </div>
       )}
 

@@ -14,7 +14,7 @@ import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight } from 'lucide-react';
+import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight, Zap } from 'lucide-react';
 import {
   ArrowLeft,
   ArrowTurnDownRight,
@@ -78,6 +78,8 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
+import { useDebugAutomationsEnabled } from '../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../providers/AutomationDebugProvider';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
 import { TwinReasoningDrawer } from './TwinReplyDraft/TwinReasoningDrawer';
@@ -933,6 +935,8 @@ export const ThreadMessages = ({
     </Tooltip>
   ) : null;
 
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
+
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket?.channelId || !ticket.conversationId) return;
 
@@ -1301,6 +1305,18 @@ export const ThreadMessages = ({
                     <DropdownMenuItem className='gap-2' onClick={openTicketDetailsExpandedView}>
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
+                    </DropdownMenuItem>
+                  )}
+                  {debugAutomationsEnabled && derivedTicketId && (
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={() => openAutomationDebug({ type: 'TICKET', id: derivedTicketId })}
+                      data-track-category='automation-run-debug'
+                      data-track-name='open-from-thread-panel'
+                      data-track-metadata={JSON.stringify({ ticketId: derivedTicketId })}
+                    >
+                      <Zap size={16} className='shrink-0 text-amber-600 dark:text-amber-400' />
+                      <span className='flex-1'>Debug automations</span>
                     </DropdownMenuItem>
                   )}
                   {showThreadTags && !channel?.isArchived && (
