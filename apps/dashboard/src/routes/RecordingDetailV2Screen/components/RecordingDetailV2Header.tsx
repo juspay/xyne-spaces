@@ -1,4 +1,4 @@
-import { type ReactElement, useState } from 'react';
+import { type ReactElement, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -74,6 +74,7 @@ export const RecordingDetailV2Header = ({
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
+  const labelsUpdateSeqRef = useRef(0);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
@@ -129,6 +130,7 @@ export const RecordingDetailV2Header = ({
   /** Labels apply optimistically and roll back if the recording rejects the write. */
   const handleLabelsChange = async (labels: string[]): Promise<void> => {
     const previousLabels = recording.labels ?? [];
+    const seq = ++labelsUpdateSeqRef.current;
     onLabelsUpdated(labels);
 
     try {
@@ -136,7 +138,7 @@ export const RecordingDetailV2Header = ({
     } catch (err) {
       logRecordingError('RecordingDetailV2Header.updateLabels', err);
       toast.error('Failed to update labels');
-      onLabelsUpdated(previousLabels);
+      if (labelsUpdateSeqRef.current === seq) onLabelsUpdated(previousLabels);
     }
   };
 
@@ -300,7 +302,7 @@ export const RecordingDetailV2Header = ({
       </div>
 
       {/* Actions row */}
-      <div className='flex items-start'>
+      <div className='flex items-start gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
@@ -327,7 +329,7 @@ export const RecordingDetailV2Header = ({
                   variant='outline'
                   size='iconSm'
                   onClick={() => setShowShareModal(true)}
-                  className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  className='w-7 h-6 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
                   aria-label='Share recording'
                   data-track-category='RecordingDetailV2'
                   data-track-name='share_recording'
@@ -376,7 +378,7 @@ export const RecordingDetailV2Header = ({
               variant='outline'
               size='sm'
               onClick={onAskAI}
-              className='ml-auto h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
+              className='ml-auto h-7 gap-2 rounded-lg w-24 text-[13px] font-medium border-muted-foreground/20'
               data-track-category='RecordingDetailV2'
               data-track-name='ask_ai_recording'
             >
