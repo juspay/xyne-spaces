@@ -41,7 +41,10 @@ export class CallParticipantsACL extends BaseQueryACL<
             ],
           },
         },
-        { call: { channel: { workspaceId: this.ctx.workspaceId } } },
+        // Scope on the row's own workspaceId, like getMutateWhere below. Going via
+        // `call.channel` never matches when channelId is null (recordings), which
+        // hid those participant rows from every read.
+        { workspaceId: this.ctx.workspaceId },
       ],
     }
   }
