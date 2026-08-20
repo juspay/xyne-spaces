@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.2](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.1...v1.188.0-release-20260817.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* flowJson ingestion in vespa ([#581](https://github.com/juspay/xyne-spaces/issues/581)) ([#795](https://github.com/juspay/xyne-spaces/issues/795)) ([39b5dc4](https://github.com/juspay/xyne-spaces/commit/39b5dc4c60314b9f626e253e9fb0f89818faffef))
+
 ## [1.188.0-release-20260817.1](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.11...v1.188.0-release-20260817.1) (2026-08-20)
 
 
