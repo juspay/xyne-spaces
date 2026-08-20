@@ -2458,6 +2458,7 @@ export const appsTable = table("apps")
     createdBy: string(),
     orgId: string(),
     scope: string(),
+    appType: string(),
     version: number(),
     webhookUrl: string().optional(),
     signingSecret: string(),

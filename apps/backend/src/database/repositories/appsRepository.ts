@@ -12,6 +12,8 @@ export interface CreateAppInput {
   createdBy: string;
   // Owning org (snapshot of the creator's workspace's org). Apps are always created at ORG scope
   orgId: string;
+  // INTERNAL = in-cluster dispatch; defaults to EXTERNAL when omitted.
+  appType?: string;
 }
 
 export class AppsRepository extends BaseRepository<
@@ -65,6 +67,7 @@ export class AppsRepository extends BaseRepository<
       orgId: data.orgId,
       workspaceId: creator.workspaceId,
       scope: "ORG",
+      appType: data.appType ?? "EXTERNAL",
       version: 1,
       signingSecret: await encrypt(crypto.randomBytes(32).toString('hex')),
       createdAt: now,

@@ -63,7 +63,7 @@ export class InstalledAppsRepository extends BaseRepository<
         userId: true,
         webhookUrl: true,
         // signingSecret is app-level now — pulled via the relation.
-        app: { select: { signingSecret: true } },
+        app: { select: { signingSecret: true, appType: true } },
       },
     });
   }

@@ -3,6 +3,23 @@ import Joi from 'joi';
 
 dotenv.config();
 
+/** Derive { externalHost -> internalBaseUrl } from the XYNE_CLAW_AUTH_URL / XYNE_CLAW_AUTH_INTERNAL_URL pair. */
+function buildInternalHostMap(
+  clawAuthExternalUrl: string,
+  clawAuthInternalUrl: string,
+): Record<string, string> {
+  if (!clawAuthExternalUrl || !clawAuthInternalUrl) return {};
+  try {
+    const externalHost = new URL(clawAuthExternalUrl).hostname.toLowerCase();
+    const internalBase = clawAuthInternalUrl.replace(/\/+$/, '');
+    if (externalHost && internalBase) return { [externalHost]: internalBase };
+  } catch {
+    // Malformed XYNE_CLAW_AUTH_URL — empty map; resolver fails closed.
+  }
+  return {};
+}
+
+
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
@@ -918,6 +935,12 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  apps: {
+    internalHostMap: buildInternalHostMap(
+      envVars.XYNE_CLAW_AUTH_URL as string,
+      envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
+    ),
+  },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },

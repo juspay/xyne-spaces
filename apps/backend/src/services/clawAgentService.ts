@@ -1363,7 +1363,7 @@ export async function runClawAgent(
           webhookUrl: { contains: '/claw/api/v1/webhook/' },
         },
         // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
-        select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+        select: { webhookUrl: true, app: { select: { signingSecret: true, appType: true } } },
       })
     : null;
 
@@ -1374,7 +1374,7 @@ export async function runClawAgent(
         user: { workspaceId: req.workspaceId },
         webhookUrl: { endsWith: `/webhook/${req.agentSlug}` },
       },
-      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+      select: { webhookUrl: true, app: { select: { signingSecret: true, appType: true } } },
     });
   }
 
@@ -1415,7 +1415,7 @@ export async function runClawAgent(
     },
     timestamp: new Date().toISOString(),
   };
-  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
+  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc), installedApp.app?.appType);
   return { dispatched: true };
 }
 

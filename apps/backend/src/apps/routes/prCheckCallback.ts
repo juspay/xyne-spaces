@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { validateS2SKey } from '@/middleware/validateS2SKey';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 
 const router = Router();
 
@@ -42,7 +42,7 @@ interface PRCheckRequestedPayload {
 /**
  * Find Varys installed app by bot email (source of truth)
  */
-async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string } | null> {
+async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string; appType: string | null } | null> {
   try {
     // Find the Varys bot user by email (source of truth)
     const botUser = await db.user.findFirst({
@@ -57,6 +57,7 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
     // Find installed app entry by userId
     const installedApp = await db.installedApps.findFirst({
       where: { userId: botUser.id },
+      select: { webhookUrl: true, userId: true, app: { select: { appType: true } } },
     });
 
     if (!installedApp || !installedApp.webhookUrl) {
@@ -67,6 +68,7 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
     return {
       webhookUrl: installedApp.webhookUrl,
       userId: installedApp.userId,
+      appType: installedApp.app?.appType ?? null,
     };
   } catch (error) {
     logger.error('[PR-Check-Callback] Error finding Varys installed app:', error);
@@ -79,17 +81,18 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
  */
 async function sendVarysWebhook(
   webhookUrl: string,
-  payload: PRCheckRequestedPayload
+  payload: PRCheckRequestedPayload,
+  appType: string | null,
 ): Promise<void> {
-  // Reject webhook URLs whose host resolves to an internal/private address.
-  await assertWebhookUrlSafe(webhookUrl);
+  // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+  const { url, headers } = await prepareAppWebhookDispatch(appType, webhookUrl, {
+    'Content-Type': 'application/json',
+    'X-Xyne-Event': 'PR_CHECK_REQUESTED',
+  });
 
-  const response = await fetch(webhookUrl, {
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Xyne-Event': 'PR_CHECK_REQUESTED',
-    },
+    headers,
     body: JSON.stringify(payload),
     redirect: 'manual',
     // Fail fast if Varys stalls — this runs inside a user-facing request.
@@ -251,7 +254,7 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
 
     // Send webhook to Varys
     try {
-      await sendVarysWebhook(varysApp.webhookUrl, webhookPayload);
+      await sendVarysWebhook(varysApp.webhookUrl, webhookPayload, varysApp.appType);
       logger.info(`[PR-Check-Callback] Webhook sent successfully to Varys`);
       res.status(200).json({ success: true, message: 'PR check webhook sent to Varys' });
     } catch (webhookError) {

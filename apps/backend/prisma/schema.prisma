@@ -3896,6 +3896,8 @@ model Apps {
   createdBy String
   orgId String
   scope String
+  // INTERNAL = dispatch to in-cluster pod; EXTERNAL = dispatch through SSRF guard.
+  appType String @default("EXTERNAL")
   version Int
   webhookUrl String?
   signingSecret String
@@ -3912,6 +3914,7 @@ model Apps {
   @@index([createdBy])
   @@index([orgId])
   @@index([scope])
+  @@index([appType])
   @@map("apps")
   @@schema("public")
 }

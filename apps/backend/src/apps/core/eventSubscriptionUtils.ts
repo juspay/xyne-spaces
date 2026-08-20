@@ -3,7 +3,7 @@ import { isValidUrl } from '@/utils/urlUtils';
 import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { prepareAppWebhookDispatch } from './appUrlResolver';
 import crypto from 'crypto';
 
 const installedAppsRepository = new InstalledAppsRepository();
@@ -19,23 +19,23 @@ export function signWebhookPayload(payload: string, signingSecret: string): stri
 export async function sendWebhookNotification(
     webhookUrl: string,
     event: BaseAppEvent,
-    signingSecret: string
+    signingSecret: string,
+    appType?: string | null,
 ): Promise<{ status: number; body: unknown }> {
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
-    // SSRF guard: require a host that does not resolve to an internal/private
-    // address before every dispatch.
-    await assertWebhookUrlSafe(webhookUrl);
+    // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+    const { url, headers } = await prepareAppWebhookDispatch(appType, webhookUrl, {
+        'Content-Type': 'application/json',
+        'X-Xyne-Signature': signature,
+        'X-Source': 'XyneSpaces',
+    });
 
     try {
-        const response = await fetch(webhookUrl, {
+        const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Xyne-Signature': signature,
-                'X-Source': 'XyneSpaces'
-            },
+            headers,
             body: payload,
             // 'manual' so a 3xx to an internal host cannot bypass the guard above.
             redirect: 'manual',
@@ -96,7 +96,7 @@ export async function handleEventSubscriptionsForUsers(
                 return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
             }
             const decryptedSigningSecret = decrypt(secretEnc);
-            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
+            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret, app.app?.appType);
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {
             logger.error(`Failed to send webhook notification`, {
