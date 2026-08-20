@@ -3690,7 +3690,7 @@ model ReleaseTicketRepo {
   @@index([releaseId])
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_ticket_repos_releaseId_createdAt_id_idx")
   @@map("release_ticket_repos")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 // Captures all events tied to the release for audit trail

@@ -3962,16 +3962,6 @@ export const queries = defineQueries({
     },
   ),
 
-  releaseTicketReposByReleaseId: defineQuery(
-    z.object({ releaseId: z.string().min(1) }),
-    ({ args: { releaseId } }) => {
-      return zql.release_ticket_repos
-        .where('releaseId', releaseId)
-        .orderBy('createdAt', 'desc')
-        .orderBy('id', 'desc');
-    },
-  ),
-
   // Form values for the env + migration change instances under a release ticket.
   // contextId on form_entity_values is the release ticket id (set by the writer),
   // entityId on each row is the matching release_change_types.id — zip client-side.

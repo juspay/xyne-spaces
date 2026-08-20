@@ -2,7 +2,7 @@
 -- for a release means single-repo legacy mode (range read from the ticket form).
 
 -- CreateTable
-CREATE TABLE "public"."release_ticket_repos" (
+CREATE TABLE "non_zero"."release_ticket_repos" (
     "workspaceId" TEXT NOT NULL,
     "id" TEXT NOT NULL,
     "releaseId" TEXT NOT NULL,
@@ -18,12 +18,12 @@ CREATE TABLE "public"."release_ticket_repos" (
 
 -- CreateIndex
 CREATE INDEX "release_ticket_repos_releaseId_idx"
-    ON "public"."release_ticket_repos"("releaseId");
+    ON "non_zero"."release_ticket_repos"("releaseId");
 
 -- CreateIndex
 CREATE INDEX "release_ticket_repos_releaseId_createdAt_id_idx"
-    ON "public"."release_ticket_repos"("releaseId", "createdAt" DESC, "id" DESC);
+    ON "non_zero"."release_ticket_repos"("releaseId", "createdAt" DESC, "id" DESC);
 
 -- CreateIndex
 CREATE UNIQUE INDEX "release_ticket_repos_releaseId_mainReleaseBoardId_key"
-    ON "public"."release_ticket_repos"("releaseId", "mainReleaseBoardId");
+    ON "non_zero"."release_ticket_repos"("releaseId", "mainReleaseBoardId");

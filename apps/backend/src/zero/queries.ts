@@ -4482,17 +4482,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
-  // MUST stay in sync with the shared copy.
-  releaseTicketReposByReleaseId: defineQuery(
-    z.object({ releaseId: z.string().min(1) }),
-    ({ args: { releaseId } }) => {
-      return zql.release_ticket_repos
-        .where('releaseId', releaseId)
-        .orderBy('createdAt', 'desc')
-        .orderBy('id', 'desc');
-    },
-  ),
-
   // Audit-log feed for a release ticket, powering the Timeline tab on the
   // Release Detail screen. Newest-first, with id as tiebreaker for stable order.
   // NOTE: this MUST also exist in shared/src/zero/queries.ts — the dashboard

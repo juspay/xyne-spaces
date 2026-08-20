@@ -95,6 +95,33 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
   }
 });
 
+// Per (release ticket × repo) commit ranges for a release ticket. Read from the
+// non_zero schema (server-only, not Zero-replicated) and served over HTTP — the
+// Release Detail screen fetches this instead of syncing the table via Zero.
+router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<void> => {
+  const { releaseId } = req.params;
+  const workspaceId = req.user?.workspaceId;
+  if (!workspaceId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!releaseId) {
+    res.status(400).json({ error: 'releaseId is required' });
+    return;
+  }
+  try {
+    const repos = await db.releaseTicketRepo.findMany({
+      where: { releaseId, workspaceId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    res.json({ repos });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error(`[CommitAnalysis] repos fetch failed for release=${releaseId}: ${msg}`);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.post('/test-connection', authMiddleware.requireAdminOrOwner, async (req: Request, res: Response): Promise<void> => {
   const { repoUrl, vcsProvider } = req.body as { repoUrl?: string; vcsProvider?: string };
   if (!repoUrl || !vcsProvider) {

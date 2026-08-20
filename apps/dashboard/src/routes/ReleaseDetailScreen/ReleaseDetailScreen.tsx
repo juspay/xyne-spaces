@@ -1,5 +1,5 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { Fragment, ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -59,6 +59,18 @@ import {
 import { apiInstance } from '../../services/clients/apiClient';
 
 type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline';
+
+// Shape returned by GET /commits/analyze/repos/:releaseId. Mirrors the
+// non_zero release_ticket_repos row; structurally compatible with the
+// RepoRangeInput the grouping util consumes.
+type ReleaseTicketRepoRow = {
+  id: string;
+  releaseId: string;
+  mainReleaseBoardId: string;
+  branch: string;
+  deployedCommit: string;
+  newCommit: string;
+};
 
 // Map ReleaseEventType (from shared schema) to icon + color for the timeline.
 // Kept here (not exported) since the timeline is the only consumer right now.
@@ -337,10 +349,27 @@ const ReleaseDetailScreen = (): ReactElement => {
     [artPage, artHasMore],
   );
 
-  const [releaseTicketRepos] = useCachedQuery(
-    queries.releaseTicketReposByReleaseId({ releaseId: releaseTicketId ?? '' }),
-    { enabled: !!releaseTicketId },
-  );
+  // release_ticket_repos lives in the non_zero schema (server-only, not
+  // Zero-replicated), so it's fetched over HTTP instead of synced via Zero.
+  // Refetched after a re-run — the only in-screen action that changes these rows.
+  const [releaseTicketRepos, setReleaseTicketRepos] = useState<ReleaseTicketRepoRow[]>([]);
+  const fetchReleaseTicketRepos = useCallback(async (): Promise<void> => {
+    if (!releaseTicketId) {
+      setReleaseTicketRepos([]);
+      return;
+    }
+    try {
+      const response = await apiInstance.get<{ repos: ReleaseTicketRepoRow[] }>(
+        `/commits/analyze/repos/${releaseTicketId}`,
+      );
+      setReleaseTicketRepos(response.data?.repos ?? []);
+    } catch {
+      setReleaseTicketRepos([]);
+    }
+  }, [releaseTicketId]);
+  useEffect(() => {
+    void fetchReleaseTicketRepos();
+  }, [fetchReleaseTicketRepos]);
   const [applications] = useCachedQuery(
     queries.applicationsByProjectId({ projectId: projectId ?? '' }),
     { enabled: !!projectId },
@@ -445,6 +474,7 @@ const ReleaseDetailScreen = (): ReactElement => {
         {},
       );
       if (response.data?.success) {
+        void fetchReleaseTicketRepos();
         toast.success('Commit analysis re-run — check the conversation for the new summary.');
       } else {
         toast.error(response.data?.error ?? 'Re-run failed');
