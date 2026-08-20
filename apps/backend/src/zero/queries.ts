@@ -4013,8 +4013,30 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('name', 'asc');
     },
   ),
+
+  conversationLabelsByChannelIdV2: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
+    ({ args: { channelId } }) => {
+      return zql.conversation_labels
+        .where('channelId', channelId)
+        .orderBy('name', 'asc');
+    },
+  ),
+  // @deprecated Use conversationLabelMappingsByConversationIdV2 when channel membership is known.
   conversationLabelMappingsByConversationId: defineQuery(
     z.object({ conversationId: z.string() }),
+    ({ args: { conversationId } }) => {
+      return zql.conversation_label_mappings
+        .where('conversationId', conversationId)
+        .orderBy('labelName', 'asc');
+    },
+  ),
+  conversationLabelMappingsByConversationIdV2: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { conversationId } }) => {
       return zql.conversation_label_mappings
         .where('conversationId', conversationId)
@@ -4035,6 +4057,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   // KEEP IN SYNC with shared/src/zero/queries.ts mailbox queries.
   myTicketMailbox: defineQuery(
     z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_user_mailbox.where('ticketId', ticketId);
+    },
+  ),
+  myTicketMailboxV2: defineQuery(
+    z.object({
+      ticketId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { ticketId } }) => {
       return zql.ticket_user_mailbox.where('ticketId', ticketId);
     },
