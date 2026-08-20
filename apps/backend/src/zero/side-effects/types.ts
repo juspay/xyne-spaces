@@ -17,12 +17,6 @@ export interface TicketPreviousValue {
   userGroupId: string | null;
   createdBy: string;
   channelId: string | null;
-  /**
-   * Pre-write `Ticket.metadata`. Needed so the handler can diff the ETA
-   * planning-risk state (`metadata.etaManagement.planningRisk`) that the
-   * mutation just wrote, and decide whether a risk was newly detected or
-   * reopened. Free to include: the collector already loads the whole row.
-   */
   metadata: unknown;
 }
 

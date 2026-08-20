@@ -21,7 +21,7 @@ async function fetchTicketActors(ticketId: string): Promise<string[]> {
 }
 
 /**
- * "Awareness recipients" (PRD §8.1): assignee, creator, active ticket
+ * "Awareness recipients": assignee, creator, active ticket
  * assignments, and user-valued ticket fields. Notification-preference
  * filtering (mute/pause/channel level) happens separately in the actual
  * send methods (`notificationFilterService`), not here.
@@ -40,7 +40,7 @@ export async function resolveAwarenessRecipients(
 }
 
 /**
- * "Action recipients" (PRD §8.1): awareness recipients who also satisfy the
+ * "Action recipients": awareness recipients who also satisfy the
  * board's ETA-update permission policy. This is a net-new concept - no
  * existing recipient-resolution function in this codebase filters by
  * permission, only by notification preference (mute/pause/channel level).

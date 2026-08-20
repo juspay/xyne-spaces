@@ -20,6 +20,12 @@ import {
   type ReferenceTicketActivityValue,
   type SubticketActivityValue,
   type BaseActivityValue,
+  type EtaAutoRecomputedActivityValue,
+  type EtaManuallyUpdatedActivityValue,
+  type EtaRiskDetectedActivityValue,
+  type EtaRiskAcknowledgedActivityValue,
+  type EtaRiskReopenedActivityValue,
+  type EtaRiskResolvedActivityValue,
 } from '@xyne/shared';
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -270,6 +276,94 @@ export const getActivityDescription = (
           </>
         ),
       };
+
+    case ActivityType.ETA_AUTO_RECOMPUTED: {
+      const v = activity.value as EtaAutoRecomputedActivityValue | null;
+      return {
+        description: 'automatically extended due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.finalEta ? new Date(v.finalEta).toLocaleDateString() : ''}
+            </span>
+            {v?.standardPathUsed ? ' via the Standard Path' : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_MANUALLY_UPDATED: {
+      const v = activity.value as EtaManuallyUpdatedActivityValue | null;
+      return {
+        description: 'manually changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.newEta ? new Date(v.newEta).toLocaleDateString() : ''}
+            </span>
+            {v?.reason ? <>: {v.reason}</> : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_DETECTED: {
+      const v = activity.value as EtaRiskDetectedActivityValue | null;
+      return {
+        description: 'detected planning risk',
+        details: (
+          <>
+            stage deadline{' '}
+            <span className='font-semibold'>
+              {v?.stageEta ? new Date(v.stageEta).toLocaleDateString() : ''}
+            </span>{' '}
+            is later than due date{' '}
+            <span className='font-semibold'>
+              {v?.ticketEta ? new Date(v.ticketEta).toLocaleDateString() : ''}
+            </span>
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_ACKNOWLEDGED: {
+      const v = activity.value as EtaRiskAcknowledgedActivityValue | null;
+      return {
+        description: 'acknowledged planning risk',
+        details: v?.reason || '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_REOPENED: {
+      const v = activity.value as EtaRiskReopenedActivityValue | null;
+      return {
+        description: 'planning risk reopened',
+        details: v?.changedInputs?.length ? `${v.changedInputs.join(', ')} changed` : '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_RESOLVED: {
+      const v = activity.value as EtaRiskResolvedActivityValue | null;
+      const causeText: Record<string, string> = {
+        CONDITION_NO_LONGER_TRUE: 'the condition no longer applies',
+        TERMINAL_STATUS: 'the ticket reached a terminal status',
+        MANUAL_DATE_CHANGE: 'the due date was changed manually',
+      };
+      return {
+        description: 'planning risk resolved',
+        details: v?.cause ? causeText[v.cause] || '' : '',
+      };
+    }
 
     case ActivityType.USER_GROUP_ID: {
       const oldGroup = userGroups?.find(g => g.id === value?.oldValue);
@@ -643,6 +737,12 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <Tag size={12} className='text-gray-400' />;
     case ActivityType.ETA:
     case ActivityType.STAGE_ETA:
+    case ActivityType.ETA_AUTO_RECOMPUTED:
+    case ActivityType.ETA_MANUALLY_UPDATED:
+    case ActivityType.ETA_RISK_DETECTED:
+    case ActivityType.ETA_RISK_ACKNOWLEDGED:
+    case ActivityType.ETA_RISK_REOPENED:
+    case ActivityType.ETA_RISK_RESOLVED:
       return <Calendar size={12} />;
     case ActivityType.SUBTICKET_CREATED:
     case ActivityType.SUBTICKET_LINKED:

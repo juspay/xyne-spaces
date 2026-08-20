@@ -253,7 +253,7 @@ class StageEtaDeadlineWorker {
    * passing, with no new mutation event - e.g. a ticket due date that quietly falls behind
    * the current stage deadline while nothing else about the ticket changes. Read-only with
    * respect to `Ticket.eta`/forecasts: it only ever updates the persisted planning-risk
-   * state, never extends a due date (PRD §12.2).
+   * state, never extends a due date.
    */
   private async reconcilePlanningRisk(
     entries: Array<{
@@ -371,7 +371,7 @@ class StageEtaDeadlineWorker {
             });
           }
 
-          // No notifications while paused (PRD §6.9) - state above is still updated.
+          // No notifications while paused - state above is still updated.
           if (ticket.statusV2 !== 'PAUSED') {
             await dispatchEtaNotifications(
               etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),

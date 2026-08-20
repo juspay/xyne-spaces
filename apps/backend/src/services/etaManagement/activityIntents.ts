@@ -2,11 +2,9 @@ import {
   ActivityType,
   type EtaAutoRecomputedActivityValue,
   type EtaChangeTrigger,
-  type EtaForecastIncompleteActivityValue,
   type EtaRiskDetectedActivityValue,
   type EtaRiskReopenedActivityValue,
   type EtaRiskResolvedActivityValue,
-  type EtaDeviationReturnedActivityValue,
 } from '@xyne/shared';
 import type { EvaluateEtaResult } from './index';
 
@@ -56,8 +54,6 @@ export function buildRiskTransitionActivityIntents(
       etaDecision: { newEta: null, changed: false },
       planningRisk,
       ticketEtaManagementPatch: {},
-      forecastNewlyIncomplete: false,
-      deviationReturned: null,
     },
     ctx,
   );
@@ -118,29 +114,6 @@ export function buildEtaActivityIntents(
     }
     default:
       break;
-  }
-
-  if (result.forecastNewlyIncomplete) {
-    const value: EtaForecastIncompleteActivityValue = {
-      reason: result.forecast.incompleteReason ?? 'UNKNOWN',
-      affectedStageIds: result.forecast.incompleteStageIds,
-      boardConfigVersion: ctx.boardConfigVersion,
-      forecastStatus: 'INCOMPLETE',
-    };
-    intents.push({ activityType: ActivityType.ETA_FORECAST_INCOMPLETE, value });
-  }
-
-  if (result.deviationReturned) {
-    const value: EtaDeviationReturnedActivityValue = {
-      offPathStageIds: result.deviationReturned.offPathStageIds,
-      offPathWorkingDurationMs: result.deviationReturned.offPathWorkingDurationMs,
-      returnStageId: result.deviationReturned.returnStageId,
-      forecastEta: result.forecast.forecastEta ? result.forecast.forecastEta.getTime() : null,
-      oldEta: ctx.oldEta,
-      finalEta: result.etaDecision.newEta ? result.etaDecision.newEta.getTime() : null,
-      etaChanged: result.etaDecision.changed,
-    };
-    intents.push({ activityType: ActivityType.ETA_DEVIATION_RETURNED, value });
   }
 
   return intents;

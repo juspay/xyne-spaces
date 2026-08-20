@@ -10,7 +10,6 @@ import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
-import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import {
   resolveStepEstimate,
   loadBoardEtaContext,
@@ -526,29 +525,6 @@ export class TicketStageTransitionService {
         systemActorId,
       });
 
-      // Deviation-return always gets a thread system message (PRD §15), regardless of
-      // whether the due date changed - distinct from the other ETA activities above, which
-      // don't post a message on this path.
-      if (etaResult.deviationReturned && ticket.conversationId) {
-        const { offPathStageIds, offPathWorkingDurationMs } = etaResult.deviationReturned;
-        const hoursOffPath = Math.round((offPathWorkingDurationMs / 3_600_000) * 10) / 10;
-        const dueDateNote = etaResult.etaDecision.changed && etaResult.etaDecision.newEta
-          ? `Due date extended to ${etaResult.etaDecision.newEta.toLocaleDateString()}.`
-          : 'Due date unchanged.';
-        await recordTicketTimelineEvent(
-          {
-            message: {
-              conversationId: ticket.conversationId,
-              senderId: systemActorId,
-              content: `Ticket returned to the Standard Path at "${toStageName}" after ~${hoursOffPath}h off-path (${offPathStageIds.length} stage${offPathStageIds.length === 1 ? '' : 's'}). ${dueDateNote}`,
-              activityType: 'ETA_DEVIATION_RETURNED',
-              workspaceId: ticket.workspaceId,
-            },
-          },
-          tx,
-        );
-      }
-
       // 8f. Persist form values (scoped to stage + visitIndex)
       if (formValues && transition?.formId) {
         await this.saveFormValues(
@@ -581,7 +557,7 @@ export class TicketStageTransitionService {
     void maybeCreateEntryApprovalRequest(ticketId, userId, toStageName);
 
     // Post-commit notification dispatch - best-effort, must never affect the already-
-    // committed transition response. PRD §6.9: suppressed while the ticket is paused.
+    // committed transition response. suppressed while the ticket is paused.
     if (result.updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
       void dispatchEtaNotifications(etaSignalsFromResult(result.etaResult), {
         ticketId,

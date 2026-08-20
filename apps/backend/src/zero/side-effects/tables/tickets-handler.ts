@@ -218,9 +218,9 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     // Deliberately drops the `newEta` signal: a due-date change is already notified by
     // the generic `etaChanged` branch below, to the same awareness recipient set. Only
     // the risk alert (which goes to the narrower "action recipients" set) is new here.
-    // PRD §6.9: planning-risk notifications are suppressed while the ticket is paused
-    // (state stays visible, just labeled paused) - mirrors the same guard already applied
-    // in stageEtaDeadlineWorker.ts's reconciliation pass.
+    //
+    // Suppressed while paused - risk state stays visible, just labeled paused. Mirrors
+    // the guard in stageEtaDeadlineWorker.ts's reconciliation pass.
     if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
       try {
         const { riskAlert } = etaSignalsFromMetadataDiff({
@@ -337,12 +337,10 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           logger.info(`[TicketsSideEffectHandler] Sent priority change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
         }
 
-        // PRD §6.9: no reminders/notifications while paused. This field is a plain diff
-        // (fires for ANY eta write, automatic or manual), and a stage move that lands the
-        // ticket in a paused stage can itself trigger an automatic forecast extension
-        // (§6.1: "a ticket enters or re-enters a stage" recomputes the forecast) - without
-        // this guard that extension's notification would leak out even though the ticket
-        // is being paused, not actively worked.
+        // No notifications while paused. This is a plain field diff (fires for ANY eta
+        // write), and moving into a paused stage is itself a stage entry, which can
+        // trigger an automatic forecast extension - without this guard that extension
+        // would notify even though the ticket is being paused, not worked.
         if (etaChanged && args.eta !== undefined && ticket.statusV2 !== TicketStatusV2.PAUSED) {
           const formattedDate = new Date(args.eta).toLocaleDateString('en-US', {
             month: 'long',

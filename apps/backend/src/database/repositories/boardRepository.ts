@@ -85,8 +85,8 @@ export class BoardRepository {
     // Use transaction to create board and stages together
     return await this.db.$transaction(async (tx) => {
       const resolvedBoardType = data.boardType || BoardType.DEFAULT;
-      // New-board creation writes the explicit versioned etaManagement defaults (PRD §5.5/
-      // §10.3) rather than leaving it unset, so this board's automation state is unambiguous
+      // New-board creation writes the explicit versioned etaManagement defaults
+      // rather than leaving it unset, so this board's automation state is unambiguous
       // from day one - autoRecomputeEnabled defaults on only for DEFAULT (linear) boards;
       // NON_LINEAR/RELEASE/FLOW start disabled (Standard Path is opt-in later for
       // NON_LINEAR; RELEASE/FLOW automatic management is deferred entirely this release).

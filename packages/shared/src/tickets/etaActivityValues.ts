@@ -1,5 +1,3 @@
-import type { ForecastStatus } from '../validation/etaManagementSchema';
-
 /**
  * Stored-`value` JSON contracts for the `ActivityType.ETA_*` TicketActivity
  * rows (packages/shared/src/zero/types.ts `ActivityType`). One interface per
@@ -22,7 +20,6 @@ export type EtaChangeTrigger =
   | 'RESUME'
   | 'TERMINAL_ENTRY'
   | 'TERMINAL_EXIT'
-  | 'DEVIATION_RETURN'
   | 'RECONCILIATION';
 
 /** ActivityType.ETA_AUTO_RECOMPUTED */
@@ -83,21 +80,3 @@ export interface EtaRiskResolvedActivityValue {
   cause: EtaRiskResolutionCause;
 }
 
-/** ActivityType.ETA_FORECAST_INCOMPLETE */
-export interface EtaForecastIncompleteActivityValue {
-  reason: string;
-  affectedStageIds: string[];
-  boardConfigVersion: number;
-  forecastStatus: Extract<ForecastStatus, 'INCOMPLETE'>;
-}
-
-/** ActivityType.ETA_DEVIATION_RETURNED */
-export interface EtaDeviationReturnedActivityValue {
-  offPathStageIds: string[];
-  offPathWorkingDurationMs: number;
-  returnStageId: string;
-  forecastEta: number | null;
-  oldEta: number | null;
-  finalEta: number | null;
-  etaChanged: boolean;
-}

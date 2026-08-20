@@ -182,8 +182,7 @@ export class TicketRepository {
       logger.info(`[TicketRepository] Upserted merchant with mid: ${data.merchantId}`);
     }
 
-    // Ticket creation + initial stage visit + the ETA domain-service evaluation (the "ticket
-    // creation with an active stage visit" trigger from PRD §9.5) must commit atomically.
+    // Ticket creation + initial stage visit + the ETA domain-service evaluation must commit atomically.
     // Reuses the caller's transaction when one was passed in; otherwise opens its own.
     const runCreate = async (client: PrismaTransaction | PrismaClient) => {
       const board = await client.board.findUnique({ where: { id: data.boardId } });
@@ -194,9 +193,7 @@ export class TicketRepository {
       const boardEtaManagement = parseBoardEtaManagement(board.metadata);
 
       // Create ticket with the conversationId, auto-assigned stageName. `eta` is set here
-      // only when the caller explicitly provided one (e.g. migration) - PRD §6.8: "When
-      // automatic ETA management is disabled, the system never creates a ticket due date
-      // automatically." An automatic initial due date, when the board has opted in, is set
+      // only when the caller explicitly provided one (e.g. migration) An automatic initial due date, when the board has opted in, is set
       // by the domain-service evaluation below instead of a naive stage-sum here.
       const ticket = await client.ticket.create({
         data: {
@@ -316,7 +313,7 @@ export class TicketRepository {
     const ticket = createResult.finalTicket;
 
     // Post-commit notification dispatch - best-effort, must never affect the already-
-    // committed response. PRD §6.9: suppressed if the ticket was created already paused.
+    // committed response. suppressed if the ticket was created already paused.
     if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
       void dispatchEtaNotifications(etaSignalsFromResult(createResult.etaResult), {
         ticketId: ticket.id,
@@ -499,8 +496,7 @@ export class TicketRepository {
 
     // Everything below that mutates TicketStageEta, the ticket row (stage/status/eta/
     // metadata), and TicketActivity rows must commit atomically - previously this ran as a
-    // sequence of separately-awaited, unguarded writes (PRD §11.3 explicitly calls this out
-    // as a prerequisite to fix before automatic ETA management can be enabled on this path).
+    // sequence of separately-awaited, unguarded writes
     const txResult = await prisma.$transaction(async (tx) => {
       if (isForwardMovement) {
         // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
@@ -817,7 +813,7 @@ export class TicketRepository {
     const updatedTicket = txResult.updatedTicket;
 
     // Post-commit notification dispatch - best-effort, must never affect the already-
-    // committed response. PRD §6.9: suppressed while the ticket is paused.
+    // committed response. suppressed while the ticket is paused.
     if (updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
       void dispatchEtaNotifications(etaSignalsFromResult(txResult.etaResult), {
         ticketId,

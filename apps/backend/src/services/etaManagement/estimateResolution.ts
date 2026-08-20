@@ -22,12 +22,6 @@ import type { StageLike, StepEstimate, TransitionLike } from './types';
  *                                              via `requireExplicitTransition`, which only
  *                                              Standard Path route steps set (M5); ordinary
  *                                              linear/DEFAULT transitions never require this.
- *
- * The stricter PRD §6.3 rule ("fixed hours selected but value absent is a
- * config error that blocks Standard Path activation") is enforced
- * separately, at Standard Path save time (M5), against this same
- * transition config - not by this always-on resolver, so it can't regress
- * the live path for boards that never touch the Standard Path feature.
  */
 export function resolveStepEstimate(
   stage: Pick<StageLike, 'id' | 'eta'>,

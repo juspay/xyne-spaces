@@ -809,11 +809,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     ((boardData?.metadata as BoardMetadata | null | undefined)?.showNextStageFormInTicketDetails ??
       false) === true;
 
-  // ETA risk/overdue display state. Per PRD §13.2/§14.3, the frontend must not
-  // independently infer authorization from raw board metadata - the backend
-  // (`canUserModifyTicketControl`, already wired into `acknowledgeEtaRisk`) is the
-  // sole security boundary. The banner/badge is shown to everyone; an unauthorized
-  // acknowledge attempt is rejected server-side with a clear error.
+  // ETA risk/overdue display state. The banner/badge is shown to everyone; the backend
+  // (`canUserModifyTicketControl`, wired into `acknowledgeEtaRisk`) is the sole authority
+  // on who may act, and rejects an unauthorized attempt with a clear error.
   const etaManagementView = useMemo(() => {
     if (!ticket) return null;
     return deriveEtaManagementView({
@@ -822,7 +820,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       ticketEta: ticket.eta ?? null,
       ticketStatus: ticket.statusV2,
       now: Date.now(),
-      viewerHasControlPermission: true,
     });
   }, [ticket, boardData]);
 
@@ -4084,7 +4081,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           : ' Automatic recalculation is off for this board.'}
                       </p>
                     </div>
-                    {!showAcknowledgeInput && etaManagementView.viewerCanAcknowledge && (
+                    {!showAcknowledgeInput && (
                       <Button
                         variant='secondary'
                         onClick={() => setShowAcknowledgeInput(true)}
