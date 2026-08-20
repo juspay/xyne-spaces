@@ -164,6 +164,7 @@ export async function collectSideEffectJobs(
         userGroupId: entity.userGroupId,
         createdBy: entity.createdBy,
         channelId: entity.channelId,
+        metadata: entity.metadata,
       };
     }
   }
