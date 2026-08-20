@@ -47,8 +47,9 @@ jobs:
             echo "::error::PR title needs a ticket ID, e.g. 'fix: TESTCORP-0002 reset filters when the space changes'"
             exit 1
           fi
-          echo "TICKET_KEY=$KEY" >> "$GITHUB_ENV"
-          echo "Found $KEY"
+          SAFE_KEY="$(printf '%s' "$KEY" | tr -d '\r\n')"
+          printf 'TICKET_KEY=%s\n' "$SAFE_KEY" >> "$GITHUB_ENV"
+          echo "Found $SAFE_KEY"
 
       # Keys from other projects (legacy XYNE-####) pass on format alone — they
       # live in the internal instance, which CI must not query.
