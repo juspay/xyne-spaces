@@ -3,7 +3,7 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { ChannelVisibility, Schema } from '@xyne/shared';
+import { ChannelVisibility, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
@@ -61,7 +61,7 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
-    if (this.ctx.role === 'GUEST') {
+    if (this.ctx.role === WorkspaceRole.GUEST) {
       await this.verifyGuestScope(args.id, tx);
       return;
     }
@@ -149,7 +149,7 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       );
     }
 
-    if (this.ctx.role === 'GUEST') {
+    if (this.ctx.role === WorkspaceRole.GUEST) {
       const mappedTicket = await tx.run(
         zql.tickets.where('id', subTicket.mappedTicketId).one(),
       );
