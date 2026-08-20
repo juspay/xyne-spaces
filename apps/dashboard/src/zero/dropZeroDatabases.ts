@@ -1,4 +1,4 @@
-import { dropAllDatabases, dropDatabase } from '@rocicorp/zero';
+import { dropDatabase } from '@rocicorp/zero';
 import { ZERO_STORAGE_KEY } from '../config';
 
 // Zero's dropAllDatabases() deletes every Zero store in the origin, not just this
@@ -49,17 +49,17 @@ function currentLaneKey(): string | null {
 
 /** Drops this lane's Zero databases. Never rejects. */
 export async function dropZeroDatabases(): Promise<void> {
-  // Single-lane deployment: nothing to scope against.
-  if (!ZERO_STORAGE_KEY) {
-    await dropAllDatabases().catch(() => undefined);
-    return;
-  }
-
+  // Scoped even when this bundle sets no storageKey: the lane key still differs
+  // between bundles (it hashes storageKey + mutate/query URLs), and the main
+  // bundle is the one that drops most often. Falling back to dropAllDatabases
+  // here deleted the other lane's store out from under a live client, which
+  // surfaces as Zero's IDBNotFoundError "Expected IndexedDB not found".
   const key = currentLaneKey();
   // Zero never initialised here, so anything we dropped would be the other lane's.
   if (!key) return;
 
-  // Unavailable on Firefox; indexedDBService already depends on it.
+  // Unavailable on Firefox; indexedDBService already depends on it. Bail rather
+  // than fall back to a cross-lane wipe.
   if (typeof indexedDB.databases !== 'function') return;
 
   const databases = await indexedDB.databases().catch(() => []);
