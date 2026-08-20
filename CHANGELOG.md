@@ -1,3 +1,10 @@
+## [1.203.3](https://github.com/juspay/xyne-spaces/compare/v1.203.2...v1.203.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* workspace entry, upload filtering, and response scoping ([#289](https://github.com/juspay/xyne-spaces/issues/289)) ([c57c284](https://github.com/juspay/xyne-spaces/commit/c57c2841c461cfaa74e401546041df1d72ad0448)), closes [#313](https://github.com/juspay/xyne-spaces/issues/313)
+
 ## [1.203.2](https://github.com/juspay/xyne-spaces/compare/v1.203.1...v1.203.2) (2026-08-20)
 
 
