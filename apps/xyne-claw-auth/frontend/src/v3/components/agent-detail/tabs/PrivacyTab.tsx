@@ -9,6 +9,10 @@ interface Props {
   agent: Agent;
   userId: string;
   canEdit: boolean;
+  /** Sync the freshly-saved agent back to the parent so agent.config stays
+   *  current — otherwise this panel reverts on remount and the header Save
+   *  (which rebuilds config from the parent's agent) would clobber privacy. */
+  onAgentUpdated?: (agent: Agent) => void;
 }
 
 type Mode = "everyone" | "whitelist";
@@ -32,7 +36,7 @@ function readPrivacy(config: Record<string, unknown>): { mode: Mode; whitelist: 
  * list is the exact allowed set (owner/admins are NOT implicitly included).
  * Saves immediately on each change, like the People panel.
  */
-export function PrivacyTab({ agent, userId, canEdit }: Props) {
+export function PrivacyTab({ agent, userId, canEdit, onAgentUpdated }: Props) {
   const { show: showSnackbar } = useSnackbar();
   const initial = readPrivacy(agent.config);
   const [mode, setMode] = useState<Mode>(initial.mode);
@@ -90,14 +94,18 @@ export function PrivacyTab({ agent, userId, canEdit }: Props) {
         delete nextConfig["privacy"];
       }
       try {
-        await updateAgent(agent.slug, { config: nextConfig });
+        const updated = await updateAgent(agent.slug, { config: nextConfig });
+        // Keep the parent's agent (and thus agent.config) in sync so this
+        // panel doesn't revert on remount and the header Save preserves privacy.
+        onAgentUpdated?.(updated);
+        showSnackbar({ variant: "success", title: "Privacy saved" });
       } catch {
         showSnackbar({ variant: "error", title: "Failed to save privacy settings" });
       } finally {
         setSaving(false);
       }
     },
-    [agent.config, agent.slug, showSnackbar],
+    [agent.config, agent.slug, showSnackbar, onAgentUpdated],
   );
 
   const changeMode = (next: Mode): void => {
