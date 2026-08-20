@@ -24,9 +24,12 @@ export interface RiskFingerprintInput {
   boardConfigVersion: number;
 }
 
+const MAX_HASH_INPUT_LENGTH = 1024;
+
 function fnv1a(input: string): string {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
+  const length = Math.min(input.length, MAX_HASH_INPUT_LENGTH);
+  for (let i = 0; i < length; i++) {
     hash ^= input.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }

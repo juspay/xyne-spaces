@@ -567,7 +567,7 @@ export class TicketStageTransitionService {
         boardId: ticket.boardId,
         actorId: userId,
       }).catch(error => {
-        logger.error(`[TicketStageTransitionService] Failed to dispatch ETA notifications for ${ticketId}:`, error);
+        logger.error('[TicketStageTransitionService] Failed to dispatch ETA notifications', { ticketId, error });
       });
     }
 
