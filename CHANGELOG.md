@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.5](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.4...v1.188.0-release-20260817.5) (2026-08-20)
+
+
+### Features
+
+* add tags backfill stats ([#822](https://github.com/juspay/xyne-spaces/issues/822)) ([779a451](https://github.com/juspay/xyne-spaces/commit/779a4514c33a9b877ff2fb62a5a2aecbdb4f11c4))
+
 ## [1.188.0-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.3...v1.188.0-release-20260817.4) (2026-08-20)
 
 
