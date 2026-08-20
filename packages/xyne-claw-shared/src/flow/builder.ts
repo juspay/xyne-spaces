@@ -29,6 +29,7 @@ type FlowComponentType =
   | 'link'
   | 'plan'
   | 'agent'
+  | 'agent_summary'
   | 'mcpConfigure'
   | 'pr';
 
