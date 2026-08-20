@@ -169,6 +169,27 @@ interface UserPreferences {
   };
 }
 
+interface BrowserPushFallbackResult {
+  attempted: number;
+  delivered: number;
+  failed: number;
+}
+
+function isBrowserPushPermanentFailure(error: unknown): boolean {
+  const statusCode = (error as { statusCode?: number; status?: number })?.statusCode
+    ?? (error as { statusCode?: number; status?: number })?.status;
+
+  return statusCode === 404 || statusCode === 410;
+}
+
+function getBrowserPushErrorDetails(error: unknown): { statusCode?: number; message: string } {
+  const maybeError = error as { statusCode?: number; status?: number; message?: string };
+  return {
+    statusCode: maybeError?.statusCode ?? maybeError?.status,
+    message: maybeError?.message ?? 'Browser push delivery failed',
+  };
+}
+
 class NotificationService {
   /**
    * Helper to create a granular notification entry for a specific session (Mobile or Web)
@@ -517,7 +538,7 @@ class NotificationService {
         );
 
         const existingMetadata = (existingWorkflowMessage.metadata as any) || {};
-        let updatedMetadata = {
+        const updatedMetadata = {
           ...existingMetadata,
           workflowStatus:
             status === 'SUCCESS' ? 'SUCCESS' : status === 'FAILURE' ? 'FAILED' : status,
@@ -819,6 +840,120 @@ class NotificationService {
     return fcmPushService.isSendEnabled();
   }
 
+  private isBrowserPushFallbackEnabled(): boolean {
+    if (process.env.ENABLE_BROWSER_PUSH_FALLBACK !== 'true') {
+      return false;
+    }
+
+    return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+  }
+
+  private async sendBrowserPushFallback(
+    userId: string,
+    data: NotificationData,
+  ): Promise<BrowserPushFallbackResult> {
+    const emptyResult: BrowserPushFallbackResult = { attempted: 0, delivered: 0, failed: 0 };
+
+    try {
+      if (!this.isBrowserPushFallbackEnabled()) {
+        logger.info('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK SKIPPED (disabled or VAPID missing)', {
+          userId,
+          notificationType: data.type,
+        });
+        return emptyResult;
+      }
+
+      const subscriptions = await repositories.browserNotificationSubscriptions.findByUserId(userId, true);
+      if (subscriptions.length === 0) {
+        logger.info('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK SKIPPED (no subscriptions)', {
+          userId,
+          notificationType: data.type,
+        });
+        return emptyResult;
+      }
+
+      const notification = await this.createSessionNotification(
+        userId,
+        data,
+        NotificationDeliveryMethod.BROWSER,
+      );
+
+      const payload = JSON.stringify({
+        title: data.title,
+        message: data.message,
+        body: data.message,
+        notificationId: notification.id,
+        actionUrl: data.actionUrl,
+        relatedEntityType: data.relatedEntityType,
+        relatedEntityId: data.relatedEntityId,
+        metadata: data.metadata,
+        tag: `${data.type}:${data.relatedEntityId ?? notification.id}`,
+        icon: data.imageUrl || '/images/notification.png',
+        badge: '/images/notification.png',
+      });
+
+      const result: BrowserPushFallbackResult = { attempted: subscriptions.length, delivered: 0, failed: 0 };
+
+      await Promise.allSettled(
+        subscriptions.map(async subscription => {
+          const pushSubscription = {
+            endpoint: subscription.endpoint,
+            keys: {
+              p256dh: subscription.p256dh,
+              auth: subscription.auth,
+            },
+          };
+
+          try {
+            await webpush.sendNotification(pushSubscription, payload);
+            result.delivered += 1;
+            await repositories.browserNotificationSubscriptions.updateLastUsed(subscription.id);
+          } catch (error) {
+            result.failed += 1;
+            const details = getBrowserPushErrorDetails(error);
+
+            if (isBrowserPushPermanentFailure(error)) {
+              await repositories.browserNotificationSubscriptions.deactivateByEndpoint(subscription.endpoint);
+              logger.warn('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK DEACTIVATED invalid subscription', {
+                userId,
+                subscriptionId: subscription.id,
+                endpoint: subscription.endpoint,
+                statusCode: details.statusCode,
+                error: details.message,
+              });
+              return;
+            }
+
+            logger.warn('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK FAILED for subscription', {
+              userId,
+              subscriptionId: subscription.id,
+              statusCode: details.statusCode,
+              error: details.message,
+            });
+          }
+        }),
+      );
+
+      logger.info('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK completed', {
+        userId,
+        notificationId: notification.id,
+        notificationType: data.type,
+        attempted: result.attempted,
+        delivered: result.delivered,
+        failed: result.failed,
+      });
+
+      return result;
+    } catch (error) {
+      logger.warn('[NOTIFICATION-SERVICE] BROWSER PUSH FALLBACK FAILED before delivery attempts', {
+        userId,
+        notificationType: data.type,
+        error,
+      });
+      return emptyResult;
+    }
+  }
+
   /**
    * Unified notification delivery method for both desktop (WebSocket) and mobile (FCM) channels.
    *
@@ -945,6 +1080,11 @@ class NotificationService {
         if (hasActiveConnections) {
           deliveredViaApp = true;
           logger.info(`[NOTIFICATION-SERVICE] Spaces delivery detected for user ${userId}, type: ${data.type}`);
+        } else {
+          const browserFallbackResult = await this.sendBrowserPushFallback(userId, data);
+          if (browserFallbackResult.delivered > 0) {
+            deliveredViaApp = true;
+          }
         }
       } else {
         logger.info(`[NOTIFICATION-SERVICE] DESKTOP SKIPPED (sendDesktop=false): User ${userId} | Type: ${data.type}`);
