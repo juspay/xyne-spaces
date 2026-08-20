@@ -1,12 +1,152 @@
-import { ReactElement, ReactNode } from 'react';
-import { Eye } from 'lucide-react';
+import { ReactElement, ReactNode, useEffect, useState } from 'react';
+import { Eye, Search, X, Loader2, Lock } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Switch } from '@/components/ui/Switch';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
+import Avatar from '@/components/ui/Avatar/Avatar';
+import { useAuth } from '@/hooks/useAuth';
+import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
+import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import type { AgentPermissions } from '@/services/claw/agentPermissions';
 import type { BehaviourDraft } from '@/services/claw/behaviourConfig';
+
+/**
+ * Whitelist people-picker for the Privacy section. Stores userIds in the draft;
+ * resolves display names from the live search (a session cache), falling back
+ * to a short id for members added in an earlier session. The server enforces
+ * the whitelist at every dispatch chokepoint (isAgentInvocableBy).
+ */
+const WhitelistPicker = ({
+  whitelist,
+  onChange,
+  disabled,
+}: {
+  whitelist: string[];
+  onChange: (ids: string[]) => void;
+  disabled: boolean;
+}): ReactElement => {
+  const { user } = useAuth();
+  const requesterId = user?.id ?? '';
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ClawUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [nameCache, setNameCache] = useState<Record<string, ClawUser>>({});
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchClawUsers(q, requesterId)
+        .then(users => {
+          if (cancelled) return;
+          setResults(users);
+          setNameCache(prev => {
+            const next = { ...prev };
+            for (const u of users) next[u.id] = u;
+            return next;
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query, requesterId]);
+
+  const add = (u: ClawUser): void => {
+    if (!whitelist.includes(u.id)) onChange([...whitelist, u.id]);
+    setQuery('');
+    setResults([]);
+  };
+  const remove = (id: string): void => onChange(whitelist.filter(x => x !== id));
+
+  const visibleResults = results.filter(u => !whitelist.includes(u.id));
+
+  return (
+    <div className='flex flex-col gap-3'>
+      {/* Selected members */}
+      {whitelist.length === 0 ? (
+        <p className='text-xs text-muted-foreground'>
+          No one is allowed yet — an empty whitelist means <span className='font-medium'>nobody</span> can call this agent. Add people below.
+        </p>
+      ) : (
+        <div className='flex flex-wrap gap-2'>
+          {whitelist.map(id => {
+            const u = nameCache[id];
+            return (
+              <span
+                key={id}
+                className='inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 py-1 pl-1.5 pr-2 text-xs'
+              >
+                <Avatar userId={id} size='xs' />
+                <span className='max-w-[160px] truncate' title={u?.email ?? id}>
+                  {u?.name ?? `User ${id.slice(0, 8)}…`}
+                </span>
+                {!disabled && (
+                  <button
+                    type='button'
+                    onClick={() => remove(id)}
+                    className='rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground'
+                    aria-label={`Remove ${u?.name ?? id}`}
+                  >
+                    <X className='size-3' />
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Search + add */}
+      {!disabled && (
+        <div className='relative'>
+          <div className='flex items-center gap-2 rounded-lg border border-border px-2.5'>
+            <Search className='size-4 shrink-0 text-muted-foreground' />
+            <Input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder='Search people by name or email…'
+              className='border-0 px-0 focus-visible:ring-0'
+            />
+            {searching && <Loader2 className='size-4 shrink-0 animate-spin text-muted-foreground' />}
+          </div>
+          {visibleResults.length > 0 && (
+            <div className='absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-border bg-popover shadow-md'>
+              {visibleResults.map(u => (
+                <button
+                  key={u.id}
+                  type='button'
+                  onClick={() => add(u)}
+                  className='flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted'
+                >
+                  <Avatar userId={u.id} size='sm' />
+                  <span className='flex flex-col'>
+                    <span className='font-medium'>{u.name}</span>
+                    <span className='text-xs text-muted-foreground'>{u.email}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface BehaviourTabProps {
   permissions: AgentPermissions;
@@ -82,6 +222,37 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
           View-only access — you can’t edit this agent.
         </div>
       )}
+
+      {/* Privacy — who can invoke this agent, enforced across every surface. */}
+      <div className='rounded-lg border border-border p-4'>
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-0.5'>
+            <span className='flex items-center gap-1.5 text-sm font-medium text-foreground'>
+              <Lock className='size-3.5' /> Privacy
+            </span>
+            <p className='text-xs text-muted-foreground'>
+              Who can call this agent. Applies everywhere — mentions, DMs, automations, chat and CLI.
+            </p>
+          </div>
+          <SegmentedToggle<'everyone' | 'whitelist'>
+            options={[
+              { value: 'everyone', label: 'Everyone' },
+              { value: 'whitelist', label: 'Whitelist' },
+            ]}
+            value={value.privacyMode}
+            onChange={mode => canEdit && onChange({ privacyMode: mode })}
+          />
+        </div>
+        {value.privacyMode === 'whitelist' && (
+          <div className='mt-3 border-t border-border pt-3'>
+            <WhitelistPicker
+              whitelist={value.whitelist}
+              onChange={ids => onChange({ whitelist: ids })}
+              disabled={!canEdit}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Constant reminders — a plain field, no card chrome. */}
       <div className='flex flex-col gap-1.5'>
