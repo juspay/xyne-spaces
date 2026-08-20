@@ -16,6 +16,7 @@ import * as sandbox from "./sandbox/index.js";
 import * as sandboxPw from "./sandbox-pw/index.js";
 import * as createPpt from "./create-ppt/index.js";
 import * as createReport from "./create-report/index.js";
+import * as deskReport from "./desk-report/index.js";
 import * as genius from "./genius/index.js";
 import * as visualize from "./visualize/index.js";
 import * as webSearch from "./web-search/index.js";
@@ -137,6 +138,7 @@ register(createPpt.editPptTool);
 // standalone HTML file and attaches it, leaving a short summary inline in
 // chat. See xyne-claw-shared/src/tools/create-report/tools.ts.
 register(createReport.createHtmlReportTool);
+register(deskReport.createDeskReportTool);
 
 // Register create-pdf tools
 // register(createPdf.createPdfTool);
