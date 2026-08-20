@@ -155,8 +155,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
-import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
-import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { SlackThread } from '../../components/xyne-desk/SlackThread';
+import { AppThread } from '../../components/xyne-desk/AppThread';
+import { DeskComposer } from '../../components/xyne-desk/DeskComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
@@ -4797,9 +4798,10 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
-                  channel?.type === ChannelType.APP ||
-                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                  {channel?.type === ChannelType.APP ? (
+                    <AppThread messages={emails} ticketId={ticket?.id} />
+                  ) : channel?.type === ChannelType.SLACK ||
+                    channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -4828,24 +4830,33 @@ export const SupportTicketDetail = ({
             >
               {channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
-                  <SocialMediaReplyComposer
+                  <DeskComposer
+                    variant='social'
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    replyBasePath='/integrations/social-media'
                     placeholder='Reply to this review…'
                     maxLength={350}
-                    trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : channel?.type === ChannelType.APP ? (
                 conversationId ? (
-                  <SlackComposer
+                  <DeskComposer
+                    variant='app'
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    replyToName={initiator?.name ?? null}
+                    recordOnly={!outboundConfigured}
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK ? (
+                conversationId ? (
+                  <DeskComposer
+                    variant='slack'
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (
