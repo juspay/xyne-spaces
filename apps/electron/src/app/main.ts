@@ -1,4 +1,4 @@
-import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
+import { app, crashReporter, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from './config';
@@ -42,6 +42,37 @@ installElectronLogStackHook();
 log.transports.file.level = 'info';
 log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');
+
+/**
+ * Start Electron's crashReporter as early as possible so renderer/GPU crashes
+ * produce minidumps we can root-cause. Today the app logs `render-process-gone`
+ * with reason=crashed / exit_code=5 but captures no stack, leaving the recurring
+ * renderer crash undiagnosable. Minidumps are always written locally to
+ * app.getPath('crashDumps'); upload stays OFF unless a collector URL is
+ * configured via CRASH_REPORTER_SUBMIT_URL.
+ */
+function startCrashReporter(): void {
+  try {
+    const submitURL = process.env.CRASH_REPORTER_SUBMIT_URL;
+    const uploadToServer = Boolean(submitURL);
+    crashReporter.start({
+      productName: config.APP_NAME,
+      companyName: 'Juspay',
+      // submitURL is required by the type; when not uploading it is unused.
+      submitURL: submitURL ?? 'https://localhost/unused',
+      uploadToServer,
+      compress: true,
+    });
+    log.info(
+      `[Main] crashReporter started (uploadToServer=${uploadToServer}); dumps at`,
+      app.getPath('crashDumps'),
+    );
+  } catch (error) {
+    log.error('[Main] Failed to start crashReporter:', error);
+  }
+}
+
+startCrashReporter();
 
 // Setup global error handlers FIRST to catch any initialization errors
 setupGlobalErrorHandlers();
