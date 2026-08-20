@@ -175,6 +175,9 @@ acting as you needs your consent.
 Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
 with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
 
+Prefer Nix? A reproducible flake-based dev shell and services are available — see
+[Nix](docs/setup/nix.md).
+
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
 cd xyne-spaces
@@ -345,6 +348,7 @@ xyne-spaces/
 | [Local setup](docs/setup/local-setup.md) | From a blank machine to a running environment |
 | [Prerequisites](docs/setup/prerequisites.md) | Versions and tooling you need first |
 | [Local development](docs/setup/local-development.md) | Getting a working environment |
+| [Nix](docs/setup/nix.md) | Reproducible dev shell and services via the Nix flake |
 | [Services](docs/setup/services.md) | What the infrastructure containers do |
 | [AI providers](docs/setup/ai-providers.md) | Configuring model access |
 | [Troubleshooting](docs/setup/troubleshooting.md) | When setup goes wrong |
