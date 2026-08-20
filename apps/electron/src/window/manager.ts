@@ -101,6 +101,9 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     ...createOpts,
     show: false,
     title: config.window.title,
+    // Match the loading splash background so a renderer-crash gap shows the app
+    // background instead of a raw-white flash before auto-recovery repaints.
+    backgroundColor: '#f5f5f5',
     titleBarStyle: 'hiddenInset',
     // Align the macOS traffic lights with the AppNavigator icons on the 52px
     // top bar (nudged down 2px past the centered 18px for a visual match).

@@ -5,10 +5,19 @@
  * process crashes, and other critical errors that could crash the application.
  */
 
+import path from 'path';
 import { app, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import { Logger, errorLogger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
+import { getMainWindow, loadApp } from '../window/manager';
+import { shouldRecoverFromReason, CrashRetryBudget } from './crash-recovery-policy';
+
+/**
+ * Sliding-window retry budget for main-window renderer recovery. Prevents an
+ * infinite reload loop when the renderer hard-fails on load.
+ */
+const mainWindowRetryBudget = new CrashRetryBudget();
 
 /**
  * Setup all global error handlers
@@ -68,6 +77,43 @@ export function setupGlobalErrorHandlers(): void {
 }
 
 /**
+ * Recover the main window after its renderer dies.
+ *
+ * Historically this handler only logged, so a crashed main renderer left a
+ * permanent blank window that only a manual Cmd+Shift+R could fix. We now
+ * re-run loadApp() (which paints the branded loading splash first, then the
+ * dashboard) so the app self-heals in ~1-2s, guarded by a retry budget so a
+ * renderer that keeps failing on load falls back to an error page instead of
+ * looping forever.
+ */
+function recoverMainWindow(window: BrowserWindow, reason: string): void {
+  if (window !== getMainWindow() || window.isDestroyed()) {
+    // Auxiliary windows (claw overlay, recording pill, etc.) register their own
+    // per-window render-process-gone handlers and recover themselves.
+    return;
+  }
+
+  if (!shouldRecoverFromReason(reason)) {
+    return; // clean-exit / normal teardown — nothing to recover.
+  }
+
+  if (mainWindowRetryBudget.tryConsume()) {
+    log.warn(`[ErrorHandler] Main renderer gone (${reason}); auto-recovering via loadApp()`);
+    void loadApp(window).catch((error) => {
+      log.error('[ErrorHandler] Auto-recovery loadApp failed:', error);
+    });
+    return;
+  }
+
+  // Budget exhausted — stop thrashing and show a terminal error page.
+  log.error(`[ErrorHandler] Main renderer recovery budget exhausted (${reason}); showing error page`);
+  const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
+  void window.loadFile(errorPage).catch((error) => {
+    log.error('[ErrorHandler] Failed to show load-error page:', error);
+  });
+}
+
+/**
  * Setup error handlers for renderer processes
  */
 function setupRendererErrorHandlers(): void {
@@ -86,6 +132,12 @@ function setupRendererErrorHandlers(): void {
     }, 'ErrorHandler');
 
     Logger.flushLogs();
+
+    // Auto-recover the main window so users no longer face a permanent white
+    // screen requiring a manual reload.
+    if (window) {
+      recoverMainWindow(window, details.reason);
+    }
   });
 
   // Monitor new windows as they're created
