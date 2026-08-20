@@ -131,6 +131,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialBlockIdToFocus,
       initialCommentThreadId,
       onOpenCommentCountChange,
+      onCommentsOpenChange,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -390,6 +391,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
+      anchoredCommentThreadIds,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
       focusCommentBlock,
@@ -405,6 +407,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialCommentThreadId,
       onOpenCommentCountChange,
     });
+
+    // The panel lives in here, so the header above has no other way to tell that it is open.
+    useEffect(() => {
+      onCommentsOpenChange?.(isCommentsOpen);
+    }, [isCommentsOpen, onCommentsOpenChange]);
 
     // Expose presentation and comment drawer methods via ref
     useImperativeHandle(
@@ -601,7 +608,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 activeBlockId={activeCommentBlockId}
                 activeThreadId={activeCommentThreadId}
                 activeAnchor={activeCommentAnchor}
+                anchoredThreadIds={anchoredCommentThreadIds}
                 editable={editable}
+                anchorContainerRef={containerRef}
                 onClose={() => setIsCommentsOpen(false)}
                 onSelectBlock={focusCommentBlock}
                 onBeforeCreateThread={applyCommentAnchorStyle}
