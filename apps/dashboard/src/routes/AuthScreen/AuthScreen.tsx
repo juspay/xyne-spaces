@@ -459,6 +459,10 @@ const AuthScreen = (): ReactElement | null => {
       searchParams.get('workspaceId')?.trim() ||
       localStorage.getItem(PENDING_WORKSPACE_ID_KEY)?.trim() ||
       undefined;
+    const pendingInvitationId =
+      localStorage.getItem('pending_invitation_id')?.trim() ||
+      searchParams.get('invitationId')?.trim() ||
+      undefined;
 
     regSubmitLockRef.current = true;
     setRegLoading(true);
@@ -468,6 +472,7 @@ const AuthScreen = (): ReactElement | null => {
         regPassword,
         regName.trim(),
         pendingWorkspaceId,
+        pendingInvitationId,
       );
       if (result.success) {
         setRegMessage(result.message || 'Verification code sent to your email.');
