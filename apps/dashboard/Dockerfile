@@ -51,15 +51,14 @@ ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
 
 # --- Deployment lane -------------------------------------------------------
 # Defaults build the main bundle. The SDLC image adds:
-#   --build-arg BUILD_SCRIPT=build:sdlc --build-arg STATIC_SUBDIR=sdlc-app \
-#   --build-arg ZERO_SERVER=/sdlc-zero
-# The rest comes from .env.sdlc via `vite build --mode sdlc`. ZERO_SERVER must
-# stay an ARG: a shell env var outranks every .env file in Vite, so an ENV here
-# would silently point the SDLC bundle at the main zero-cache.
+#   --build-arg BUILD_SCRIPT=build:sdlc --build-arg STATIC_SUBDIR=sdlc-app
+# Everything else comes from .env.sdlc via `vite build --mode sdlc`, including
+# VITE_ZERO_PATH. The lane must NOT set VITE_ZERO_SERVER: that is baked absolute
+# below, and letting it win over the serving host pins every deployment to one
+# host regardless of where it is served from.
 ARG BUILD_SCRIPT=build
 
-ARG ZERO_SERVER=https://spaces.xyne.juspay.net/zero
-ENV VITE_ZERO_SERVER=${ZERO_SERVER}
+ENV VITE_ZERO_SERVER=https://spaces.xyne.juspay.net/zero
 
 # Only read by the main bundle; defaults to /sdlc-app in config.ts.
 ARG SDLC_APP_BASE_PATH=""

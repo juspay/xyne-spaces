@@ -137,16 +137,15 @@ overrides go in the gitignored `.env.sdlc.local` beside them.
 
 | File | Loaded by | Holds |
 | --- | --- | --- |
-| `apps/dashboard/.env.sdlc` | `vite --mode sdlc` (`dev:sdlc`, `build:sdlc`) | surface, base path, API base override, zero server, zero storage key, dev port |
+| `apps/dashboard/.env.sdlc` | `vite --mode sdlc` (`dev:sdlc`, `build:sdlc`) | surface, base path, API base override, zero path, zero storage key, dev port |
 | `apps/backend/.env.sdlc` | `dotenv -e .env.sdlc -e .env.local` (`dev:sdlc`) | `PORT`, `API_PATH_PREFIX` |
 
 Two precedence rules to know, because they differ:
 
 - **Vite**: an env var that already exists in the shell **wins over every `.env`
-  file**. So a Docker `ENV` silently shadows `.env.sdlc`. This is why
-  `ZERO_SERVER` is a build arg rather than a hardcoded `ENV` in the Dockerfile —
-  the Dockerfile has to set *something* for the main bundle, and an `ENV` there
-  would have pointed the SDLC bundle at the main zero-cache.
+  file**, so a Docker `ENV` silently shadows `.env.sdlc`. This is why the lane
+  uses its own `VITE_ZERO_PATH` rather than overriding `VITE_ZERO_SERVER`, which
+  the Dockerfile bakes to an absolute URL.
 - **dotenv-cli**: the **first** `-e` file wins (it does not override
   already-set variables). Hence `-e .env.sdlc -e .env.local` in that order.
 
@@ -159,8 +158,7 @@ Frontend — same Dockerfile, three build args; everything else comes from
 docker build -f apps/dashboard/Dockerfile . \
   --build-arg BUILD_SCRIPT=build:sdlc \
   --build-arg STATIC_SUBDIR=sdlc-app \
-  --build-arg ZERO_SERVER=/sdlc-zero \
-  -t xyne-sdlc-dashboard
+    -t xyne-sdlc-dashboard
 ```
 
 `VITE_ZERO_STORAGE_KEY` (set to `sdlc` in `.env.sdlc`) **must** differ from the
@@ -287,8 +285,7 @@ starts from the second SDLC deploy onward.
    docker build -f apps/dashboard/Dockerfile . \
      --build-arg BUILD_SCRIPT=build:sdlc \
      --build-arg STATIC_SUBDIR=sdlc-app \
-     --build-arg ZERO_SERVER=/sdlc-zero \
-     -t xyne-sdlc-dashboard
+          -t xyne-sdlc-dashboard
    ```
 
 5. **Add the Ingress rules** (see "Edge configuration" above) — `/sdlc-app`,
@@ -310,7 +307,7 @@ starts from the second SDLC deploy onward.
 
 ### Consider skipping the second zero-cache on day one
 
-Point the SDLC bundle at the existing cache (`--build-arg ZERO_SERVER=/zero`) and
+Point the SDLC bundle at the existing cache (`VITE_ZERO_PATH=/zero` in `.env.sdlc`) and
 drop the `/sdlc-zero` Ingress rule. You still get independently deployable SDLC
 frontend and backend, which is most of the benefit, and you avoid the second
 replication slot entirely on the riskiest day.
