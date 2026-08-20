@@ -27,8 +27,7 @@ import type {
   Todo,
   UiWidget,
 } from "xyne-claw-shared";
-import { type ThinkingLevel } from "@earendil-works/pi-ai";
-import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
+import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
@@ -777,8 +776,8 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   const map = new Map<string, number>();
   try {
-    for (const provider of getBuiltinProviders()) {
-      for (const model of getBuiltinModels(provider)) {
+    for (const provider of getProviders()) {
+      for (const model of getModels(provider)) {
         const m = model as { id?: string; contextWindow?: number };
         if (m.id && typeof m.contextWindow === "number" && m.contextWindow > 0) {
           map.set(m.id.toLowerCase(), m.contextWindow);
