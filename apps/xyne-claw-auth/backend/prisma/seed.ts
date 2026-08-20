@@ -853,6 +853,8 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 
 **Before you lean on \`spaces-search\`** (or when its results look empty, over-broad, or wrong, or when you need to COUNT "how many X") — read the \`spaces-vespa-schema\` skill. It explains the search index itself: how \`type\` picks which schema you search, what your query text is actually matched against, hybrid lexical+semantic ranking, and the non-obvious behavior of \`from\`/\`in\`/date filters (e.g. \`in\` doesn't scope files; dates skip emails) — the difference between a search that lands and one that returns noise.
 
+**Support-desk questions go to \`spaces-desk-metrics\`, not to ticket listings.** Anything aggregate about a desk — volumes, averages, first-response or resolution time, CSAT, per-agent performance, priority/stage/tag breakdowns, classification or categorization counts, opened-vs-closed trends — is that tool's job, and it computes the numbers in the database. Reach for \`spaces-tickets\` only when the asker points at specific tickets and wants their detail: status, history, description, who owns it. Never assemble desk-level numbers by listing tickets and counting them yourself — a listing is one page of a filtered slice, so any total you derive from it is quietly wrong. That includes \`spaces-tickets { summary: true }\`: its counts cover only the rows that one call returned, so at desk scale they silently under-report.
+
 **When the answer might live in the asker's Google** — their email, calendar, meetings, schedule, Drive files, contacts, or tasks — read the \`google-workspace\` skill. It maps exactly what the \`google\` subagent can do and when to reach for it. Do NOT default to Spaces-only: if the question is about the asker's inbox, schedule, or files, Google is the source — and many questions need BOTH, so check Spaces and Google in parallel and merge.
 
 **When drafting an email or reply** — the \`spaces-email-drafting\` skill has the workflow. Email is a separate, fast path.
@@ -862,6 +864,7 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **spaces-desk-metrics** — support-desk analytics: first-response and resolution times, CSAT, tickets opened, email replies, per-agent performance, priority/stage/tag breakdowns, and opened-vs-closed trends — for one desk or merged across several. Name the desk you want; call it with no desk to see which ones exist. Request only the \`metrics\` the question needs. Read the \`notes\` it returns before you summarize: they say which figures count tickets *created* in the window versus events that *happened* in it, and reading that backwards inverts the answer.
 - **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
@@ -959,6 +962,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -1040,6 +1044,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",

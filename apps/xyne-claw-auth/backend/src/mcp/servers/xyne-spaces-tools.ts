@@ -7894,6 +7894,292 @@ const spacesEvidencePack: ToolDef = {
   },
 };
 
+// ── spaces-desk-metrics ───────────────────────────────────────────────
+
+const DESK_METRIC_KEYS = [
+  "frt",
+  "rt",
+  "csat",
+  "counts",
+  "priority",
+  "trend",
+  "agents",
+  "tags",
+  "customFields",
+  "tickets",
+] as const;
+
+interface DeskSummary {
+  channelId: string;
+  channelName: string | null;
+  deskType: string;
+}
+
+/** Resolve the desks a request targets, or explain why it could not. */
+type DeskResolution =
+  | { ok: true; channelIds: string[] }
+  | { ok: false; text: string };
+
+async function listMetricsDesks(): Promise<DeskSummary[]> {
+  const data = (await spacesFetch("/api/desk-metrics/claw/desks")) as {
+    desks?: DeskSummary[];
+  };
+  return data.desks ?? [];
+}
+
+function describeDesks(desks: DeskSummary[]): string {
+  return desks
+    .map((d) => `- ${d.channelName ?? "(unnamed)"} [${d.deskType}] channelId=${d.channelId}`)
+    .join("\n");
+}
+
+async function resolveDesks(args: Record<string, unknown>): Promise<DeskResolution> {
+  const explicitIds = Array.isArray(args["channelIds"])
+    ? (args["channelIds"] as unknown[]).filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+  if (explicitIds.length > 0) return { ok: true, channelIds: explicitIds };
+
+  const desks = await listMetricsDesks();
+  if (desks.length === 0) {
+    return {
+      ok: false,
+      text:
+        "This user is not a member of any support desk, so there is nothing to report on. Desk " +
+        "metrics cover Xyne Desk channels only, and only ones the user belongs to.",
+    };
+  }
+
+  if (args["allDesks"] === true) {
+    return { ok: true, channelIds: desks.map((d) => d.channelId) };
+  }
+
+  const deskName = typeof args["deskName"] === "string" ? args["deskName"].trim() : "";
+  if (!deskName) {
+    return {
+      ok: false,
+      text:
+        `Specify which desk. Pass deskName, or channelIds, or allDesks=true to cover all ` +
+        `${desks.length}. Desks available to this user:\n${describeDesks(desks)}`,
+    };
+  }
+
+  const needle = deskName.toLowerCase();
+  // Tier 1: case-insensitive exact.
+  let matches = desks.filter((d) => (d.channelName ?? "").toLowerCase() === needle);
+  // Tier 2: case-insensitive contains — catches the casing/wording drift that
+  // makes a plain equality check fail on names the user typed from memory.
+  if (matches.length === 0) {
+    matches = desks.filter((d) => (d.channelName ?? "").toLowerCase().includes(needle));
+  }
+  // Tier 3: no match — surface real candidates rather than a dead end.
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      text:
+        `No desk matched "${deskName}". Re-call with one of these exact names, or its channelId:\n` +
+        describeDesks(desks),
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      text:
+        `"${deskName}" matched ${matches.length} desks. Re-call with one exact name or channelId, ` +
+        `or allDesks=true to merge them:\n${describeDesks(matches)}`,
+    };
+  }
+  return { ok: true, channelIds: [matches[0]!.channelId] };
+}
+
+const spacesDeskMetrics: ToolDef = {
+  name: "spaces-desk-metrics",
+  description:
+    "Support-desk analytics for Xyne Desk channels: first-response time (FRT), resolution time (RT), " +
+    "CSAT, tickets opened, email replies sent, per-stage and per-priority breakdowns, per-agent " +
+    "performance, tag breakdowns, and a daily opened-vs-closed trend. This is the SAME data the Desk " +
+    "Metrics dashboard shows. " +
+    "Use when the user asks how a support desk is performing — 'what's our average response time', " +
+    "'CSAT last month', 'who resolved the most tickets', 'how many tickets did we get last week', " +
+    "'which tags are spiking'. " +
+    "Identify the desk by `deskName` (partial, case-insensitive; the tool returns real candidates if " +
+    "nothing matches), by `channelIds`, or set `allDesks=true` to merge every desk the " +
+    "user can see. Call with no desk argument to list the available desks. " +
+    "ASK FOR ONLY THE METRICS YOU NEED via `metrics` — each key is a separate database query, and the " +
+    "default runs all of them. " +
+    "For custom (form) field questions: run metrics:[\"customFields\"] to discover which fields the desk " +
+    "carries, then pass `customFieldBreakdown` with the exact names to get a value distribution, or " +
+    "`customFieldFilter` to scope any other metric to tickets matching a field value. " +
+    "IMPORTANT semantics, also restated in the response's `notes`: (1) frt/rt/counts/priority/agents/" +
+    "tags/tickets are COHORT-scoped — they describe tickets CREATED in the range, so a ticket created " +
+    "earlier and resolved during the range is NOT counted; (2) csat and counts.emailRepliesInRange are " +
+    "ACTIVITY-scoped — events that happened in the range whatever their ticket's age; (3) rt excludes " +
+    "still-open tickets, so a low average over few resolvedTickets is survivorship bias; (4) agents[] " +
+    "attributes tickets to the CURRENT assignee; (5) data is forward-only and does not extend before " +
+    "desk metrics was deployed — old ranges are partial, not empty. " +
+    "Durations are SECONDS. Report them in human units (minutes/hours) rather than reading the raw number aloud.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      deskName: {
+        type: "string",
+        description:
+          "Desk (channel) name, case-insensitive partial match. If nothing matches, or the match is " +
+          "ambiguous, the tool returns the real desk names — re-call with one of those.",
+      },
+      channelIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Explicit desk channel ids. Takes precedence over deskName/allDesks. Max 20; more than one " +
+          "merges them with denominator-weighted averages and adds a perDesk split.",
+      },
+      allDesks: {
+        type: "boolean",
+        description:
+          "Merge every desk the user can see. Use for org-wide questions ('how is support doing " +
+          "overall'). Ignored when channelIds is set.",
+      },
+      lastDays: {
+        type: "number",
+        minimum: 1,
+        maximum: 90,
+        description: "Window length in days ending now (1-90). Defaults to 7. Mutually exclusive with timeRange.",
+      },
+      timeRange: {
+        type: "string",
+        description:
+          "Absolute window as 'startMs_endMs' (epoch milliseconds), e.g. '1735689600000_1738368000000'. " +
+          "Use for a specific calendar period; otherwise prefer lastDays. Max span 90 days.",
+      },
+      metrics: {
+        type: "array",
+        items: { type: "string", enum: [...DESK_METRIC_KEYS] },
+        description:
+          "Which metrics to compute; defaults to all. Each key costs a separate query, so pass only what " +
+          "the question needs. 'counts' covers ticketsOpened + emailReplies + per-stage counts; 'tags' " +
+          "covers both the category and per-tag breakdowns; 'tickets' additionally needs includeTickets.",
+      },
+      includeTickets: {
+        type: "number",
+        minimum: 0,
+        maximum: 50,
+        description:
+          "Return this many individual ticket rows (newest first), each with title, priority, stage, " +
+          "assignee, FRT/RT seconds, CSAT and custom fields. Defaults to 0. Rows are heavy — ask for them " +
+          "only when the user wants examples or a drill-down, not to compute aggregates yourself.",
+      },
+      assigneeIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently assigned to these user ids (from spaces-users).",
+      },
+      stageNames: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently in these stages.",
+      },
+      priorities: {
+        type: "array",
+        items: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        description: "Restrict to these ticket priorities.",
+      },
+      userGroupIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets owned by these user groups.",
+      },
+      tagValues: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to tickets carrying these desk-email tags, each as 'category:tag' (e.g. " +
+          "'issue_type:refund'). Get the real values from a tags-enabled run first.",
+      },
+      customFieldBreakdown: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Custom (form) field NAMES to break down by value, e.g. [\"Primary Issue\"]. Max 5. Names must " +
+          "match exactly — run with metrics:[\"customFields\"] first to discover what this desk has. " +
+          "Multi-select fields count a ticket once per value, so their counts do not sum to the ticket " +
+          "total; the response's notes say which fields those are.",
+      },
+      customFieldFilter: {
+        type: "object",
+        description:
+          "Restrict the cohort by custom field. `keys` alone means 'the field is set at all'; add " +
+          "perKeyFilters to match values. Discover field names with metrics:[\"customFields\"] first.",
+        properties: {
+          keys: {
+            type: "array",
+            items: { type: "string" },
+            description: "Field names to require, e.g. [\"Primary Issue\"].",
+          },
+          perKeyFilters: {
+            type: "object",
+            description:
+              "Per field name: { values: [exact matches] } or { textTerms: [substrings] }. Use values " +
+              "for dropdowns/multi-selects, textTerms for free-text fields.",
+          },
+        },
+        required: ["keys"],
+      },
+    },
+  },
+  async handler(args) {
+    try {
+      if (args["lastDays"] !== undefined && typeof args["timeRange"] === "string") {
+        return err("Pass either lastDays or timeRange, not both.");
+      }
+
+      const resolution = await resolveDesks(args);
+      if (!resolution.ok) return ok(resolution.text);
+
+      const body: Record<string, unknown> = { channelIds: resolution.channelIds };
+      if (typeof args["timeRange"] === "string") body["timeRange"] = args["timeRange"];
+      else body["lastDays"] = typeof args["lastDays"] === "number" ? args["lastDays"] : 7;
+
+      const metrics = Array.isArray(args["metrics"])
+        ? (args["metrics"] as unknown[]).filter(
+            (m): m is string => typeof m === "string" && (DESK_METRIC_KEYS as readonly string[]).includes(m),
+          )
+        : [];
+      if (metrics.length > 0) body["metrics"] = metrics;
+
+      const includeTickets = typeof args["includeTickets"] === "number" ? args["includeTickets"] : 0;
+      if (includeTickets > 0) {
+        body["includeTickets"] = includeTickets;
+        // Asking for rows without the 'tickets' key would silently return none.
+        if (metrics.length > 0 && !metrics.includes("tickets")) {
+          body["metrics"] = [...metrics, "tickets"];
+        }
+      }
+
+      for (const key of ["assigneeIds", "stageNames", "priorities", "userGroupIds", "tagValues"]) {
+        const value = args[key];
+        if (Array.isArray(value) && value.length > 0) body[key] = value;
+      }
+
+      const breakdown = args["customFieldBreakdown"];
+      if (Array.isArray(breakdown) && breakdown.length > 0) body["customFieldBreakdown"] = breakdown;
+
+      const cff = args["customFieldFilter"];
+      if (cff && typeof cff === "object" && Array.isArray((cff as { keys?: unknown }).keys)) {
+        body["customFieldFilter"] = cff;
+      }
+
+      const data = (await spacesFetch("/api/desk-metrics/claw/query", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as Record<string, unknown>;
+
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(`desk-metrics error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
@@ -7902,6 +8188,7 @@ export const tools: ToolDef[] = [
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,
+  spacesDeskMetrics,
   userSendMessage,
   spacesMeetingInsights,
   spacesTickets,
