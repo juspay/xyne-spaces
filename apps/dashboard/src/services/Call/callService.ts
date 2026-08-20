@@ -1,4 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
+import type { SdlcCallLink } from '@xyne/shared';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
@@ -14,6 +15,7 @@ export interface InitiateCallRequest {
   callType: CallType;
   isHeadless?: boolean; // For recordings without a specific channel
   conversationId?: string; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call + its conversation to
 }
 
 export interface InitiateCallResponse {
@@ -225,6 +227,7 @@ export class CallService {
         callType: data.callType,
         isHeadless: data.isHeadless,
         ...(data.conversationId && { conversationId: data.conversationId }),
+        ...(data.sdlcLink && { sdlcLink: data.sdlcLink }),
       });
 
       return response.data;

@@ -633,7 +633,7 @@ const AppRoot = (): ReactElement => {
                         </Panel>
                       </ResizableGroup>
                     </div>
-                  ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage && sdlcRepoId === null ? (
+                  ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                     // XyneAI is open on desktop - show panel layout with XyneAI
                     <div className='flex flex-col h-screen'>
                       <ResizableGroup
@@ -1339,15 +1339,27 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'sdlc',
-                element: <SdlcScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'sdlc/:repoId',
-                element: <SdlcScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'sdlc/:repoId/:section',
-                element: <SdlcScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'team-intelligence',

@@ -126,6 +126,8 @@ interface ThreadMessagesProps {
    *  panel on this thread; hosts with their own agent session (e.g. Desk's
    *  draft agent) pass their own opener. */
   onAskAI?: () => void;
+  /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
+  onUserClick?: ((userId: string) => void) | undefined;
 }
 
 export const ThreadMessages = ({
@@ -147,6 +149,7 @@ export const ThreadMessages = ({
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
   onAskAI,
+  onUserClick,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -1054,6 +1057,7 @@ export const ThreadMessages = ({
               channelId={derivedChannelId || ''}
               conversationId={derivedConversationId || ''}
               threadMessages={messages}
+              {...(onUserClick && { onUserClick })}
               initialScrollOffset={0}
               isTicketThread={false}
               channelScopeType={channel?.scopeType}
@@ -1400,6 +1404,7 @@ export const ThreadMessages = ({
                     channelId={derivedChannelId || ''}
                     conversationId={derivedConversationId || ''}
                     threadMessages={messages}
+                    {...(onUserClick && { onUserClick })}
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
