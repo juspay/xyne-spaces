@@ -57,18 +57,26 @@ export async function resolveActionRecipients(
   }
 
   const board = await db.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+
+  // Two queries total regardless of recipient count: the board above, and every
+  // relevant membership in one batch below. Notification fan-out can be large, so
+  // this must not scale with the recipient list.
+  const mappings = await db.userGroupMapping.findMany({
+    where: { userGroupId: ticketUserGroupId, userId: { in: awarenessRecipients } },
+    select: { userId: true, roleId: true, responsibility: true },
+  });
+  const mappingByUserId = new Map(
+    mappings.map((m) => [
+      m.userId,
+      { roleId: m.roleId ?? null, responsibility: m.responsibility ?? null },
+    ]),
+  );
+
   const results = await Promise.all(
     awarenessRecipients.map(async (userId) => {
       const permission = await canUserModifyTicketControl(userId, ticketUserGroupId, boardId, {
         getBoardMetadata: async () => board?.metadata ?? null,
-        getUserGroupMapping: async (uid, ugId) => {
-          const mapping = await db.userGroupMapping.findFirst({
-            where: { userId: uid, userGroupId: ugId },
-          });
-          return mapping
-            ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
-            : null;
-        },
+        getUserGroupMapping: async (uid) => mappingByUserId.get(uid) ?? null,
       });
       return permission.allowed ? userId : null;
     }),

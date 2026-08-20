@@ -326,54 +326,72 @@ class StageEtaDeadlineWorker {
 
         if (decision.transitionKind === 'UNCHANGED') continue;
 
-        // Idempotency: re-read immediately before writing so a slower/retried run can't
-        // clobber a newer state that the immediate (mutation-triggered) evaluation path -
-        // or a faster worker retry - already wrote since we read `ticket.metadata` above.
-        const freshTicket = await db.ticket.findUnique({
-          where: { id: ticket.id },
-          select: { metadata: true },
-        });
-        const freshRisk = parseTicketEtaManagement(freshTicket?.metadata).planningRisk;
-        if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
+        // Re-check the persisted fingerprint under a row lock and write in the same
+        // transaction, so an overlapping run or a retry can't pass the check and then
+        // both write. Without the lock this is check-then-write: two workers could
+        // duplicate the risk activities and notify twice for one fingerprint.
+        const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+        const committed = await runAsServiceActor(
+          'stage-eta-deadline-worker',
+          ticket.workspaceId,
+          async () =>
+            db.$transaction(async tx => {
+              const [locked] = await tx.$queryRaw<{ metadata: unknown }[]>`
+                SELECT "metadata"
+                FROM "tickets"
+                WHERE "id" = ${ticket.id}
+                FOR UPDATE
+              `;
+              const freshRisk = parseTicketEtaManagement(locked?.metadata).planningRisk;
+              if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
+                return false;
+              }
+
+              const mergedMetadata = mergeTicketEtaManagement(locked?.metadata, {
+                planningRisk: decision.nextState,
+              });
+              await tx.ticket.update({
+                where: { id: ticket.id },
+                data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+              });
+
+              const intents = buildRiskTransitionActivityIntents(decision, {
+                currentStageId: entry.stageId,
+                oldEta: ticket.eta ? ticket.eta.getTime() : null,
+                boardConfigVersion: boardEtaManagement.configVersion,
+                trigger: 'RECONCILIATION',
+                systemReason: 'Hourly reconciliation detected a planning-risk state change',
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+              for (const intent of intents) {
+                await recordTicketTimelineEvent(
+                  {
+                    activity: {
+                      ticketId: ticket.id,
+                      updatedBy: systemActorId,
+                      activityType: intent.activityType,
+                      value: intent.value as Prisma.InputJsonValue,
+                      workspaceId: ticket.workspaceId,
+                      channelId: ticket.channelId,
+                    },
+                  },
+                  tx,
+                );
+              }
+              return true;
+            }),
+        );
+
+        if (!committed) {
           metrics.skippedStale += 1;
           continue;
         }
 
-        const mergedMetadata = mergeTicketEtaManagement(freshTicket?.metadata, {
-          planningRisk: decision.nextState,
-        });
-
-        await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, async () => {
-          await db.ticket.update({
-            where: { id: ticket.id },
-            data: { metadata: mergedMetadata as Prisma.InputJsonValue },
-          });
-
-          const systemActorId = await getTicketBotActorId(ticket.workspaceId);
-          const intents = buildRiskTransitionActivityIntents(decision, {
-            currentStageId: entry.stageId,
-            oldEta: ticket.eta ? ticket.eta.getTime() : null,
-            boardConfigVersion: boardEtaManagement.configVersion,
-            trigger: 'RECONCILIATION',
-            systemReason: 'Hourly reconciliation detected a planning-risk state change',
-            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-          });
-          for (const intent of intents) {
-            await recordTicketTimelineEvent({
-              activity: {
-                ticketId: ticket.id,
-                updatedBy: systemActorId,
-                activityType: intent.activityType,
-                value: intent.value as Prisma.InputJsonValue,
-                workspaceId: ticket.workspaceId,
-                channelId: ticket.channelId,
-              },
-            });
-          }
-
-          // No notifications while paused - state above is still updated.
-          if (ticket.statusV2 !== 'PAUSED') {
-            await dispatchEtaNotifications(
+        // Post-commit, and never while paused. Only the run that actually won the lock
+        // reaches here, so one fingerprint notifies once.
+        if (ticket.statusV2 !== 'PAUSED') {
+          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, () =>
+            dispatchEtaNotifications(
               etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),
               {
                 ticketId: ticket.id,
@@ -383,9 +401,9 @@ class StageEtaDeadlineWorker {
                 boardId: ticket.boardId,
                 actorId: systemActorId,
               },
-            );
-          }
-        });
+            ),
+          );
+        }
 
         if (decision.transitionKind === 'DETECTED') metrics.detected += 1;
         else if (decision.transitionKind === 'REOPENED') metrics.reopened += 1;
