@@ -131,6 +131,9 @@ export interface CallableAgentLightSpec {
 export type NestedAgentRunner = (args: {
   spec: CallableAgentSpec;
   question: string;
+  /** toolCall id of the delegating call, so the callee's own tool invocations
+   *  can be recorded against it instead of being discarded. */
+  parentToolCallId?: string;
   /** Depth at which the callee will run (parent depth + 1). */
   depth: number;
   /** Governor to hand the callee so ITS own delegation attempts are governed
@@ -330,11 +333,12 @@ const paramSchema = (spec: CallableAgentSpec): unknown => ({
 async function runGovernedDelegation(args: {
   spec: CallableAgentSpec;
   question: string;
+  parentToolCallId?: string;
   governor: AgentDelegationGovernor;
   runner: NestedAgentRunner;
   opts?: { signal?: AbortSignal; onProgress?: (label: string) => void };
 }): Promise<ToolResultContent> {
-  const { spec, question, governor, runner, opts = {} } = args;
+  const { spec, question, parentToolCallId, governor, runner, opts = {} } = args;
   const caller = governor.ownerSlug;
   governor.emit({
     ts: Date.now(),
@@ -378,6 +382,7 @@ async function runGovernedDelegation(args: {
           question,
           depth: governor.depth + 1,
           childGovernor,
+          ...(parentToolCallId ? { parentToolCallId } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
         });
@@ -419,9 +424,9 @@ export function buildCallableAgentTools(
       description: callableAgentDescription(spec),
       progressLabels: spec.progressLabels ?? [`Delegating to ${spec.name}…`],
       parameters: paramSchema(spec),
-      async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
+      async execute(toolCallId: string, params: unknown): Promise<ToolResultContent> {
         const question = String((params as Record<string, unknown>)?.[paramName] ?? "").trim();
-        return runGovernedDelegation({ spec, question, governor, runner, opts });
+        return runGovernedDelegation({ spec, question, parentToolCallId: toolCallId, governor, runner, opts });
       },
     };
   });
@@ -459,7 +464,7 @@ export function buildOrchestratorCallableAgentTool(
         },
       },
     },
-    async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
+    async execute(toolCallId: string, params: unknown): Promise<ToolResultContent> {
       const raw = params as Record<string, unknown> | null | undefined;
       const agentSlug = String(raw?.["agentSlug"] ?? "").trim();
       const question = String(raw?.["task"] ?? "").trim();
@@ -476,7 +481,7 @@ export function buildOrchestratorCallableAgentTool(
       }
       opts.onProgress?.(light.progressLabels?.[0] ?? `Delegating to ${light.name}…`);
       const fullSpec = await hydrateSpec(agentSlug);
-      return runGovernedDelegation({ spec: fullSpec, question, governor, runner, opts });
+      return runGovernedDelegation({ spec: fullSpec, question, parentToolCallId: toolCallId, governor, runner, opts });
     },
   }];
 }

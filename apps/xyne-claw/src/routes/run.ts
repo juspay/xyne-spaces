@@ -19,7 +19,9 @@ import {
   type ProgressDest,
   type ProgressEmitter,
   type Attachment,
+  type ToolInvocation,
 } from "../agent.js";
+import { type LlmCallStat } from "../llm-turn-stats.js";
 import {
   frameSseEvent,
   KEEPALIVE_FRAME,
@@ -2207,6 +2209,18 @@ async function processTask(
     // nested tools (e.g. Bitbucket__create_pull_request), not just the
     // subagent wrapper names returned by the parent agent.
     const subagentInnerTools: string[] = [];
+    // Durable sink for tool calls made INSIDE a nested run — subagent children
+    // and A2A callees alike. Both are otherwise lossy: an A2A run has no
+    // agent_runs row of its own (its sessionId is synthetic), and a subagent
+    // child reaches the DB only via a fire-and-forget push that finalize does
+    // not re-supply. Rows collected here ride the final callback payload, where
+    // finalize's toolCallId-keyed dedupe union collapses anything already
+    // streamed.
+    const nestedInvocations: ToolInvocation[] = [];
+    // LLM calls made inside a subagent's own loop, tagged with the subagent
+    // name. Merged into the parent's series so one column describes the whole
+    // run and parent-only analysis stays a filter on the tag.
+    const nestedLlmCalls: LlmCallStat[] = [];
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2271,6 +2285,8 @@ async function processTask(
                 }
               : {}),
             parentToolsUsed: subagentInnerTools,
+            parentToolInvocations: nestedInvocations,
+            parentLlmCalls: nestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               ...(agentSlug ? { agentSlug } : {}),
@@ -2392,7 +2408,7 @@ async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, parentToolCallId, childGovernor, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
@@ -2535,6 +2551,13 @@ async function processTask(
         });
         if (calleeInnerTools.length > 0) {
           subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        }
+        for (const inv of result.toolInvocations) {
+          nestedInvocations.push({
+            ...inv,
+            subagentName: inv.subagentName ?? spec.slug,
+            ...(parentToolCallId ? { parentToolCallId: inv.parentToolCallId ?? parentToolCallId } : {}),
+          });
         }
         return { text: result.text, toolsUsed: result.toolsUsed };
       } finally {
@@ -3986,6 +4009,10 @@ async function processTask(
     // on specific inner tools (Bitbucket__create_pull_request) in addition to
     // subagent wrappers (bitbucket).
     const combinedToolsUsed = [...result.toolsUsed, ...subagentInnerTools];
+    if (nestedInvocations.length > 0) {
+      result.toolInvocations.push(...nestedInvocations);
+    }
+    const llmCallSeries = [...(result.llmCalls ?? []), ...nestedLlmCalls];
 
     const lat = result.latency;
     const latencyStr = lat
@@ -4245,6 +4272,8 @@ async function processTask(
         ? { reasoning: result.reasoning }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
+      ...(result.citationReflection ? { citationReflection: result.citationReflection } : {}),
+      ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
       ...(result.toolInvocations.length > 0
         ? { toolInvocations: result.toolInvocations }
         : {}),

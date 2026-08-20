@@ -7,6 +7,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
+import { clawMetricsFields } from "../lib/run-metrics-payload.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import { gcsService } from "../services/storageService.js";
@@ -2198,7 +2199,7 @@ router.post(
           ...(typeof payload.provider === "string" ? { provider: payload.provider } : {}),
           ...(typeof payload.model === "string" ? { model: payload.model } : {}),
           toolsUsed: toolsUsed ?? [],
-          ...(toolInvocations ? { toolInvocations } : {}),
+          ...clawMetricsFields(payload),
           ...((payload as { fastMode?: boolean }).fastMode !== undefined
             ? { fastMode: (payload as { fastMode?: boolean }).fastMode === true }
             : {}),

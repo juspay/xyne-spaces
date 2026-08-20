@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
+import { summarizeToolInvocations } from "../lib/tool-stats.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-run");
@@ -131,6 +132,18 @@ export interface FinalizeRunInput {
    *  deterministically once branching introduces multiple assistant siblings. */
   chatMessageId?: string | null;
   fastMode?: boolean | null;
+  /** Run-level citation-reflection outcome from claw. Merged into
+   *  `metadata.citationReflection` rather than given its own column — it is a
+   *  reporting attribute, never a join key or filter. */
+  citationReflection?: {
+    outcome?: string;
+    initialCited?: boolean;
+    sourcesWereCiteable?: boolean;
+    finalCited?: boolean;
+    rounds?: number;
+  };
+  /** Per-LLM-call latency/token series from claw, stored as-is. */
+  llmCalls?: unknown;
 }
 
 export const agentRunRepository = {
@@ -227,7 +240,7 @@ export const agentRunRepository = {
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { toolInvocations: true, userId: true, agentSlug: true },
+      select: { toolInvocations: true, userId: true, agentSlug: true, metadata: true },
     });
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
@@ -267,10 +280,37 @@ export const agentRunRepository = {
       finalInvocations = merged;
     }
 
+    // Summarise the MERGED invocations, not the callback's own array — the
+    // merge is what folds in streamed subagent children and nested A2A rows, so
+    // summarising before it would undercount. Both inputs are already in memory
+    // here, so this adds no query and no I/O.
+    //
+    // `result` is the answer text this run produced; citation attribution is
+    // therefore same-run only. A later turn re-citing an earlier turn's chunk is
+    // not visible from here and is not counted — see lib/tool-stats.ts.
+    // `?? []` rather than undefined: a run whose invocations summarise to
+    // nothing is still SUMMARISED — its answer is "no tool calls". Leaving it
+    // NULL would park it permanently in the backfill's candidate set and hold
+    // toolStats coverage below 1.0 with no way to close the gap.
+    const toolStats = finalInvocations !== undefined
+      ? (summarizeToolInvocations(finalInvocations, input.result ?? null) ?? [])
+      : undefined;
+
+    // Merge, never replace: start() and the external-result-callback path both
+    // write their own keys here, and clobbering them breaks the durable
+    // callback fallback.
+    const mergedMetadata = input.citationReflection
+      ? {
+          ...((existingRow?.metadata as Record<string, unknown> | null) ?? {}),
+          citationReflection: input.citationReflection,
+        }
+      : undefined;
+
     const updated = await tx.agentRun.updateMany({
       where: { sessionId },
       data: {
         status: input.status,
+        ...(mergedMetadata ? { metadata: mergedMetadata as Prisma.InputJsonValue } : {}),
         ...(input.result !== undefined ? { result: input.result } : {}),
         ...(input.error !== undefined ? { error: input.error } : {}),
         ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
@@ -278,6 +318,10 @@ export const agentRunRepository = {
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.toolsUsed ? { toolsUsed: input.toolsUsed } : {}),
         ...(finalInvocations !== undefined ? { toolInvocations: stripNulDeep(finalInvocations) as Prisma.InputJsonValue } : {}),
+        ...(toolStats !== undefined ? { toolStats: stripNulDeep(toolStats) as Prisma.InputJsonValue } : {}),
+        ...(Array.isArray(input.llmCalls) && input.llmCalls.length > 0
+          ? { llmTurnStats: stripNulDeep(input.llmCalls) as Prisma.InputJsonValue }
+          : {}),
         ...(input.tokenUsage ? {
           tokensIn: input.tokenUsage.input ?? null,
           tokensOut: input.tokenUsage.output ?? null,
