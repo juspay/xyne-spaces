@@ -1645,8 +1645,10 @@ router.post("/requests/:requestId/reject", requireClawAdmin, async (req: Request
 });
 
 // ── Agent cloning ─────────────────────────────────────────────────────────────
-// Clone copies ONLY the source agent's system prompt, tools, and skills into a
-// new personal agent owned by the caller (see agentRepository.cloneAgentForUser).
+// Clone copies the source agent's prompt, config (tools/subagents/behaviour),
+// tools, skills, KB grants and MCP connections into a new PERSONAL agent owned
+// by the caller. Spaces app identity, shares, provider credentials, delegation
+// grants and prompt history stay behind (see agentRepository.cloneAgentForUser).
 // Owners / contributors / admins clone instantly; everyone else raises a
 // "clone" AgentRequest that the SOURCE agent's owner reviews — surfaced both on
 // this frontend (GET /clone-requests/incoming) and, best-effort, as an
