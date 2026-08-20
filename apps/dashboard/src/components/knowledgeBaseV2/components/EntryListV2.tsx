@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { StatusBadgeV2 } from './StatusBadgeV2';
 import { IngestStatusV2 } from './IngestStatusV2';
-import { Folder, Link2, Pencil, Share2, Trash2 } from 'lucide-react';
+import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
@@ -24,16 +24,14 @@ interface EntryListV2Props {
   onOpen: (entry: CollectionChild) => void;
   onDelete?: (entry: CollectionChild) => void;
   onRename?: (entry: CollectionChild) => void;
-  /** When provided, FOLDER rows render a share button next to rename/delete.
-   *  The screen only passes this at root (collections view). */
+  /** When provided, every row renders a Share button. At root this opens
+   *  the full collection access-management dialog; inside a collection it
+   *  opens a copy-link-only dialog for the folder/file. */
   onShare?: (entry: CollectionChild) => void;
   /** When provided, every row renders an Ask AI button next to share.
    *  Files scope precisely (kbDocId); folders fall back to their owning
    *  collection — see KnowledgeBaseV2Screen's onAskAIAboutEntry. */
   onAskAI?: (entry: CollectionChild) => void;
-  /** When provided, every row renders a Copy link button. Copies a deep
-   *  link straight to that item. */
-  onCopyLink?: (entry: CollectionChild) => void;
   /** Opens the per-collection ingestion status drawer (root collections view). */
   onOpenStatus?: (entry: CollectionChild) => void;
   /** Inline-rename state: id of the row whose name should render as an
@@ -86,7 +84,6 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   onRename,
   onShare,
   onAskAI,
-  onCopyLink,
   onOpenStatus,
   editingId,
   onRenameCommit,
@@ -98,11 +95,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   // grid columns don't shift between rows with/without actions. Each button
   // is 36 px wide.
   const actionCount =
-    (onAskAI ? 1 : 0) +
-    (onCopyLink ? 1 : 0) +
-    (onShare ? 1 : 0) +
-    (onRename ? 1 : 0) +
-    (onDelete ? 1 : 0);
+    (onAskAI ? 1 : 0) + (onShare ? 1 : 0) + (onRename ? 1 : 0) + (onDelete ? 1 : 0);
   const actionsWidth = actionCount > 0 ? `${String(actionCount * 36)}px` : null;
   const template = [
     '1fr',
@@ -292,9 +285,10 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                   </button>
                 ))}
 
-                {/* Row actions (share / rename / delete). Share is folder-only
-                    and only wired by the root view — matches V1's behaviour.
-                    Visibility (public/private) lives inside the share dialog. */}
+                {/* Row actions (share / rename / delete). Share opens the full
+                    collection access-management dialog at root, or a
+                    copy-link-only dialog for a folder/file — see
+                    KnowledgeBaseV2Screen's onShare. */}
                 {actionsWidth ? (
                   <div className='flex items-center justify-end gap-1'>
                     {onAskAI ? (
@@ -306,30 +300,14 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onAskAI(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='ask-ai-entry'
                       >
                         <XyneAIStar size={14} />
                       </button>
                     ) : null}
-                    {onCopyLink ? (
-                      <button
-                        type='button'
-                        aria-label={`Copy link to ${e.name}`}
-                        title='Copy link'
-                        onClick={ev => {
-                          ev.stopPropagation();
-                          onCopyLink(e);
-                        }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
-                        data-track-category='knowledge-base'
-                        data-track-name='copy-link-entry'
-                      >
-                        <Link2 className='h-3.5 w-3.5' strokeWidth={1.75} />
-                      </button>
-                    ) : null}
-                    {onShare && e.type === 'FOLDER' ? (
+                    {onShare ? (
                       <button
                         type='button'
                         aria-label={`Share ${e.name}`}
@@ -338,7 +316,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onShare(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='share-entry'
                       >
@@ -354,7 +332,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onRename(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='rename-entry'
                       >
@@ -370,7 +348,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onDelete(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus:opacity-100 dark:hover:bg-red-950/40'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 dark:hover:bg-red-950/40'
                         data-track-category='knowledge-base'
                         data-track-name='delete-entry'
                       >

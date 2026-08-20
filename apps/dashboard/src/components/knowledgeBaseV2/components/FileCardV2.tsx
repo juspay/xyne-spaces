@@ -3,7 +3,7 @@ import { cn } from '../../../utils/classNames';
 import { FileCardPreviewV2 } from './FileCardPreviewV2';
 import { IngestStatusV2 } from './IngestStatusV2';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
-import { Folder, Link2, Pencil, Share2, Trash2 } from 'lucide-react';
+import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
@@ -16,8 +16,8 @@ interface FileCardV2Props {
   onRename?: (() => void) | undefined;
   /** Opens Ask AI scoped to this specific file (kbDocId). */
   onAskAI?: (() => void) | undefined;
-  /** Copies a deep link to this file. */
-  onCopyLink?: (() => void) | undefined;
+  /** Opens the copy-link share dialog for this file. */
+  onShare?: (() => void) | undefined;
   /** Inline-rename mode. When true the title becomes an editable input;
    *  Enter / blur calls `onRenameCommit`, Escape calls `onRenameCancel`. */
   isRenaming?: boolean;
@@ -85,7 +85,7 @@ const HoverAction: React.FC<HoverActionProps> = ({
     data-track-category='knowledge-base'
     data-track-name={trackName}
     className={cn(
-      'grid h-7 w-7 place-items-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition group-hover:opacity-100 focus:opacity-100',
+      'grid h-7 w-7 place-items-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100',
       intent === 'danger'
         ? 'hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40'
         : 'hover:bg-muted hover:text-foreground',
@@ -107,7 +107,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
   onDelete,
   onRename,
   onAskAI,
-  onCopyLink,
+  onShare,
   isRenaming,
   onRenameCommit,
   onRenameCancel,
@@ -136,9 +136,12 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
       >
         <div className='relative pl-1 pt-1'>
           <FileCardPreviewV2 format={ext} size='md' />
-          {/* Top-left, not bottom-right — FileCardPreviewV2 already occupies
-              that corner with its own format banner (e.g. "MD", "JSON"). */}
-          <span className='absolute -left-1 -top-1'>
+          {/* Bottom-right, matching FolderCardV2's CollectionStatusBadgeV2
+              corner — FileCardPreviewV2's format banner moved to top-right
+              to free this corner up.
+              z-10 — FileCardPreviewV2's thumbnail/banner sit at z-[1]/z-[2],
+              which otherwise outrank this z-auto badge and clip it. */}
+          <span className='absolute -right-1 -bottom-1 z-10'>
             <FileFailedBadgeV2 status={file.ingestionStatus} />
           </span>
         </div>
@@ -160,8 +163,8 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
           ) : null}
         </span>
       </button>
-      {!isRenaming && (onAskAI || onCopyLink || onRename || onDelete) ? (
-        <div className='absolute right-2 top-2 flex gap-1'>
+      {!isRenaming && (onAskAI || onShare || onRename || onDelete) ? (
+        <div className='absolute right-2 top-2 z-10 flex gap-1'>
           {onAskAI ? (
             <HoverAction
               label={`Ask AI about ${file.name}`}
@@ -174,16 +177,16 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
               <XyneAIStar size={14} />
             </HoverAction>
           ) : null}
-          {onCopyLink ? (
+          {onShare ? (
             <HoverAction
-              label={`Copy link to ${file.name}`}
-              trackName='copy-link-file-card'
+              label={`Share ${file.name}`}
+              trackName='share-file-card'
               onClick={ev => {
                 ev.stopPropagation();
-                onCopyLink();
+                onShare();
               }}
             >
-              <Link2 className='h-3.5 w-3.5' strokeWidth={1.75} />
+              <Share2 className='h-3.5 w-3.5' strokeWidth={1.75} />
             </HoverAction>
           ) : null}
           {onRename ? (
@@ -226,15 +229,13 @@ interface FolderCardV2Props {
   caption?: string;
   onDelete?: (() => void) | undefined;
   onRename?: (() => void) | undefined;
-  /** Shares this collection. Only wired at the KB root — see
-   *  KnowledgeBaseV2Screen's onShare. Visibility (public/private) lives
-   *  inside the share dialog. */
+  /** Opens the share dialog for this entry — the full access-management
+   *  dialog at the KB root (a collection card), or the copy-link-only
+   *  dialog for a regular subfolder. See KnowledgeBaseV2Screen's onShare. */
   onShare?: (() => void) | undefined;
   /** Opens Ask AI scoped to this folder's owning collection (there's no
    *  per-folder scope — see KnowledgeBaseV2Screen's onAskAIAboutEntry). */
   onAskAI?: (() => void) | undefined;
-  /** Copies a deep link to this folder. */
-  onCopyLink?: (() => void) | undefined;
   /** Opens the per-collection ingestion status drawer. Wired at the KB root
    *  only; clicking the badge must not trigger folder navigation. */
   onOpenStatus?: ((entry: CollectionChild) => void) | undefined;
@@ -252,7 +253,6 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
   onRename,
   onShare,
   onAskAI,
-  onCopyLink,
   onOpenStatus,
   isRenaming,
   onRenameCommit,
@@ -322,8 +322,8 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
           </span>
         </span>
       </div>
-      {!isRenaming && (onAskAI || onCopyLink || onShare || onRename || onDelete) ? (
-        <div className='absolute right-2 top-2 flex gap-1'>
+      {!isRenaming && (onAskAI || onShare || onRename || onDelete) ? (
+        <div className='absolute right-2 top-2 z-10 flex gap-1'>
           {onAskAI ? (
             <HoverAction
               label={`Ask AI about ${folder.name}`}
@@ -334,18 +334,6 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
               }}
             >
               <XyneAIStar size={14} />
-            </HoverAction>
-          ) : null}
-          {onCopyLink ? (
-            <HoverAction
-              label={`Copy link to ${folder.name}`}
-              trackName='copy-link-folder-card'
-              onClick={ev => {
-                ev.stopPropagation();
-                onCopyLink();
-              }}
-            >
-              <Link2 className='h-3.5 w-3.5' strokeWidth={1.75} />
             </HoverAction>
           ) : null}
           {onShare ? (

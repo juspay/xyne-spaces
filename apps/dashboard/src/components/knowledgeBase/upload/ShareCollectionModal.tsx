@@ -1,6 +1,6 @@
 import { ReactElement, useState, useCallback, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, Check, Globe, Lock, Share2, X } from 'lucide-react';
+import { ChevronDown, Check, Globe, Link2, Lock, Share2, X } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
@@ -36,6 +36,9 @@ interface ShareCollectionModalProps {
    *  enforces this too, but hiding the control for non-owners avoids a wasted
    *  round-trip + error toast. */
   canEditVisibility?: boolean;
+  /** Deep link to the collection. Renders a "Copy link" row above the
+   *  Cancel/Share buttons when present; omitted entirely otherwise. */
+  link?: string;
 }
 
 export const ShareCollectionModal = ({
@@ -46,6 +49,7 @@ export const ShareCollectionModal = ({
   channelId,
   isPrivate: isPrivateProp,
   canEditVisibility = false,
+  link,
 }: ShareCollectionModalProps): ReactElement => {
   const { user } = useAuth();
   const zero = useZero();
@@ -240,6 +244,14 @@ export const ShareCollectionModal = ({
 
   const canSubmit = (selectedUsers.length > 0 || visibilityChanged) && !isLoading;
 
+  const handleCopyLink = (): void => {
+    if (!link) return;
+    void navigator.clipboard.writeText(link).then(
+      () => toast.success('Link copied'),
+      () => toast.error('Could not copy link'),
+    );
+  };
+
   return (
     <Dialog
       open={isOpen}
@@ -248,7 +260,7 @@ export const ShareCollectionModal = ({
       }}
       title='Share Collection'
       description={`Share "${collectionName}" with other users`}
-      className='max-w-md bg-secondary border border-border'
+      className='max-w-md bg-popover border border-border'
     >
       <div className='p-6'>
         {/* Header */}
@@ -468,22 +480,42 @@ export const ShareCollectionModal = ({
           </div>
         )}
 
-        {/* Submit Button */}
-        <div className='flex justify-end gap-2'>
-          <Button variant='outline' onClick={handleClose} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!canSubmit}
-            loading={isLoading}
-            onClick={() => {
-              void handleShare();
-            }}
-            className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
-          >
-            <Share2 size={16} />
-            Share Collection
-          </Button>
+        {/* Footer — Copy link (left) alongside Cancel/Share Collection
+            (right), matching the "General access ... Copy link ... Done"
+            share-dialog convention. Copy link is independent of the
+            share-with-users flow below it: it just puts the deep link on the
+            clipboard, no submit required. */}
+        <div className='flex items-center justify-between gap-3 border-t border-border pt-4'>
+          {link ? (
+            <button
+              type='button'
+              onClick={handleCopyLink}
+              data-track-category='knowledge-base'
+              data-track-name='share-collection-copy-link'
+              className='inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 -ml-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-primary'
+            >
+              <Link2 size={16} />
+              Copy link
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className='flex justify-end gap-2'>
+            <Button variant='outline' onClick={handleClose} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!canSubmit}
+              loading={isLoading}
+              onClick={() => {
+                void handleShare();
+              }}
+              className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            >
+              <Share2 size={16} />
+              Share Collection
+            </Button>
+          </div>
         </div>
       </div>
     </Dialog>

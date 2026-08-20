@@ -28,6 +28,7 @@ import {
 } from '../../services/Knowledge/collectionService';
 import CreateCollectionModal from '../../components/knowledgeBase/upload/CreateCollectionModal';
 import { ShareCollectionModal } from '../../components/knowledgeBase/upload/ShareCollectionModal';
+import { ShareLinkModal } from '../../components/knowledgeBaseV2/components/ShareLinkModal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -252,6 +253,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // `activeCollection` machine slot, so opening the modal also seeds that
   // slot from the chosen card and we restore it on close.
   const [shareTarget, setShareTarget] = useState<CollectionChild | null>(null);
+  // Open share target for a regular folder/file (copy-link-only dialog —
+  // no ACL of its own, see ShareLinkModal). Distinct from `shareTarget`
+  // (collections), which drives the full access-management dialog.
+  const [linkShareTarget, setLinkShareTarget] = useState<CollectionChild | null>(null);
   // Collection whose ingestion status drawer is open (root view only).
   const [statusFor, setStatusFor] = useState<StatusDrawerTarget | null>(null);
   // "Add from Google Drive link" modal (inside a collection).
@@ -852,15 +857,54 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     [user, isAtRoot, collectionId, renameCollection, renameNode, globalCollections],
   );
 
+  // ── Entry deep link ──────────────────────────────────────────────────
+  // Same URL shape onOpenEntry navigates to. There's no separate ACL for
+  // this: whoever opens it needs access to the owning collection already
+  // (or gets Shared it separately), matching how every other "copy link"
+  // button in the app works (Canvas, messages). Used by onShare below to
+  // seed both the collection dialog's link and the folder/file dialog's link.
+  const buildEntryLink = useCallback(
+    (entry: CollectionChild): string | null => {
+      const base = window.location.origin + browseBasePath;
+      if (entry.type === 'FOLDER') {
+        if (isAtRoot) return `${base}?cl=${entry.id}`;
+        if (!collectionId) return null;
+        return `${base}?cl=${collectionId}&parent=${entry.id}`;
+      }
+      if (!collectionId) return null;
+      const owning = globalCollections.byId(collectionId);
+      const projectId = owning?.projectId;
+      const channelId = owning?.scopeId;
+      if (!projectId || !channelId) return null;
+      return `${base}/${projectId}/${channelId}/${collectionId}/${entry.parentId ?? '_'}/${entry.id}`;
+    },
+    [browseBasePath, isAtRoot, collectionId, globalCollections],
+  );
+
   // ── Share ─────────────────────────────────────────────────────────────
-  // Matches V1's TreeSidebar gate (`canShare = perm?.canShare ?? isOwner`).
-  // The modal validates against `activeCollection.role/canShare` internally,
-  // so we seed those on the machine before opening — the URL→machine sync
-  // effect only re-runs when spCollectionId changes, so our seed sticks for
-  // the lifetime of the modal. Root-view only (collection cards): sharing is
-  // a collection-wide permission with no per-folder/file ACL, so this isn't
-  // wired up for rows inside a collection — see the separate PR for that.
+  // One entry point for every "Share" button in the screen — it routes to
+  // one of two dialogs depending on what's being shared:
+  //   - At root (collection cards): the full access-management dialog
+  //     (ShareCollectionModal — per-user roles, public/private visibility).
+  //     Matches V1's TreeSidebar gate (`canShare = perm?.canShare ?? isOwner`).
+  //   - Inside a collection (a regular folder/file): those have no ACL of
+  //     their own — access is entirely inherited from the owning collection
+  //     — so there's nothing to grant, just a copy-link-only dialog
+  //     (ShareLinkModal).
   const onShare = (entry: CollectionChild): void => {
+    if (!isAtRoot) {
+      const link = buildEntryLink(entry);
+      if (!link) {
+        toast.error('Could not build a link for this item');
+        return;
+      }
+      setLinkShareTarget(entry);
+      return;
+    }
+    // The modal validates against `activeCollection.role/canShare`
+    // internally, so we seed those on the machine before opening — the
+    // URL→machine sync effect only re-runs when spCollectionId changes, so
+    // our seed sticks for the lifetime of the modal.
     const owning = globalCollections.byId(entry.id);
     if (!owning) {
       toast.error('Could not resolve collection');
@@ -936,44 +980,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       });
     },
     [collectionId, globalCollections, isAtRoot],
-  );
-
-  // ── Copy link ────────────────────────────────────────────────────────
-  // Deep-links straight to the item — same URL shape onOpenEntry navigates
-  // to. There's no separate ACL for this: whoever opens it needs access to
-  // the owning collection already (or gets Shared it separately), matching
-  // how every other "copy link" button in the app works (Canvas, messages).
-  const buildEntryLink = useCallback(
-    (entry: CollectionChild): string | null => {
-      const base = window.location.origin + browseBasePath;
-      if (entry.type === 'FOLDER') {
-        if (isAtRoot) return `${base}?cl=${entry.id}`;
-        if (!collectionId) return null;
-        return `${base}?cl=${collectionId}&parent=${entry.id}`;
-      }
-      if (!collectionId) return null;
-      const owning = globalCollections.byId(collectionId);
-      const projectId = owning?.projectId;
-      const channelId = owning?.scopeId;
-      if (!projectId || !channelId) return null;
-      return `${base}/${projectId}/${channelId}/${collectionId}/${entry.parentId ?? '_'}/${entry.id}`;
-    },
-    [browseBasePath, isAtRoot, collectionId, globalCollections],
-  );
-
-  const onCopyLink = useCallback(
-    (entry: CollectionChild): void => {
-      const link = buildEntryLink(entry);
-      if (!link) {
-        toast.error('Could not build a link for this item');
-        return;
-      }
-      void navigator.clipboard.writeText(link).then(
-        () => toast.success('Link copied'),
-        () => toast.error('Could not copy link'),
-      );
-    },
-    [buildEntryLink],
   );
 
   // ── Header label ─────────────────────────────────────────────────────
@@ -1302,8 +1308,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             scrollParentRef={mainRef}
             onOpenStatus={onOpenStatus}
             onAskAI={onAskAIAboutEntry}
-            onCopyLink={onCopyLink}
-            {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
+            onShare={onShare}
+            {...(isAtRoot ? { folderCaption: locationOf } : {})}
           />
         ) : (
           <EntryListV2
@@ -1320,10 +1326,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             scrollParentRef={mainRef}
             onOpenStatus={onOpenStatus}
             onAskAI={onAskAIAboutEntry}
-            onCopyLink={onCopyLink}
+            onShare={onShare}
             {...(isAtRoot
               ? {
-                  onShare,
                   resolveColumnValue: (entry, key): string | undefined =>
                     key === 'location' ? locationOf(entry) : undefined,
                 }
@@ -1385,6 +1390,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       {shareTarget
         ? (() => {
             const owning = globalCollections.byId(shareTarget.id);
+            const link = buildEntryLink(shareTarget);
             return (
               <ShareCollectionModal
                 isOpen
@@ -1394,10 +1400,20 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 channelId={owning?.scopeId ?? null}
                 isPrivate={owning?.isPrivate ?? false}
                 canEditVisibility={owning?.role === 'OWNER'}
+                {...(link ? { link } : {})}
               />
             );
           })()
         : null}
+
+      {linkShareTarget ? (
+        <ShareLinkModal
+          isOpen
+          onClose={() => setLinkShareTarget(null)}
+          title={linkShareTarget.name}
+          link={buildEntryLink(linkShareTarget) ?? ''}
+        />
+      ) : null}
 
       <CollectionStatusDrawer collection={statusFor} onClose={() => setStatusFor(null)} />
 
