@@ -61,6 +61,7 @@ export const DeskCalendarView = ({
       start: null,
       dir: 'forward',
     }),
+    { enabled: !!channelId },
   );
   // Memoized so the identity only changes when the query result does — that keeps the
   // notify-parent effect below honest about its dependencies instead of suppressing them.
