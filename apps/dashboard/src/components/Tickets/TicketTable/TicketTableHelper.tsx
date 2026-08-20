@@ -125,6 +125,30 @@ export const getAssigneeOptions = (
   return [...userOptions, ...groupOptions];
 };
 
+/** The columns an assignee pick actually writes. */
+export interface AssigneeTicketUpdate {
+  assignedTo: string | null;
+  userGroupId?: string;
+}
+
+/**
+ * Inverse of `getAssigneeOptions`, whose values are encoded `user:<id>` /
+ * `group:<id>`. A ticket row stores a bare user id in `assignedTo` and a group in
+ * `userGroupId`, and the server looks the assignee up by id — so writing the
+ * encoded value back is rejected outright ("assignee must be an active user").
+ *
+ * Unassign clears both columns: across a multi-row selection there's no single
+ * current assignee to decide which of the two the user meant.
+ */
+export const assigneeOptionToTicketUpdate = (value: string | null): AssigneeTicketUpdate => {
+  if (value?.startsWith('group:')) {
+    return { assignedTo: null, userGroupId: value.slice('group:'.length) };
+  }
+  if (value) return { assignedTo: value.replace(/^user:/, '') };
+  // The mutator ignores a null userGroupId, so '' is how a group is cleared.
+  return { assignedTo: null, userGroupId: '' };
+};
+
 export const UNASSIGNED_OPTION: EntityOption = {
   value: '',
   label: 'Unassigned',
