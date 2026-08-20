@@ -303,10 +303,20 @@ export class AttachmentController {
 
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
 
-      const buffer = await service.getFileBuffer(filePath);
+      const fileExists = await service.fileExists(filePath);
+      if (!fileExists) {
+        logger.error(`Attachment file not found in storage: ${filePath}`);
+        res.status(404).json({ error: 'File not found in storage' });
+        return;
+      }
+
+      const fileMetadata = await service.getFileMetadata(filePath);
+      const fileSize = parseInt(String(fileMetadata.size || '0'), 10);
 
       // Set response headers (safe disposition/type to prevent stored XSS)
-      res.setHeader('Content-Length', buffer.length);
+      if (fileSize > 0) {
+        res.setHeader('Content-Length', fileSize);
+      }
       setSafeDownloadHeaders(res, {
         mimetype: attachment.mimetype,
         filename: attachment.originalFilename,
@@ -321,12 +331,26 @@ export class AttachmentController {
         res.setHeader('Cache-Control', 'private, max-age=3600');
       }
 
-      // Stream the file
-      res.send(buffer);
+      // Stream directly from object storage to the client. Piping avoids
+      // buffering the whole object in heap (previously getFileBuffer +
+      // res.send), which could OOM the process on large downloads.
+      const stream = await service.createReadStream(filePath);
+      stream.pipe(res);
+
+      stream.on('error', (error) => {
+        logger.error('Attachment download stream error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to download attachment' });
+        } else {
+          res.destroy(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
 
     } catch (error) {
       logger.error('Error downloading attachment:', error);
-      res.status(500).json({ error: 'Failed to download attachment' });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to download attachment' });
+      }
     }
   };
 
