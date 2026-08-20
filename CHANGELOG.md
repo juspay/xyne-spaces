@@ -1,3 +1,10 @@
+## [1.199.8](https://github.com/juspay/xyne-spaces/compare/v1.199.7...v1.199.8) (2026-08-20)
+
+
+### Bug Fixes
+
+* don't offer to record a meeting while already recording ([#780](https://github.com/juspay/xyne-spaces/issues/780)) ([e1b1d1d](https://github.com/juspay/xyne-spaces/commit/e1b1d1db5cabb2adba43643286b575c481d2d4eb))
+
 ## [1.199.7](https://github.com/juspay/xyne-spaces/compare/v1.199.6...v1.199.7) (2026-08-20)
 
 
