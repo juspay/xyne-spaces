@@ -466,11 +466,7 @@ export class ACLFactory {
       return new ResourceAccessACL(ctx, prisma)
     case 'scheduledMessage':
       return new ScheduledMessagesACL(ctx, prisma)
-    case 'sdkIdempotencyKey':
-      return new UnscopedACL(ctx, prisma)
-    case 'sdkRefreshToken':
-      return new UnscopedACL(ctx, prisma)
-    case 'sdkAuthorizationCode':
+    case 'sdkApiKey':
       return new UnscopedACL(ctx, prisma)
     case 'sessionRecordingFile':
       return new BaseQueryACL(ctx, prisma)

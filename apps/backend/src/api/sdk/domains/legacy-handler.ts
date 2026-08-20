@@ -108,7 +108,6 @@ function principalOf(ctx: RouteContext): AuthenticatedUser {
     orgRole: authData.orgRole,
     memberId: authData.memberId,
     isApiKeyUser: false,
-    scopes: [...ctx.auth.scopes],
   };
 }
 

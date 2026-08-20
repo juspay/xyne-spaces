@@ -59,7 +59,9 @@ export function rateLimit(kind: 'read' | 'write') {
       kind === 'read' ? sdkConfig.rateLimit.readPerMinute : sdkConfig.rateLimit.writePerMinute;
     const capacity = Math.max(1, Math.floor(perMinute * sdkConfig.rateLimit.burstMultiplier));
     const refillPerSec = perMinute / 60;
-    const key = `sdk:rl:${kind}:${auth.authData.sub}:${auth.clientId}`;
+    // Bucket per key, not per user: two keys held by one person get independent
+    // budgets, and revoking one cannot starve the other.
+    const key = `sdk:rl:${kind}:${auth.authData.sub}:${auth.keyId}`;
 
     try {
       const client = redisService.getClient();

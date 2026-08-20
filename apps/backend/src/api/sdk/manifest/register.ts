@@ -1,18 +1,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_REPLAYED_HEADER } from '@xyne/spaces-contract';
 import { ZodError } from 'zod';
 import { ApiError } from '../errors';
-import { requireScope } from '../middleware/scopes';
 import { rateLimit } from '../middleware/rateLimit';
 import type { RouteDefinition } from './types';
 
 /**
  * Turn manifest entries into Express routes with a uniform middleware chain.
  *
- * Ordering is deliberate: scope check before rate limit (an unauthorized caller
- * should not consume another caller's budget on a shared key), validation after
- * both, and every handler wrapped so a rejected promise reaches the SDK error
- * handler rather than crashing the process.
+ * Authorization already happened in `apiKeyAuth`; what a principal may touch is
+ * decided by the Zero ACL inside each handler, so the chain here is only rate
+ * limit, then validation, then the handler — wrapped so a rejected promise
+ * reaches the SDK error handler rather than crashing the process.
  */
 export function registerRoutes(routes: readonly RouteDefinition[]): Router {
   const router = Router();
@@ -29,7 +27,6 @@ export function registerRoutes(routes: readonly RouteDefinition[]): Router {
 
     router[route.method](
       route.path,
-      requireScope(route.scope),
       rateLimit(isWrite ? 'write' : 'read'),
       ...(route.middleware ?? []),
       asyncHandler(route),
@@ -44,17 +41,6 @@ function asyncHandler(route: RouteDefinition) {
     try {
       const auth = req.sdkAuth;
       if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
-
-      const idempotencyKey = req.header(IDEMPOTENCY_KEY_HEADER)?.trim();
-      if (route.idempotency === 'required' && !idempotencyKey) {
-        throw new ApiError(
-          'idempotency_key_required',
-          `${route.operationId} is not safe to retry blindly. Send an ${IDEMPOTENCY_KEY_HEADER} header.`,
-        );
-      }
-      if (idempotencyKey && idempotencyKey.length > 255) {
-        throw new ApiError('invalid_request', `${IDEMPOTENCY_KEY_HEADER} must be 255 characters or fewer.`);
-      }
 
       const parsed = validate(route, req);
 
@@ -101,5 +87,3 @@ function validate(
     throw err;
   }
 }
-
-export { IDEMPOTENCY_REPLAYED_HEADER };

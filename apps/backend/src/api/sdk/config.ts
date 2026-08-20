@@ -5,8 +5,6 @@
  * schema in `config/env.ts`, so enabling the SDK surface in a deployment is
  * additive and cannot break boot for deployments that do not run it.
  *
- * Auth-related configuration (issuer, audience, keys) is in `oauth/config.ts`
- * since the backend is now both AS and RS (no external auth service).
  */
 
 export const sdkConfig = {
@@ -24,6 +22,18 @@ export const sdkConfig = {
     return process.env['SDK_QUERIES_ALLOW_PRIMARY'] === 'true';
   },
 
+  apiKey: {
+    /**
+     * How long a newly minted key stays valid. Keys are deliberately short-lived:
+     * they carry a user's full identity and there is no refresh step, so the
+     * lifetime is the only bound on a leaked one.
+     */
+    get ttlDays(): number {
+      const raw = Number(process.env['SDK_API_KEY_TTL_DAYS'] ?? 30);
+      return Number.isFinite(raw) && raw > 0 ? raw : 30;
+    },
+  },
+
   rateLimit: {
     /** Token bucket capacity per (user, client) for read endpoints. */
     get readPerMinute(): number {
@@ -34,13 +44,6 @@ export const sdkConfig = {
     },
     get burstMultiplier(): number {
       return Number(process.env['SDK_RATE_LIMIT_BURST_MULTIPLIER'] ?? 2);
-    },
-  },
-
-  idempotency: {
-    /** How long a completed idempotency record is replayable. */
-    get ttlHours(): number {
-      return Number(process.env['SDK_IDEMPOTENCY_TTL_HOURS'] ?? 24);
     },
   },
 } as const;

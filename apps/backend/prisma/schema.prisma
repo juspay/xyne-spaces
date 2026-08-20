@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "SdkIdempotencyKey", "SdkRefreshToken", "SdkAuthorizationCode", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "SdkApiKey", "ExternalSource"]
 }
 
 datasource db {
@@ -963,91 +963,21 @@ model ScheduledMessage {
   @@schema("non_zero")
 }
 
-// Idempotency records for the public SDK API (/api/v1).
-//
-// Written INSIDE the same transaction as the mutator it guards. That coupling is
-// the mechanism: ~35 catalog mutators mint uuids internally, so a retried HTTP
-// write would otherwise duplicate rows and re-fire notifications. If the mutator
-// rolls back the key rolls back with it, leaving the client free to retry.
-//
-// Runtime access is raw SQL through the Zero transaction's pg client; Prisma owns
-// the migration and the TTL cleanup only.
-model SdkIdempotencyKey {
-  id             String    @id @default(cuid())
-  key            String
-  userId         String
-  workspaceId    String
-  endpoint       String
-  requestHash    String    @map("request_hash")
-  responseStatus Int?      @map("response_status")
-  responseBody   Json?     @map("response_body")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  expiresAt      DateTime  @map("expires_at")
-
-  @@unique([workspaceId, userId, endpoint, key], map: "sdk_idempotency_keys_workspace_user_endpoint_key")
-  @@index([workspaceId])
-  @@index([expiresAt])
-  @@map("sdk_idempotency_keys")
-  @@schema("non_zero")
-}
-
-// Refresh tokens for the public Spaces SDK OAuth.
-//
-// Access tokens are short-lived RS256 JWTs verified statelessly by the backend
-// itself (no external auth server). This table is the only revocation point:
-// deleting or revoking a row stops renewal; the outstanding access token
-// expires within minutes.
-//
-// Rotation is single-use. `familyId` groups every token descended from one
-// authorization, so presenting an already-rotated token (classic signal of a
-// stolen refresh token) can revoke the whole family at once.
-model SdkRefreshToken {
-  id          String    @id @default(cuid())
+// API keys for the public Spaces SDK (/api/sdk).
+model SdkApiKey {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  name        String
   userId      String
-  workspaceId String
-  clientId    String
-  familyId    String
-  tokenHash   String    @unique
-  prefix      String
-  scopes      String[]  @default([])
-  rotatedAt   DateTime? @map("rotated_at")
-  revokedAt   DateTime? @map("revoked_at")
-  expiresAt   DateTime  @map("expires_at")
-  lastUsedAt  DateTime? @map("last_used_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
+  @@index([workspaceId])
   @@index([userId])
-  @@index([familyId])
   @@index([expiresAt])
-  @@map("sdk_refresh_tokens")
-  @@schema("non_zero")
-}
-
-// Short-lived authorization codes for SDK OAuth.
-//
-// When a user authorizes an SDK client via the browser, the backend mints a
-// one-time authorization code. The SDK then exchanges this code (via POST
-// /api/v1/oauth/token) for an access + refresh token pair.
-//
-// Codes are single-use and expire within 10 minutes.
-model SdkAuthorizationCode {
-  id                  String    @id @default(cuid())
-  codeHash            String    @unique @map("code_hash")
-  userId              String
-  workspaceId         String
-  memberId            String
-  clientId            String
-  scopes              String[]  @default([])
-  redirectUri         String?   @map("redirect_uri")
-  codeChallenge       String    @map("code_challenge")
-  codeChallengeMethod String    @default("S256") @map("code_challenge_method")
-  usedAt              DateTime? @map("used_at")
-  expiresAt           DateTime  @map("expires_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
-
-  @@index([expiresAt])
-  @@map("sdk_authorization_codes")
+  @@map("sdk_api_keys")
   @@schema("non_zero")
 }
 
