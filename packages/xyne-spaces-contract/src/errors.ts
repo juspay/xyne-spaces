@@ -10,17 +10,12 @@
 export const ERROR_CODES = [
   'validation_failed',
   'invalid_request',
-  'mixed_update_fields',
   'unauthenticated',
   'token_expired',
-  'insufficient_scope',
   'forbidden',
   'not_found',
   'domain_rule',
   'conflict',
-  'idempotency_key_required',
-  'idempotency_key_conflict',
-  'idempotency_in_flight',
   'rate_limited',
   'internal',
   'service_misconfigured',
@@ -47,12 +42,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     retryable: false,
     description: 'The request was structurally invalid (malformed JSON, bad cursor, unknown view).',
   },
-  mixed_update_fields: {
-    status: 400,
-    retryable: false,
-    description:
-      'A PATCH touched fields belonging to more than one underlying update operation. Split into separate requests.',
-  },
   unauthenticated: {
     status: 401,
     retryable: false,
@@ -62,11 +51,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 401,
     retryable: false,
     description: 'The access token has expired. Refresh and retry; SDK clients do this automatically.',
-  },
-  insufficient_scope: {
-    status: 403,
-    retryable: false,
-    description: 'The token is valid but lacks the scope required by this endpoint.',
   },
   forbidden: {
     status: 403,
@@ -88,22 +72,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 409,
     retryable: false,
     description: 'The operation conflicts with the current state of the resource.',
-  },
-  idempotency_key_required: {
-    status: 400,
-    retryable: false,
-    description: 'This endpoint is not safe to replay and requires an Idempotency-Key header.',
-  },
-  idempotency_key_conflict: {
-    status: 409,
-    retryable: false,
-    description: 'The Idempotency-Key was already used with a different request body.',
-  },
-  idempotency_in_flight: {
-    status: 409,
-    retryable: true,
-    description:
-      'A request with this Idempotency-Key is still executing, or its response was never recorded. Retry, or re-read the resource.',
   },
   rate_limited: {
     status: 429,
