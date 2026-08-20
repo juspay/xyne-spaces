@@ -827,7 +827,7 @@ export function buildCloneApprovalFlow(
     .setTitle('Clone Request')
     .addText(
       'intro',
-      `*${context.requesterName}* wants to clone your agent *${context.agentName}*.\n\nA clone copies only the system prompt, tools, and skills into a new personal agent they own. Your app registration, credentials, and knowledge-base grants are NOT shared.${link}`,
+      `*${context.requesterName}* wants to clone your agent *${context.agentName}*.\n\nApproving gives them a personal copy carrying its prompt, tools, skills, behaviour settings and knowledge-base grants. Your app registration and your saved integration credentials are NOT shared — they will have to connect their own.${link}`,
     )
     .addDivider('d1')
     .addRow('actions', [
