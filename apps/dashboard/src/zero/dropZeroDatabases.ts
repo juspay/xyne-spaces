@@ -1,4 +1,4 @@
-import { dropDatabase } from '@rocicorp/zero';
+import { dropAllDatabases, dropDatabase } from '@rocicorp/zero';
 import { ZERO_STORAGE_KEY } from '../config';
 
 // Zero's dropAllDatabases() deletes every Zero store in the origin, not just this
@@ -68,4 +68,13 @@ export async function dropZeroDatabases(): Promise<void> {
     .filter((name): name is string => !!name && parseLaneKey(name) === key);
 
   await Promise.all(ours.map(name => dropDatabase(name).catch(() => undefined)));
+}
+
+/**
+ * Drops every lane's Zero databases. Correct only at logout, where both bundles
+ * are torn down. Everywhere else use dropZeroDatabases(): deleting the other
+ * lane's store under a live client is what raises IDBNotFoundError.
+ */
+export async function dropAllZeroDatabases(): Promise<void> {
+  await dropAllDatabases().catch(() => undefined);
 }
