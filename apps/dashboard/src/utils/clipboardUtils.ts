@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from './logger';
+import { getFlowJsonCopyHtml } from './flowPreview';
 /**
  * Clipboard utilities for copying HTML content with proper formatting preservation
  */
@@ -300,6 +301,22 @@ export const copyHtmlToClipboard = async (html: string): Promise<void> => {
     // If the fancy clipboard API fails, fall back to plain text
     await navigator.clipboard.writeText(plainText);
   }
+};
+
+/**
+ * Copies a chat message's stored `content` to the clipboard.
+ *
+ * FlowJSON messages are stored as `<div data-flow-json=\"...\">Flow JSON</div>`,
+ * so copying the raw content puts only the literal placeholder \"Flow JSON\" on the
+ * clipboard. For those, extract a readable HTML representation from the flow
+ * payload first; everything else copies exactly as before.
+ */
+export const copyMessageContentToClipboard = async (content: string): Promise<void> => {
+  if (!content) {
+    throw new Error('No content to copy');
+  }
+  const flowHtml = getFlowJsonCopyHtml(content);
+  return copyHtmlToClipboard(flowHtml ?? content);
 };
 
 /**
