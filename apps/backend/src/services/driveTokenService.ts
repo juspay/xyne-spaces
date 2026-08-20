@@ -115,10 +115,14 @@ export async function getDriveAccessToken(userId: string): Promise<string | null
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
   );
-  client.setCredentials({
-    access_token: credentials.accessToken,
-    refresh_token: credentials.refreshToken,
-  });
+  // Set ONLY the refresh token. If we also pass the stored access token, google-auth-
+  // library's getAccessToken() sees a present access_token and — because we never store
+  // an expiry_date — isTokenExpiring() returns false, so `shouldRefresh` is false and it
+  // hands back that token WITHOUT refreshing (oauth2client.js: shouldRefresh =
+  // !access_token || isTokenExpiring()). The stored token then dies ~1h after connect,
+  // Drive 401s, and we wrongly clear the credentials. Omitting access_token forces a
+  // fresh mint from the refresh token on every call.
+  client.setCredentials({ refresh_token: credentials.refreshToken });
 
   let accessToken: string | null | undefined;
   try {
