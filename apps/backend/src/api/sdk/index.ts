@@ -14,23 +14,48 @@
  * reached through code the app itself uses, never reimplemented here.
  */
 
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z, ZodError } from 'zod';
 import { API_VERSION } from '@xyne/spaces-contract';
 import { requestId } from './middleware/requestId';
-import { apiKeyAuth } from './auth';
+import { rateLimit } from './middleware/rateLimit';
 import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
-import { registerRoutes } from './manifest/register';
-import { readsAvailable } from './query';
-import { searchRoutes } from './domains/search';
-import { catalogGapRoutes } from './domains/catalog-gaps';
-import type { RouteDefinition } from './manifest/types';
-import { catalogRouter } from './domains/catalog';
+import { apiKeyAuth } from './auth';
+import { callQuery, readsAvailable } from './query';
+import { callMutator } from './mutation';
+import { createDirectRouter } from './direct';
+import { ApiError } from './errors';
 
-/** Direct API routes: operations that are not Zero catalog queries or mutators. */
-export const allRoutes: readonly RouteDefinition[] = [
-  ...catalogGapRoutes,
-  ...searchRoutes,
-];
+/**
+ * Body of a catalog call. What a caller may actually reach is decided by Zero's
+ * per-table ACL, which is folded into every query AST and wrapped transaction —
+ * an API key acts as its user and gets exactly that user's reach.
+ */
+const catalogRequest = z.object({
+  name: z.string().min(1),
+  args: z.unknown().optional(),
+});
+
+function catalogHandler(kind: 'query' | 'mutator') {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const auth = req.sdkAuth;
+      if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+
+      const { name, args } = catalogRequest.parse(req.body);
+
+      if (kind === 'query') {
+        res.status(200).json({ data: await callQuery(name, args, auth.ctx) });
+        return;
+      }
+
+      await callMutator(name, args, auth.authData);
+      res.status(200).json({ success: true });
+    } catch (err) {
+      next(err instanceof ZodError ? ApiError.validation(err) : err);
+    }
+  };
+}
 
 export function createSdkRouter(): Router {
   const router = Router();
@@ -58,8 +83,10 @@ export function createSdkRouter(): Router {
   });
 
   router.use(apiKeyAuth);
-  router.use('/catalog', catalogRouter);
-  router.use(registerRoutes(allRoutes));
+
+  router.post('/catalog/query', rateLimit('read'), catalogHandler('query'));
+  router.post('/catalog/mutate', rateLimit('write'), catalogHandler('mutator'));
+  router.use(createDirectRouter());
 
   router.use(v1NotFound);
   router.use(v1ErrorHandler);
