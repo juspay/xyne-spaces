@@ -1661,6 +1661,50 @@ export async function getDailyBriefHistory(
   return response.json();
 }
 
+/** GET the days the user has briefs for (date + status only — powers the date picker). */
+export async function getDailyBriefDates(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  limit?: number
+): Promise<unknown> {
+  const qs = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/dates${qs}`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief dates GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** GET the user's stored brief for one YYYY-MM-DD bucket. */
+export async function getDailyBriefByDate(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  date: string
+): Promise<{ status: number; json: unknown }> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/by-date/${encodeURIComponent(date)}`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  return { status: response.status, json: await response.json().catch(() => ({})) };
+}
+
+/** POST the "user switched briefs" beacon (fire-and-forget; never surfaced to the user). */
+export async function postDailyBriefSwitched(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  source: string
+): Promise<number> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/switched`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    body: JSON.stringify({ source }),
+  });
+  return response.status;
+}
+
 /**
  * Regenerate the brief now, streaming the SSE straight through to the dashboard.
  * claw-auth already emits dashboard-facing frames (start / progress / complete /
