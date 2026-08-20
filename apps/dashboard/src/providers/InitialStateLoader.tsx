@@ -30,7 +30,6 @@ import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
-import { usePendingQueue } from '@xyne/shared/messages';
 import { axiosHttpClient } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
 
@@ -91,10 +90,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   logger.setZeroClientGroupId(zero.clientGroupID);
 
   useZeroConnectionLogger(state);
-
-  // Durable pending-message queue: reconciles server-confirmed sends and
-  // auto-retries messages queued while the socket was reconnecting.
-  usePendingQueue();
 
   // Connection failure modal state — in-memory only
   const [showModal, setShowModal] = useState(false);
