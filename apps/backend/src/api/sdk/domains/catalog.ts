@@ -10,7 +10,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z, ZodError } from 'zod';
 import { ApiError } from '../errors';
 import { callQuery } from '../query';
-import { callMutator } from '../engine/mutations';
+import { callMutator } from '../mutation';
 import { rateLimit } from '../middleware/rateLimit';
 
 const router = Router();
@@ -35,7 +35,7 @@ function asyncHandler(kind: 'query' | 'mutator') {
         return;
       }
 
-      await callMutator({ name, args, authData: auth.authData, ctx: auth.ctx });
+      await callMutator(name, args, auth.authData);
       res.status(200).json({ success: true });
     } catch (err) {
       next(err instanceof ZodError ? ApiError.validation(err) : err);

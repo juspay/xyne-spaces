@@ -671,16 +671,104 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
   }
 }
 
-export async function handleMutateFallback(request: Request): Promise<unknown> {
-  const authData = await extractAuthDataFromRequest(request);
-  if (!authData) {
-    throw new Error("Unauthorized");
-  }
+/**
+ * Run one catalog mutator in a transaction, then drain its post-commit work.
+ *
+ * `createMutators` + `wrapTransactionWithACL` + `mustGetMutator` is the sequence
+ * the app itself uses, so write ACL, Vespa indexing, and side-effect jobs behave
+ * identically for every caller. Throws on failure; callers decide what that looks
+ * like on the wire.
+ *
+ * Everything after the commit is deliberately fire-and-forget except the awaited
+ * post-commit tasks: a failed notification must not fail a write that already
+ * landed.
+ */
+export async function runCatalogMutation(
+  name: string,
+  args: unknown,
+  authData: AuthData,
+): Promise<void> {
+  const ctx: Context = {
+    userID: authData.sub,
+    workspaceId: authData.workspaceId,
+    role: authData.role,
+    orgRole: authData.orgRole,
+    memberId: authData.memberId,
+  };
 
   const asyncTasks: (() => Promise<void>)[] = [];
   const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
   const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
+
+  await dbProvider.transaction(async (tx) => {
+    const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
+    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name);
+    const mutator = mustGetMutator(mutators, name);
+    // Args are validated by the mutator's own zod schema; the cast only satisfies
+    // Zero's ReadonlyJSONValue parameter type.
+    await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
+  });
+
+  await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
+  void Promise.allSettled(asyncTasks.map(task => task()));
+
+  void Promise.allSettled(
+    vespaJobs.map(async (job) => {
+      try {
+        await vespaQueue.addJob({
+          schema: job.schema,
+          jobType: job.jobType,
+          docId: job.docId,
+          userId: authData.sub,
+          workspaceId: authData.workspaceId,
+          ...(job.jobType === "update" ? { data: job.data } : {})
+        });
+      } catch (err) {
+        try {
+          await db.vespaInsertionLogs.create({
+            data: {
+              status: "FAILED",
+              type: VespaOperationType[job.jobType],
+              entityId: job.docId,
+              entityType: job.schema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
+              errorDetails: JSON.stringify(err),
+              userId: authData.sub,
+              workspaceId: authData.workspaceId,
+              createdAt: new Date(),
+            },
+          });
+        } catch (dbError) {
+          logger.error('Failed to log insertion error to database', dbError);
+        }
+      }
+    })
+  );
+
+  // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
+  // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
+  // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
+  // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
+  // async chain scheduled inside the callback.
+  void runWithContext(
+    {
+      userId: authData.sub,
+      workspaceId: authData.workspaceId,
+      role: authData.role,
+      orgRole: authData.orgRole,
+      memberId: authData.memberId,
+    },
+    () => processSideEffectJobs(sideEffectJobs, ctx),
+  );
+}
+
+export async function handleMutateFallback(request: Request): Promise<unknown> {
+  const authData = await extractAuthDataFromRequest(request);
+  if (!authData) {
+    throw new Error("Unauthorized");
+  }
 
   try {
     const mutation = await request.json() as {
@@ -690,72 +778,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
 
     logger.info(`Fallback executing mutation: ${mutation.name}`);
 
-    await dbProvider.transaction(async (tx) => {
-      const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
-      const wrappedTx = wrapTransactionWithACL(
-        tx,
-        { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
-        vespaJobs,
-        sideEffectJobs,
-        mutation.name,
-      );
-      const mutator = mustGetMutator(mutators, mutation.name);
-      await mutator.fn({
-        tx: wrappedTx,
-        args: mutation.args,
-        ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }
-      });
-    });
-    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
-    Promise.allSettled(asyncTasks.map(task => task()));
-    Promise.allSettled(
-      vespaJobs.map(async (job) => {
-        try {
-          await vespaQueue.addJob({
-            schema: job.schema,
-            jobType: job.jobType,
-            docId: job.docId,
-            userId: authData.sub,
-            workspaceId: authData.workspaceId,
-            ...(job.jobType === "update" ? { data: job.data } : {})
-          });
-        } catch (err) {
-          try {
-            await db.vespaInsertionLogs.create({
-              data: {
-                status: "FAILED",
-                type: VespaOperationType[job.jobType],
-                entityId: job.docId,
-                entityType: job.schema,
-                namespace: NAMESPACE,
-                errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
-                errorDetails: JSON.stringify(err),
-                userId: authData.sub,
-                workspaceId: authData.workspaceId,
-                createdAt: new Date(),
-              },
-            });
-          } catch (dbError) {
-            logger.error('Failed to log insertion error to database', dbError);
-          }
-        }
-      })
-    );
-    // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
-    // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
-    // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
-    // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
-    // async chain scheduled inside the callback.
-    void runWithContext(
-      {
-        userId: authData.sub,
-        workspaceId: authData.workspaceId,
-        role: authData.role,
-        orgRole: authData.orgRole,
-        memberId: authData.memberId,
-      },
-      () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
-    );
+    await runCatalogMutation(mutation.name, mutation.args, authData);
     return { success: true };
   } catch (error) {
     logger.error('Fallback mutate request failed', error);
