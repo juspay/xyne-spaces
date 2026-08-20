@@ -756,7 +756,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
               onStatusChange={val => handleBulkUpdate({ statusV2: val })}
               onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
-              onStageChange={val => handleBulkUpdate({ stageName: val })}
+              onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
               onDueDateChange={date => {
                 // `ticket.update` has no way to null an eta, so only a picked
                 // date is applied — clearing in bulk isn't supported yet.

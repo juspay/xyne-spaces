@@ -138,7 +138,7 @@ import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -1725,8 +1725,30 @@ const SupportScreen = (): ReactElement => {
     () => Array.from(new Set((deskProjectTags ?? []).map(tag => tag.name))).sort(),
     [deskProjectTags],
   );
+  // No Stage control on boards that gate moves client-side (evaluateLinearStageGate) —
+  // a bulk bar can't run per-ticket forms/approvals. NON_LINEAR is server-enforced.
+  const deskBoardGatesStageMoves = useMemo(() => {
+    if (channelBoardDetail?.boardType === BoardType.NON_LINEAR) return false;
+    return (channelBoardDetail?.stages ?? []).some(
+      stage =>
+        (stage.approvers?.length ?? 0) > 0 ||
+        (stage.formContextMappings ?? []).some(
+          mapping => mapping.contextType === FormContextType.STAGE,
+        ),
+    );
+  }, [channelBoardDetail?.boardType, channelBoardDetail?.stages]);
+
   const deskBulkStages = useMemo(
-    () => availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+    () =>
+      deskBoardGatesStageMoves
+        ? []
+        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+    [availableStages, deskBoardGatesStageMoves],
+  );
+
+  // A stage's default status must ride along in the same write — see BulkTicketUpdates.stage.
+  const deskStageStatusByName = useMemo(
+    () => new Map(availableStages.map(stage => [stage.name, stage.status])),
     [availableStages],
   );
 
@@ -1737,6 +1759,14 @@ const SupportScreen = (): ReactElement => {
       clearTicketSelection();
     },
     [applyBulkUpdates, selectedTicketList, clearTicketSelection],
+  );
+
+  const handleBulkStageChange = useCallback(
+    (name: string): void => {
+      const statusV2 = deskStageStatusByName.get(name);
+      handleBulkFieldUpdate({ stage: { name, ...(statusV2 ? { statusV2 } : {}) } });
+    },
+    [deskStageStatusByName, handleBulkFieldUpdate],
   );
 
   const handleBulkTagsChange = useCallback(
@@ -3474,7 +3504,7 @@ const SupportScreen = (): ReactElement => {
                   onPriorityChange={value => {
                     if (value) handleBulkFieldUpdate({ priority: value });
                   }}
-                  onStageChange={value => handleBulkFieldUpdate({ stageName: value })}
+                  onStageChange={handleBulkStageChange}
                   onDueDateChange={date => {
                     if (date) handleBulkFieldUpdate({ eta: dueDateToEta(date) });
                   }}

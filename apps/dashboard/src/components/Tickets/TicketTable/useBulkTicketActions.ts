@@ -25,12 +25,9 @@ export interface BulkTicketUpdates {
   userGroupId?: string;
   statusV2?: TicketStatusV2;
   priority?: TicketPriority;
-  stageName?: string;
-  /**
-   * Epoch millis. `ticket.update` types `eta` as an optional number, so a due
-   * date can be set but not cleared — callers drop the clear rather than send a
-   * null the mutator would silently ignore.
-   */
+  /** `statusV2` = the target stage's default; linear boards don't apply it server-side. */
+  stage?: { name: string; statusV2?: TicketStatusV2 };
+  /** Epoch millis. `ticket.update` can set an eta but not clear it, so callers drop clears. */
   eta?: number;
 }
 
@@ -50,6 +47,7 @@ export interface BulkTicketActions {
     ticketId: string,
     boardId: string | null | undefined,
     toStageName: string,
+    toStageStatusV2?: TicketStatusV2,
   ) => Promise<void>;
   applyUpdates: (tickets: readonly BulkActionTicket[], updates: BulkTicketUpdates) => void;
   applyTags: (tickets: readonly BulkActionTicket[], tagNames: readonly string[]) => void;
@@ -100,6 +98,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       ticketId: string,
       boardId: string | null | undefined,
       toStageName: string,
+      toStageStatusV2?: TicketStatusV2,
     ): Promise<string | null> => {
       if (boardId) {
         // No try/catch: Zero queries resolve through the cache and don't throw here.
@@ -118,7 +117,12 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       }
       return mutationError(
         zero.mutate(
-          mutators.ticket.update({ id: ticketId, stageName: toStageName, updatedAt: Date.now() }),
+          mutators.ticket.update({
+            id: ticketId,
+            stageName: toStageName,
+            ...(toStageStatusV2 ? { statusV2: toStageStatusV2 } : {}),
+            updatedAt: Date.now(),
+          }),
         ),
         'Failed to update stage',
       );
@@ -131,8 +135,9 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       ticketId: string,
       boardId: string | null | undefined,
       toStageName: string,
+      toStageStatusV2?: TicketStatusV2,
     ): Promise<void> => {
-      const message = await stageChange(ticketId, boardId, toStageName);
+      const message = await stageChange(ticketId, boardId, toStageName, toStageStatusV2);
       if (message) toast.error(message);
     },
     [stageChange],
@@ -140,12 +145,12 @@ export const useBulkTicketActions = (): BulkTicketActions => {
 
   const applyUpdates = useCallback(
     (tickets: readonly BulkActionTicket[], updates: BulkTicketUpdates): void => {
-      const { stageName, ...fields } = updates;
+      const { stage, ...fields } = updates;
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
       for (const ticket of tickets) {
-        if (stageName !== undefined) {
-          pending.push(stageChange(ticket.id, ticket.boardId, stageName));
+        if (stage) {
+          pending.push(stageChange(ticket.id, ticket.boardId, stage.name, stage.statusV2));
         }
         if (hasFields) {
           pending.push(

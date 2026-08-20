@@ -132,13 +132,9 @@ export interface AssigneeTicketUpdate {
 }
 
 /**
- * Inverse of `getAssigneeOptions`, whose values are encoded `user:<id>` /
- * `group:<id>`. A ticket row stores a bare user id in `assignedTo` and a group in
- * `userGroupId`, and the server looks the assignee up by id — so writing the
- * encoded value back is rejected outright ("assignee must be an active user").
- *
- * Unassign clears both columns: across a multi-row selection there's no single
- * current assignee to decide which of the two the user meant.
+ * Inverse of `getAssigneeOptions`. Its `user:<id>` / `group:<id>` values map onto a
+ * bare id in `assignedTo` and a group in `userGroupId` — writing the encoded value
+ * back is rejected ("assignee must be an active user"). Unassign clears both.
  */
 export const assigneeOptionToTicketUpdate = (value: string | null): AssigneeTicketUpdate => {
   if (value?.startsWith('group:')) {
