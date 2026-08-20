@@ -10,11 +10,21 @@ import { updateAgent } from "../../../../lib/api";
  *
  * Spaces (the platform LiteLLM proxy) is always available as the terminal
  * fallback and needs no credential, so it's rendered as a permanent row that
- * can't be removed. Its MODEL is the fixed platform default and is NOT
- * editable — only the run params (temperature, thinking level, max output
- * tokens) can be tuned. Persisted at agent.config.modelSettings; applied
- * per-run by the xyne-claw runtime (agent-model-settings.ts). The params apply
- * to whichever provider serves the run (including quota fallbacks).
+ * can't be removed. Its MODEL and run params (temperature, thinking level, max
+ * output tokens) are editable per agent. Persisted at
+ * agent.config.modelSettings; applied per-run by the xyne-claw runtime
+ * (agent-model-settings.ts). The params apply to whichever provider serves the
+ * run (including quota fallbacks).
+ *
+ * The model is a FREE-TEXT field, deliberately not a dropdown: it's whatever
+ * model id the platform LiteLLM proxy exposes, and the proxy's catalogue
+ * changes without a deploy here. Leave it blank to run on the platform default
+ * (LITELLM_MODEL in the claw pod's env). The model only applies when the run is
+ * served by the platform LiteLLM branch — premium providers (Claude, Codex,
+ * Copilot, LiteLLM-own-key) pick their model on their own credential.
+ *
+ * Every change is audited (AGENT_CONFIG_UPDATED, metadata.kind =
+ * "modelSettings") by the PUT /agents/:slug handler in claw-auth.
  *
  * Structured output (config.outputFormat) lives in the Behavior tab, not here —
  * it's an agent-behavior choice, not a model knob.
@@ -33,6 +43,9 @@ const INPUT_CLASS =
   "w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]";
 
 const LABEL_CLASS = "block text-[12px] font-medium text-xyne-fg-secondary mb-1.5";
+
+/** Mirrors the backend clamp in claw-auth's agent-config-validation.ts. */
+const MODEL_MAX_LENGTH = 200;
 
 interface ModelSettings {
   model?: string;
@@ -56,6 +69,12 @@ export function SpacesDefaultRowV3({ agent }: Props) {
   const [savedSettings, setSavedSettings] = useState<ModelSettings>(initial);
 
   const [editing, setEditing] = useState(false);
+  // "default" = no modelSettings.model at all, so the run uses the platform
+  // model from the claw pod's env (LITELLM_MODEL). "custom" = the id typed
+  // below wins. Kept as an explicit choice rather than inferring it from an
+  // empty text box, so "use the platform default" is a deliberate selection.
+  const [modelMode, setModelMode] = useState<"default" | "custom">(initial.model ? "custom" : "default");
+  const [model, setModel] = useState(initial.model ?? "");
   const [temperature, setTemperature] = useState(initial.temperature !== undefined ? String(initial.temperature) : "");
   const [maxTokens, setMaxTokens] = useState(initial.maxTokens !== undefined ? String(initial.maxTokens) : "");
   const [thinkingLevel, setThinkingLevel] = useState(initial.thinkingLevel ?? "");
@@ -67,6 +86,8 @@ export function SpacesDefaultRowV3({ agent }: Props) {
 
   const resetDraft = () => {
     const ms = readSettings();
+    setModelMode(ms.model ? "custom" : "default");
+    setModel(ms.model ?? "");
     setTemperature(ms.temperature !== undefined ? String(ms.temperature) : "");
     setMaxTokens(ms.maxTokens !== undefined ? String(ms.maxTokens) : "");
     setThinkingLevel(ms.thinkingLevel ?? "");
@@ -76,11 +97,20 @@ export function SpacesDefaultRowV3({ agent }: Props) {
     if (saving) return;
 
     const settings: ModelSettings = {};
-    // The Spaces model is fixed (platform default) and not editable here.
-    // Preserve any model value set out-of-band (e.g. via API) rather than
-    // wiping it when params are saved.
-    const existing = readSettings();
-    if (existing.model) settings.model = existing.model;
+    // "default" omits modelSettings.model entirely — that absence is what makes
+    // the runtime fall back to the platform model from env.
+    if (modelMode === "custom") {
+      const trimmedModel = model.trim();
+      if (!trimmedModel) {
+        showSnackbar({ variant: "error", title: 'Enter a model name, or switch to "Platform default"' });
+        return;
+      }
+      if (trimmedModel.length > MODEL_MAX_LENGTH) {
+        showSnackbar({ variant: "error", title: `Model name must be ${MODEL_MAX_LENGTH} characters or fewer` });
+        return;
+      }
+      settings.model = trimmedModel;
+    }
     if (temperatureSet) {
       const t = Number(temperature);
       if (!Number.isFinite(t) || t < 0 || t > 1) {
@@ -180,10 +210,35 @@ export function SpacesDefaultRowV3({ agent }: Props) {
 
       {editing && (
         <div className="mt-3 rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="mb-3 flex items-center gap-2 text-[12px]">
-            <span className="text-xyne-fg-tertiary">Model</span>
-            <span className="font-mono text-xyne-fg-secondary">{savedSettings.model || "Platform default"}</span>
-            <span className="text-[11px] text-xyne-fg-muted">· fixed, not editable</span>
+          <div className="mb-4">
+            <label className={LABEL_CLASS} htmlFor="spaces-model-source">Model</label>
+            <select
+              id="spaces-model-source"
+              value={modelMode}
+              onChange={(e) => setModelMode(e.target.value === "custom" ? "custom" : "default")}
+              className={INPUT_CLASS}
+            >
+              <option value="default">Platform default (from environment)</option>
+              <option value="custom">Custom model…</option>
+            </select>
+            {modelMode === "custom" && (
+              <input
+                id="spaces-default-model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="e.g. kimi-latest"
+                spellCheck={false}
+                autoComplete="off"
+                autoFocus
+                maxLength={MODEL_MAX_LENGTH}
+                className={`${INPUT_CLASS} font-mono mt-2`}
+              />
+            )}
+            <p className="mt-1 text-[11px] text-xyne-fg-muted">
+              {modelMode === "custom"
+                ? "Any model id served by the platform LiteLLM proxy. Applies to runs served by Spaces — premium providers keep the model set on their own credential."
+                : "Runs on whichever model the platform is configured with (LITELLM_MODEL). Switch to a custom model to pin this agent to a specific one."}
+            </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -232,8 +287,8 @@ export function SpacesDefaultRowV3({ agent }: Props) {
 
           <p className="mt-3 text-[11px] text-xyne-fg-tertiary">
             Temperature, thinking and max tokens apply to whichever provider serves the run
-            (including quota fallbacks). The Spaces model is the fixed platform default; premium
-            providers pick their model on their credential.
+            (including quota fallbacks). The model applies only to Spaces runs; premium providers
+            pick their model on their credential. Model changes are recorded in the admin audit log.
           </p>
 
           <div className="mt-4 flex items-center gap-2">

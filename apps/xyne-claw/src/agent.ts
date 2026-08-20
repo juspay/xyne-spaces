@@ -294,6 +294,19 @@ interface StreamRateSample {
   streamsCollected: number;
 }
 
+interface DebugThinkingConfiguration {
+  /** Value selected by agent model settings / provider config / default policy. */
+  requestedLevel: string;
+  /** Pi's final value after capability clamping for the resolved model. */
+  effectiveLevel: string;
+  /** Where the requested setting came from, so precedence is inspectable. */
+  source: "agent_model_settings" | "provider_credential" | "codex_default" | "server_default" | "temperature_override";
+  /** Whether the resolved Pi model was registered as reasoning-capable. */
+  modelSupportsReasoning: boolean;
+  /** The provider request shape that disables/enables thinking for this model. */
+  wireMode: string;
+}
+
 interface DebugSessionSnapshot {
   schemaVersion: 1;
   conversationId?: string;
@@ -303,6 +316,10 @@ interface DebugSessionSnapshot {
   userName?: string;
   userEmail?: string;
   provider?: string;
+  /** The model resolved for this particular run (not merely the agent default). */
+  model?: string;
+  /** Requested/effective thinking selection and its provider wire representation. */
+  thinking?: DebugThinkingConfiguration;
   startedAt: string;
   finishedAt: string;
   task: string;
@@ -763,6 +780,50 @@ export function contextWindowFor(modelId: string | undefined): number {
     ?? Number(process.env["XYNE_CLAW_DEFAULT_CONTEXT_WINDOW"] ?? 128_000);
 }
 
+/**
+ * Kimi's OpenAI-compatible endpoint does not honor `reasoning_effort: "none"`.
+ * It returns `reasoning_content` unless the request explicitly contains
+ * `thinking: { type: "disabled" }`. In pi-ai's adapter this is the `deepseek`
+ * request shape; its `zai` shape instead emits `enable_thinking: false`, which
+ * Kimi ignores. Keep this narrow: other LiteLLM models such as GLM do honor the
+ * standard `reasoning_effort: "none"` route.
+ */
+function liteLlmThinkingCompat(modelId: string): { thinkingFormat: "deepseek" } | undefined {
+  return /(^|[\/_-])kimi(?:[\/_-]|$)/i.test(modelId)
+    ? { thinkingFormat: "deepseek" }
+    : undefined;
+}
+
+/** Human-readable description of how the thinking level reaches the provider —
+ *  surfaced in the debug snapshot so a "why is it still thinking?" report can be
+ *  answered from the trace instead of by reading adapter source. */
+function describeThinkingWireMode(
+  model: { reasoning: boolean; api: string; compat?: unknown },
+  thinkingLevel: string,
+): string {
+  if (!model.reasoning) return "not sent (model registered without reasoning)";
+  if (model.api !== "openai-completions") return thinkingLevel === "off" ? "provider-native thinking disabled" : "provider-native reasoning";
+
+  const enabled = thinkingLevel !== "off";
+  const thinkingFormat = typeof model.compat === "object" && model.compat !== null
+    && "thinkingFormat" in model.compat
+    && typeof (model.compat as { thinkingFormat?: unknown }).thinkingFormat === "string"
+    ? (model.compat as { thinkingFormat: string }).thinkingFormat
+    : undefined;
+  switch (thinkingFormat) {
+    case "zai":
+      return `thinking: { type: "${enabled ? "enabled" : "disabled"}" }`;
+    case "qwen":
+      return `enable_thinking: ${enabled}`;
+    case "deepseek":
+      return `thinking: { type: "${enabled ? "enabled" : "disabled"}" }`;
+    default:
+      return enabled
+        ? `reasoning_effort: "${thinkingLevel}"`
+        : 'reasoning_effort: "none"';
+  }
+}
+
 export function resolveModel(
   modelRegistry: ModelRegistry,
   provider?: string,
@@ -956,7 +1017,13 @@ export function resolveModel(
   }
 
   // Default: shared LiteLLM proxy
+  // The Spaces grid's default models (including glm-latest) support the
+  // OpenAI-compatible `reasoning_effort` parameter. Marking this model as
+  // non-reasoning used to make pi silently omit the user-selected thinking
+  // level, leaving long server-default reasoning enabled even when an agent
+  // selected "Off". The grid accepts `none` as the explicit off value.
   const litellmModel = overrides?.model ?? LITELLM.model;
+  const litellmCompat = liteLlmThinkingCompat(litellmModel);
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
     apiKey: overrides?.litellmApiKey || LITELLM.apiKey,
@@ -966,7 +1033,9 @@ export function resolveModel(
       {
         id: litellmModel,
         name: litellmModel,
-        reasoning: false,
+        reasoning: true,
+        thinkingLevelMap: { off: "none" },
+        ...(litellmCompat ? { compat: litellmCompat } : {}),
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: contextWindowFor(litellmModel),
@@ -2010,6 +2079,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const credEffort = effectiveProviderConfig?.reasoningEffort;
   const credEffortValid =
     credEffort === "low" || credEffort === "medium" || credEffort === "high";
+  let thinkingSource: DebugThinkingConfiguration["source"] = modelSettings?.thinkingLevel
+    ? "agent_model_settings"
+    : credEffortValid
+      ? "provider_credential"
+      : provider === "codex"
+        ? "codex_default"
+        : "server_default";
   let effectiveThinking: SessionThinkingLevel = modelSettings?.thinkingLevel
     ? (modelSettings.thinkingLevel as SessionThinkingLevel)
     : credEffortValid
@@ -2020,6 +2096,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   if (modelSettings?.temperature !== undefined && effectiveThinking !== "off") {
     log.info(`[agent] modelSettings.temperature=${modelSettings.temperature} set — forcing thinkingLevel off (was ${effectiveThinking})`);
     effectiveThinking = "off";
+    thinkingSource = "temperature_override";
   }
   // SECURITY (cross-session read): pi's built-in read/write/grep/find/ls are
   // NOT confined to cwd. `createReadTool(cwd)` uses cwd only as the default base
@@ -2094,6 +2171,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : allCustomTools;
 
   const { session } = await createAgentSession(options);
+  const debugThinking: DebugThinkingConfiguration = {
+    requestedLevel: effectiveThinking,
+    effectiveLevel: session.thinkingLevel,
+    source: thinkingSource,
+    modelSupportsReasoning: model.reasoning,
+    wireMode: describeThinkingWireMode(model, session.thinkingLevel),
+  };
+  log.info(
+    `[agent] Thinking configuration: requested=${debugThinking.requestedLevel} ` +
+    `effective=${debugThinking.effectiveLevel} source=${debugThinking.source} ` +
+    `wire=${debugThinking.wireMode}`,
+  );
 
   if (fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);
@@ -2342,6 +2431,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
         inProgress: true,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
@@ -2463,6 +2554,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
     userId,
     provider,
+    model: model.id,
+    thinking: debugThinking,
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
@@ -3407,6 +3500,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
@@ -3581,6 +3676,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(userName ? { userName } : {}),
           ...(userEmail ? { userEmail } : {}),
           ...(provider ? { provider } : {}),
+          model: model.id,
+          thinking: debugThinking,
           cancelled: true,
           startedAt: debugStartedIso,
           finishedAt: new Date().toISOString(),
