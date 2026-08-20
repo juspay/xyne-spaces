@@ -24,6 +24,8 @@ import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { ingestAttachments, type AttachmentInput } from "../attachment-ingest.js";
 import { createLogger } from "../logger.js";
+import { GCS, STORAGE } from "../config.js";
+import { rebuildUrlOnTrustedOrigin } from "../lib/url-guard.js";
 
 const log = createLogger("attachments-ingest");
 const URL_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = Number(process.env["ATTACHMENT_URL_DOWNLOAD_TIMEOUT_MS"] ?? 120_000);
@@ -36,21 +38,55 @@ const URL_ATTACHMENT_MAX_BYTES = Number(process.env["ATTACHMENT_URL_MAX_BYTES"] 
  * but that alone is not a boundary: any bug or compromise upstream would turn
  * this pod into a fetch proxy for the cluster's internal network — including the
  * GCP metadata server (169.254.169.254), which would hand out this pod's own
- * service-account credentials. The URL is only ever a storage signed URL, so
- * restrict it to storage hosts and https by construction rather than trusting
- * the caller. Extra hosts (fake-gcs in dev, a custom S3 endpoint) come from
- * ATTACHMENT_URL_ALLOWED_HOSTS as a comma-separated list.
+ * service-account credentials. The URL is only ever a storage signed URL for
+ * this deployment's own bucket, so restrict it to exactly those storage hosts
+ * and to https by construction rather than trusting the caller.
+ *
+ * The fetched URL is REBUILT from the allowlist entry that matched (plus the
+ * caller's re-encoded path and query), so the host/scheme handed to `fetch`
+ * come from our configuration, not from the request body.
+ *
+ * Hosts are matched exactly (hostname, or host:port). The public-cloud hosts
+ * are derived from the same STORAGE/GCS config claw-auth signs with, covering
+ * both path-style and virtual-hosted signed URLs. Extra hosts (fake-gcs in
+ * dev, a custom S3 endpoint) come from ATTACHMENT_URL_ALLOWED_HOSTS as a
+ * comma-separated list; only those explicitly configured hosts may use http.
  */
-const URL_ATTACHMENT_ALLOWED_HOSTS = new Set(
+function hostOfUrl(raw: string): string | undefined {
+  try {
+    return new URL(raw).host.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const URL_ATTACHMENT_CONFIGURED_HOSTS: ReadonlySet<string> = new Set(
   [
-    "storage.googleapis.com",
-    ...(process.env["ATTACHMENT_URL_ALLOWED_HOSTS"] ?? "")
-      .split(",")
-      .map((h) => h.trim().toLowerCase())
-      .filter(Boolean),
-  ],
+    ...(STORAGE.s3Endpoint ? [hostOfUrl(STORAGE.s3Endpoint)] : []),
+    ...(GCS.fakeHost ? [hostOfUrl(GCS.fakeHost)] : []),
+    ...(process.env["ATTACHMENT_URL_ALLOWED_HOSTS"] ?? "").split(","),
+  ]
+    .map((h) => h?.trim().toLowerCase())
+    .filter((h): h is string => !!h),
 );
 
+const URL_ATTACHMENT_ALLOWED_HOSTS: ReadonlySet<string> = new Set(
+  [
+    // GCS: path-style (the @google-cloud/storage default) and virtual-hosted.
+    "storage.googleapis.com",
+    ...(GCS.bucketName ? [`${GCS.bucketName}.storage.googleapis.com`] : []),
+    // S3: virtual-hosted (the SDK default) and path-style.
+    ...(STORAGE.s3BucketName ? [`${STORAGE.s3BucketName}.s3.${STORAGE.s3Region}.amazonaws.com`] : []),
+    `s3.${STORAGE.s3Region}.amazonaws.com`,
+    ...URL_ATTACHMENT_CONFIGURED_HOSTS,
+  ].map((h) => h.toLowerCase()),
+);
+
+/**
+ * Validate a caller-supplied download URL and return the URL we will actually
+ * fetch: same path and query, but the scheme and host are taken from the
+ * allowlist entry that matched rather than from the caller's string.
+ */
 function assertDownloadableUrl(raw: string, fileName: string): URL {
   let parsed: URL;
   try {
@@ -58,20 +94,43 @@ function assertDownloadableUrl(raw: string, fileName: string): URL {
   } catch {
     throw new IngestBadRequest(`Attachment "${fileName}": malformed download URL`);
   }
-  // http:// is allowed ONLY for an explicitly configured host (dev fake-gcs);
-  // everything else must be https so the bytes aren't readable in transit.
-  const host = parsed.hostname.toLowerCase();
-  const allowed = URL_ATTACHMENT_ALLOWED_HOSTS.has(host)
-    || [...URL_ATTACHMENT_ALLOWED_HOSTS].some((h) => host.endsWith(`.${h}`));
-  if (!allowed) {
-    throw new IngestBadRequest(
-      `Attachment "${fileName}": download host "${host}" is not an allowed storage host`,
-    );
-  }
-  if (parsed.protocol !== "https:" && !URL_ATTACHMENT_ALLOWED_HOSTS.has(host)) {
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new IngestBadRequest(`Attachment "${fileName}": download URL must use https`);
   }
-  return parsed;
+  const hostname = parsed.hostname.toLowerCase();
+  const hostWithPort = parsed.host.toLowerCase();
+  // Prefer a host:port entry; fall back to a bare-hostname entry, in which case
+  // the (numeric) port from the URL is carried over.
+  let matchedHost: string | undefined;
+  let portSuffix = "";
+  for (const allowed of URL_ATTACHMENT_ALLOWED_HOSTS) {
+    if (allowed === hostWithPort) {
+      matchedHost = allowed;
+      portSuffix = "";
+      break;
+    }
+    if (allowed === hostname && matchedHost === undefined) {
+      matchedHost = allowed;
+      portSuffix = parsed.port ? `:${Number.parseInt(parsed.port, 10)}` : "";
+    }
+  }
+  if (matchedHost === undefined) {
+    throw new IngestBadRequest(
+      `Attachment "${fileName}": download host "${hostname}" is not an allowed storage host`,
+    );
+  }
+  // http:// is allowed ONLY for an explicitly configured host (dev fake-gcs,
+  // custom S3 endpoint); everything else must be https so the bytes aren't
+  // readable in transit.
+  const scheme = parsed.protocol === "https:" ? "https:" : "http:";
+  if (scheme === "http:" && !URL_ATTACHMENT_CONFIGURED_HOSTS.has(matchedHost)) {
+    throw new IngestBadRequest(`Attachment "${fileName}": download URL must use https`);
+  }
+  const rebuilt = rebuildUrlOnTrustedOrigin(parsed, `${scheme}//${matchedHost}${portSuffix}`);
+  if (!rebuilt) {
+    throw new IngestBadRequest(`Attachment "${fileName}": malformed download URL`);
+  }
+  return new URL(rebuilt);
 }
 
 export const attachmentsRouter = Router();

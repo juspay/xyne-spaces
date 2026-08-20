@@ -1088,10 +1088,9 @@ class AgentAuthService {
           const filePath = path.join(downloadDir, filename);
 
           // Download attachment using the attachment download endpoint
-          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${attachment.id}/download`;
-          log.info(`[AgentAuth] Downloading attachment: ${filename} from ${downloadUrl}`);
+          log.info(`[AgentAuth] Downloading attachment: ${filename} (id=${attachment.id})`);
 
-          await this.downloadAttachmentToFile(downloadUrl, filePath, accessToken);
+          await this.downloadAttachmentToFile(String(attachment.id), filePath, accessToken);
 
           const stats = await fs.promises.stat(filePath);
           downloadedFiles.push({
@@ -1186,13 +1185,19 @@ class AgentAuthService {
   }
 
   /**
-   * Download an attachment file using Electron's net module
+   * Download an attachment file using Electron's net module.
+   *
+   * Takes the attachment id rather than a URL: the request always goes to the
+   * configured backend (config.BACKEND_URL), and the id — which comes from a
+   * backend response — is only ever a percent-encoded path segment, so it can
+   * never change the host or scheme of the request.
    */
   private async downloadAttachmentToFile(
-    url: string,
+    attachmentId: string,
     filePath: string,
     accessToken: string
   ): Promise<void> {
+    const url = `${config.BACKEND_URL}/api/attachments/${encodeURIComponent(attachmentId)}/download`;
     return new Promise((resolve, reject) => {
       const request = net.request({
         url,

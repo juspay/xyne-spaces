@@ -2,6 +2,15 @@ import { Request, Response } from 'express';
 import { AnalyticsRepository, AnalyticsFilters } from '@/database/repositories/analyticsRepository';
 import { logger } from '@/utils/logger';
 
+/**
+ * Returns the query param only when it is a single string. Repeated params
+ * (`?timeRange=a&timeRange=b`) arrive as arrays and are treated as absent.
+ */
+function queryString(req: Request, key: string): string | undefined {
+  const value = req.query[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
 export class AnalyticsController {
   private analyticsRepository = new AnalyticsRepository();
 
@@ -10,9 +19,9 @@ export class AnalyticsController {
     extraFilters: Partial<AnalyticsFilters> = {}
   ): AnalyticsFilters {
     return {
-      timeRange: req.query.timeRange as string,
-      startDate: req.query.startDate as string,
-      endDate: req.query.endDate as string,
+      timeRange: queryString(req, 'timeRange'),
+      startDate: queryString(req, 'startDate'),
+      endDate: queryString(req, 'endDate'),
       ...extraFilters,
       workspaceId: req.user!.workspaceId!
     };

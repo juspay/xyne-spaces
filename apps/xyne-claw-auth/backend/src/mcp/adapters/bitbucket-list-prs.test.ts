@@ -1,7 +1,12 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeAll, afterAll } from "vitest";
 import { handleListPullRequests } from "./bitbucket.js";
 
 const CREDS = { username: "u", token: "t", baseUrl: "https://bitbucket.example.net" };
+
+// The base URL is validated before any request (see resolveBitbucketBase);
+// the fake host does not resolve, so trust it via the operator allowlist.
+beforeAll(() => vi.stubEnv("BITBUCKET_ALLOWED_HOSTS", "bitbucket.example.net"));
+afterAll(() => vi.unstubAllEnvs());
 
 interface FakePr { id: number; toRef?: string }
 

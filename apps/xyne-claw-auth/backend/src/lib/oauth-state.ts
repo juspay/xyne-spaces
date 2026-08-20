@@ -53,6 +53,12 @@ export class OAuthStateError extends Error {
 }
 
 export function verifyOAuthState(state: string): VerifiedState {
+  // `state` comes straight from the provider callback's query/body, so it can be an
+  // array (`?state=a&state=b`) at runtime despite the declared type. Reject anything
+  // that isn't a single string before doing string operations on it.
+  if (typeof state !== "string") {
+    throw new OAuthStateError("malformed");
+  }
   const dot = state.lastIndexOf(".");
   if (dot <= 0 || dot === state.length - 1) {
     throw new OAuthStateError("malformed");

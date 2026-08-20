@@ -1271,11 +1271,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // the same row that was pre-created here. Without it, the cross-pod
     // callback would create a NEW row and the pre-created placeholder would
     // dangle in "running" forever.
-    const callbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/callback?callbackId=${callbackId}&assistantMessageId=${assistantMsg.id}`;
+    //
+    // slug (req.params) and conversationId (req.body) are caller-controlled, so
+    // they are percent-encoded into the path: the host is always
+    // CONFIG.internalUrl and request data can only name a path segment.
+    const callbackPathBase = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(conversationId)}`;
+    const callbackUrl = `${callbackPathBase}/callback?callbackId=${encodeURIComponent(callbackId)}&assistantMessageId=${encodeURIComponent(assistantMsg.id)}`;
     // assistantMessageId also threaded here so the /progress webhook (which may
     // land on another pod) can debounce-persist partial assistant content onto
     // the pre-created placeholder row — so a reload mid-run shows the answer-so-far.
-    const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/progress?callbackId=${callbackId}&assistantMessageId=${assistantMsg.id}`;
+    const progressUrl = `${callbackPathBase}/progress?callbackId=${encodeURIComponent(callbackId)}&assistantMessageId=${encodeURIComponent(assistantMsg.id)}`;
 
     // Resolve provider + credentials with the same 3-layer chain as webhook:
     //   1. user's personal provider (userAgentConfig + userProviderCredentials)
@@ -2999,7 +3004,7 @@ async function runAgentChatViaSse(
           const sid = capturedSessionId ?? (consumeResult.result["sessionId"] as string | undefined) ?? "";
           const callbackBody = { ...consumeResult.result, sessionId: sid };
           try {
-            const cbRes = await fetch(`${callbackUrl}`, {
+            const cbRes = await fetch(callbackUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -3019,7 +3024,7 @@ async function runAgentChatViaSse(
           // outer await resultPromise unblocks and the user sees an error
           // instead of the 30-min safety-net timeout.
           try {
-            await fetch(`${callbackUrl}`, {
+            await fetch(callbackUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -3044,7 +3049,7 @@ async function runAgentChatViaSse(
         // We already returned success to the outer handler — push a synthetic
         // failed /callback so the resultPromise unblocks instead of timing out.
         try {
-          await fetch(`${callbackUrl}`, {
+          await fetch(callbackUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

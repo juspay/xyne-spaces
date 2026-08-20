@@ -264,6 +264,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       res.status(403).json({ success: false, error: 'Forbidden: workspace context required' });
       return;
     }
+    // `q` is used as a string all the way down to YqlBuilder; a repeated query
+    // param (`?q=a&q=b`) arrives as an array, so reject anything that isn't a string.
+    if (q !== undefined && typeof q !== 'string') {
+      res.status(400).json({ success: false, error: 'Query parameter "q" must be a string' });
+      return;
+    }
 
     // ── Chunk-level KB drill-in (additive, opt-in) ─────────────────────────
     //

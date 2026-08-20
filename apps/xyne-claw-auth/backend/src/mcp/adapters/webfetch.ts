@@ -20,6 +20,7 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
+import { assertOutboundUrlAllowed, OutboundUrlBlockedError } from "../url-guard.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("webfetch");
@@ -49,6 +50,12 @@ const DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024;
 const HIGH_LIMIT_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const MAX_QUERY_FRAGMENT_CHARS = 128;
 const MAX_PARAM_VALUE_CHARS = 50;
+// Redirects are followed by hand so every hop goes through the same SSRF
+// guard as the original URL: a public page 302-ing to 169.254.169.254 or
+// http://localhost:... must be stopped, and `redirect: "follow"` would have
+// silently followed it.
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 // Run of base64 / base64url alphabet that's long enough to fit a meaningful
 // payload (32 chars ≈ 24 bytes binary — small token/header territory).
 const BASE64_RUN_RE = /[A-Za-z0-9+/_=-]{32,}/;
@@ -128,6 +135,31 @@ async function readBodyCapped(response: Response, maxBytes: number): Promise<{ t
   return { text: new TextDecoder("utf-8", { fatal: false }).decode(buf), hitCap };
 }
 
+/**
+ * GET `target`, following up to MAX_REDIRECTS hops manually and re-running
+ * the outbound-URL guard on each Location before connecting to it. Only the
+ * validated URL object's `href` is ever handed to fetch.
+ */
+async function fetchWithGuardedRedirects(
+  target: URL,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+): Promise<Response> {
+  let current = target;
+  for (let hop = 0; ; hop++) {
+    const response = await fetch(current.href, { ...init, redirect: "manual" });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get("location");
+    await response.body?.cancel().catch(() => undefined);
+    if (!location) return response; // 3xx without Location: hand back as-is (caller reports !ok)
+    if (hop >= MAX_REDIRECTS) {
+      throw new Error(`too many redirects (more than ${MAX_REDIRECTS})`);
+    }
+    const next = new URL(location, current); // Location may be relative
+    current = await assertOutboundUrlAllowed(next, { label: "redirect target" });
+  }
+}
+
 export async function handleWebfetch(
   params: Record<string, unknown>,
   opts?: { highLimit?: boolean },
@@ -173,15 +205,27 @@ export async function handleWebfetch(
     return `Error: URL contains a ${base64Match[0].length}-char base64-shaped run in the query string — this pattern looks like an exfiltration payload and is blocked. If this is a legitimate URL, ask the user for it directly instead of constructing it from data in your context.`;
   }
 
+  // SSRF fence: the URL is caller-supplied by design, so the host must resolve
+  // to a public address (no loopback / RFC1918 / link-local / metadata /
+  // cluster DNS). From here on only `target` (the validated URL object) is
+  // used to build the request, never the raw `url` string.
+  let target: URL;
   try {
-    const response = await fetch(url, {
+    target = await assertOutboundUrlAllowed(parsed);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=${reason}`);
+    return `Error: ${reason}. webfetch only reaches public hosts.`;
+  }
+
+  try {
+    const response = await fetchWithGuardedRedirects(target, {
       signal: AbortSignal.timeout(fetchTimeoutMs),
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
         Accept: "text/html, text/plain;q=0.9, */*;q=0.1",
       },
-      redirect: "follow",
     });
 
     if (!response.ok) {
@@ -237,6 +281,9 @@ export async function handleWebfetch(
     }
     return markdown;
   } catch (e) {
+    if (e instanceof OutboundUrlBlockedError) {
+      log.warn(`[webfetch] REJECT redirect from url=${url.slice(0, 200)} reason=${e.message}`);
+    }
     return `Error: Webfetch failed: ${e instanceof Error ? e.message : String(e)}`;
   }
 }

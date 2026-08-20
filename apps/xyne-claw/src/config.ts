@@ -1,3 +1,5 @@
+import { rebuildUrlOnTrustedOrigin } from "./lib/url-guard.js";
+
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
   s2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
@@ -30,6 +32,34 @@ export function isAllowedCallbackUrl(raw: string | undefined | null): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve a caller-supplied callback/progress URL into the URL we will
+ * actually POST to, or undefined if it is not on the allowlist.
+ *
+ * This is the form every outbound callback/progress fetch must use. Unlike
+ * `isAllowedCallbackUrl` (a yes/no check), it returns a URL rebuilt from the
+ * matching allowlist origin plus the caller's (re-encoded) path and query, so
+ * the host and scheme that reach `fetch` come from our configuration rather
+ * than from the request body. Apply it once at the edge (the /run handler) and
+ * pass the result downstream.
+ */
+export function resolveAllowedCallbackUrl(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+  for (const allowedOrigin of ALLOWED_CALLBACK_ORIGINS) {
+    if (allowedOrigin === u.origin) {
+      return rebuildUrlOnTrustedOrigin(u, allowedOrigin);
+    }
+  }
+  return undefined;
 }
 
 export const PATHS = {
