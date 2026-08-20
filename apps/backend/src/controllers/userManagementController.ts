@@ -1035,9 +1035,9 @@ export class UserManagementController {
       if (type === 'onboarding') {
         const saved = await prisma.questionnaireResponse.upsert({
           where: {
-            questionnaireType_email: {
-              questionnaireType: type,
+            email_questionnaireType: {
               email: normalizedEmail!,
+              questionnaireType: type,
             },
           },
           update: {
