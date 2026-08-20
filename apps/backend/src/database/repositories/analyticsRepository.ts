@@ -8,11 +8,8 @@ import { AttachmentEntityType, CallType, ChannelScopeType, UserType } from '@xyn
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
   workspaceId?: string; // Current workspace scope for analytics queries
-  workflowType?: string; // 'all' or any value from WorkflowType enum
   startDate?: string; // ISO date string for custom range start
   endDate?: string; // ISO date string for custom range end
-  repoName?: string; // Repository filter
-  userId?: string; // User filter - 'all' or specific user ID
 }
 
 // Calls and recordings are the same table, split by callType (HEADLESS = recording)
@@ -27,20 +24,6 @@ export interface CallsTimeSeriesPoint {
   recordings: number; // Recording count for the bucket
 }
 
-export interface PRStatsLegacy {
-  xyneMerged: number
-  xyneDeclined: number
-  xyneOpen: number
-  nonXyneMerged: number
-  raised: number
-  successRate: number,
-  coverage: number
-}
-
-export interface TimeSeriesDataPoint {
-  date: string
-  stats: PRStatsLegacy
-}
 const MINUTE_MS = 60 * 1000;
 /**
  * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]

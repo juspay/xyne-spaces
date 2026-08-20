@@ -113,7 +113,7 @@ export class AnalyticsController {
     const groupBy = this.groupByParam(req) ?? 'day';
     const filters = this.buildWorkspaceFilters(req);
     // Always return both unique count and time-series data in a single response
-    // Returns { uniqueUsers: number, timeSeries: TimeSeriesDataPoint[] }
+    // Returns { uniqueUsers: number, timeSeries: { date: string; value: number }[] }
     return this.respond(
       res,
       'Error fetching active users analytics',
