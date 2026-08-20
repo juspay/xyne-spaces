@@ -108,7 +108,7 @@ class AgentAuthService {
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Set CORS headers for localhost only
     res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -165,65 +165,6 @@ class AgentAuthService {
       } else if (req.method === 'POST' && url.pathname.startsWith('/chat/postMessage/')) {
         const conversationId = url.pathname.split('/chat/postMessage/')[1];
         await this.handleProxyPost(req, res, `/api/conversations/${conversationId}/messages`);
-      } else if (
-        req.method === 'POST' &&
-        url.pathname.startsWith('/channels/') &&
-        url.pathname.endsWith('/conversations')
-      ) {
-        const channelId = url.pathname.slice('/channels/'.length, -'/conversations'.length);
-        if (!channelId || channelId.includes('/')) {
-          this.sendJson(res, 400, { error: 'Invalid channelId' });
-        } else {
-          await this.handleProxyPost(
-            req,
-            res,
-            `/api/channels/${encodeURIComponent(channelId)}/conversations`,
-          );
-        }
-      } else if (req.method === 'GET' && url.pathname === '/auth/me') {
-        // Identity for local agents. The Prisma AST behind /interact has no way to
-        // reference "the caller", so this is the only route by which an agent can
-        // learn its own user id — without it, every "assigned to me" query is a guess.
-        await this.handleProxy(req, res, 'GET', '/api/v2/auth/me');
-      } else if (req.method === 'PATCH' && url.pathname.startsWith('/ticket/')) {
-        const ticketId = url.pathname.slice('/ticket/'.length);
-        if (!ticketId || ticketId.includes('/')) {
-          this.sendJson(res, 400, { error: 'Invalid ticketId' });
-        } else {
-          await this.handleProxy(req, res, 'PATCH', `/api/tickets/${encodeURIComponent(ticketId)}`);
-        }
-      } else if (
-        req.method === 'POST' &&
-        url.pathname.startsWith('/message/') &&
-        url.pathname.endsWith('/reactions')
-      ) {
-        const messageId = url.pathname.slice('/message/'.length, -'/reactions'.length);
-        if (!messageId || messageId.includes('/')) {
-          this.sendJson(res, 400, { error: 'Invalid messageId' });
-        } else {
-          await this.handleProxy(
-            req,
-            res,
-            'POST',
-            `/api/messages/${encodeURIComponent(messageId)}/reactions`,
-          );
-        }
-      } else if (
-        req.method === 'DELETE' &&
-        url.pathname.startsWith('/message/') &&
-        url.pathname.includes('/reactions/')
-      ) {
-        const [messageId, emojiName] = url.pathname.slice('/message/'.length).split('/reactions/');
-        if (!messageId || !emojiName || messageId.includes('/')) {
-          this.sendJson(res, 400, { error: 'Invalid messageId or emojiName' });
-        } else {
-          await this.handleProxy(
-            req,
-            res,
-            'DELETE',
-            `/api/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(emojiName)}`,
-          );
-        }
       } else if (req.method === 'POST' && url.pathname === '/ticket/create') {
         await this.handleProxyPost(req, res, '/api/tickets');
       } else if (req.method === 'POST' && url.pathname === '/calls/schedule') {
@@ -395,21 +336,15 @@ class AgentAuthService {
       log.info(`[AgentAuth] Proxying ${method} request to ${backendUrl}`);
 
       // Make request to backend with user's access token
-      const backendResponse = await this.sendWithRefresh(accessToken, (token) =>
-        this.makeBackendRequest({
-          url: backendUrl,
-          method,
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          data
-        }),
-      );
-      if (!backendResponse) {
-        this.reauthRequired(res);
-        return;
-      }
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        data
+      });
 
       // Forward backend response to agent
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
@@ -474,20 +409,14 @@ class AgentAuthService {
       log.info(`[AgentAuth] Proxying GET vespaSearch request to ${backendUrl}`);
 
       // Make request to backend with user's access token
-      const backendResponse = await this.sendWithRefresh(accessToken, (token) =>
-        this.makeBackendRequest({
-          url: backendUrl,
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-      );
-      if (!backendResponse) {
-        this.reauthRequired(res);
-        return;
-      }
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
       // Forward backend response to agent
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
@@ -969,25 +898,6 @@ class AgentAuthService {
     res: ServerResponse,
     backendPath: string
   ): Promise<void> {
-    return this.handleProxy(req, res, 'POST', backendPath);
-  }
-
-  /**
-   * Method-aware variant of the write proxy.
-   *
-   * GET and DELETE carry no body, so body parsing is skipped for them — parseBody
-   * rejects on an empty stream, which would turn every such request into a 400.
-   *
-   * `backendPath` is always built from a literal in the route table above, never
-   * taken from the request, so this stays an explicit vocabulary rather than an
-   * open passthrough to arbitrary backend paths.
-   */
-  private async handleProxy(
-    req: IncomingMessage,
-    res: ServerResponse,
-    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
-    backendPath: string
-  ): Promise<void> {
     // 1. Validate agent token
     const token = this.extractToken(req);
     if (!token || !this.validateToken(token)) {
@@ -995,21 +905,18 @@ class AgentAuthService {
       return;
     }
 
-    // 2. Parse request body (only for methods that carry one)
-    const expectsBody = method === 'POST' || method === 'PATCH' || method === 'PUT';
+    // 2. Parse request body
     let body: any;
-    if (expectsBody) {
-      try {
-        body = await this.parseBody(req);
-      } catch {
-        this.sendJson(res, 400, { error: 'Bad request: invalid JSON body' });
-        return;
-      }
+    try {
+      body = await this.parseBody(req);
+    } catch {
+      this.sendJson(res, 400, { error: 'Bad request: invalid JSON body' });
+      return;
+    }
 
-      if (!body || typeof body !== 'object') {
-        this.sendJson(res, 400, { error: 'Bad request: body must be a JSON object' });
-        return;
-      }
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Bad request: body must be a JSON object' });
+      return;
     }
 
     try {
@@ -1020,34 +927,25 @@ class AgentAuthService {
         return;
       }
 
-      // 4. Forward to backend
+      // 4. Forward POST to backend
       const backendUrl = `${config.BACKEND_URL}${backendPath}`;
-      log.info(`[AgentAuth] Proxying ${method} to ${backendUrl}`);
+      log.info(`[AgentAuth] Proxying POST to ${backendUrl}`);
 
-      const send = (token: string) =>
-        this.makeBackendRequest({
-          url: backendUrl,
-          method,
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          ...(expectsBody ? { data: body } : {})
-        });
-
-      // The forwarded workspace token is short-lived, so refresh once on a 401 and
-      // replay — a long agent run would otherwise die mid-job.
-      const backendResponse = await this.sendWithRefresh(accessToken, send);
-      if (!backendResponse) {
-        this.reauthRequired(res);
-        return;
-      }
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        data: body
+      });
 
       // 5. Return backend response
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(backendResponse.data));
     } catch (error: any) {
-      log.error(`[AgentAuth] Proxy ${method} to ${backendPath} failed:`, error);
+      log.error(`[AgentAuth] Proxy POST to ${backendPath} failed:`, error);
       this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
     }
   }
@@ -1517,90 +1415,6 @@ class AgentAuthService {
     }
 
     return null;
-  }
-
-  /**
-   * Ask the backend to mint a fresh workspace token from the browser session.
-   *
-   * The workspace cookie this proxy forwards is short-lived, and nothing here used
-   * to notice it expiring: a long-running local agent would simply start getting
-   * 401s ("Token expired and no session provided for refresh") partway through a
-   * job and have to be reconnected by hand.
-   *
-   * `/api/v2/auth/refresh-session` is driven by the `user_session_id` cookie, so
-   * that has to be forwarded — the access token we are replacing is exactly the
-   * thing that is no longer valid.
-   *
-   * Returns the new token, or null when the session itself is gone and the user
-   * genuinely has to sign in again.
-   */
-  /**
-   * Run a backend call, refreshing the workspace token once on a 401 and replaying.
-   *
-   * Returns null when the session could not be refreshed, meaning the caller should
-   * answer 401 with `reauthRequired` rather than pass the failure through opaquely.
-   */
-  private async sendWithRefresh(
-    firstToken: string,
-    send: (token: string) => Promise<{ statusCode: number; data: any }>,
-  ): Promise<{ statusCode: number; data: any } | null> {
-    const response = await send(firstToken);
-    if (response.statusCode !== 401) return response;
-
-    log.info('[AgentAuth] Backend returned 401; attempting session refresh');
-    const refreshed = await this.refreshUserAccessToken();
-    if (!refreshed) return null;
-    return send(refreshed);
-  }
-
-  private reauthRequired(res: ServerResponse): void {
-    this.sendJson(res, 401, {
-      error: 'Unauthorized',
-      message:
-        'Your Spaces session expired and could not be refreshed. Sign in again in the Spaces app.',
-      reauthRequired: true,
-    });
-  }
-
-  private async refreshUserAccessToken(): Promise<string | null> {
-    try {
-      const cookies = await session.defaultSession.cookies.get({});
-      const sessionCookie = cookies.find((cookie) => cookie.name === 'user_session_id');
-      if (!sessionCookie) {
-        log.warn('[AgentAuth] Cannot refresh: no user_session_id cookie');
-        return null;
-      }
-
-      const response = await this.makeBackendRequest({
-        url: `${config.BACKEND_URL}/api/v2/auth/refresh-session`,
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Cookie: `user_session_id=${sessionCookie.value}`,
-        },
-      });
-
-      if (response.statusCode !== 200) {
-        log.warn(`[AgentAuth] Session refresh returned ${response.statusCode}`);
-        return null;
-      }
-
-      // The backend sets the refreshed workspace cookie as a side effect of the
-      // call, but Electron's net module is run with useSessionCookies:false, so
-      // re-read from the session rather than trusting a Set-Cookie round trip.
-      const refreshed = await this.getUserAccessTokenFromSession();
-      if (refreshed) {
-        log.info('[AgentAuth] Refreshed the workspace access token');
-        return refreshed;
-      }
-
-      // Fall back to a token in the response body if the cookie did not land.
-      const data = response.data as { accessToken?: string; token?: string } | undefined;
-      return data?.accessToken ?? data?.token ?? null;
-    } catch (error: any) {
-      log.error('[AgentAuth] Session refresh failed:', error);
-      return null;
-    }
   }
 
   /**
