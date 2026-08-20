@@ -758,7 +758,12 @@ const SupportScreen = (): ReactElement => {
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const pointerDownInSubmenuRef = useRef(false);
+  // Radix replays outside-dismissal on `click` with the original pointerdown target, which is
+  // already detached when a submenu button unmounts itself (AI Tags category drill-down), so the
+  // `closest('[data-filter-submenu]')` guard below misses it. Remember the exact node the
+  // pointerdown started on — matching on identity means a pointerdown that never leads to a
+  // dismissal (touch scroll, Escape) can't latch and swallow a later, genuine outside click.
+  const submenuPointerDownTargetRef = useRef<EventTarget | null>(null);
 
   useEffect(() => {
     if (!moreFiltersOpen) {
@@ -2834,8 +2839,8 @@ const SupportScreen = (): ReactElement => {
                               sideOffset={6}
                               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
                               onInteractOutside={e => {
-                                if (pointerDownInSubmenuRef.current) {
-                                  pointerDownInSubmenuRef.current = false;
+                                if (e.target === submenuPointerDownTargetRef.current) {
+                                  submenuPointerDownTargetRef.current = null;
                                   e.preventDefault();
                                   return;
                                 }
@@ -2962,8 +2967,8 @@ const SupportScreen = (): ReactElement => {
                               <div
                                 ref={submenuRef}
                                 data-filter-submenu='true'
-                                onPointerDownCapture={() => {
-                                  pointerDownInSubmenuRef.current = true;
+                                onPointerDownCapture={e => {
+                                  submenuPointerDownTargetRef.current = e.target;
                                 }}
                                 className='fixed z-[60]'
                                 style={{
