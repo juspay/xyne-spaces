@@ -49,6 +49,7 @@ import {
   Info as InfoIcon,
   Ticket as TicketIcon,
   Tag as TagIcon,
+  CalendarRange,
 } from 'lucide-react';
 import {
   ChannelVisibility,
@@ -160,6 +161,7 @@ import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyCo
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDrafts } from '../../hooks/useEmailDraft';
@@ -536,7 +538,7 @@ interface DemergeEmailResponse {
   };
 }
 
-type ViewMode = 'kanban' | 'list' | 'table';
+type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
 const SupportScreen = (): ReactElement => {
   const {
@@ -756,6 +758,12 @@ const SupportScreen = (): ReactElement => {
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Radix replays outside-dismissal on `click` with the original pointerdown target, which is
+  // already detached when a submenu button unmounts itself (AI Tags category drill-down), so the
+  // `closest('[data-filter-submenu]')` guard below misses it. Remember the exact node the
+  // pointerdown started on — matching on identity means a pointerdown that never leads to a
+  // dismissal (touch scroll, Escape) can't latch and swallow a later, genuine outside click.
+  const submenuPointerDownTargetRef = useRef<EventTarget | null>(null);
 
   useEffect(() => {
     if (!moreFiltersOpen) {
@@ -2831,6 +2839,11 @@ const SupportScreen = (): ReactElement => {
                               sideOffset={6}
                               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
                               onInteractOutside={e => {
+                                if (e.target === submenuPointerDownTargetRef.current) {
+                                  submenuPointerDownTargetRef.current = null;
+                                  e.preventDefault();
+                                  return;
+                                }
                                 const target = e.target;
                                 if (
                                   target instanceof Element &&
@@ -2954,6 +2967,9 @@ const SupportScreen = (): ReactElement => {
                               <div
                                 ref={submenuRef}
                                 data-filter-submenu='true'
+                                onPointerDownCapture={e => {
+                                  submenuPointerDownTargetRef.current = e.target;
+                                }}
                                 className='fixed z-[60]'
                                 style={{
                                   left:
@@ -3122,6 +3138,20 @@ const SupportScreen = (): ReactElement => {
                           data-track-name='SetTableView'
                         >
                           <Table2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => setViewMode('calendar')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'calendar'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='Calendar View'
+                          data-track-category='Support'
+                          data-track-name='SetCalendarView'
+                        >
+                          <CalendarRange size={16} />
                         </button>
                       </div>
                       {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
@@ -3346,6 +3376,21 @@ const SupportScreen = (): ReactElement => {
                         onTicketClick={handleTicketClick}
                         onTicketsLoaded={setKanbanTickets}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
+                      />
+                    ) : viewMode === 'calendar' && selectedChannelId ? (
+                      <DeskCalendarView
+                        channelId={selectedChannelId}
+                        isMember={isSelectedChannelJoined}
+                        ticketFilter={ticketFilter}
+                        onTicketClick={ticket => {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
+                        onTicketsLoaded={setKanbanTickets}
                       />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
