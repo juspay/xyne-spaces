@@ -283,7 +283,9 @@ export const ActivityItemCard = ({
               // Sets the color the truncation ellipsis is drawn in (text-overflow
               // paints the "…" from THIS element's color, not the clipped child's),
               // so the ellipsis matches the muted/foreground title state.
-              activity.isRead ? 'text-muted-foreground' : 'text-foreground',
+              // Read activity is secondary, but still used for navigation/context recall.
+              // Keep it comfortably scannable instead of making it look disabled.
+              activity.isRead ? 'text-foreground/80' : 'text-foreground',
             )}
           >
             {titlePrefix && <span className='mr-1.5 inline-flex align-middle'>{titlePrefix}</span>}
@@ -306,7 +308,12 @@ export const ActivityItemCard = ({
             {/* Description children (the `description` prop) set their own
                 text-muted-foreground; on unread we override them to foreground via
                 the child selector. Read + the container's color handle the rest. */}
-            <span className={cn('ml-1.5', activity.isRead ? '' : '*:text-foreground')}>
+            <span
+              className={cn(
+                'ml-1.5',
+                activity.isRead ? '*:text-foreground/70' : '*:text-foreground',
+              )}
+            >
               {description}
             </span>
 
@@ -354,7 +361,12 @@ export const ActivityItemCard = ({
               ))}
           </div>
 
-          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+          <span
+            className={cn(
+              'flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs ml-auto sm:ml-2',
+              activity.isRead ? 'text-foreground/60' : 'text-muted-foreground',
+            )}
+          >
             {!isMobile &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
               !isDeskChannelType(channel?.type) &&
@@ -410,7 +422,7 @@ export const ActivityItemCard = ({
           className={cn(
             'mt-px w-full',
             activity.isRead
-              ? 'text-muted-foreground [&_.jp-message-html]:text-muted-foreground'
+              ? 'text-foreground/70 [&_.jp-message-html]:text-foreground/70'
               : 'text-foreground',
             isExpanded
               ? 'whitespace-normal break-normal'
