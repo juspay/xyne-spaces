@@ -489,6 +489,12 @@ export enum AppIncomingWebhookType {
 }
 
 // @ts-ignore TS1294
+export enum AppType {
+  INTERNAL = 'INTERNAL',
+  EXTERNAL = 'EXTERNAL',
+}
+
+// @ts-ignore TS1294
 export enum AppIncomingWebhookAction {
   MESSAGE = 'MESSAGE',
   TICKET = 'TICKET',

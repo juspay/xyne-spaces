@@ -12,6 +12,7 @@ export interface App {
   name: string;
   description: string | null;
   createdBy: string;
+  appType: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -124,6 +125,7 @@ export interface AppSearchHit {
   installedAppId: string | null;
   installedVersion: number | null;
   webhookUrl: string | null;
+  appType: string | null;
   botUserId: string | null;
 }
 
