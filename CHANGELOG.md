@@ -1,3 +1,10 @@
+## [1.204.0](https://github.com/juspay/xyne-spaces/compare/v1.203.4...v1.204.0) (2026-08-20)
+
+
+### Features
+
+* add nix setup CI check and fix db-setup backend path ([#453](https://github.com/juspay/xyne-spaces/issues/453)) ([0047187](https://github.com/juspay/xyne-spaces/commit/0047187113a72eb12e63d5570981aa7faf706c20)), closes [#21](https://github.com/juspay/xyne-spaces/issues/21)
+
 ## [1.203.4](https://github.com/juspay/xyne-spaces/compare/v1.203.3...v1.203.4) (2026-08-20)
 
 
