@@ -175,8 +175,15 @@ export class CanvasController {
         return;
       }
 
-      const labelsByCanvasId: Record<string, ReturnType<typeof toCanvasLabelResponse>[]> =
-        Object.fromEntries(requestedCanvasIds.map((canvasId) => [canvasId, []]));
+      // Keyed by a Map, not a plain object: requestedCanvasId is untrusted user
+      // input (from the canvasIds query param), and writing it as a dynamic
+      // object property (obj[requestedCanvasId] = ...) goes through the
+      // Object.prototype.__proto__ setter for that exact key, allowing
+      // prototype pollution (CodeQL js/remote-property-injection). Map keys
+      // have no such special-cased property.
+      const labelsByCanvasId = new Map<string, ReturnType<typeof toCanvasLabelResponse>[]>(
+        requestedCanvasIds.map((canvasId) => [canvasId, []])
+      );
 
       const canonicalToRequested = new Map<string, string[]>();
 
@@ -248,7 +255,7 @@ export class CanvasController {
       // Now perform access checks in-memory for the candidate canonical IDs.
       const candidateIds = candidateCanonicalIds;
       if (candidateIds.length === 0) {
-        res.status(200).json({ labels: labelsByCanvasId });
+        res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
         return;
       }
 
@@ -413,7 +420,7 @@ export class CanvasController {
       }
 
       if (allowedCanonicalIds.length === 0) {
-        res.status(200).json({ labels: labelsByCanvasId });
+        res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
         return;
       }
 
@@ -428,14 +435,14 @@ export class CanvasController {
         const label = toCanvasLabelResponse(row);
         const requestedIds = canonicalToRequested.get(row.sourceId) ?? [row.sourceId];
         for (const requestedCanvasId of requestedIds) {
-          labelsByCanvasId[requestedCanvasId] = [
-            ...(labelsByCanvasId[requestedCanvasId] ?? []),
+          labelsByCanvasId.set(requestedCanvasId, [
+            ...(labelsByCanvasId.get(requestedCanvasId) ?? []),
             label,
-          ];
+          ]);
         }
       }
 
-      res.status(200).json({ labels: labelsByCanvasId });
+      res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
     } catch (error) {
       logger.error('[CANVAS-LABELS] Failed to fetch labels:', error);
       res.status(500).json({ error: 'Failed to fetch canvas labels' });
