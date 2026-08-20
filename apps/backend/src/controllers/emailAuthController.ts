@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { config } from '@/config/env';
 import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';

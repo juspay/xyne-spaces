@@ -74,6 +74,10 @@ const DIRECT_ACCESS_ALLOWED = new Map([
     'the key is chosen at runtime from a bot definition (externalApi.authEnvVar)',
   ],
   ['src/utils/retry.ts', 'the key is a caller-supplied argument'],
+  [
+    'src/sdlc/vcs/GitHubVcsAdapter.ts',
+    'passes the whole environment to a git child process; reads no value itself',
+  ],
 ]);
 
 const offenders = files

@@ -58,11 +58,7 @@ jobs:
       # Every process.env read should be declared in the Joi schema, and every
       # declared key should appear in .env.example. The schema is `.unknown()`,
       # so nothing else catches a variable that skips it.
-      # Reporting only for now: variables that predate the schema are still being
-      # migrated, and failing here would block unrelated work. Remove
-      # continue-on-error once that backlog is cleared.
       - name: Env schema coverage
-        continue-on-error: true
         run: pnpm --filter xyne-spaces-backend run check:env-schema
 
       # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).

@@ -133,12 +133,11 @@ else
 fi
 
 # Env schema coverage: every process.env read declared in the Joi schema, every
-# declared key present in .env.example. Reports only for now — main still carries
-# variables that predate the schema, and blocking on them would stop unrelated work.
-# Flip the `|| true` to `|| exit 1` once the backlog is cleared.
+# declared key present in .env.example. Fast feedback only — CI is the gate, since
+# this hook is skippable with --no-verify.
 if git diff --cached --name-only | grep -qE '^apps/backend/(src/|\.env\.example)'; then
   echo "Running env schema coverage check..."
-  node apps/backend/scripts/check-env-schema.mjs || true
+  node apps/backend/scripts/check-env-schema.mjs || exit 1
 fi
 
 # Enum guard: block new Postgres enums / CREATE TYPE / ALTER TYPE (XYNE-16525)

@@ -25,6 +25,7 @@ import type {
 } from './types';
 import { VcsProviderError } from './types';
 import { verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
+import { config } from '@/config/env';
 
 const adapters: Record<VcsProvider, VcsProviderAdapter> = {
   GITHUB: new GitHubVcsAdapter(),
@@ -472,7 +473,7 @@ export class SdlcVcsService implements SdlcVcs {
       try {
         grant = verifySdlcInteractiveGrant(
           binding.interactiveGrant,
-          process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || ''
+          config.internalS2sKey || config.xyneClaw.s2sKey || ''
         );
       } catch {
         throw new AppError('Invalid or expired SDLC interactive grant', 403);
@@ -567,7 +568,7 @@ export class SdlcVcsService implements SdlcVcs {
       try {
         grant = verifySdlcInteractiveGrant(
           input.interactiveGrant,
-          process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || ''
+          config.internalS2sKey || config.xyneClaw.s2sKey || ''
         );
       } catch {
         throw new AppError('Invalid or expired SDLC interactive grant', 403);
