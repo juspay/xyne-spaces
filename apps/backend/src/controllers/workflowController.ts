@@ -97,6 +97,21 @@ export class WorkflowController {
   }
 
   /**
+   * Extract the executionId from a workflow-artifacts GCS path so it can be
+   * workspace-authorized. Expected shape: `workflow-artifacts/<executionId>/...`.
+   * Returns null for anything that does not match or that tries path traversal.
+   */
+  private parseArtifactExecutionId(gcsPath: string): string | null {
+    const parts = gcsPath.split('/');
+    if (parts.length < 3 || parts[0] !== 'workflow-artifacts') return null;
+    const executionId = parts[1];
+    if (!executionId || executionId === '.' || executionId === '..' || executionId.includes('..')) {
+      return null;
+    }
+    return executionId;
+  }
+
+  /**
    * Copy parent execution's agentic step data to new execution for rerun scenarios.
    * Loads from parent's Redis/GCS storage and copies to new execution's storage.
    * Optionally appends a user continuation message.
@@ -1733,6 +1748,9 @@ export class WorkflowController {
         return;
       }
 
+      // Only list artifacts for executions the caller's workspace owns.
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
+
       const vrBucketName = config.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
@@ -1831,6 +1849,16 @@ export class WorkflowController {
         return;
       }
 
+      // Enforce workspace ownership. The executionId embedded in the path must belong to
+      // the caller's workspace; otherwise any authenticated user could read another
+      // workspace's artifacts by supplying its executionId (cross-workspace IDOR).
+      const artifactExecutionId = this.parseArtifactExecutionId(gcsPath);
+      if (!artifactExecutionId) {
+        res.status(400).json({ error: 'Invalid path: expected workflow-artifacts/{executionId}/...' });
+        return;
+      }
+      if (!(await this.authorizeExecution(req, res, artifactExecutionId))) return;
+
       const vrBucketName = config.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
@@ -1881,6 +1909,16 @@ export class WorkflowController {
         res.status(400).json({ error: 'Invalid path: must start with workflow-artifacts/' });
         return;
       }
+
+      // Enforce workspace ownership. The executionId embedded in the path must belong to
+      // the caller's workspace; otherwise any authenticated user could read another
+      // workspace's artifacts by supplying its executionId (cross-workspace IDOR).
+      const artifactExecutionId = this.parseArtifactExecutionId(gcsPath);
+      if (!artifactExecutionId) {
+        res.status(400).json({ error: 'Invalid path: expected workflow-artifacts/{executionId}/...' });
+        return;
+      }
+      if (!(await this.authorizeExecution(req, res, artifactExecutionId))) return;
 
       const vrBucketName = config.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
@@ -1934,6 +1972,16 @@ export class WorkflowController {
         res.status(400).json({ error: 'Invalid path: must start with workflow-artifacts/' });
         return;
       }
+
+      // Enforce workspace ownership. The executionId embedded in the path must belong to
+      // the caller's workspace; otherwise any authenticated user could read another
+      // workspace's artifacts by supplying its executionId (cross-workspace IDOR).
+      const artifactExecutionId = this.parseArtifactExecutionId(gcsPath);
+      if (!artifactExecutionId) {
+        res.status(400).json({ error: 'Invalid path: expected workflow-artifacts/{executionId}/...' });
+        return;
+      }
+      if (!(await this.authorizeExecution(req, res, artifactExecutionId))) return;
 
       const vrBucketName = config.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
