@@ -2,9 +2,10 @@
  * Search request contract.
  *
  * A zod mirror of `apps/backend/src/validators/vespaSearchValidator.ts`, which is
- * Joi. The duplication is deliberate and worth it: zod is what generates the
- * OpenAPI document and the SDK's types, and the Joi schema stays the validator
- * for the existing `/api/vespaSearch` route, which is not being changed.
+ * Joi. The duplication is deliberate and worth it: this schema validates
+ * `/api/sdk/search` and is what the SDK's build-time check compares its search
+ * parameters against, while the Joi schema stays the validator for the existing
+ * `/api/vespaSearch` route, which is not being changed.
  *
  * Only parameters meaningful to an external caller are exposed. Internal ones
  * used by claw-auth's knowledge-base tooling (`includeChunkLevel`,

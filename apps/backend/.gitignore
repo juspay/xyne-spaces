@@ -19,7 +19,6 @@ zero-*
 .env.development.local
 .env.test.local
 .env.production.local
-sdk-jwt.local.pem
 
 # Logs
 logs/
