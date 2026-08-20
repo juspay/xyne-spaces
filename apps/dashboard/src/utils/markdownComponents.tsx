@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { logger, Event } from './logger';
 import { openLink } from './openLink';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
@@ -326,9 +325,6 @@ export const createMarkdownComponents = (
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
         if (!href) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey) {
-          logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
-        }
         openLink(href, event);
       };
       return (

@@ -357,6 +357,16 @@ export const TicketListRow = ({
       </div>
       <div
         className={cn(
+          'flex min-w-0 items-center overflow-hidden',
+          getTicketListColumnAlignClass('age'),
+        )}
+      >
+        <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+          {Math.max(0, Math.floor((Date.now() - ticket.createdAt) / 86400000))}d
+        </span>
+      </div>
+      <div
+        className={cn(
           'flex min-w-0 items-center gap-2 overflow-hidden',
           getTicketListColumnAlignClass('latestEmail'),
         )}

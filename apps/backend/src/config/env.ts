@@ -63,7 +63,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -104,6 +104,18 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
+  SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
+  SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(24 * 60 * 60 * 1000),
+  SDLC_CAPACITY_RETRY_DELAY_MS: Joi.number().integer().min(1000).default(30_000),
+  SDLC_CLAW_RUN_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(60_000)
+    .default(3 * 60 * 60 * 1000),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -189,7 +201,7 @@ const envSchema = Joi.object({
         'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
         'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
         'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.'
     ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
@@ -603,6 +615,12 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
+  sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
+  sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
+  sdlcCapacityRetryDelayMs: envVars.SDLC_CAPACITY_RETRY_DELAY_MS as number,
+  sdlcClawRunTimeoutMs: envVars.SDLC_CLAW_RUN_TIMEOUT_MS as number,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,

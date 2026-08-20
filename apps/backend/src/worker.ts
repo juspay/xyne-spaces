@@ -39,6 +39,9 @@ import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
+import { sdlcWorker } from '@/workers/sdlcWorker';
+import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
+import { sdlcWikiExecutionService } from '@/sdlc/wiki/SdlcWikiExecutionService';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
@@ -49,6 +52,7 @@ config()
 class WorkerService {
   private isShuttingDown = false
   private automationTemplateCleanupTimer: NodeJS.Timeout | null = null
+  private sdlcReconciliationTimer: NodeJS.Timeout | null = null
 
   async start(): Promise<void> {
     try {
@@ -292,6 +296,24 @@ class WorkerService {
         logger.info('Entity extraction is disabled; skipping worker startup');
       }
 
+      if (appConfig.enableSdlcWorker) {
+        logger.info('Starting SDLC worker...');
+        await sdlcWorker.start();
+        const reconcileSdlc = (): void => {
+          void sdlcClawExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-CLAW] reconciliation failed', error);
+          });
+          void sdlcWikiExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-WIKI] reconciliation failed', error);
+          });
+        };
+        reconcileSdlc();
+        this.sdlcReconciliationTimer = setInterval(reconcileSdlc, 60_000);
+        this.sdlcReconciliationTimer.unref();
+      } else {
+        logger.info('SDLC worker is disabled (ENABLE_SDLC_WORKER=false)');
+      }
+
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');
         registerDeskEmailTags(tagGenerationPipeline);
@@ -353,6 +375,10 @@ class WorkerService {
       if (this.automationTemplateCleanupTimer) {
         clearInterval(this.automationTemplateCleanupTimer)
         this.automationTemplateCleanupTimer = null
+      }
+      if (this.sdlcReconciliationTimer) {
+        clearInterval(this.sdlcReconciliationTimer)
+        this.sdlcReconciliationTimer = null
       }
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
@@ -461,6 +487,7 @@ class WorkerService {
       }
 
       await autoDraftWorker.shutdown();
+      if (appConfig.enableSdlcWorker) await sdlcWorker.stop();
 
       if (appConfig.enableTagGenerationPipeline) {
         await tagGenerationPipeline.close();
