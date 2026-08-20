@@ -1,3 +1,11 @@
+## [1.199.5](https://github.com/juspay/xyne-spaces/compare/v1.199.4...v1.199.5) (2026-08-20)
+
+
+### Bug Fixes
+
+* links in cmdK ([#629](https://github.com/juspay/xyne-spaces/issues/629)) ([4993367](https://github.com/juspay/xyne-spaces/commit/4993367d446ccfd43256473181462b1deb9fb9d2))
+* show a recording-specific placeholder in the notes editor ([#774](https://github.com/juspay/xyne-spaces/issues/774)) ([7e042a7](https://github.com/juspay/xyne-spaces/commit/7e042a7482ba7474b918b9af69d33ede7266db52))
+
 ## [1.199.4](https://github.com/juspay/xyne-spaces/compare/v1.199.3...v1.199.4) (2026-08-19)
 
 
