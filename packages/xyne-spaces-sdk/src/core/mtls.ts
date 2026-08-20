@@ -4,6 +4,8 @@
  * Allows applications to provide client certificates for mTLS authentication.
  * This is similar to how the Xyne Electron app handles device enrollment.
  *
+ * Uses Undici's Agent for proper mTLS support in Node.js 18+.
+ *
  * @example Node.js usage:
  * ```typescript
  * import { readFileSync } from 'fs';
@@ -19,6 +21,8 @@
  * });
  * ```
  */
+
+import type { Agent, Dispatcher } from 'undici';
 
 /**
  * mTLS certificate configuration.
@@ -68,38 +72,55 @@ export function isNodeEnvironment(): boolean {
 }
 
 /**
- * Creates an HTTPS agent for Node.js with mTLS configuration.
- * This is a factory function that returns an Agent when in Node.js,
- * or undefined in browser environments (where mTLS is handled by the browser).
+ * Error thrown when mTLS configuration is invalid or unsupported.
+ */
+export class MTLSError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MTLSError';
+  }
+}
+
+/**
+ * Creates an Undici Agent for Node.js with mTLS configuration.
+ * This agent can be used as a dispatcher for fetch requests.
+ *
+ * In browser/Electron environments, returns undefined as mTLS is handled
+ * automatically by the browser/OS through the certificate store.
+ * Electron uses `select-client-certificate` event to handle certificate selection.
  *
  * @internal
  */
 export async function createMTLSAgent(
   config: MTLSConfig
-): Promise<unknown | undefined> {
+): Promise<Agent | undefined> {
   if (!isNodeEnvironment()) {
-    // In browser environments, mTLS is handled by the browser/OS
-    // through the keychain (like Electron does)
+    // In browser/Electron environments, mTLS is handled automatically:
+    // - Electron: Uses OS keychain + select-client-certificate event
+    // - Browser: Uses OS/browser certificate store
+    // The mTLS config is ignored, but no error is thrown to allow
+    // the same code to work in both Node.js and browser environments.
     return undefined;
   }
 
   // Dynamic import to avoid bundling Node.js modules in browser builds
-  const https = await import('https');
+  // Undici is bundled with Node.js 18+ so no extra install needed
+  const { Agent } = await import('undici');
 
-  return new https.Agent({
-    cert: config.cert,
-    key: config.key,
-    passphrase: config.passphrase,
-    ca: config.ca,
-    rejectUnauthorized: config.rejectUnauthorized ?? true,
+  return new Agent({
+    connect: {
+      cert: config.cert,
+      key: config.key,
+      passphrase: config.passphrase,
+      ca: config.ca,
+      rejectUnauthorized: config.rejectUnauthorized ?? true,
+    },
   });
 }
 
 /**
- * Node.js fetch options with agent support.
- * Standard fetch doesn't support agents, but node-fetch and undici do.
+ * Undici fetch options with dispatcher support.
  */
-export interface NodeFetchOptions extends RequestInit {
-  agent?: unknown;
-  dispatcher?: unknown;
+export interface UndiciRequestInit extends RequestInit {
+  dispatcher?: Dispatcher;
 }
