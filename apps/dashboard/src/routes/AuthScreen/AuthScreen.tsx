@@ -14,7 +14,7 @@ import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropZeroDatabases } from '../../zero/dropZeroDatabases';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -172,7 +172,7 @@ const AuthScreen = (): ReactElement | null => {
       localStorage.removeItem('enrollment_completed');
     } else {
       void indexedDBService.dropAllUserDatabases();
-      void dropAllDatabases();
+      void dropZeroDatabases();
     }
   }, [isAuthenticated]);
 
