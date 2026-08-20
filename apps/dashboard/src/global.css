@@ -3540,12 +3540,16 @@ img.inline-emoji,
  * The blend design system uses styled-components with hardcoded light-mode colors
  * from module-level defaults (R.colors.gray). Hover states use !important CSS
  * which can't be overridden by inline styles from the ThemeProvider context.
+ *
+ * `.rdp-root` is excluded because react-day-picker builds a real <table>: each
+ * week is a <tr> of day <td>s, so without the guard hovering any day paints the
+ * whole week row. :where() keeps the exclusion specificity-free.
  */
-[data-theme="midnight"] tr:hover > td {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) > td {
   background-color: #222530 !important;
 }
 
-[data-theme="midnight"] tr:hover {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) {
   background-color: #222530 !important;
 }
 
@@ -3869,22 +3873,32 @@ img.inline-emoji,
 /* Blend DataTable header cells - ensure proper dark mode text color.
    These target app data grids. Message tables must be excluded: the markdown
    renderer emits a real <thead> (the composer does not), so without the guard
-   the two paths get different header colours in midnight. */
+   the two paths get different header colours in midnight. `.rdp-root` is
+   excluded for the same reason — react-day-picker's weekday row is a real
+   <thead><th>, which otherwise picks up the data-grid header surface. */
 [data-theme="midnight"]
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  span:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  span:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 
 /* Specific targeting for table header text with lower contrast */
 [data-theme="midnight"]
   thead
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
   background-color: #1a1a1a !important;
 }
@@ -3893,7 +3907,7 @@ img.inline-emoji,
 [data-theme="midnight"]
   th
   :is(p, div, span):not(
-    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ) {
   color: #d1d5db !important;
 }
@@ -3901,7 +3915,9 @@ img.inline-emoji,
 /* Ensure high contrast for all header content */
 [data-theme="midnight"]
   thead
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 

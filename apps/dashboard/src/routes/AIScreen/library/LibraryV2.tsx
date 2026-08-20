@@ -100,7 +100,7 @@ const LibraryV2 = (): ReactElement => {
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-              Library
+              Agent Hub
             </h1>
             <p className='text-[15px] leading-[1.2] text-muted-foreground'>
               View and manage agents, subagent, skills and MCP.
