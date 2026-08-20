@@ -620,6 +620,9 @@ export const NotificationHandler: React.FC = () => {
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
     const state = {
       active: isActive,
+      // Sent before the mic is enabled, so the meeting detector can tell our own
+      // recording from a meeting worth offering to record.
+      starting: recordingStatus === 'starting',
       startTime: recordingStartTime ?? undefined,
       paused: recordingStatus === 'paused',
       pauseStartedAt: recordingPauseStartedAt,
