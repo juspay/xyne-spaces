@@ -161,8 +161,15 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  // The development key pair ships in LiveKit's own published sample config, so a
+  // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
+  // deployments without calls do not configure LiveKit at all.
+  LIVEKIT_API_KEY: Joi.string().allow('').invalid('devkey').default('').messages({
+    'any.invalid': 'LIVEKIT_API_KEY must not be the published development key',
+  }),
+  LIVEKIT_API_SECRET: Joi.string().allow('').invalid('devsecret').default('').messages({
+    'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+  }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
@@ -492,6 +499,7 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);

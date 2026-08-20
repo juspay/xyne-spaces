@@ -1,3 +1,45 @@
+## [1.203.2](https://github.com/juspay/xyne-spaces/compare/v1.203.1...v1.203.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* Add V2 queries and update components to support channel membership ([#754](https://github.com/juspay/xyne-spaces/issues/754)) ([9fe712f](https://github.com/juspay/xyne-spaces/commit/9fe712fab4246c5650b42bdbcfde02adac1ed806))
+
+## [1.203.1](https://github.com/juspay/xyne-spaces/compare/v1.203.0...v1.203.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* adding runAsSystem for syncBotUsers in new org creation ([#807](https://github.com/juspay/xyne-spaces/issues/807)) ([25aa089](https://github.com/juspay/xyne-spaces/commit/25aa089b0ff81fcad3d05c76284e727d9cf218e1))
+
+## [1.203.0](https://github.com/juspay/xyne-spaces/compare/v1.202.0...v1.203.0) (2026-08-20)
+
+
+### Features
+
+* enable Xyne AI homescreen (Open AI on launch) by default ([#773](https://github.com/juspay/xyne-spaces/issues/773)) ([31f990e](https://github.com/juspay/xyne-spaces/commit/31f990ee2943cb4a75c2ae9a07c9f192e55d3118))
+
+## [1.202.0](https://github.com/juspay/xyne-spaces/compare/v1.201.0...v1.202.0) (2026-08-20)
+
+
+### Features
+
+* add tags backfill stats ([#796](https://github.com/juspay/xyne-spaces/issues/796)) ([8b3900d](https://github.com/juspay/xyne-spaces/commit/8b3900d1fdc8ee41cf0c1cd2484c24ff5bb1893c))
+
+## [1.201.0](https://github.com/juspay/xyne-spaces/compare/v1.200.1...v1.201.0) (2026-08-20)
+
+
+### Features
+
+* Create Google doc list for recordi ([#791](https://github.com/juspay/xyne-spaces/issues/791)) ([e411963](https://github.com/juspay/xyne-spaces/commit/e411963f6796dc2316310e40c08bba195445eb2d))
+
+## [1.200.1](https://github.com/juspay/xyne-spaces/compare/v1.200.0...v1.200.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* upgrade vitest version ([#804](https://github.com/juspay/xyne-spaces/issues/804)) ([d292aff](https://github.com/juspay/xyne-spaces/commit/d292aff701ab298552606ce9a57e6bffdcf95662))
+
 ## [1.200.0](https://github.com/juspay/xyne-spaces/compare/v1.199.8...v1.200.0) (2026-08-20)
 
 
