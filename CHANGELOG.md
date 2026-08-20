@@ -1,3 +1,10 @@
+## [1.203.0](https://github.com/juspay/xyne-spaces/compare/v1.202.0...v1.203.0) (2026-08-20)
+
+
+### Features
+
+* enable Xyne AI homescreen (Open AI on launch) by default ([#773](https://github.com/juspay/xyne-spaces/issues/773)) ([31f990e](https://github.com/juspay/xyne-spaces/commit/31f990ee2943cb4a75c2ae9a07c9f192e55d3118))
+
 ## [1.202.0](https://github.com/juspay/xyne-spaces/compare/v1.201.0...v1.202.0) (2026-08-20)
 
 
