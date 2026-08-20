@@ -69,6 +69,10 @@ import { SummaryGenerationPanel } from './components/SummaryGenerationPill/Summa
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
+import {
+  RecordingGoogleDocsList,
+  parseRecordingGoogleDocLinks,
+} from './components/RecordingGoogleDocsList';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -171,7 +175,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
 
-  const exportGoogleDoc = async (): Promise<void> => {
+  const exportGoogleDoc = async (documentTitle?: string): Promise<void> => {
     if (!recording || isExportingGoogleDoc) return;
 
     // Opening synchronously keeps this user-initiated navigation from being blocked by browsers.
@@ -180,11 +184,31 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     setIsExportingGoogleDoc(true);
     try {
-      const { documentUrl } = await recordingService.exportGoogleDoc(recording.externalId);
+      const { documentUrl, document: createdDocument } = await recordingService.exportGoogleDoc(
+        recording.externalId,
+        documentTitle,
+      );
       if (documentWindow) {
         documentWindow.location.assign(documentUrl);
       } else {
         window.open(documentUrl, '_blank', 'noopener,noreferrer');
+      }
+      // Zero replays the metadata write too, but only after the row round-trips —
+      // the list should show the doc the moment its tab opens.
+      if (createdDocument) {
+        setRecording(prev =>
+          prev
+            ? {
+                ...prev,
+                googleDocs: [
+                  createdDocument,
+                  ...(prev.googleDocs ?? []).filter(
+                    entry => entry.documentId !== createdDocument.documentId,
+                  ),
+                ],
+              }
+            : prev,
+        );
       }
       toast.success('Google Doc created');
       setShowGoogleDocPreviewModal(false);
@@ -390,6 +414,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
       const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
+      const googleDocs = parseRecordingGoogleDocLinks(metadata?.['googleDocs']);
       const next: RecordingDetail = {
         ...prev,
         title: recordingRow.title || prev.title,
@@ -407,6 +432,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
             : prev.detailedSummaryReady,
         notesCanvasId:
           prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
+        // An empty list here means metadata hasn't carried the key yet (older
+        // recording, or the export write is still in flight) — keep what we have.
+        googleDocs: googleDocs.length > 0 ? googleDocs : (prev.googleDocs ?? []),
         markedItems: recordingRow.markedItems ?? prev.markedItems,
         summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
         aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
@@ -1048,6 +1076,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
+              {/* Owner-only: the docs live in the owner's Drive, so these links are
+                  dead ends for anyone the recording was merely shared with. */}
+              {isOwner ? <RecordingGoogleDocsList documents={recording.googleDocs ?? []} /> : null}
             </section>
           )}
         </div>
@@ -1109,7 +1140,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowGoogleDocPreviewModal(false)}
           title='Preview Google Doc'
           description='Review the recording summary before creating a Google Doc.'
-          className='max-w-[760px] overflow-hidden rounded-xl p-0'
+          className='max-w-[720px] overflow-hidden rounded-[18px] p-0'
           testId='google-doc-preview-dialog'
         >
           <GoogleDocPreviewModal

@@ -48,6 +48,7 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -1407,6 +1408,8 @@ export class CallController {
             typeof callMetadata?.linkedTicketMessageId === 'string'
               ? callMetadata.linkedTicketMessageId
               : null,
+          // Google Docs exported from this recording's summary, newest first.
+          googleDocs: readRecordingGoogleDocLinks(call.metadata),
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
