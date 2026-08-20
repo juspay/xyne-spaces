@@ -235,6 +235,27 @@ export const linkComponentSchema = baseComponentSchema.extend({
   }).strict(),
 });
 
+/**
+ * Roster summary — "you have N agents", with a link into the agent library.
+ *
+ * Counts only; the individual agents are the `agent` card's job. Emitted when a
+ * user asks what agents exist, where a prose list of 30 names is unreadable and
+ * the library page is the real answer. The route is NOT carried in props: the
+ * dashboard's router already knows the workspace, so the node builds its own
+ * link and a payload can never point this CTA somewhere else.
+ */
+export const agentSummaryComponentSchema = baseComponentSchema.extend({
+  type: z.literal('agent_summary'),
+  props: z
+    .object({
+      total: z.number().int().nonnegative(),
+      global: z.number().int().nonnegative().optional(),
+      personal: z.number().int().nonnegative().optional(),
+      label: z.string().optional(),
+    })
+    .strict(),
+});
+
 export const tableComponentSchema = baseComponentSchema.extend({
   type: z.literal('table'),
   props: z.object({
@@ -716,6 +737,12 @@ export const agentIdentitySchema = z
     slug: z.string().min(1),
     /** Handle credited under the name ("Built by @fractal-agent") — who authored it. */
     builtBy: z.string().optional(),
+    /** Owner's display name, credited in the chin ("Created by @aryan.pidiha"). */
+    ownedBy: z.string().optional(),
+    /** Owner's user id — renders their avatar beside the credit. */
+    ownedById: z.string().optional(),
+    /** Reach: 'global' is org-wide, 'personal' belongs to one user. */
+    scope: z.enum(['personal', 'global']).optional(),
     description: z.string().optional(),
     /** Full system prompt — revealed in the expanded view, never the card body. */
     systemPrompt: z.string().optional(),
@@ -906,6 +933,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     imageComponentSchema,
     linkComponentSchema,
     tableComponentSchema,
+    agentSummaryComponentSchema,
     planComponentSchema,
     prComponentSchema,
     prApprovalComponentSchema,
@@ -954,7 +982,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema
