@@ -228,6 +228,8 @@ const envSchema = Joi.object({
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
+  // Auto-invoke a chat-enabled agent on a same-initiator no-mention thread reply.
+  THREAD_AGENT_CONTINUATION_ENABLED: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
@@ -839,6 +841,7 @@ export const config = {
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
+  threadAgentContinuationEnabled: envVars.THREAD_AGENT_CONTINUATION_ENABLED,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,

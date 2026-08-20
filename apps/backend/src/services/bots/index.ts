@@ -5,3 +5,4 @@ export * from './botExecutionSession';
 export * from './botCommandParser';
 export * from './botMentionHandler';
 export * from './chat-enabled-bots';
+export * from './threadContinuation';

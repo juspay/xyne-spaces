@@ -16,6 +16,7 @@ import {
   getChannelParticipantsForMention,
   getOnlineChannelParticipants,
   extractSpecialMentions,
+  hasAnyMentionsToNotify,
 } from '@/utils/mentionUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
@@ -45,9 +46,12 @@ import { InstalledAppsRepository } from '@/database/repositories/installedAppsRe
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
-import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
+import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS,
+  resolveThreadContinuation, isAcknowledgementText, DEFAULT_CONTINUATION_RECENCY_MS,
+  type ParticipantType } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { extractUserMentions } from '@/utils/mentionParser';
 import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -951,6 +955,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       channel,
       sender,
       channelParticipants
+    );
+
+    // Thread agent auto-continuation: a same-initiator, no-mention follow-up in a
+    // thread where the initiator already @mentioned a chat-enabled agent re-invokes
+    // that agent (BOT and/or APP) without an explicit re-tag. Feature-flagged;
+    // shadow-logs its decision even when disabled. See services/bots/threadContinuation.
+    await this.handleAgentThreadContinuation(
+      message,
+      conversation,
+      channel,
+      sender,
+      channelParticipants,
+      appUserIds,
+      channelName,
+      senderName,
+      channelProject?.name ?? null,
     );
 
     if (isReply && conversationId) {
@@ -2538,6 +2558,216 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       logger.error('[BOT-MENTION] Error handling bot mentions', {
         messageId: message.messageId,
         error: error,
+      });
+    }
+  }
+
+  /**
+   * Thread agent auto-continuation.
+   *
+   * When a human posts a no-mention reply in a channel thread where they had
+   * previously @mentioned a chat-enabled agent (BOT like ask-ai, or an installed
+   * APP/claw agent) and that agent already replied with no other human speaking
+   * since, re-invoke the SAME agent(s) without requiring a re-tag. The pure guard
+   * logic lives in `resolveThreadContinuation`; this method only fetches thread
+   * state, resolves chat-eligibility, and dispatches the returned targets.
+   *
+   * Feature-flagged via config.threadAgentContinuationEnabled — the decision is
+   * always logged (shadow mode) so the guard can be tuned on real traffic before
+   * execution is turned on.
+   */
+  private async handleAgentThreadContinuation(
+    message: {
+      messageId: string;
+      senderId: string;
+      content: string;
+      conversationId: string;
+      createdAt: Date;
+      hasAttachment: boolean;
+    },
+    conversation: { channelId: string; initialMessageId: string | null },
+    channel: { id?: string; name: string | null; scopeType: string | null; projectId?: string | null } | null,
+    sender: { name: string; userType?: string } | null,
+    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
+    appUserIds: string[],
+    channelName: string,
+    senderName: string,
+    projectName: string | null,
+  ): Promise<void> {
+    try {
+      // DMs already auto-respond via the mutator path.
+      if (
+        channel?.scopeType === ChannelScopeType.DM ||
+        channel?.scopeType === ChannelScopeType.GROUP_DM
+      ) {
+        return;
+      }
+
+      // Loop safety: never continue on an agent's own post.
+      if (sender?.userType === UserType.BOT || sender?.userType === UserType.APP) {
+        return;
+      }
+
+      const isThreadReply = !!(
+        conversation.initialMessageId && conversation.initialMessageId !== message.messageId
+      );
+      if (!isThreadReply) return;
+
+      // ACL: sender must be a channel participant.
+      if (!channelParticipants.some(p => p.userId === message.senderId)) return;
+
+      // Build the chat-eligible agent set: chat-enabled BOTs (by DB user id) plus
+      // installed APP agents present in this channel.
+      const chatEnabledAgentUserIds = new Set<string>();
+      const botEntriesByUserId = new Map<string, { botId: string; def: BotDefinition }>();
+      for (const entry of botCatalog.getAll()) {
+        const uid = botCatalog.getDbUserId(entry.definition.id);
+        if (!uid) continue;
+        botEntriesByUserId.set(uid, { botId: entry.definition.id, def: entry.definition });
+        if (CHAT_ENABLED_BOT_IDS.has(entry.definition.id)) {
+          chatEnabledAgentUserIds.add(uid);
+        }
+      }
+      for (const id of appUserIds) chatEnabledAgentUserIds.add(id);
+      if (chatEnabledAgentUserIds.size === 0) return;
+
+      // Fetch recent thread history (excluding the current message).
+      const recent = await db.message.findMany({
+        where: { conversationId: message.conversationId, messageId: { not: message.messageId } },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        select: {
+          messageId: true,
+          senderId: true,
+          content: true,
+          createdAt: true,
+          sender: { select: { userType: true } },
+        },
+      });
+
+      // Resolve which mentioned user ids are agents (BOT/APP) in one query.
+      const allMentioned = new Set<string>();
+      for (const m of recent) {
+        for (const id of extractUserMentions(m.content ?? '')) allMentioned.add(id);
+      }
+      let agentIdSet = new Set<string>();
+      if (allMentioned.size > 0) {
+        const agentUsers = await db.user.findMany({
+          where: { id: { in: [...allMentioned] }, userType: { in: [UserType.BOT, UserType.APP] } },
+          select: { id: true },
+        });
+        agentIdSet = new Set(agentUsers.map(u => u.id));
+      }
+
+      const priorMessages = recent.map(m => ({
+        messageId: m.messageId,
+        senderId: m.senderId,
+        senderType: (m.sender?.userType ?? UserType.USER) as ParticipantType,
+        createdAtMs: m.createdAt.getTime(),
+        mentionedAgentUserIds: extractUserMentions(m.content ?? '').filter(id => agentIdSet.has(id)),
+      }));
+
+      const plain = extractPlainTextFromHtml(message.content);
+      const decision = resolveThreadContinuation(
+        {
+          senderId: message.senderId,
+          senderType: (sender?.userType ?? UserType.USER) as ParticipantType,
+          hasAnyMention: hasAnyMentionsToNotify(message.content),
+          isAcknowledgement: isAcknowledgementText(plain),
+        },
+        {
+          nowMs: message.createdAt.getTime(),
+          isThreadReply,
+          chatEnabledAgentUserIds,
+          recencyWindowMs: DEFAULT_CONTINUATION_RECENCY_MS,
+          priorMessages,
+        },
+      );
+
+      logger.info('[THREAD-CONTINUATION] decision', {
+        messageId: message.messageId,
+        conversationId: message.conversationId,
+        enabled: config.threadAgentContinuationEnabled,
+        invoke: decision.invoke,
+        reason: decision.reason,
+        targets: decision.agentUserIds,
+      });
+
+      if (!decision.invoke || !config.threadAgentContinuationEnabled) return;
+
+      // De-dupe: a BOT that authored the thread's initial message is already handled
+      // by handleBotMentions' legacy bot-started continuation. Skip it here.
+      let initialAuthorId: string | null = null;
+      if (conversation.initialMessageId) {
+        const initial = await db.message.findUnique({
+          where: { messageId: conversation.initialMessageId },
+          select: { senderId: true },
+        });
+        initialAuthorId = initial?.senderId ?? null;
+      }
+
+      const question = plain.trim() || 'What happened in this thread until now?';
+      const appTargets: string[] = [];
+
+      for (const agentUserId of decision.agentUserIds) {
+        const botEntry = botEntriesByUserId.get(agentUserId);
+        if (botEntry) {
+          if (agentUserId === initialAuthorId) continue; // legacy path owns this
+          await executeBotForMention({
+            bot: { botUserId: agentUserId, botId: botEntry.botId, botDefinition: botEntry.def },
+            message: {
+              messageId: message.messageId,
+              senderId: message.senderId,
+              content: message.content,
+              conversationId: message.conversationId,
+            },
+            conversation,
+            question,
+            sender,
+            channelParticipants,
+          }).catch(err =>
+            logger.error('[THREAD-CONTINUATION] BOT execution failed', { agentUserId, error: err }),
+          );
+        } else if (appUserIds.includes(agentUserId)) {
+          appTargets.push(agentUserId);
+        }
+      }
+
+      if (appTargets.length > 0) {
+        const attachments = message.hasAttachment
+          ? await messageAttachmentRepository.findByMessageId(message.messageId)
+          : [];
+        void this.handlleMessageAppEvents(
+          AppEventType.APP_MENTION,
+          {
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            content: message.content,
+            cleanContent: plain,
+            createdAt: message.createdAt,
+            userId: message.senderId,
+            senderName,
+            channelId: conversation.channelId,
+            channelName,
+            ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+            ...(projectName ? { projectName } : {}),
+            ...(attachments.length > 0 && {
+              attachments: attachments.map(att => ({
+                attachmentId: att.id,
+                fileName: att.originalFilename,
+                fileSize: att.size,
+                mimeType: att.mimetype,
+                fileUrl: att.url,
+              })),
+            }),
+          } as AppMentionEventPayload,
+          appTargets,
+        );
+      }
+    } catch (error) {
+      logger.error('[THREAD-CONTINUATION] Error handling thread continuation', {
+        messageId: message.messageId,
+        error,
       });
     }
   }
