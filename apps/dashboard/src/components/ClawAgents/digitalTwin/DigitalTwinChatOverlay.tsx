@@ -134,7 +134,13 @@ export const DigitalTwinChatOverlay = ({
   const frameRadius =
     open && !closing ? EXPANDED_RADIUS : showSessionChrome ? COMPACT_RADIUS : EXPANDED_RADIUS;
   const sessionCard = showSessionChrome && !closing;
-  const overlayMode = closing ? 'closing' : !showSessionChrome ? 'idle' : open ? 'expanded' : 'compact';
+  const overlayMode = closing
+    ? 'closing'
+    : !showSessionChrome
+      ? 'idle'
+      : open
+        ? 'expanded'
+        : 'compact';
   const overlayModeRef = useRef(overlayMode);
   const overlayStateTweenRef = useRef(false);
   if (overlayModeRef.current !== overlayMode) {
@@ -273,9 +279,7 @@ export const DigitalTwinChatOverlay = ({
       style={
         {
           height: 0,
-          ...(docked
-            ? { '--dt-ask-dock-center': `${dockRect.left + dockRect.width / 2}px` }
-            : {}),
+          ...(docked ? { '--dt-ask-dock-center': `${dockRect.left + dockRect.width / 2}px` } : {}),
         } as CSSProperties
       }
     >
