@@ -4,8 +4,8 @@
  * Maps SDK user methods to backend operations.
  */
 
-import { query } from './types.js';
-import type { User, UserProfile } from '../types/index.js';
+import { api, query } from './types.js';
+import type { CurrentUser, User, UserProfile } from '../types/index.js';
 
 /**
  * User operations registry.
@@ -14,6 +14,12 @@ import type { User, UserProfile } from '../types/index.js';
  * Each entry maps an SDK method to the corresponding backend operation.
  */
 export const usersOperations = {
+  /**
+   * Identify the user this client acts as.
+   * Maps to: GET /api/sdk/me
+   */
+  me: api<void, CurrentUser>('GET', '/api/sdk/me'),
+
   /**
    * Get all users in workspace.
    * Maps to: Zero query 'getUsers'

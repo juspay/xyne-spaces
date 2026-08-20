@@ -53,7 +53,7 @@ function stubSequence(bodies: unknown[]): void {
 }
 
 const client = () =>
-  createClient({ baseUrl: 'https://spaces.example.com', token: 'xyne_sk_test' });
+  createClient({ baseUrl: 'https://spaces.example.com', apiKey: 'xyne_sk_test' });
 
 describe('claw operations', () => {
   it('reaches Claw through the Spaces origin with the Spaces credential', async () => {
@@ -130,7 +130,7 @@ describe('claw operations', () => {
 });
 
 describe('claw carries no credential of its own', () => {
-  it('sends nothing when the client has no token', async () => {
+  it('sends nothing when the client has no API key', async () => {
     stubFetch([]);
 
     await createClient({ baseUrl: 'https://spaces.example.com' }).claw.listAgents();
@@ -139,10 +139,10 @@ describe('claw carries no credential of its own', () => {
     expect(headers['Authorization']).toBeUndefined();
   });
 
-  it('picks up the Spaces token set after construction', async () => {
+  it('picks up an API key set after construction', async () => {
     stubFetch([]);
     const sdk = createClient({ baseUrl: 'https://spaces.example.com' });
-    sdk.setToken('xyne_sk_later');
+    sdk.setApiKey('xyne_sk_later');
 
     await sdk.claw.listAgents();
 

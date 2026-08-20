@@ -151,6 +151,34 @@ const ROUTES: readonly DirectRoute[] = [
     serverErrorCode: 'upstream_unavailable',
   },
 
+  /**
+   * Who the presented key acts as.
+   *
+   * The middleware has already resolved this, so it is a read of the request
+   * rather than a lookup. It exists because the key is an opaque encrypted blob:
+   * unlike a JWT there are no claims for a client to read, and several
+   * operations take the acting user's id as an argument.
+   */
+  {
+    method: 'get',
+    path: '/me',
+    service: async (_req, auth) => {
+      const { authData } = auth;
+      return {
+        id: authData.sub,
+        email: authData.email,
+        name: authData.name,
+        displayName: authData.displayName ?? null,
+        workspaceId: authData.workspaceId,
+        orgId: authData.orgId,
+        memberId: authData.memberId,
+        role: authData.role,
+        orgRole: authData.orgRole,
+        keyExpiresAt: auth.keyExpiresAt.toISOString(),
+      };
+    },
+  },
+
   /*
    * Claw runs through Spaces rather than being reached directly.
    *

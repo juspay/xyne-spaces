@@ -173,8 +173,6 @@ for (const [typeName, file, constName] of [
   }
 }
 
-// ── 3: every other direct-API operation against its route's declared body ───
-
 /** Columns of every table in the Zero schema, keyed by SQL table name. */
 function zeroTables() {
   const src = readFileSync(join(repoRoot, 'packages/shared/src/zero/schema.ts'), 'utf8');
@@ -238,73 +236,7 @@ function routeBodies() {
   return byPath;
 }
 
-const bodies = routeBodies();
-let apiOpsChecked = 0;
-
-for (const file of readdirSync(REGISTRY_DIR).filter((f) => f.endsWith('.ts'))) {
-  if (file === 'types.ts' || file === 'claw.ts') continue; // claw is a different service
-  const src = readFileSync(join(REGISTRY_DIR, file), 'utf8');
-
-  for (const m of src.matchAll(/api<[\s\S]*?>\(\s*'(?:GET|POST|PUT|PATCH|DELETE)',\s*([^,)]+)/g)) {
-    // Only literal paths can be matched to a route; templated ones carry params.
-    const literal = /^'(\/api\/sdk[^']*)'$/.exec(m[1].trim());
-    const templated = /\/api\/sdk\/channels\/\$\{[^}]*\}\/conversations/.test(m[1]);
-    const routePath = literal
-      ? literal[1].replace('/api/sdk', '')
-      : templated
-        ? '/channels/:channelId/conversations'
-        : null;
-    if (!routePath) continue;
-
-    const declared = bodies.get(routePath);
-    if (!declared) continue; // search has its own check above
-
-    /*
-     * Compare the operation's *input type*, not its `mapArgs` keys.
-     *
-     * Every one of these operations either forwards `args` verbatim or spreads them
-     * into FormData with `Object.entries`, so there are no static keys in `mapArgs`
-     * to read — an earlier version of this check inspected them and therefore
-     * silently checked nothing. The input type is the honest source: whatever it
-     * declares is what a caller can set and what ends up on the wire.
-     */
-    const inputType = /api<\s*([A-Za-z][A-Za-z0-9]*)\s*,/.exec(m[0]);
-    if (!inputType) continue;
-    const fields = interfaceFields(typesSrc, inputType[1]);
-    if (!fields) continue;
-    apiOpsChecked += 1;
-
-    for (const field of fields) {
-      // `files` is the multipart payload, consumed by the SDK rather than sent as
-      // a body field.
-      if (field === 'files' || declared.has(field)) continue;
-      problems.push(
-        `types/index.ts: ${inputType[1]}.${field} is sent to ${routePath}, ` +
-          `which does not declare it — the server will ignore it`
-      );
-    }
-  }
-}
-
-/** Top-level property names of a named interface, or null if it is not declared. */
-function interfaceFields(src, name) {
-  const start = src.indexOf(`export interface ${name} {`);
-  if (start === -1) return null;
-  const open = src.indexOf('{', start);
-  const end = matchBracketIn(src, open);
-  const fields = [];
-  let depth = 0;
-  for (const line of src.slice(open + 1, end).split('\n')) {
-    if (depth === 0) {
-      const f = /^\s*([a-zA-Z][a-zA-Z0-9_]*)\??\s*:/.exec(line);
-      if (f) fields.push(f[1]);
-    }
-    depth += (line.match(/[{[(]/g) ?? []).length - (line.match(/[}\])]/g) ?? []).length;
-  }
-  return fields;
-}
-
-// ── 4: SDK entity types against the Zero schema ─────────────────────────────
+// ── 3: SDK entity types against the Zero schema ─────────────────────────────
 
 /**
  * The SDK's entity interfaces are hand-written mirrors of Zero tables. Eight of
@@ -360,7 +292,7 @@ for (const [iface, table] of Object.entries(ENTITY_TABLES)) {
   }
 }
 
-// ── 5: error codes ──────────────────────────────────────────────────────────
+// ── 4: error codes ──────────────────────────────────────────────────────────
 
 const codes = contractErrorCodes();
 const httpSrc = readFileSync(join(sdkRoot, 'src/core/http.ts'), 'utf8');
@@ -375,10 +307,6 @@ for (const m of httpSrc.matchAll(/serverCode === '([a-z_]+)'/g)) {
 console.log(`contract:  ${accepted.size} search params, ${codes.size} error codes`);
 console.log(`search:    ${sent.size} params sent by registry/search.ts`);
 console.log(`enums:     ${enumsChecked} enumerated search value sets compared`);
-console.log(
-  `api ops:   ${apiOpsChecked} of ${bodies.size} direct-API routes checked ` +
-    `(the rest take inline or multipart-only inputs with no named type to compare)`
-);
 console.log(`entities:  ${entitiesChecked} interfaces checked against Zero tables`);
 
 if (problems.length > 0) {

@@ -6,22 +6,18 @@
 
 import { Resource } from './base.js';
 import { usersOperations } from '../registry/users.js';
-import { decodeAccessToken, isTokenExpired, type CurrentUser } from '../core/token.js';
-import type { User, UserProfile } from '../types/index.js';
+import type { CurrentUser, User, UserProfile } from '../types/index.js';
 
 export class UsersResource extends Resource {
   /**
-   * Identify the user this client is acting as.
+   * Identify the user this client acts as.
    *
-   * Read from the access token's claims rather than fetched, so it costs no
-   * round trip. That also means it returns the token's identity — id, email,
-   * workspace, org membership, granted scopes — not the full `User` row. Pass
-   * `me.id` to `getProfile` for the profile card, or to any `userId` argument.
+   * An API key is an opaque encrypted blob, not a JWT, so there are no claims to
+   * read locally — this is a request. Cache it if you need it often; the identity
+   * behind a key does not change.
    *
-   * Async for consistency with the rest of the SDK, and so this can move to a
-   * server call later without becoming a breaking change.
-   *
-   * @throws {AuthError} if no token is set, or it cannot be read
+   * `keyExpiresAt` says when the key stops working, so a long-running process can
+   * rotate before it does rather than discovering the expiry mid-request.
    *
    * @example
    * const me = await sdk.users.me();
@@ -29,22 +25,8 @@ export class UsersResource extends Resource {
    *   ticketId, stageId, status: 'APPROVED', updatedBy: me.id,
    * });
    */
-  async me(): Promise<CurrentUser> {
-    return decodeAccessToken(this.transport.getToken());
-  }
-
-  /**
-   * Whether the current access token has expired.
-   *
-   * Checked locally against the token's own expiry, with a 30-second allowance
-   * for clock skew. Returns true when no readable token is set.
-   */
-  async isSessionExpired(): Promise<boolean> {
-    try {
-      return isTokenExpired(decodeAccessToken(this.transport.getToken()));
-    } catch {
-      return true;
-    }
+  me(): Promise<CurrentUser> {
+    return this.call(usersOperations.me, undefined as void);
   }
 
   /**

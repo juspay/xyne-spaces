@@ -1029,6 +1029,28 @@ export interface FlowPlan {
 // ----- Claw Types (remote agents) -----
 
 /** A remote agent that can be dispatched to. */
+/**
+ * The identity an API key acts as, from `sdk.users.me()`.
+ *
+ * A key is an opaque encrypted blob rather than a JWT, so this comes from the
+ * server rather than being read out of the credential.
+ */
+export interface CurrentUser {
+  /** The acting user's id, as used by every `userId` argument in the API. */
+  id: string;
+  email: string;
+  name: string;
+  displayName: string | null;
+  workspaceId: string;
+  orgId: string;
+  /** Org membership id, required by some operations such as stage approvals. */
+  memberId: string;
+  role: string;
+  orgRole: string;
+  /** When the key stops working, ISO 8601. Rotate before this. */
+  keyExpiresAt: string;
+}
+
 export interface ClawAgent {
   id: string;
   slug: string;

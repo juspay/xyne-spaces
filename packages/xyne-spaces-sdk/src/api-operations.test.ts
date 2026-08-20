@@ -16,7 +16,7 @@ afterEach(() => {
 describe('direct API operations', () => {
   it('sends channel creation as authenticated JSON', async () => {
     stubFetch({ id: 'channel-1', channelId: 'channel-1' });
-    const sdk = createClient({ baseUrl: 'https://spaces.example.com', token: 'token-1' });
+    const sdk = createClient({ baseUrl: 'https://spaces.example.com', apiKey: 'xyne_sk_1' });
 
     await expect(
       sdk.channels.create({
@@ -30,7 +30,7 @@ describe('direct API operations', () => {
     expect(request?.url).toBe('https://spaces.example.com/api/sdk/channels');
     expect(request?.init.method).toBe('POST');
     expect(request?.init.headers).toMatchObject({
-      Authorization: 'Bearer token-1',
+      Authorization: 'Bearer xyne_sk_1',
       'Content-Type': 'application/json',
     });
     expect(JSON.parse(String(request?.init.body))).toMatchObject({
@@ -118,22 +118,22 @@ describe('direct API operations', () => {
   });
 });
 
-describe('OAuth catalog operations', () => {
-  it('routes reads through the v1 catalog with the bearer token', async () => {
+describe('catalog operations', () => {
+  it('routes reads through the catalog with the API key', async () => {
     stubFetch({ data: [{ id: 'status-1', channel: { id: 'channel-1', name: 'general' } }] });
-    const sdk = createClient({ baseUrl: 'http://localhost:3001', token: 'sdk-access-token' });
+    const sdk = createClient({ baseUrl: 'http://localhost:3001', apiKey: 'xyne_sk_access' });
 
     await expect(sdk.channels.list()).resolves.toHaveLength(1);
 
     const request = requests[0];
     expect(request?.url).toBe('http://localhost:3001/api/sdk/catalog/query');
-    expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer sdk-access-token' });
+    expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer xyne_sk_access' });
     expect(JSON.parse(String(request?.init.body))).toEqual({ name: 'userVisibleChannelsV3' });
   });
 
   it('routes writes through the v1 catalog', async () => {
     stubFetch({ success: true });
-    const sdk = createClient({ baseUrl: 'http://localhost:3001', token: 'sdk-access-token' });
+    const sdk = createClient({ baseUrl: 'http://localhost:3001', apiKey: 'xyne_sk_access' });
 
     await sdk.channels.rename('channel-1', 'General');
 
