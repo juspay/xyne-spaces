@@ -402,9 +402,11 @@ export const EmailBodyRenderer = ({
   onMailtoClickRef.current = onMailtoClick;
   const [height, setHeight] = useState<number>(24);
   const [showRemoteImages, setShowRemoteImages] = useState<boolean>(false);
+  const quoteOpenRef = useRef(false);
 
   useEffect(() => {
     setShowRemoteImages(false);
+    quoteOpenRef.current = false;
   }, [emailId]);
 
   const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments, body);
@@ -448,6 +450,14 @@ export const EmailBodyRenderer = ({
         img.addEventListener('load', measure);
         img.addEventListener('error', measure);
       });
+
+      const quoteDetails = contentDoc.querySelector<HTMLDetailsElement>('details.xd-quote-details');
+      if (quoteDetails) {
+        quoteDetails.open = quoteOpenRef.current;
+        quoteDetails.addEventListener('toggle', () => {
+          quoteOpenRef.current = quoteDetails.open;
+        });
+      }
 
       // Capture-phase image click handler — registered before the anchor handler
       // below so it intercepts first. Uses refs for latest blobUrl→attachmentId

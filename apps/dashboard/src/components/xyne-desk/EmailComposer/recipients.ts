@@ -37,6 +37,8 @@ export interface ThreadEmail {
   cc?: ReadonlyArray<string> | null;
   bcc?: ReadonlyArray<string> | null;
   replyTo?: ReadonlyArray<string> | null;
+  /** HTML body — present on the full Zero-loaded email rows; used to seed the reply quote trail. */
+  body?: string | null;
 }
 
 export interface ComposerEmail extends ThreadEmail {
