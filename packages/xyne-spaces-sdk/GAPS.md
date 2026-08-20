@@ -1,96 +1,79 @@
 # Catalog gaps
 
-The Zero catalog contains 254 queries and 244 mutators. It still deliberately
-does not contain operations that require multipart transfer, external side
-effects, or server-owned sequence allocation. Those are transport gaps, not SDK
-gaps: the SDK exposes them as direct `api` registry operations, following the
-structure originally used only by `sdk.search`.
+The Zero catalog contains 508 operations — 263 queries and 245 mutators — and the
+SDK reaches almost all of them through one pair of endpoints. It deliberately does
+not contain operations that need multipart transfer, external side effects, or
+server-owned sequence allocation.
+
+Those are **transport** gaps, not capability gaps. The SDK exposes them as direct
+`api` registry entries, following the structure originally used only by
+`sdk.search`. Callers cannot tell the difference: `sdk.channels.create` and
+`sdk.channels.list` look identical at the call site.
 
 ## Covered outside the catalog
 
-| Operation | SDK method | Public SDK route | Existing product workflow |
+| Operation | SDK method | Route | Why it is not a catalog operation |
 |---|---|---|---|
-| Create a channel | `sdk.channels.create` | `POST /api/sdk/channels` | `POST /api/channels` |
-| Check channel-name uniqueness | `sdk.channels.checkDuplicate` | `POST /api/sdk/channels/check-duplicate` | `POST /api/channels/check-duplicate` |
-| Create a ticket | `sdk.tickets.create` | `POST /api/sdk/tickets` | `POST /api/tickets` |
-| Create a conversation with file bytes | `sdk.conversations.createWithAttachments` | `POST /api/sdk/channels/:channelId/conversations` | `POST /api/channels/:channelId/conversations` |
-| Upload entity attachments | `sdk.attachments.upload` | `POST /api/sdk/attachments` | `POST /api/attachments/upload` |
-| Upload draft attachments | `sdk.attachments.uploadDraft` | `POST /api/sdk/draft-attachments` | `POST /api/drafts/attachments/upload` |
-| Search Vespa | `sdk.search.query` | `GET /api/sdk/search` | `GET /api/vespaSearch` |
+| Identify the caller | `sdk.users.me` | `GET /api/sdk/me` | An API key is opaque; there are no claims to read locally |
+| Create a channel | `sdk.channels.create` | `POST /api/sdk/channels` | Allocates server-owned associated rows |
+| Check channel-name uniqueness | `sdk.channels.checkDuplicate` | `POST /api/sdk/channels/check-duplicate` | Paired with the above |
+| Create a ticket | `sdk.tickets.create` | `POST /api/sdk/tickets` | Project sequence allocator |
+| Create a thread with files | `sdk.conversations.createWithAttachments` | `POST /api/sdk/channels/:channelId/conversations` | Multipart |
+| Upload entity attachments | `sdk.attachments.upload` | `POST /api/sdk/attachments` | Multipart + file storage |
+| Upload draft attachments | `sdk.attachments.uploadDraft` | `POST /api/sdk/draft-attachments` | Multipart + file storage |
+| Search | `sdk.search.query` | `GET /api/sdk/search` | Vespa, not Postgres |
+| Search field definitions | `sdk.search.getSchema` | `GET /api/sdk/search/schema` | Index introspection |
 
-The `/api/sdk` routes authenticate SDK OAuth access tokens, apply SDK scopes and
-rate limits, and then delegate to the established product controllers. This
-keeps sequence allocation, workspace checks, file storage, assignment, search
-indexing, and side effects in one implementation.
+Each of these delegates to the **same product controller the application calls**.
+Sequence allocation, workspace checks, file storage, assignment, search indexing,
+and side effects stay in one implementation — forking any of them for the SDK
+would be the fastest way to make SDK behaviour quietly disagree with product
+behaviour.
 
-Each of these routes declares a `request.body` schema in
-`api/sdk/domains/catalog-gaps.ts`. Those schemas are declaration-only — every
-field is optional and every object is `.passthrough()`, so runtime behaviour is
-unchanged and requiredness stays in the controllers. What they buy is
-`npm run contract-check`, which compares each operation's input type against the
-field set its route declares. Without them these operations had nothing to check
-against, which is how three non-existent search parameters shipped.
+## Claw: a different service, not a gap
 
-## A different kind of gap: Claw
+`sdk.claw` is neither a catalog gap nor a transport gap. Xyne Claw is a **separate
+service** (`apps/xyne-claw-auth`) with its own database, and its verifier accepts
+only its own credentials — a Spaces key is not valid there.
 
-`sdk.claw` is not a catalog gap or a transport gap. It is a **different service**.
+Rather than making callers hold two credentials, Spaces relays:
 
 | Operation | SDK method | Route |
 |---|---|---|
-| Device-flow login | `sdk.claw.login` | `POST /claw/api/v1/cli/auth/{start,token}` |
-| List agents | `sdk.claw.listAgents` | `GET /claw/api/v1/agents` |
-| List runs | `sdk.claw.listSessions` | `GET /claw/api/v1/runs/light` |
-| Dispatch a run | `sdk.claw.runAgent` | `POST /claw/api/v1/run` |
-| Read a run | `sdk.claw.getRun` | `GET /claw/api/v1/runs/:sessionId` |
+| List agents | `sdk.claw.listAgents` | `GET /api/sdk/claw/agents` |
+| Dispatch a run | `sdk.claw.run` | `POST /api/sdk/claw/runs` |
+| Read a run | `sdk.claw.getRun` | `GET /api/sdk/claw/runs/:sessionId` |
 
-`/claw/api/v1` is served by `apps/xyne-claw-auth`, which has its own database and
-accepts only its own `xyne_cli_` / `xyne_svc_` tokens. A Spaces OAuth token is a
-stateless RS256 JWT and fails its verifier outright, so Claw carries a **separate
-credential** and its own `HttpClient`. `setToken()` and `setClawToken()` never
-affect each other. This is the one place the SDK's transport choice is visible to
-callers, and the reason is documented in `core/claw-auth.ts`.
+The backend calls Claw with the deployment's own service credential and passes the
+caller's identity through explicitly. `sdk.claw.runAndWait` is a client-side
+convenience over `run` + `getRun`; it adds no endpoint.
 
-## The selected approach
+## Exclusions
 
-This is approach 1 from the original gap analysis: add direct API operations to
-the registry. Each public resource method remains a thin wrapper around one
-typed registry entry, just like search:
+The 57 entries in `src/exclusions.json` are a separate concern — operations that
+exist in the catalog but are deliberately not surfaced:
 
-```typescript
-create: api<CreateChannelInput, { id: string }>(
-  'POST',
-  '/api/sdk/channels',
-)
+| Reason | Count | Meaning |
+|---|---|---|
+| `superseded-by:<name>` | 45 | An older version where a newer one is exposed |
+| `deferred:sdlc` | 10 | The software-development-lifecycle subsystem: repos, links, baselines, discussions. Internal, driven by its own services and Claw execution profiles. Exposing it is a product decision |
+| `legacy-unused` | 1 | `myChannelParticipations` — backend-marked deprecated |
+| `deferred:<why>` | 1 | `activeSlashCommandArtifacts` — takes no arguments, scoped entirely to the caller's own id, and drives an in-product banner |
+
+Direct API operations and `sdk.claw` sit outside the catalog denominator, so
+`npm run coverage` accounts for all 508 catalog operations exactly:
+
 ```
-
-For multipart operations, `mapArgs` builds `FormData`; the shared transport
-recognizes it and lets `fetch` supply the boundary. JSON operations continue to
-use the same transport unchanged.
+catalog:  263 queries, 245 mutators (508 total)
+exposed:  451
+excluded: 57
+accounted for: 508/508
+```
 
 ## Attachment flow
 
 Files can be sent inline with `tickets.create` and
-`conversations.createWithAttachments`, or uploaded to a draft first. Draft
-uploads return attachment ids, which can be passed to `messages.send`,
-`conversations.create`, or `tickets.create`. Callers do not allocate draft,
+`conversations.createWithAttachments`, or uploaded to a draft first. Draft uploads
+return attachment ids that can then be passed to `messages.send`,
+`conversations.create`, or `tickets.create`. Callers never allocate draft,
 attachment, channel, ticket, conversation, or message ids themselves.
-
-## Exclusions
-
-The 47 entries in `src/exclusions.json` are a separate catalog concern:
-
-| Reason | Count | What it means |
-|---|---|---|
-| `superseded-by:<name>` | 45 | An older version where a newer one is exposed |
-| `legacy-unused` | 1 | `myChannelParticipations` — backend-marked deprecated |
-| `deferred:<why>` | 1 | `activeSlashCommandArtifacts` — takes no arguments and is scoped entirely to the caller's own id; it drives an in-product banner and has no standalone value for an API client |
-
-Direct API operations and `sdk.claw` are outside the catalog coverage
-denominator, so `npm run coverage` accounts for all 498 catalog operations:
-
-```
-catalog:  254 queries, 244 mutators (498 total)
-exposed:  451
-excluded: 47
-accounted for: 498/498
-```
