@@ -2997,6 +2997,7 @@ model Canvas {
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
   commentThreads CanvasCommentThread[]
+  suggestions  CanvasSuggestion[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
@@ -3046,6 +3047,50 @@ model CanvasVersion {
   @@index([createdBy])
 
   @@map("canvas_versions")
+  @@schema("public")
+}
+
+model CanvasSuggestion {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  canvasId    String
+  baseBlockIds Json @default("[]")
+  status          String    @default("PENDING") // PENDING | ACCEPTED | REJECTED | STALE
+  createdBy String // the user the agent acted for (no FK constraint)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  canvas  Canvas                   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  changes CanvasSuggestionChange[]
+
+  // Deliberately NO @@unique on content: unlike CanvasVersion, an agent may
+  // propose the same text twice and both proposals must be storable.
+  @@index([canvasId, status, createdAt])
+  @@index([createdBy])
+  @@map("canvas_suggestions")
+  @@schema("public")
+}
+
+
+model CanvasSuggestionChange {
+  workspaceId  String // denormalized tenant key (stamped on insert)
+  id           String @id @default(cuid())
+  suggestionId String
+  op String // replace | insert_after | delete
+  blockId String?
+  basePos      Int?
+  beforeContent Json? 
+  afterContent  Json? 
+  status          String    @default("PENDING") // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE
+  orderIndex Int // display order, and tiebreak for inserts sharing an anchor
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  suggestion CanvasSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  @@index([suggestionId, orderIndex])
+  @@index([blockId])
+  @@map("canvas_suggestion_changes")
   @@schema("public")
 }
 
