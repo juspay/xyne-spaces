@@ -1530,6 +1530,10 @@ interface Props {
   // a one-click "Run autonomously" button at the end of multi-turn planning.
   draftSuggestGoal: boolean;
   onDraftSuggestGoalChange: (v: boolean) => void;
+  /** Query prefetch opt-in (agent.config.prefetchContext). Resolves the
+   *  entities named in a question to ids before the agent's first turn. */
+  draftPrefetchContext: boolean;
+  onDraftPrefetchContextChange: (v: boolean) => void;
   // Post TODOs to Spaces opt-OUT (agent.config.postTodos). Default ON: the
   // live plan/TODO card from the todo-write tool is posted into the thread.
   // Turning it OFF sets postTodos=false, suppressing the card at claw-auth's
@@ -1717,6 +1721,8 @@ export function AgentDetailLeftColumn({
   researchAgentRepositoryOptions,
   draftSuggestGoal,
   onDraftSuggestGoalChange,
+  draftPrefetchContext,
+  onDraftPrefetchContextChange,
   draftPostTodos,
   onDraftPostTodosChange,
   draftVerifyResponses,
@@ -2556,7 +2562,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal || draftPlanMode || !draftPostTodos ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -2742,6 +2748,39 @@ export function AgentDetailLeftColumn({
           existing agents). Display when canEdit OR when already on, so
           read-only viewers see the current setting on agents that have it
           enabled. */}
+      {/* Prefetch context — opt-IN switch (agent.config.prefetchContext). Before
+          the first model turn, a cheap model extracts the names the question
+          mentions and the platform resolves each one against channels,
+          projects and people in parallel, then attaches the ids to the prompt.
+          Measured motivation: runs were spending whole turns (15-25s each)
+          re-deriving a user id already in the request payload and mapping
+          channel/project names to ids. Off by default. */}
+      {(canEdit || draftPrefetchContext) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Prefetch Context</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Resolve the channels, projects and people a question names before the agent&apos;s first turn, and hand it the ids up front.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Best for search and reporting agents that otherwise burn turns looking up ids. Results are attached as a hint the agent still verifies.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftPrefetchContext}
+                onChange={(e) => onDraftPrefetchContextChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Prefetch Context"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftPrefetchContext ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
       {(canEdit || draftSuggestGoal) && (
         <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
           <div className="flex items-start justify-between gap-4">

@@ -264,6 +264,13 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     timestampField: "createdAt",
     fields: [
       strField("channelId", "The channel's own id.", ["in"], "docId"),
+      // Name → id resolution. Mapped to `channelName_fuzzy`, NOT the bare
+      // `channelName`: the latter is `attribute | summary` with no index, so a
+      // `contains` on it is a whole-value exact match and "#xyne-spaces" would
+      // only ever match a channel called exactly that. `channelName_fuzzy` is
+      // `input channelName | index` with 3-gram matching + bm25 — built for
+      // exactly this lookup, and it survives partial names and typos.
+      strField("channelName", "Channel name — partial, case-insensitive (3-gram fuzzy index).", ["contains", "in"], "channelName_fuzzy"),
       strField("scopeType", "Channel scope: DEFAULT (regular channel), DM, GROUP_DM, TICKET, DOCUMENT.", ["in", "nin"]),
       strField("visibility", "Channel visibility: PUBLIC or PRIVATE.", ["in"]),
       strField("projectId", "Project the channel belongs to.", ["in", "contains"]),
@@ -403,6 +410,10 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     timestampField: "createdAt",
     fields: [
       strField("email", "User email.", ["contains"]),
+      // `name_fuzzy` is `input name | index | attribute` with 3-gram + bm25 —
+      // partial names and misspellings resolve, which a plain attribute match
+      // would not.
+      strField("name", "User name — partial (3-gram fuzzy index).", ["contains", "in"], "name_fuzzy"),
       strField("status", "User status (e.g. ACTIVE).", ["in"]),
       dateField("createdDate", "User creation date (dd/mm/yy, IST).", "createdAt"),
     ],
@@ -430,6 +441,12 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     aclSchemaKey: null,
     timestampField: "createdAt",
     fields: [
+      // `project.name` is `index | attribute | summary` with bm25, so `contains`
+      // is a real tokenised match. `projectId` mirrors the channel area's
+      // docId mapping so a project resolved by name can be re-queried by id
+      // (and a channel row's `projectId` can be followed back to its project).
+      strField("projectId", "The project's own id.", ["in"], "docId"),
+      strField("name", "Project name.", ["contains", "in"]),
       strField("createdBy", "Creator user id.", ["contains"]),
       dateField("createdDate", "Project creation date (dd/mm/yy, IST).", "createdAt"),
     ],

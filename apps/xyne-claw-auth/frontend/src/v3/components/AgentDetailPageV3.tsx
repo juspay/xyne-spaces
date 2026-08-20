@@ -171,6 +171,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // "Run autonomously" button (the `pendingGoalSuggestion` payload). Default
   // false so existing agents are unchanged.
   const [draftSuggestGoal, setDraftSuggestGoal] = useState(false);
+  // Query prefetch opt-in (agent.config.prefetchContext). When on, xyne-claw
+  // resolves the entities named in the question (channels, projects, people)
+  // BEFORE the first model turn and attaches the ids to the prompt, so the
+  // agent does not spend turns looking them up.
+  const [draftPrefetchContext, setDraftPrefetchContext] = useState(false);
   // Per-agent opt-OUT: post the live plan/TODO card (from the todo-write tool)
   // into the Spaces thread. Default true (post) so existing agents are
   // unchanged; turning it off sets agent.config.postTodos=false, which
@@ -305,6 +310,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
         setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
+        setDraftPrefetchContext((agentData.config as { prefetchContext?: boolean }).prefetchContext === true);
         setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
@@ -411,6 +417,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
     const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
+    const basePrefetchContext = (agent.config as { prefetchContext?: boolean }).prefetchContext === true;
     const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
@@ -453,6 +460,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
       draftSuggestGoal !== baseSuggestGoal ||
+      draftPrefetchContext !== basePrefetchContext ||
       draftPostTodos !== basePostTodos ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
@@ -470,7 +478,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -538,6 +546,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       nextConfig.repository_id = draftResearchAgentRepositoryId || null;
       delete nextConfig.RESEARCH_AGENT_PRODUCT_ID;
       delete nextConfig.RESEARCH_AGENT_REPOSITORY_ID;
+      if (draftPrefetchContext) {
+        nextConfig.prefetchContext = true;
+      } else {
+        delete nextConfig.prefetchContext;
+      }
       if (draftSuggestGoal) {
         nextConfig.suggestGoal = true;
       } else {
@@ -678,7 +691,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1061,6 +1074,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             researchAgentRepositoryOptions={researchAgentRepositoryOptions}
             draftSuggestGoal={draftSuggestGoal}
             onDraftSuggestGoalChange={setDraftSuggestGoal}
+            draftPrefetchContext={draftPrefetchContext}
+            onDraftPrefetchContextChange={setDraftPrefetchContext}
             draftPostTodos={draftPostTodos}
             onDraftPostTodosChange={setDraftPostTodos}
             draftVerifyResponses={draftVerifyResponses}
