@@ -1,3 +1,10 @@
+## [1.199.6](https://github.com/juspay/xyne-spaces/compare/v1.199.5...v1.199.6) (2026-08-20)
+
+
+### Reverts
+
+* Revert "test-local-machine (#730)" (#779) ([b64cb27](https://github.com/juspay/xyne-spaces/commit/b64cb273e4ffb001fae1821f14f8abc50cf2f1fe)), closes [#730](https://github.com/juspay/xyne-spaces/issues/730) [#779](https://github.com/juspay/xyne-spaces/issues/779)
+
 ## [1.199.5](https://github.com/juspay/xyne-spaces/compare/v1.199.4...v1.199.5) (2026-08-20)
 
 
