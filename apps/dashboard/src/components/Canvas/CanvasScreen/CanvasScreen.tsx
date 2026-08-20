@@ -261,7 +261,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   useEffect(() => {
     // Use canvas from navigation state if available (for newly created canvases)
     const canvasFromState = (state as LocationState)?.canvas;
-    const shouldUseState = canvasFromState && canvasFromState.id === canvasId && !singleCanvas;
+    const shouldUseState =
+      canvasFromState &&
+      canvasFromState.id === canvasId &&
+      (!singleCanvas || singleCanvasDetails.type !== 'complete');
 
     if (shouldUseState) {
       const isNewCanvas = initializedCanvasIdRef.current !== canvasFromState.id;
@@ -646,6 +649,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         return;
       }
 
+      // Set ref synchronously so re-entrant calls within the same tick are blocked
+      isSavingRef.current = true;
+
       // Always read the latest title from ref to prevent stale state
       const titleToSave = titleRef.current;
 
@@ -672,6 +678,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           description: 'Failed to save canvas. Please check your connection and try again.',
         });
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
 
         // If changes occurred while saving, save again immediately
@@ -692,6 +699,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const handleSave = useCallback(
     (blocks: PartialBlock[], html?: string): void => {
+      // Skip save if content hasn't changed since last save
+      if (JSON.stringify(blocks) === lastSavedContentRef.current) return;
       void performSave(blocks, selectedCanvas, html);
     },
     [performSave, selectedCanvas],
@@ -1604,6 +1613,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               onFilterChange={setActiveFilter}
               paginated={true}
             />
+          </div>
+        ) : singleCanvasDetails.type !== 'complete' ? (
+          <div className='h-full w-full flex items-center justify-center bg-muted'>
+            <div className='flex flex-col items-center gap-3'>
+              <Loader2 className='w-8 h-8 animate-spin text-muted-foreground' />
+              <span className='text-sm text-muted-foreground'>Loading canvas...</span>
+            </div>
           </div>
         ) : (
           <div

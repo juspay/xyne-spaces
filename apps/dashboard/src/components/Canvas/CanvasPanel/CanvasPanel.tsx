@@ -14,6 +14,7 @@ import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
+import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Switch } from '../../ui/Switch';
 import {
@@ -133,7 +134,23 @@ const CanvasPanel = (): ReactElement => {
         title: 'Untitled Canvas',
       });
 
-      void navigate(`/chat/canvas/${newCanvasId}`);
+      const now = Date.now();
+      const optimisticCanvas: Canvas = {
+        id: newCanvasId,
+        title: 'Untitled Canvas',
+        content: [],
+        createdBy: user?.id || '',
+        visibility: CanvasVisibility.PRIVATE,
+        isTemplate: false,
+        isArchived: false,
+        isCollaborative: true,
+        isStarred: false,
+        createdAt: now,
+        updatedAt: now,
+        accessLevel: CanvasRole.OWNER,
+      };
+
+      void navigate(`/chat/canvas/${newCanvasId}`, { state: { canvas: optimisticCanvas } });
     } catch {
       toast.error('Error', {
         description: 'Failed to create canvas. Please try again.',
@@ -141,7 +158,7 @@ const CanvasPanel = (): ReactElement => {
     } finally {
       setIsCreatingCanvas(false);
     }
-  }, [navigate, viewMode]);
+  }, [navigate, viewMode, user?.id]);
 
   const handleSelectCanvas = useCallback(
     (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
@@ -159,7 +176,7 @@ const CanvasPanel = (): ReactElement => {
       if (!isMobile && isCmdClick) {
         window.open(canvasUrl, '_blank');
       } else {
-        void navigate(canvasUrl);
+        void navigate(canvasUrl, { state: { canvas } });
       }
     },
     [navigate, isMobile],
