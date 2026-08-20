@@ -222,6 +222,9 @@ export function initSearchEvalRunWorker(): Worker<SearchEvalRunJobData> {
     log.error(`[search-eval-run] job ${job?.id} failed:`, err instanceof Error ? err.message : err);
     if (job?.data?.runId) void searchEvalRepository.updateRunStatus(job.data.runId, "failed").catch(() => {});
   });
+  worker.on("error", (err) => {
+    log.error(`[search-eval-run] worker error:`, err instanceof Error ? err.message : err);
+  });
   log.info("[search-eval-run] Worker started");
   return worker;
 }

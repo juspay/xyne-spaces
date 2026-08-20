@@ -377,6 +377,9 @@ export function initDigitalTwinBackfillWorker(): Worker<BackfillJobData> {
       err: err.message,
     });
   });
+  worker.on("error", (err) => {
+    logger.error("[backfill] worker error", { err: err instanceof Error ? err.message : String(err) });
+  });
 
   // Self-heal any backfill that got wedged (a `failed` job with no re-enqueue)
   // before this process started — e.g. jobs killed by the old maxStalledCount=1.

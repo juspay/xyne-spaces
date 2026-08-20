@@ -71,6 +71,19 @@ app.use(evalExtractRouter);
 app.use(entityLlmRouter);
 app.use(attachmentsRouter);
 
+// Global error handler — last-resort net for a synchronous throw in any route
+// or an error explicitly forwarded via next(err). Async handlers still catch
+// their own rejections (Express 4 does not auto-forward promise rejections),
+// but this guarantees an unexpected throw returns 500 instead of hanging the
+// S2S caller until its timeout. Must be registered AFTER all routes, and must
+// keep the 4-arg signature so Express treats it as error-handling middleware.
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  log.error("[xyne-claw] Unhandled route error:", err instanceof Error ? err.message : String(err));
+  if (!res.headersSent) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Internal error" });
+  }
+});
+
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
 });

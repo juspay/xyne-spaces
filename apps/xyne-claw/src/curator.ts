@@ -23,15 +23,16 @@
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { LITELLM } from "./config.js";
 import { chunkTranscript } from "./claude-session-parse.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("curator");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = LITELLM.url;
 // Background job: prefer the low-priority automation key so curator bursts
 // can't queue interactive agent turns on the main key's parallel-slot pool.
-const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
+const LITELLM_API_KEY = LITELLM.automationApiKey;
 // MEMORY_CURATOR_MODEL is the explicit per-job override and still wins. Absent
 // it, resolve from the same source as the key above — LiteLLM keys are
 // team-scoped with DISJOINT allowed-model lists, so the automation key paired
