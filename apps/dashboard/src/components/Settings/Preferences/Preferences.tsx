@@ -36,6 +36,7 @@ import { Button } from '../../ui/Button/Button';
 
 import { usePlatform } from '../../../hooks/usePlatform';
 import type { Theme } from '../../../hooks/useTheme';
+import { useIsAutomationsAdmin } from '../../Automation/useIsAutomationsAdmin';
 
 import { cn } from '../../../utils/classNames';
 import { isElectronApp } from '../../../utils/electronApp';
@@ -839,6 +840,7 @@ const PasswordSection: FC = () => {
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const { isMobile } = usePlatform();
+  const isAutomationsAdmin = useIsAutomationsAdmin();
   return (
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
@@ -852,19 +854,21 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Debug automations</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              Show the “Debug automations” action on messages, mails, and tickets
-            </p>
+        {isAutomationsAdmin && (
+          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+            <div>
+              <p className='text-sm font-medium text-foreground'>Debug automations</p>
+              <p className='text-xs text-muted-foreground mt-0.5'>
+                Show the “Debug automations” action on messages, mails, and tickets
+              </p>
+            </div>
+            <Switch
+              id='debug-automations'
+              checked={state.debugSettings.debugAutomations === true}
+              onCheckedChange={state.toggleDebugAutomations}
+            />
           </div>
-          <Switch
-            id='debug-automations'
-            checked={state.debugSettings.debugAutomations === true}
-            onCheckedChange={state.toggleDebugAutomations}
-          />
-        </div>
+        )}
 
         {!isMobile && (
           <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
