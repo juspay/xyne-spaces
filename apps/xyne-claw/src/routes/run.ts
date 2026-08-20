@@ -1711,7 +1711,8 @@ async function processTask(
       pptxAttachments,
       htmlAttachments,
       videoAttachments,
-    } = await ingestAttachments(attachments, log, { deferVideoProcessing: recordSkillCommand }, {
+    } = await ingestAttachments(attachments, log, {
+      deferVideoProcessing: recordSkillCommand,
       ...(providerConfigs?.["litellm"]?.apiKey ? { litellmApiKey: providerConfigs["litellm"].apiKey } : {}),
     });
 

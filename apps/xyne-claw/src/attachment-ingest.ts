@@ -69,7 +69,7 @@ export interface IngestAttachmentOptions {
    * running ffmpeg in the xyne-claw pod. Ordinary attachment behavior is
    * unchanged when false/omitted. */
   deferVideoProcessing?: boolean;
-  litellmApiKey: string | undefined;
+  litellmApiKey?: string;
 }
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
@@ -199,7 +199,7 @@ export async function ingestAttachments(
             `This recording is staged for the sandbox-backed \`analyze-skill-recording\` tool.\n`,
         };
       }
-      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName,{ litellmApiKey: options.litellmApiKey });
+      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName, options.litellmApiKey ? { litellmApiKey: options.litellmApiKey } : undefined);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),

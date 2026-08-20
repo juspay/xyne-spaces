@@ -2538,7 +2538,8 @@ router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{
     const createRes = await fetch(`${spacesUrl}/api/apps/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
-      body: JSON.stringify({ name: agent.name, description: agent.description }),
+      // Claw agents run in-cluster; mark the Spaces app INTERNAL.
+      body: JSON.stringify({ name: agent.name, description: agent.description, appType: "INTERNAL" }),
     });
 
     if (!createRes.ok) {
