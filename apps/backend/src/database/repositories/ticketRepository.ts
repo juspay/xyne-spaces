@@ -319,7 +319,7 @@ export class TicketRepository {
         boardId: ticket.boardId,
         actorId: data.createdBy,
       }).catch(error => {
-        logger.error(`[TicketRepository] Failed to dispatch ETA notifications for ${ticket.id}:`, error);
+        logger.error('[TicketRepository] Failed to dispatch ETA notifications', { ticketId: ticket.id, error });
       });
     }
 
@@ -729,10 +729,12 @@ export class TicketRepository {
           }
         });
 
-        logger.info(
-          `[TicketRepository] Created PR activity for ticket ${ticketId}, PR ${prActivityData.prId} ` +
-          `(action: ${prActivityData.prEvent}, author: ${prActivityData.prAuthor || 'unknown'})`
-        );
+        logger.info('[TicketRepository] Created PR activity', {
+          ticketId,
+          prId: prActivityData.prId,
+          action: prActivityData.prEvent,
+          author: prActivityData.prAuthor || 'unknown',
+        });
       } else if (source === ActivitySource.INTERNAL || source === ActivitySource.AUTOMATION) {
         // For INTERNAL / AUTOMATION source: Create STAGE_NAME activity
         await tx.ticketActivity.create({
@@ -752,9 +754,11 @@ export class TicketRepository {
           }
         });
 
-        logger.info(
-          `[TicketRepository] Created STAGE_NAME activity for ticket ${ticketId}: ${oldStageName} → ${newStageName}`
-        );
+        logger.info('[TicketRepository] Created STAGE_NAME activity', {
+          ticketId,
+          oldStageName,
+          newStageName,
+        });
       }
 
       // Create STATUS activity if status changed (for both WEBHOOK and INTERNAL sources)
@@ -779,14 +783,16 @@ export class TicketRepository {
           tx,
         );
 
-        logger.info(
-          `[TicketRepository] Created STATUS activity for ticket ${ticketId}: ${oldStatusV2} → ${newStatusV2}`
-        );
+        logger.info('[TicketRepository] Created STATUS activity', {
+          ticketId,
+          oldStatusV2,
+          newStatusV2,
+        });
       }
 
-      // Audit trail for the ETA evaluation (auto-recompute, risk detected/reopened/resolved,
-      // forecast-incomplete) - attributed to the system actor since these are computed by
-      // automatic recalculation, not authored by the user who moved the stage.
+      // Audit trail for the ETA evaluation (auto-recompute, risk detected/reopened/resolved) -
+      // attributed to the system actor since these are computed by automatic recalculation,
+      // not authored by the user who moved the stage.
       const activityIntents = buildEtaActivityIntents(etaResult, {
         currentStageId: targetStage.id,
         oldEta: currentTicket.eta ? currentTicket.eta.getTime() : null,
@@ -819,7 +825,7 @@ export class TicketRepository {
         boardId: currentTicket.boardId,
         actorId: updatedBy,
       }).catch(error => {
-        logger.error(`[TicketRepository] Failed to dispatch ETA notifications for ${ticketId}:`, error);
+        logger.error('[TicketRepository] Failed to dispatch ETA notifications', { ticketId, error });
       });
     }
 

@@ -2360,7 +2360,7 @@ class NotificationService {
         },
       });
       if (!ticket) {
-        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        logger.warn('[NotificationService] Ticket not found', { ticketId });
         return;
       }
 
