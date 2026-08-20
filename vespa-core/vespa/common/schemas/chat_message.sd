@@ -280,7 +280,6 @@ field text_fuzzy type string {
     summary channelMentions {}
     summary attachmentIds {}
     summary links {}
-    summary hasLinks {}
     summary channelName {}
     summary isPrivate {}
     summary channelId {}
