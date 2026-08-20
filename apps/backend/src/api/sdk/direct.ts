@@ -15,7 +15,7 @@
  */
 
 import { Router, type Request, type RequestHandler, type Response } from 'express';
-import type { ZodTypeAny } from 'zod';
+import { z, type ZodTypeAny } from 'zod';
 import { searchQuerySchema, searchSchemaQuerySchema } from '@xyne/spaces-contract';
 import type { AuthenticatedUser } from '@/types/express';
 import { ChannelController } from '@/controllers/channelController';
@@ -25,7 +25,14 @@ import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
+import {
+  getS2SClawRunStatus,
+  listS2SClawAgents,
+  runS2SClawAgent,
+} from '@/services/clawAgentService';
 import { uploadMultiple } from '@/middleware/upload';
+import { config } from '@/config/env';
+import type { SdkAuth } from './auth';
 import { ApiError } from './errors';
 import { handle } from './handler';
 import type { ErrorCode } from '@xyne/spaces-contract';
@@ -39,24 +46,50 @@ const draftAttachmentController = new DraftAttachmentController();
 /** A product controller: writes its response rather than returning it. */
 type Controller = (req: Request, res: Response) => Promise<void> | void;
 
-interface DirectRoute {
+/** A service function: returns its payload, so nothing needs capturing. */
+type Service = (req: Request, auth: SdkAuth) => Promise<unknown>;
+
+interface BaseRoute {
   readonly method: 'get' | 'post';
   /** Express path relative to the /api/sdk mount. */
   readonly path: string;
-  readonly controller: Controller;
   /** Route-local parsing, such as multipart handling. */
   readonly middleware?: readonly RequestHandler[];
-  /** Validates and coerces the query string before the controller sees it. */
+  /** Validates and coerces the query string before the handler sees it. */
   readonly query?: ZodTypeAny;
+  /** Validates and coerces the body before the handler sees it. */
+  readonly body?: ZodTypeAny;
   /** Adjust the query the controller receives. */
   readonly mapQuery?: (query: Record<string, unknown>) => Record<string, unknown>;
   /** Adjust the body the controller receives. */
   readonly mapBody?: (body: unknown) => unknown;
   /** Unwrap the controller's envelope into the SDK's response shape. */
   readonly unwrap?: (body: unknown) => unknown;
-  /** What a 5xx from this controller means. */
+  /** What a 5xx from this handler means. */
   readonly serverErrorCode?: ErrorCode;
 }
+
+/**
+ * A route is backed by one of two things, never both: a product controller that
+ * writes an Express response, or a service function that returns a value.
+ */
+type DirectRoute =
+  | (BaseRoute & { readonly controller: Controller; readonly service?: never })
+  | (BaseRoute & { readonly service: Service; readonly controller?: never });
+
+/**
+ * A Claw run request.
+ *
+ * `channelId` is the one real bridge between the two services: supplying one
+ * makes the agent post its reply into that Spaces thread as well as returning it.
+ */
+const clawRunBody = z.object({
+  agent: z.string().min(1),
+  task: z.string().min(1),
+  conversationId: z.string().min(1).optional(),
+  channelId: z.string().min(1).optional(),
+  context: z.string().optional(),
+});
 
 const ROUTES: readonly DirectRoute[] = [
   {
@@ -117,6 +150,66 @@ const ROUTES: readonly DirectRoute[] = [
     unwrap: unwrapEnvelope,
     serverErrorCode: 'upstream_unavailable',
   },
+
+  /*
+   * Claw runs through Spaces rather than being reached directly.
+   *
+   * `clawAgentService` already speaks to claw-auth with the deployment's own
+   * service credential, so a caller needs no second login and Claw needs no
+   * knowledge of API keys. The S2S variants are the ones that take an explicit
+   * identity — `userId`, `userName`, `userEmail`, and the three `spaces*` fields
+   * map one-to-one onto `AuthData` — and return a session id that can be polled.
+   * The non-S2S `runClawAgent` is the app-mention path: it requires a channel and
+   * conversation to post into and returns only whether it dispatched, so a result
+   * cannot be read back.
+   */
+  {
+    method: 'get',
+    path: '/claw/agents',
+    service: async () => listS2SClawAgents(),
+    serverErrorCode: 'upstream_unavailable',
+  },
+  {
+    method: 'post',
+    path: '/claw/runs',
+    body: clawRunBody,
+    serverErrorCode: 'upstream_unavailable',
+    service: async (req, auth) => {
+      const input = clawRunBody.parse(req.body);
+      const { authData } = auth;
+      const result = await runS2SClawAgent({
+        agentSlug: input.agent,
+        task: input.task,
+        userId: authData.sub,
+        userName: authData.displayName || authData.name || authData.email,
+        userEmail: authData.email,
+        spacesWorkspaceId: authData.workspaceId,
+        spacesOrgId: authData.orgId,
+        spacesOrgMemberId: authData.memberId,
+        workspaceId: authData.workspaceId,
+        // Required by the webhook contract. The run is polled through
+        // `/claw/runs/:sessionId` rather than delivered here, but claw-auth
+        // rejects a run without somewhere to call back to.
+        callbackUrl: config.xyneClaw.callbackUrl,
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+        ...(input.channelId ? { channelId: input.channelId } : {}),
+        ...(input.context ? { context: input.context } : {}),
+      });
+      return { sessionId: result.sessionId };
+    },
+  },
+  {
+    method: 'get',
+    path: '/claw/runs/:sessionId',
+    serverErrorCode: 'upstream_unavailable',
+    service: async (req, auth) => {
+      const sessionId = req.params['sessionId'];
+      if (!sessionId) throw new ApiError('invalid_request', 'sessionId is required.');
+      const status = await getS2SClawRunStatus(sessionId, auth.authData.sub);
+      if (!status) throw ApiError.notFound('Claw run');
+      return status;
+    },
+  },
 ];
 
 /** Build the router for every direct operation. */
@@ -128,6 +221,23 @@ export function createDirectRouter(): Router {
       route.path,
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
+        if (route.service) {
+          const auth = req.sdkAuth;
+          if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+          if (route.query) route.query.parse(req.query);
+          if (route.body) route.body.parse(req.body);
+          try {
+            res.status(200).json(await route.service(req, auth));
+          } catch (err) {
+            throw err instanceof ApiError
+              ? err
+              : new ApiError(route.serverErrorCode ?? 'internal', serviceMessage(err), {
+                  cause: err,
+                });
+          }
+          return;
+        }
+
         const result = await callController(route, req);
         for (const [name, value] of Object.entries(result.headers)) {
           res.setHeader(name, value);
@@ -161,7 +271,7 @@ interface ControllerResult {
  * these routes unscoped.
  */
 export async function callController(
-  route: DirectRoute,
+  route: DirectRoute & { controller: Controller },
   req: Request,
 ): Promise<ControllerResult> {
   const auth = req.sdkAuth;
@@ -314,6 +424,17 @@ function controllerError(status: number, body: unknown, serverErrorCode?: ErrorC
         ? new ApiError(serverErrorCode, message)
         : new ApiError('internal', 'The handler failed.', { cause: body });
   }
+}
+
+/**
+ * A service failure message.
+ *
+ * `clawAgentService` throws plain `Error`s whose text names the upstream and the
+ * status, which is worth keeping — but only the message, never the cause, since
+ * the cause can carry the deployment's service credential.
+ */
+function serviceMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'The upstream service failed.';
 }
 
 /** Parse fields that multipart delivered as JSON strings. */
