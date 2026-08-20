@@ -43,17 +43,16 @@ export const APPS_PUBLIC_BASE_URL = isLocalhost
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-// Zero rejects a relative server URL, so resolve the lane's '/sdlc-zero' against
-// the current origin. Keeping it a path is what lets one build run behind any host.
-const resolveZeroServer = (value: string): string =>
-  value.startsWith('/') ? `${window.location.origin}${value}` : value;
+// SDLC lane: same-origin path to its own zero-cache. A separate variable from
+// VITE_ZERO_SERVER on purpose — overloading that one let a baked absolute URL
+// win over the host, pinning every deployment to one host.
+const laneZeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) || '';
 
-export const VITE_ZERO_SERVER = resolveZeroServer(
-  (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
-    (isElectronBundled
-      ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-      : `${protocol}://${hostname}${zeroServerPort}/zero`),
-);
+export const VITE_ZERO_SERVER = laneZeroPath
+  ? `${window.location.origin}${laneZeroPath}`
+  : isElectronBundled
+    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+    : `${protocol}://${hostname}${zeroServerPort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
