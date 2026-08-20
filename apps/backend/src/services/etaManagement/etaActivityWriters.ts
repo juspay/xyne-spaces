@@ -58,16 +58,14 @@ export async function writeEtaActivitiesPrisma(
 /**
  * Zero-mutator counterpart to {@link writeEtaActivitiesPrisma}, writing the
  * same rows with the same shapes through `tx.mutate` so the two write paths
- * can't drift. Returns the resolved system actor id when anything was
- * written, for callers that also need it (e.g. to attribute a paired system
- * message to the same actor).
+ * can't drift.
  */
 export async function writeEtaActivitiesZero(
   tx: Transaction<Schema>,
   intents: ReadonlyArray<EtaActivityIntent>,
   ctx: EtaActivityWriteContext,
-): Promise<string | null> {
-  if (intents.length === 0) return null;
+): Promise<void> {
+  if (intents.length === 0) return;
   const systemActorId = ctx.systemActorId ?? (await getTicketBotActorId(ctx.workspaceId));
   for (const intent of intents) {
     await tx.mutate.ticket_activities.insert({
@@ -81,5 +79,4 @@ export async function writeEtaActivitiesZero(
       ...(ctx.channelId != null ? { channelId: ctx.channelId } : {}),
     });
   }
-  return systemActorId;
 }
