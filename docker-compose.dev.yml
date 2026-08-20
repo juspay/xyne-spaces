@@ -274,12 +274,17 @@ services:
       # VictoriaLogs datasource isn't bundled with core Grafana.
       - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
       - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=victoriametrics-logs-datasource
+      # Read-only claw-auth DB access for the Daily Brief distinct-user panels.
+      # Same names/defaults as docker/init-db.sh.
+      - CLAW_DB_USER=${CLAW_DB_USER:-claw}
+      - CLAW_DB_PASSWORD=${CLAW_DB_PASSWORD:-claw123}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - victoriametrics
       - victorialogs-errors
+      - postgres
     # Lets webhook contact points (e.g. the Desk alert integration) reach the
     # backend running on the host, same as zero-cache's ZERO_MUTATE_URL below.
     extra_hosts:
