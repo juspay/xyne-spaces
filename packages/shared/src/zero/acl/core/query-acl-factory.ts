@@ -130,6 +130,8 @@ import {
   WorkspaceOrganizationsACL,
   EntityAccessACL,
   SummaryTemplatesACL,
+  CanvasSuggestionsACL,
+  CanvasSuggestionChangesACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(table: TTable, ctx: Context): BaseQueryACL<TTable> {
@@ -312,6 +314,10 @@ export class QueryACLFactory {
         return new ApplicationsACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_versions':
         return new CanvasVersionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_suggestions':
+        return new CanvasSuggestionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_suggestion_changes':
+        return new CanvasSuggestionChangesACL(ctx) as BaseQueryACL<TTable>;
       case 'classification_mappings':
         return new ClassificationMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'coes':

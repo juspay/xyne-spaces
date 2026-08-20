@@ -1354,6 +1354,36 @@ export const canvasVersionTable = table('canvas_versions')
   })
   .primaryKey('id');
 
+export const canvasSuggestionTable = table('canvas_suggestions' /* CanvasSuggestion */)
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    canvasId: string(),
+    baseBlockIds: json(),
+    status: string(), // PENDING | ACCEPTED | REJECTED | STALE
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const canvasSuggestionChangeTable = table('canvas_suggestion_changes' /* CanvasSuggestionChange */)
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    suggestionId: string(),
+    op: string(), // replace | insert_after | delete
+    blockId: string().optional(),
+    basePos: number().optional(),
+    beforeContent: json().optional(),
+    afterContent: json().optional(),
+    status: string(), // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE
+    orderIndex: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
@@ -3971,6 +4001,33 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
   }),
 }));
 
+export const canvasSuggestionTableRelationships = relationships(
+  canvasSuggestionTable,
+  ({ one, many }) => ({
+    canvas: one({
+      sourceField: ['canvasId'],
+      destField: ['id'],
+      destSchema: canvasTable,
+    }),
+    changes: many({
+      sourceField: ['id'],
+      destField: ['suggestionId'],
+      destSchema: canvasSuggestionChangeTable,
+    }),
+  }),
+);
+
+export const canvasSuggestionChangeTableRelationships = relationships(
+  canvasSuggestionChangeTable,
+  ({ one }) => ({
+    suggestion: one({
+      sourceField: ['suggestionId'],
+      destField: ['id'],
+      destSchema: canvasSuggestionTable,
+    }),
+  }),
+);
+
 export const canvasCommentThreadTableRelationships = relationships(
   canvasCommentThreadTable,
   ({ one, many }) => ({
@@ -4803,6 +4860,8 @@ export const schema = createSchema({
     canvasFolderTable,
     canvasTable,
     canvasVersionTable,
+    canvasSuggestionTable,
+    canvasSuggestionChangeTable,
     canvasCommentThreadTable,
     canvasCommentTable,
     canvasParticipantTable,
@@ -4933,6 +4992,8 @@ export const schema = createSchema({
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasVersionTableRelationships,
+    canvasSuggestionTableRelationships,
+    canvasSuggestionChangeTableRelationships,
     canvasCommentThreadTableRelationships,
     canvasCommentTableRelationships,
     canvasParticipantTableRelationships,
