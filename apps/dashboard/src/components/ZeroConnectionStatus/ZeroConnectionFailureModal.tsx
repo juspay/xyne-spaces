@@ -2,7 +2,6 @@ import { ReactElement } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
-import { useAuth } from '@/hooks/useAuth';
 
 interface ZeroConnectionFailureModalProps {
   onClose?: () => void;
@@ -12,14 +11,17 @@ export const ZeroConnectionFailureModal = ({
   onClose,
 }: ZeroConnectionFailureModalProps = {}): ReactElement => {
   const isElectron = isElectronApp();
-  const { logout } = useAuth();
 
   const handleRefresh = (): void => {
     logger.info(LoggerEvent.APP_REFRESH, {
       trigger: 'USER_CLICK_CONNECTION_FAILURE_MODAL',
     });
 
-    logout();
+    // Reload the app to re-establish the Zero connection. Previously this called
+    // logout(), which signed the user out entirely (especially disruptive on
+    // Electron) instead of simply reconnecting — contradicting the modal copy
+    // ("Click below to reload the app" / "refresh").
+    window.location.reload();
   };
 
   return (

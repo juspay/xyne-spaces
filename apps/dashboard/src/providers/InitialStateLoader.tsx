@@ -111,6 +111,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const retryCountRef = useRef(0);
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null);
   const previousStateRef = useRef<string>('');
+  const latestStateNameRef = useRef<string>('');
+  const disconnectedNudgeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const MAX_RETRIES = 4;
 
   const getRetryDelay = (retryCount: number): number => {
@@ -264,9 +266,48 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     }
   }, [context.userID, schemaVersion, isHydrated]);
 
+  // Force a Zero reconnect when the OS/network wakes the app back up.
+  // After the laptop sleeps or the WiFi changes, the underlying socket is dead
+  // but Zero's internal ping/reconnect timers were frozen while suspended, so
+  // nothing tells it to reconnect and the app can sit on the loader for ~60s
+  // (or until a manual restart). The browser fires `online` / `visibilitychange`
+  // / `focus` on wake — use those to nudge Zero to reconnect immediately.
+  useEffect(() => {
+    const forceReconnect = (trigger: string): void => {
+      // Only nudge when we're not already connected — avoid churning a healthy socket.
+      if (latestStateNameRef.current === 'connected') {
+        return;
+      }
+      logger.info(LoggerEvent.ZERO_ERROR_RECONNECT_INITIATED, {
+        trigger,
+        reason: `network/visibility wake (state=${latestStateNameRef.current || 'unknown'})`,
+      });
+      void zero.connection.connect();
+    };
+
+    const handleOnline = (): void => forceReconnect('NETWORK_ONLINE');
+    const handleVisibility = (): void => {
+      if (document.visibilityState === 'visible') {
+        forceReconnect('VISIBILITY_VISIBLE');
+      }
+    };
+    const handleFocus = (): void => forceReconnect('WINDOW_FOCUS');
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return (): void => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [zero]);
+
   useEffect(() => {
     const currentState = state.name;
     const previousState = previousStateRef.current;
+    latestStateNameRef.current = currentState;
 
     switch (currentState) {
       case 'needs-auth':
@@ -331,13 +372,35 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           clearTimeout(modalTimerRef.current);
           modalTimerRef.current = null;
         }
+        if (disconnectedNudgeTimerRef.current) {
+          clearTimeout(disconnectedNudgeTimerRef.current);
+          disconnectedNudgeTimerRef.current = null;
+        }
         setShowModal(false);
         handlePostErrorReset(previousState);
         break;
-      case 'disconnected':
-        // Don't show modal for disconnected state, only for error state
+      case 'disconnected': {
+        // Don't show modal for disconnected state, only for error state.
         handlePostErrorReset(previousState);
+        // The `disconnected` state (e.g. "unable to connect for 60s", ping
+        // failure after sleep/WiFi change) is otherwise a dead-end: the error
+        // retry ladder never runs for it, so the app can sit on the loader
+        // until a manual restart. Schedule a single bounded reconnect nudge.
+        if (disconnectedNudgeTimerRef.current) {
+          clearTimeout(disconnectedNudgeTimerRef.current);
+        }
+        disconnectedNudgeTimerRef.current = setTimeout(() => {
+          disconnectedNudgeTimerRef.current = null;
+          if (latestStateNameRef.current !== 'connected') {
+            logger.info(LoggerEvent.ZERO_ERROR_RECONNECT_INITIATED, {
+              trigger: 'ZERO_SOCKET_DISCONNECTED',
+              reason: 'bounded reconnect nudge from disconnected state',
+            });
+            void zero.connection.connect();
+          }
+        }, 3000);
         break;
+      }
       default:
         handlePostErrorReset(previousState);
         break;
@@ -354,6 +417,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       if (modalTimerRef.current) {
         clearTimeout(modalTimerRef.current);
         modalTimerRef.current = null;
+      }
+      if (disconnectedNudgeTimerRef.current) {
+        clearTimeout(disconnectedNudgeTimerRef.current);
+        disconnectedNudgeTimerRef.current = null;
       }
     };
   }, [state.name]);
