@@ -146,7 +146,8 @@ export class TagRepository {
     workspaceId: string,
     sourceType: string,
     tagCategory: string,
-    query?: string
+    query?: string,
+    pagination?: { skip?: number; take?: number }
   ): Promise<string[]> {
     const where: Prisma.TagWhereInput = {
       workspaceId,
@@ -161,7 +162,8 @@ export class TagRepository {
       distinct: ['tag'],
       select: { tag: true },
       orderBy: { tag: 'asc' },
-      take: 50,
+      skip: pagination?.skip,
+      take: pagination?.take ?? 50,
     });
     return rows.map((r) => r.tag);
   }

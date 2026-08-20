@@ -27,11 +27,19 @@ import {
 const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
 const CANVAS_LABEL_CATEGORY = 'generic';
 const MAX_CANVAS_LABEL_BULK_IDS = 200;
-const MAX_CANVAS_LABEL_NAMES_PER_REQUEST = 20;
+// Shared cap for both add (names) and remove (labelIds): how many labels one
+// request can mutate at once.
+const MAX_CANVAS_LABELS_PER_REQUEST = 20;
+const DEFAULT_CANVAS_LABEL_SUGGESTIONS_LIMIT = 50;
+const MAX_CANVAS_LABEL_SUGGESTIONS_LIMIT = 100;
 
 const CanvasLabelBodySchema = z.object({
   // Canvas labels are freeform user labels, unlike configured desk tags.
-  names: z.array(z.string().min(1).max(64)).min(1).max(MAX_CANVAS_LABEL_NAMES_PER_REQUEST),
+  names: z.array(z.string().min(1).max(64)).min(1).max(MAX_CANVAS_LABELS_PER_REQUEST),
+});
+
+const CanvasLabelIdsBodySchema = z.object({
+  labelIds: z.array(z.string().min(1)).min(1).max(MAX_CANVAS_LABELS_PER_REQUEST),
 });
 
 const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
@@ -52,6 +60,12 @@ const parseCanvasIds = (value: unknown): string[] => {
         .filter(Boolean)
     )
   ).slice(0, MAX_CANVAS_LABEL_BULK_IDS);
+};
+
+const parseNonNegativeIntParam = (value: unknown, fallback: number): number => {
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 };
 
 const isUniqueConstraintError = (error: unknown): boolean => {
@@ -132,11 +146,18 @@ export class CanvasController {
 
       const query =
         typeof req.query.query === 'string' ? normalizeCanvasLabelKey(req.query.query) : '';
+      const offset = parseNonNegativeIntParam(req.query.offset, 0);
+      const limit = Math.min(
+        parseNonNegativeIntParam(req.query.limit, DEFAULT_CANVAS_LABEL_SUGGESTIONS_LIMIT),
+        MAX_CANVAS_LABEL_SUGGESTIONS_LIMIT
+      );
+
       const rows = await tagRepository.distinctTagsByCategory(
         workspaceId,
         CANVAS_LABEL_SOURCE_TYPE,
         CANVAS_LABEL_CATEGORY,
-        query || undefined
+        query || undefined,
+        { skip: offset, take: limit }
       );
 
       const seen = new Set<string>();
@@ -148,12 +169,9 @@ export class CanvasController {
         }
         seen.add(key);
         labels.push(labelName);
-        if (labels.length >= 50) {
-          break;
-        }
       }
 
-      res.status(200).json({ labels });
+      res.status(200).json({ labels, offset, limit });
     } catch (error) {
       logger.error('[CANVAS-LABELS] Failed to fetch label suggestions:', error);
       res.status(500).json({ error: 'Failed to fetch canvas label suggestions' });
@@ -543,9 +561,9 @@ export class CanvasController {
 
   removeCanvasLabel = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { canvasId, labelId } = req.params;
-      if (!canvasId || !labelId) {
-        res.status(400).json({ error: 'Canvas ID and label ID are required' });
+      const { canvasId } = req.params;
+      if (!canvasId) {
+        res.status(400).json({ error: 'Canvas ID is required' });
         return;
       }
 
@@ -554,21 +572,27 @@ export class CanvasController {
         return;
       }
 
-      const userId = req.user!.id!;
-      const workspaceId = req.user!.workspaceId!;
-      const existing = await tagRepository.findById(labelId, workspaceId);
-
-      if (
-        !existing ||
-        existing.sourceId !== canonicalCanvasId ||
-        existing.sourceType !== CANVAS_LABEL_SOURCE_TYPE ||
-        existing.tagCategory !== CANVAS_LABEL_CATEGORY
-      ) {
-        res.status(200).json({ success: true });
+      const parsedBody = CanvasLabelIdsBodySchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'At least one label ID is required' });
         return;
       }
 
-      await tagRepository.softDeleteTagRow(existing.id, userId);
+      const userId = req.user!.id!;
+      const workspaceId = req.user!.workspaceId!;
+      const labelIds = Array.from(new Set(parsedBody.data.labelIds));
+
+      const existingRows = await tagRepository.findByIds(labelIds, workspaceId);
+      const removableIds = existingRows
+        .filter(
+          (row) =>
+            row.sourceId === canonicalCanvasId &&
+            row.sourceType === CANVAS_LABEL_SOURCE_TYPE &&
+            row.tagCategory === CANVAS_LABEL_CATEGORY
+        )
+        .map((row) => row.id);
+
+      await Promise.all(removableIds.map((id) => tagRepository.softDeleteTagRow(id, userId)));
 
       res.status(200).json({ success: true });
     } catch (error) {
