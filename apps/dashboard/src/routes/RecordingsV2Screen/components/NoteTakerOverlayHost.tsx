@@ -33,6 +33,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   // hide the overlay when live recording detail screen entered.
   const isViewingThisRecording =
     Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
+  const isOnRecordingsSection = /^\/[^/]+\/recordings(\/|$)/.test(pathname);
 
   const handleStop = useCallback((): void => {
     const stoppedRecordingId = externalId;
@@ -65,6 +66,11 @@ export function NoteTakerOverlayHost(): ReactElement {
 
   // ─── Native pill hand-off (Electron only) ─────────────────────────────────
   const isElectron = isElectronApp();
+
+  useEffect(() => {
+    if (!isElectron || !isActive) return;
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: !isOnRecordingsSection });
+  }, [isElectron, isActive, isOnRecordingsSection]);
 
   useEffect(() => {
     if (!isElectron) return;

@@ -19,6 +19,9 @@ import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
 
+const EXECUTION_FETCH_MAX_RETRIES = 3;
+const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
+
 class AutomationWorker {
   private isInitialized = false;
   private executor: AutomationExecutor | null = null;
@@ -50,7 +53,16 @@ class AutomationWorker {
     const { executionId } = job.data;
     logger.info(`[AUTOMATION-WORKER] Job ${job.id} starting — execution=${executionId}`);
 
-    const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
+    const fetchExecution = () => db.workflowExecution.findUnique({ where: { id: executionId } });
+    let execution = await fetchExecution();
+    for (let retry = 0; !execution && retry < EXECUTION_FETCH_MAX_RETRIES; retry++) {
+      const delayMs = EXECUTION_FETCH_RETRY_BASE_DELAY_MS * 2 ** retry;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      execution = await fetchExecution();
+      logger.warn(
+        `[AUTOMATION-WORKER-RETRY] execution=${executionId} fetch failed, retrying (${retry + 1})`,
+      );
+    }
     if (!execution || !isExecutableAutomationWorkflowType(execution.workflowType)) {
       logger.warn(
         `[AUTOMATION-WORKER] execution=${executionId} missing or wrong workflowType — dropping`,
