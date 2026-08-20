@@ -2070,7 +2070,8 @@ export const appsTable = table('apps')
     scope: string(),
     version: number(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    // signingSecret intentionally NOT synced to clients (XYNE-56394): the app HMAC secret
+    // is read server-side via Prisma; the client never needs it. Kept in Postgres/Prisma only.
     createdAt: number(),
     updatedAt: number(),
   })

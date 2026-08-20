@@ -139,6 +139,12 @@ export function focusMainWindow(pathname?: string): BrowserWindow | null {
   return mainWindow;
 }
 
+function isMainWindowFocused(): boolean {
+  if (focusRequestTimer) return true;
+  const mainWindow = getMainWindow();
+  return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
+}
+
 function syncPowerSaveBlocker(): void {
   if (active && powerSaveBlockerId === null) {
     powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
@@ -157,7 +163,7 @@ function cancelPendingPillSync(): void {
 
 function syncPillVisibility(): void {
   cancelPendingPillSync();
-  if (active && isRecordingPillEnabled() && minimized) {
+  if (active && isRecordingPillEnabled() && (minimized || !isMainWindowFocused())) {
     showRecordingPill({
       startTime: startTime ?? Date.now(),
       paused,

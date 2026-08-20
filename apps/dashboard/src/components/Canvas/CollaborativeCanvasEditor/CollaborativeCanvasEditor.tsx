@@ -80,14 +80,18 @@ import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasIn
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
-const canvasDictionary = {
+const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
+
+const buildCanvasDictionary = (placeholder: string): typeof en => ({
   ...en,
   placeholders: {
     ...en.placeholders,
-    default: "Write something, or press '/' for commands",
-    emptyDocument: "Write something, or press '/' for commands",
+    default: placeholder,
+    emptyDocument: placeholder,
   },
-};
+});
+
+const canvasDictionary = buildCanvasDictionary(DEFAULT_CANVAS_PLACEHOLDER);
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
@@ -127,7 +131,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       channelId,
       title,
       editable = true,
-      placeholder: _placeholder,
+      placeholder,
       className = '',
       onFileUpload,
       onChange,
@@ -191,9 +195,14 @@ export const CollaborativeCanvasEditor = forwardRef<
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
     const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
+    const dictionary = useMemo(
+      () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
+      [placeholder],
+    );
+
     const baseEditorOptions = {
       schema: canvasSchema,
-      dictionary: canvasDictionary,
+      dictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,

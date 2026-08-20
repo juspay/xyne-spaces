@@ -1,6 +1,8 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../ui/ShortcutHint';
+import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
@@ -43,6 +45,11 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import type { NavigationItem } from './navigationConfig';
+import {
+  RAIL_SHORTCUT_LIMIT,
+  railItemIndexFromEvent,
+  railShortcutsAvailable,
+} from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
@@ -287,6 +294,19 @@ const AppSidebar = (): ReactElement => {
     mixpanelService.track(EVENTS.NAVIGATION, { item: label });
   };
 
+  const railShortcuts = railShortcutsAvailable();
+
+  useShortcutById(
+    'global.goToRailItem',
+    event => {
+      const item = toolbarItems[railItemIndexFromEvent(event)];
+      if (!item) return;
+      handleNavigationClick(item.label);
+      void navigate(prefixWs(item.path));
+    },
+    { enabled: railShortcuts && !isSupportContext },
+  );
+
   const handleMoreNavigate = (label: string): void => {
     setIsMoreOpen(false);
     handleNavigationClick(label);
@@ -363,7 +383,9 @@ const AppSidebar = (): ReactElement => {
                   </li>
                 )}
 
-                {toolbarItems.map(item => {
+                {toolbarItems.map((item, index) => {
+                  const shortcutIndex =
+                    railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
@@ -375,7 +397,20 @@ const AppSidebar = (): ReactElement => {
 
                   return (
                     <li key={item.path} className='relative'>
-                      <Tooltip content={item.label} side='right' delayDuration={0}>
+                      <Tooltip
+                        content={
+                          shortcutIndex ? (
+                            <span className='flex items-center gap-2'>
+                              {item.label}
+                              <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                            </span>
+                          ) : (
+                            item.label
+                          )
+                        }
+                        side='right'
+                        delayDuration={0}
+                      >
                         <Link
                           to={prefixWs(item.path)}
                           onClick={() => handleNavigationClick(item.label)}
