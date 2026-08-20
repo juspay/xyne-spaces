@@ -49,6 +49,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
+import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -85,6 +86,9 @@ const ChannelItemV2 = memo(
     const isDM = isDMChannel(channel.scopeType);
 
     const hasActiveCall = useChannelHasActiveCall(channel.id);
+    const hasSlashCommandArtifactSideEffect = useChannelHasSlashCommandArtifactSideEffect(
+      channel.id,
+    );
 
     const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
@@ -193,6 +197,12 @@ const ChannelItemV2 = memo(
           <span className='flex h-4 w-4 shrink-0 items-center justify-center'>{getIcon()}</span>
           <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide truncate'>{displayName}</span>
+            {hasSlashCommandArtifactSideEffect && (
+              <span className='relative flex size-2 shrink-0' aria-label='Active incident'>
+                <span className='absolute inline-flex size-full animate-ping rounded-full bg-orange-500 opacity-70' />
+                <span className='relative inline-flex size-2 rounded-full bg-orange-500' />
+              </span>
+            )}
             {isSupportChannel && <SupportChannelBadge />}
             {is1on1DM && (
               <StatusIndicator

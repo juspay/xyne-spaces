@@ -23,8 +23,10 @@ import {
   fetchAllGoogleEventsForBaseline,
 } from '@/services/googleCalendarApi';
 import { storeGCalEventsAsCallsForUser } from '@/services/googleCalendarCallStore';
+import { reconcileXyneCallLinks } from '@/services/xyneCallLinkInjector';
 import { GoogleCalendarWatchService } from '@/services/googleCalendarWatchService';
 import {
+  CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
   CALENDAR_SYNC_LOOKAHEAD_DAYS,
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
@@ -52,6 +54,30 @@ type EnqueueIncrementalSyncOptions = {
 function continuationJobId(sourceId: string, pageToken: string): string {
   const tokenHash = createHash('sha1').update(pageToken).digest('hex');
   return `google-calendar-incremental-${sourceId}-${tokenHash}`;
+}
+
+/**
+ * Bull refuses to create a new job when a job with the same jobId already
+ * exists in a terminal state (failed/completed) that hasn't been removed.
+ * Since our jobIds are deterministic per sourceId (by design, to serialize
+ * access to the Google syncToken cursor), a single exhausted-retries failure
+ * would otherwise permanently block every future sync for that source.
+ * Clear out any dead job for this id before adding a fresh one.
+ */
+async function clearDeadJobForReenqueue(queue: Bull.Queue, jobId: string): Promise<void> {
+  try {
+    const existing = await queue.getJob(jobId);
+    if (!existing) return;
+    if ((await existing.isFailed()) || (await existing.isCompleted())) {
+      await existing.remove();
+      logger.warn(`${TAG} Cleared stale job before re-enqueue`, { jobId });
+    }
+  } catch (err) {
+    logger.warn(`${TAG} Failed to check/clear stale job before re-enqueue`, {
+      jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function resolveSourceId(jobData: CalendarSyncJobData): Promise<string> {
@@ -87,8 +113,12 @@ async function performManualSync(sourceId: string): Promise<void> {
       MAX_CALENDAR_EVENTS_PER_SYNC
     );
 
+    const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+    );
+
     await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
-      storeGCalEventsAsCallsForUser(events, userId, user.email, {
+      storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
         isFullSync: true,
         timeRange: { startsAfter: now, startsBefore: future },
         skipCancelRemoved: truncated,
@@ -145,8 +175,12 @@ async function performIncrementalSync(
       MAX_CALENDAR_EVENTS_PER_SYNC
     );
 
+    const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+    );
+
     await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
-      storeGCalEventsAsCallsForUser(events, userId, user.email, {
+      storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
         isFullSync: true,
         skipCancelRemoved: truncated,
       }),
@@ -186,8 +220,12 @@ async function performIncrementalSync(
         MAX_CALENDAR_EVENTS_PER_SYNC
       );
 
+      const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+        reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+      );
+
       await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
-        storeGCalEventsAsCallsForUser(events, userId, user.email, {
+        storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
           isFullSync: true,
           skipCancelRemoved: truncated,
         }),
@@ -207,9 +245,10 @@ async function performIncrementalSync(
       return null;
     }
 
-    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
-      storeGCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false }),
-    );
+    await runWithContext({ userId, workspaceId: user.workspaceId }, async () => {
+      const reconciledEvents = await reconcileXyneCallLinks(result.events, credentials, user.email, user.workspaceId);
+      await storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, { isFullSync: false });
+    });
 
     if (result.nextPageToken) {
       logger.warn(`${TAG} Incremental sync hit event cap, scheduling continuation`, {
@@ -311,9 +350,15 @@ class GoogleCalendarSyncQueue {
         throw err;
       }
       if (continuation) {
+        const continuationId = continuationJobId(continuation.sourceId, continuation.pageToken);
+        await clearDeadJobForReenqueue(queue, continuationId);
+        logger.info(`${TAG} Scheduling incremental continuation`, {
+          sourceId: continuation.sourceId,
+          delayMs: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
+        });
         await queue.add('incremental-sync', continuation, {
-          jobId: continuationJobId(continuation.sourceId, continuation.pageToken),
-          delay: 0,
+          jobId: continuationId,
+          delay: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
         });
       }
     });
@@ -333,12 +378,12 @@ class GoogleCalendarSyncQueue {
 
   async enqueueManualSync(sourceId: string): Promise<void> {
     const queue = await this.ensureQueue();
+    const jobId = `google-calendar-manual-${sourceId}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'manual-sync',
       { sourceId },
-      {
-        jobId: `google-calendar-manual-${sourceId}`,
-      }
+      { jobId }
     );
   }
 
@@ -348,11 +393,13 @@ class GoogleCalendarSyncQueue {
   ): Promise<void> {
     const queue = await this.ensureQueue();
     const jobIdSuffix = options?.jobIdSuffix ? `-${options.jobIdSuffix}` : '';
+    const jobId = `google-calendar-incremental-${sourceId}${jobIdSuffix}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'incremental-sync',
       { sourceId },
       {
-        jobId: `google-calendar-incremental-${sourceId}${jobIdSuffix}`,
+        jobId,
         delay: options?.delayMs ?? 0,
       }
     );

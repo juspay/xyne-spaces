@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 import { createPreviewUrl } from '../services/clients/fileFetchService';
 import { BASE_URL } from '../services/clients/apiClient';
 import type { TocHeading } from '../components/Canvas/TableOfContents';
@@ -30,7 +31,11 @@ export const resolveFileUrl = async (attachmentId: string): Promise<string> => {
     const blobUrl = URL.createObjectURL(blob);
     return blobUrl;
   } catch (error) {
-    console.error('Error resolving file URL:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Error resolving file URL:'),
+      error: error,
+    });
     return `${BASE_URL}/attachments/${attachmentId}/download`;
   }
 };

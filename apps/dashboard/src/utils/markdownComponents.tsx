@@ -8,6 +8,7 @@ import { copyTextToClipboard } from './clipboardUtils';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
 import { D2Block } from '../components/Markdown/D2Block';
+import { ChartBlock } from '../components/Markdown/ChartBlock';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
@@ -67,7 +68,10 @@ const FencedCodeBlock = ({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          message: 'Failed to copy code snippet to clipboard',
+          error,
+        });
       });
   };
 
@@ -179,6 +183,13 @@ const CodeBlock = ({
       />
     ) : (
       <D2Block source={codeString} messageId={(props as { messageId: string }).messageId} />
+    );
+  }
+
+  // ── Chart (visualize tool output) ──
+  if (language === 'chart') {
+    return (
+      <ChartBlock jsonSource={codeString} messageId={(props as { messageId: string }).messageId} />
     );
   }
 
@@ -318,9 +329,6 @@ export const createMarkdownComponents = (
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
         if (!href) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey) {
-          logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
-        }
         openLink(href, event);
       };
       return (

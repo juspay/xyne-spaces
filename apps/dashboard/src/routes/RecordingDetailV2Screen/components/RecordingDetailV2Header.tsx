@@ -190,7 +190,7 @@ export const RecordingDetailV2Header = ({
   };
 
   const handleStartEdit = (): void => {
-    if (isEditingTitle || isSavingTitle) return;
+    if (isEditingTitle || isSavingTitle || isGeneratingTitle) return;
     setEditedTitle(recording.title);
     setIsEditingTitle(true);
   };
@@ -255,7 +255,7 @@ export const RecordingDetailV2Header = ({
                 />
               </div>
             </div>
-          ) : isOwner ? (
+          ) : isOwner && !isGeneratingTitle ? (
             <div
               role='button'
               tabIndex={0}
@@ -276,8 +276,9 @@ export const RecordingDetailV2Header = ({
               </h1>
             </div>
           ) : (
-            /* Shared-with-me: the title is someone else's to change, so it isn't
-               focusable or clickable — no affordance to discover and be refused. */
+            /* Shared-with-me, or the AI title is still generating: not this
+               user's to change right now, so it isn't focusable or clickable
+               — no affordance to discover and be refused. */
             <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
               {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
               <HeaderTitle isGenerating={isGeneratingTitle} title={displayTitle} />
@@ -299,9 +300,9 @@ export const RecordingDetailV2Header = ({
       </div>
 
       {/* Actions row */}
-      <div className='flex flex-wrap items-center justify-between gap-3'>
+      <div className='flex items-start'>
         <div className='flex flex-wrap items-center gap-2'>
-          {recording.detailedSummaryCanvasId && (
+          {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
               canEdit={isOwner}
@@ -314,7 +315,7 @@ export const RecordingDetailV2Header = ({
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          {isOwner && recording.detailedSummaryCanvasId && (
+          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
             <>
               <RecordingSharedWithAvatars
                 recordingExternalId={recording.externalId}
@@ -352,22 +353,22 @@ export const RecordingDetailV2Header = ({
               </Button>
             </Tooltip>
           )}
-        </div>
 
-        {isOwner && showShareModal && recording.detailedSummaryCanvasId && (
-          <Dialog
-            open={showShareModal}
-            onOpenChange={open => !open && setShowShareModal(false)}
-            title='Share recording'
-            data-testid='recording-share-modal'
-          >
-            <RecordingShareModal
-              recording={recording}
-              onClose={() => setShowShareModal(false)}
-              onTicketLinkUpdated={onTicketLinkUpdated}
-            />
-          </Dialog>
-        )}
+          {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
+            <Dialog
+              open={showShareModal}
+              onOpenChange={open => !open && setShowShareModal(false)}
+              title='Share recording'
+              data-testid='recording-share-modal'
+            >
+              <RecordingShareModal
+                recording={recording}
+                onClose={() => setShowShareModal(false)}
+                onTicketLinkUpdated={onTicketLinkUpdated}
+              />
+            </Dialog>
+          )}
+        </div>
         {!isLive && (
           <Tooltip content='Ask AI about this recording' side='top'>
             <Button
@@ -375,7 +376,7 @@ export const RecordingDetailV2Header = ({
               variant='outline'
               size='sm'
               onClick={onAskAI}
-              className='h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
+              className='ml-auto h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
               data-track-category='RecordingDetailV2'
               data-track-name='ask_ai_recording'
             >

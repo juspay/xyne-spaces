@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { BoardType, deserializeFlowPlan, type FlowPlan } from '@xyne/shared';
-import { ArrowLeft, Boxes, Edit2, LayoutGrid, Rocket } from 'lucide-react';
+import { ArrowLeft, Boxes, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -16,12 +16,6 @@ import { ProjectForm } from '../../components/Project';
 import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizard/ReleaseConfigWizard';
 import { ReleasesSection } from './ReleasesSection';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
-import {
-  RepoDot,
-  ProviderBadge,
-  repoColor,
-  repoHostPath,
-} from '../../components/Release/repoVisual';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { queries } from '../../zero/queries';
@@ -30,6 +24,14 @@ import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { cn } from '../../utils/classNames';
+import { apiInstance } from '../../services/clients/apiClient';
+import { ProjectRepositoriesSection } from './ProjectRepositoriesSection';
+import {
+  RepoDot,
+  ProviderBadge,
+  repoColor,
+  repoHostPath,
+} from '../../components/Release/repoVisual';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
 interface BoardData {
@@ -74,12 +76,21 @@ const ProjectDetailScreen = (): ReactElement => {
   // instead of the default Boards tab.
   const navState = location.state as { tab?: TabValue; from?: string } | null;
   const initialTab = navState?.tab ?? 'boards';
-  const backTo =
-    navState?.from === 'releaseManager'
-      ? { path: '/releaseManager', label: 'Back to Release Manager' }
-      : { path: '/listProjects', label: 'Back to Projects' };
+  // Reached through the Release Manager? Then the "Repositories" tab is the
+  // original release-repo config (Connect / Edit / Workflow & Fields). Reached
+  // through Projects, the same tab is the SDLC repositories view.
+  const fromReleaseManager = navState?.from === 'releaseManager';
+  const backTo = fromReleaseManager
+    ? { path: '/releaseManager', label: 'Back to Release Manager' }
+    : { path: '/listProjects', label: 'Back to Projects' };
   const [activeTab, setActiveTab] = useState<TabValue>(initialTab);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+  const [showAddRepositoryModal, setShowAddRepositoryModal] = useState(false);
+  const [repositoryUrl, setRepositoryUrl] = useState('');
+  const [repositoryName, setRepositoryName] = useState('');
+  const [repositoryBranch, setRepositoryBranch] = useState('main');
+  const [addingRepository, setAddingRepository] = useState(false);
+  const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
   const [showBoardTypeChooser, setShowBoardTypeChooser] = useState(false);
   const [showFlowBoardCreate, setShowFlowBoardCreate] = useState(false);
@@ -319,6 +330,29 @@ const ProjectDetailScreen = (): ReactElement => {
     }
   };
 
+  const handleAddRepository = async (): Promise<void> => {
+    if (!repositoryUrl.trim()) return;
+    setAddingRepository(true);
+    try {
+      await apiInstance.post('/sdlc/repositories', {
+        projectId,
+        url: repositoryUrl.trim(),
+        ...(repositoryName.trim() && { name: repositoryName.trim() }),
+        baseBranch: repositoryBranch.trim() || 'main',
+      });
+      toast.success('Repository attached');
+      setShowAddRepositoryModal(false);
+      setRepositoryUrl('');
+      setRepositoryName('');
+      setActiveTab('release');
+      setRepositoryRefreshKey(value => value + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to attach repository');
+    } finally {
+      setAddingRepository(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className='h-full bg-muted flex items-center justify-center'>
@@ -373,16 +407,18 @@ const ProjectDetailScreen = (): ReactElement => {
                   Created: {new Date(project.createdAt).toLocaleDateString()}
                 </div>
               </div>
-              <Button
-                variant='secondary'
-                onClick={() => setShowEditProjectModal(true)}
-                data-track-category='ProjectDetail'
-                data-track-name='EditProject'
-                data-track-metadata={JSON.stringify({ projectId: project.id })}
-              >
-                <Edit2 size={16} />
-                Edit Project
-              </Button>
+              <div className='flex gap-2'>
+                <Button
+                  variant='secondary'
+                  onClick={() => setShowEditProjectModal(true)}
+                  data-track-category='ProjectDetail'
+                  data-track-name='EditProject'
+                  data-track-metadata={JSON.stringify({ projectId: project.id })}
+                >
+                  <Edit2 size={16} />
+                  Edit Project
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -419,17 +455,22 @@ const ProjectDetailScreen = (): ReactElement => {
                     Create Board
                   </Button>
                 )}
-                {activeTab === 'release' && (
-                  <Button
-                    variant='default'
-                    onClick={openConnectRepository}
-                    data-track-category='ProjectDetail'
-                    data-track-name='ConnectRepository'
-                    data-track-metadata={JSON.stringify({ projectId })}
-                  >
-                    Connect Repository
-                  </Button>
-                )}
+                {activeTab === 'release' &&
+                  (fromReleaseManager ? (
+                    <Button
+                      variant='default'
+                      onClick={openConnectRepository}
+                      data-track-category='ProjectDetail'
+                      data-track-name='ConnectRepository'
+                      data-track-metadata={JSON.stringify({ projectId })}
+                    >
+                      Connect Repository
+                    </Button>
+                  ) : (
+                    <Button variant='outline' onClick={() => setShowAddRepositoryModal(true)}>
+                      <GitBranch size={16} /> Add Repository
+                    </Button>
+                  ))}
                 {activeTab === 'releases' && (
                   <Button
                     variant='default'
@@ -461,50 +502,59 @@ const ProjectDetailScreen = (): ReactElement => {
                 />
               </Tabs.Content>
 
+              {/* Release-repo config via the Release Manager, else SDLC (see fromReleaseManager). */}
               <Tabs.Content value='release' className='outline-none'>
-                {repositories.length === 0 ? (
-                  <div className='rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-sm text-muted-foreground'>
-                    No repositories yet. Connect a repository to ship releases from this project.
-                  </div>
-                ) : (
-                  <div className='space-y-2.5'>
-                    {repositories.map(repo => (
-                      <div
-                        key={repo.mainBoardId}
-                        className='flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3.5'
-                      >
-                        <RepoDot color={repoColor(repo.mainBoardId)} />
-                        <div className='min-w-0 flex-1'>
-                          <div className='truncate text-sm font-semibold text-foreground'>
-                            {repo.name}
-                          </div>
-                          {repo.repoUrl && (
-                            <div className='truncate font-mono text-[11.5px] text-muted-foreground'>
-                              {repoHostPath(repo.repoUrl)}
+                {fromReleaseManager ? (
+                  repositories.length === 0 ? (
+                    <div className='rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-sm text-muted-foreground'>
+                      No repositories yet. Connect a repository to ship releases from this project.
+                    </div>
+                  ) : (
+                    <div className='space-y-2.5'>
+                      {repositories.map(repo => (
+                        <div
+                          key={repo.mainBoardId}
+                          className='flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3.5'
+                        >
+                          <RepoDot color={repoColor(repo.mainBoardId)} />
+                          <div className='min-w-0 flex-1'>
+                            <div className='truncate text-sm font-semibold text-foreground'>
+                              {repo.name}
                             </div>
-                          )}
+                            {repo.repoUrl && (
+                              <div className='truncate font-mono text-[11.5px] text-muted-foreground'>
+                                {repoHostPath(repo.repoUrl)}
+                              </div>
+                            )}
+                          </div>
+                          <ProviderBadge repoUrl={repo.repoUrl} />
+                          <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
+                            {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
+                          </span>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            onClick={() => openRepositoryWorkflow(repo.mainBoardId)}
+                          >
+                            Workflow & Fields
+                          </Button>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            onClick={() => openRepositoryConfig(repo.mainBoardId)}
+                          >
+                            Edit
+                          </Button>
                         </div>
-                        <ProviderBadge repoUrl={repo.repoUrl} />
-                        <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
-                          {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
-                        </span>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={() => openRepositoryWorkflow(repo.mainBoardId)}
-                        >
-                          Workflow & Fields
-                        </Button>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={() => openRepositoryConfig(repo.mainBoardId)}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <ProjectRepositoriesSection
+                    projectId={projectId}
+                    refreshKey={repositoryRefreshKey}
+                    onAdd={() => setShowAddRepositoryModal(true)}
+                  />
                 )}
               </Tabs.Content>
 
@@ -856,32 +906,107 @@ const ProjectDetailScreen = (): ReactElement => {
           />
         </div>
       </Dialog>
+
+      <Dialog
+        open={showAddRepositoryModal}
+        onOpenChange={setShowAddRepositoryModal}
+        title='Add Repository'
+        description='Create a private SDLC hub for this repository'
+      >
+        <form
+          className='p-6'
+          onSubmit={event => {
+            event.preventDefault();
+            void handleAddRepository();
+          }}
+        >
+          <h2 className='text-lg font-semibold'>Add Repository</h2>
+          <p className='mt-1 text-sm text-muted-foreground'>
+            Creates the hub, then runs a non-mutating access check. Baseline generation starts only
+            after you click Next.
+          </p>
+          <label htmlFor='sdlc-repository-url' className='mt-5 block text-sm font-medium'>
+            Repository URL
+          </label>
+          <input
+            id='sdlc-repository-url'
+            autoFocus
+            required
+            value={repositoryUrl}
+            onChange={event => setRepositoryUrl(event.target.value)}
+            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            placeholder='https://github.com/org/repository.git'
+            data-track-category='ProjectDetail'
+            data-track-name='RepositoryUrlChanged'
+          />
+          <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
+            Display name <span className='font-normal text-muted-foreground'>(optional)</span>
+          </label>
+          <input
+            id='sdlc-repository-name'
+            value={repositoryName}
+            onChange={event => setRepositoryName(event.target.value)}
+            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            placeholder='Inferred from URL'
+            data-track-category='ProjectDetail'
+            data-track-name='RepositoryNameChanged'
+          />
+          <div className='mt-4'>
+            <label htmlFor='sdlc-repository-branch' className='block text-sm font-medium'>
+              Base branch
+            </label>
+            <input
+              id='sdlc-repository-branch'
+              value={repositoryBranch}
+              onChange={event => setRepositoryBranch(event.target.value)}
+              className='mt-2 h-10 w-full rounded-md border bg-background px-3'
+              data-track-category='ProjectDetail'
+              data-track-name='RepositoryBranchChanged'
+            />
+          </div>
+          <div className='mt-6 flex justify-end gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => setShowAddRepositoryModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button type='submit' loading={addingRepository} disabled={!repositoryUrl.trim()}>
+              Attach repository
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 };
 
 const TabTrigger = ({
   value,
-  icon: Icon,
+  icon,
   label,
 }: {
   value: TabValue;
   icon: React.ElementType;
   label: string;
-}): ReactElement => (
-  <Tabs.Trigger
-    value={value}
-    className={cn(
-      'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
-      'text-muted-foreground border-transparent hover:text-foreground hover:border-muted',
-      'data-[state=active]:text-primary data-[state=active]:border-primary',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-    )}
-  >
-    <Icon size={16} />
-    {label}
-  </Tabs.Trigger>
-);
+}): ReactElement => {
+  const Icon = icon;
+  return (
+    <Tabs.Trigger
+      value={value}
+      className={cn(
+        'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+        'text-muted-foreground border-transparent hover:text-foreground hover:border-muted',
+        'data-[state=active]:text-primary data-[state=active]:border-primary',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      )}
+    >
+      <Icon size={16} />
+      {label}
+    </Tabs.Trigger>
+  );
+};
 
 ProjectDetailScreen.displayName = 'ProjectDetailScreen';
 

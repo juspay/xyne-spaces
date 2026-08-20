@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
@@ -351,7 +352,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             baselineAttachmentCountRef.current = map.size;
           }
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
         }
       } else {
         // For tickets tab, local state only
@@ -419,7 +424,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useTitleGenerator({
     maxLength: 100,
     onError: error => {
-      console.error('Title generation error:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Title generation error:'),
+        error: error,
+      });
     },
   });
 
@@ -632,7 +641,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           hasPopulatedDeployedCommitId.current = true;
         }
       } catch (error) {
-        console.error('Failed to fetch latest deployed commit ID:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to fetch latest deployed commit ID:'),
+          error: error,
+        });
       }
     };
 
@@ -1499,7 +1512,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     } catch (error) {
       // Handle file upload failures and other API errors
-      console.error('Failed to create ticket:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to create ticket:'),
+        error: error,
+      });
 
       toast.error('Ticket Creation Failed', {
         description:
@@ -2928,7 +2945,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       // Exclude this chat attachment from the ticket
                       setExcludedChatAttachmentIds(prev => new Set([...prev, attachmentId]));
                     }}
-                    onPreview={() => {}}
+                    onPreview={() => undefined}
                     isUploading={form.state.isSubmitting}
                     variant='detailed'
                   />

@@ -11,5 +11,5 @@ export const isMainReleaseBoard = (board?: {
   boardType?: BoardType;
   vcsProvider?: string | null;
 }): boolean => {
-  return isReleaseBoard(board?.boardType) && board?.vcsProvider != null;
+  return isReleaseBoard(board?.boardType) && Boolean(board?.vcsProvider);
 };

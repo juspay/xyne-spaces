@@ -302,6 +302,7 @@ const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => 
         channelId={channelId ?? undefined}
         editable
         autoFocus
+        placeholder='Add your notes here, you can view the transcript live in the transcript tab'
         onFileUpload={handleFileUpload}
         className='floating-recording-notes h-full w-full
           [&_.bn-side-menu]:!hidden

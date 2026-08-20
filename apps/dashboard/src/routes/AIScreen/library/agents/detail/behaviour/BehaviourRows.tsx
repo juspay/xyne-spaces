@@ -89,14 +89,16 @@ export function BehaviourSelect({
   disabled = false,
   label,
   trackName,
+  triggerClassName,
   onChange,
 }: {
   value: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
+  options: ReadonlyArray<{ value: string; label: string; icon?: ReactNode }>;
   editable: boolean;
   disabled?: boolean;
   label: string;
   trackName: string;
+  triggerClassName?: string;
   onChange: (next: string) => void;
 }): ReactElement {
   const current = options.find(option => option.value === value);
@@ -109,14 +111,22 @@ export function BehaviourSelect({
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        className='h-9 w-auto min-w-0 max-w-[240px] gap-2 rounded-[10px]'
+        className={cn('h-9 w-auto min-w-0 max-w-[240px] gap-2 rounded-[10px]', triggerClassName)}
       >
-        <SelectValue />
+        <SelectValue>
+          <span className='flex min-w-0 items-center gap-2'>
+            {current?.icon}
+            <span className='truncate'>{current?.label ?? '—'}</span>
+          </span>
+        </SelectValue>
       </SelectTrigger>
       <SelectContent align='end'>
         {options.map(option => (
           <SelectItem key={option.value} value={option.value}>
-            {option.label}
+            <span className='flex items-center gap-2'>
+              {option.icon}
+              <span>{option.label}</span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

@@ -1,4 +1,4 @@
-import { Menu, Tray, nativeImage } from 'electron';
+import { Menu, Tray, nativeImage, type NativeImage } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
 import log from 'electron-log/main';
@@ -14,13 +14,15 @@ import {
   type RecordingSnapshot,
 } from './recording-controller';
 import { RECORDING_SHORTCUT } from './global-shortcuts';
+import { startPillRenderer, stopPillRenderer, updatePill } from './tray-pill-renderer';
 
-const PAUSED_TITLE = ' Paused';
+const PAUSED_TITLE = 'Paused';
 
 const trayStore = new Store({ name: 'tray' });
 const VISIBLE_KEY = 'trayVisible';
 
 let tray: Tray | null = null;
+let idleIcon: NativeImage | null = null;
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let unsubscribeRecordingState: (() => void) | null = null;
 
@@ -34,8 +36,8 @@ function formatElapsed(snapshot: RecordingSnapshot): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-function formatTitle(snapshot: RecordingSnapshot): string {
-  return snapshot.paused ? PAUSED_TITLE : ` ${formatElapsed(snapshot)}`;
+function formatLabel(snapshot: RecordingSnapshot): string {
+  return snapshot.paused ? PAUSED_TITLE : formatElapsed(snapshot);
 }
 
 async function openXyne(): Promise<void> {
@@ -98,13 +100,15 @@ function syncTrayToState(snapshot: RecordingSnapshot): void {
   if (process.platform !== 'darwin') return;
 
   if (snapshot.active && snapshot.startTime) {
-    tray.setTitle(formatTitle(snapshot), { fontType: 'monospacedDigit' });
+    startPillRenderer((image) => tray?.setImage(image));
+    void updatePill(formatLabel(snapshot), snapshot.paused);
     if (snapshot.paused) return;
     timerInterval = setInterval(() => {
-      tray?.setTitle(formatTitle(snapshot), { fontType: 'monospacedDigit' });
+      void updatePill(formatLabel(snapshot), snapshot.paused);
     }, 1000);
   } else {
-    tray.setTitle('');
+    stopPillRenderer();
+    if (idleIcon) tray.setImage(idleIcon);
   }
 }
 
@@ -118,6 +122,7 @@ function createTray(): void {
     return;
   }
   icon.setTemplateImage(true);
+  idleIcon = icon;
 
   tray = new Tray(icon);
   tray.setToolTip('Xyne');
@@ -139,6 +144,8 @@ function destroyTray(): void {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+  stopPillRenderer();
+  idleIcon = null;
   if (!tray) return;
   tray.destroy();
   tray = null;

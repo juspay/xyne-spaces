@@ -111,6 +111,7 @@ import {
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
+import { classificationApi } from '../../api/classificationApi';
 import {
   CalendarView,
   PRESETS,
@@ -183,6 +184,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -201,6 +203,8 @@ import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -646,7 +650,7 @@ const SupportScreen = (): ReactElement => {
   );
   const channelPreference = channelPreferenceList?.[0];
   const deskBoardId = channelPreference?.boardId || channelBoardId;
-  const [channelBoardDetail] = useCachedQuery(
+  const [channelBoardDetail, channelBoardDetailDetails] = useCachedQuery(
     queries.boardDetailById({ boardId: deskBoardId || '' }),
     { enabled: !!deskBoardId },
   );
@@ -747,6 +751,7 @@ const SupportScreen = (): ReactElement => {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [autoLabelWizardOpen, setAutoLabelWizardOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
@@ -771,34 +776,57 @@ const SupportScreen = (): ReactElement => {
       enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
     },
   );
-  const availableAiCategories = useMemo(() => {
-    const fromMappings = [
-      ...new Set(
-        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
-      ),
-    ];
-    if (fromMappings.length === 0) return [];
-    if (!fromMappings.includes('Other')) {
-      fromMappings.push('Other');
-    }
-    return fromMappings;
-  }, [classificationMappings]);
+  // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
+  // configured mappings only cover the subset that has an assignment rule — without this the
+  // filter hides every unmapped category that is visibly labelled on the list.
+  const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
+  const aiCategoriesChannelId =
+    filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null;
 
-  // deskBoardId (channel preference first) rather than the row-derived
-  // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages, boardStagesDetails] = useCachedQuery(
-    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
-    {
-      enabled: !!deskBoardId,
-    },
-  );
+  useEffect(() => {
+    if (!aiCategoriesChannelId) {
+      setTicketAiCategories([]);
+      return;
+    }
+    let cancelled = false;
+    classificationApi
+      .getAiCategories(aiCategoriesChannelId)
+      .then(categories => {
+        if (!cancelled) setTicketAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setTicketAiCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiCategoriesChannelId]);
+
+  const availableAiCategories = useMemo(() => {
+    const merged = [
+      ...new Set([
+        ...(classificationMappings ?? [])
+          .map(m => m.category)
+          .filter((c): c is string => Boolean(c)),
+        ...ticketAiCategories,
+      ]),
+    ];
+    if (merged.length === 0) return [];
+    if (!merged.includes('Other')) {
+      merged.push('Other');
+    }
+    return merged;
+  }, [classificationMappings, ticketAiCategories]);
+
   const availableStages = useMemo(
     () =>
-      boardStages?.map(s => ({
+      channelBoardDetail?.stages.map(s => ({
         name: s.name,
         status: s.defaultTicketStatusV2,
       })) ?? [],
-    [boardStages],
+    [channelBoardDetail?.stages],
   );
 
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
@@ -1391,8 +1419,9 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-sidebar-open', isSidebarOpen.toString());
   }, [isSidebarOpen]);
 
-  // Fetch EMAIL channels using hook (from state machine, already loaded)
-  const emailChannels = useEmailChannels(!ticketId);
+  // Derive EMAIL channels from already-loaded state (no extra Zero query).
+  // channelStats are fetched inside the hook and merged onto each channel.
+  const emailChannels = useEmailChannels();
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
@@ -2055,6 +2084,15 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
+  const handleDeletedLabel = useCallback(
+    (labelId: string): void => {
+      if (selectedLabel?.id !== labelId) return;
+      setSelectedLabel(null);
+      setViewMode('list');
+    },
+    [selectedLabel?.id],
+  );
+
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
@@ -2207,6 +2245,7 @@ const SupportScreen = (): ReactElement => {
               channelId={c.id}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
+              onDeletedLabel={handleDeletedLabel}
             />
           </div>
         )}
@@ -2555,6 +2594,25 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Ask AI' side='bottom'>
+                          <button
+                            onClick={() => {
+                              if (!selectedChannelId) return;
+                              trackAskAIOpened(
+                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
+                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                            }}
+                            className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
+                            data-track-category='Support'
+                            data-track-name='OPEN_XYNE_AI'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <XyneAIStar />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         channelPreference?.metricsEnabled && (
@@ -2739,7 +2797,9 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
-                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
+                                isLoading={
+                                  !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                }
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -2782,6 +2842,19 @@ const SupportScreen = (): ReactElement => {
                               }}
                             >
                               <div className='px-4 py-3 flex flex-col gap-3 border-b border-border'>
+                                <button
+                                  type='button'
+                                  onClick={() => {
+                                    setMoreFiltersOpen(false);
+                                    setAutoLabelWizardOpen(true);
+                                  }}
+                                  className='flex w-full items-center gap-2 rounded-md px-0 py-0.5 text-left text-sm text-foreground hover:text-foreground'
+                                  data-track-category='Support'
+                                  data-track-name='OpenAutoLabelWizard'
+                                >
+                                  <Tag className='size-3.5 text-muted-foreground' />
+                                  <span className='font-medium'>Auto-label…</span>
+                                </button>
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleMyTickets'
@@ -3454,6 +3527,14 @@ const SupportScreen = (): ReactElement => {
         onMerge={handleMergeSelectedTickets}
       />
 
+      {selectedChannelId && (
+        <AutoLabelWizard
+          open={autoLabelWizardOpen}
+          onOpenChange={setAutoLabelWizardOpen}
+          channelId={selectedChannelId}
+        />
+      )}
+
       {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
           Windows are laid out right-to-left (flex-row-reverse) so the newest
           window always sits at the right edge. When there are more windows than
@@ -3675,7 +3756,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
-  const ticketEmailDrafts = useEmailDrafts(detailConversationId);
+  const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
   // then include any merged-ticket conversations once the detail query resolves.
@@ -3732,7 +3813,11 @@ export const SupportTicketDetail = ({
   );
 
   const [allEmails] = useCachedQuery(
-    queries.getEmailsForConversations({ conversationIds: allConversationIds }),
+    queries.getEmailsForConversationsV2({
+      conversationIds: allConversationIds,
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: allConversationIds.length > 0 },
   );
 
@@ -3740,11 +3825,10 @@ export const SupportTicketDetail = ({
   const emailCollapseState = useEmailCollapseState(emails);
 
   const initiator = useMemo(() => {
-    if (emails.length === 0) return null;
-    const first = [...emails].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))[0];
+    const first = emailCollapseState.sortedEmails[0];
     if (!first?.from) return null;
     return parseFromField(first.from);
-  }, [emails]);
+  }, [emailCollapseState.sortedEmails]);
 
   // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
   // email so it's visible, then scroll to it with a brief yellow flash.
@@ -3775,21 +3859,9 @@ export const SupportTicketDetail = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMailId, emails]);
 
-  const channelId = ticket?.channelId || '';
+  const channelId = ticket?.channelId || routeChannelId;
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
-  const [threadConversation] = useCachedQuery(
-    queries.threadConversationV2({
-      conversationId: conversationId || '',
-      channelId: channelId || undefined,
-      isMember,
-    }),
-    { enabled: !!conversationId && !!channelId },
-  );
-  const messages = useMemo(
-    () => [...(threadConversation?.messages ?? [])],
-    [threadConversation?.messages],
-  );
   // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
   // on list navigation, else it comes from the fetched ticket row.
   const mailboxTicketId = ticket?.id ?? ticketId ?? null;
@@ -4171,23 +4243,6 @@ export const SupportTicketDetail = ({
   );
 
   const targetMessageId = searchParams.get('messageId');
-  useEffect(() => {
-    if (!targetMessageId || !conversationId) return;
-    if (!messages || messages.length === 0) return;
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = document.getElementById(
-          `thread-message-${conversationId}-${targetMessageId}`,
-        );
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('bg-yellow-50');
-          setTimeout(() => target.classList.remove('bg-yellow-50'), 2500);
-        }
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [targetMessageId, conversationId, messages]);
 
   // Get channel info and user status
   const channel = useChannel(channelId);

@@ -31,6 +31,8 @@ import {
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
+import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -441,8 +443,15 @@ export const mapMessage = async (
     }),
   ])
 
+  // Bot messages carry FlowJSON, whose text lives in the component tree — the
+  // HTML only holds a fallback label ("Flow JSON"), so html-to-text would index
+  // that instead of the message. Reuses the same extraction the notification
+  // path uses; plain HTML content falls through unchanged.
   const messageContent =
-    extractPlainTextFromHtml(args.content || '') || ''
+    getFlowJsonContentForNotification(args.content || '') ||
+    extractPlainTextFromHtml(args.content || '') || '';
+
+  const messageLinks = extractLinksFromContent(args.content || '');
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
@@ -499,6 +508,8 @@ export const mapMessage = async (
     docType: VespaDocType.MESSAGE,
     text: messageContent,
     chunks: chunkPlainText(messageContent),
+    links: messageLinks,
+    hasLinks: messageLinks.length > 0,
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",

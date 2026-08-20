@@ -204,6 +204,25 @@ get_non_zero_definitions() {
     ' "$schema_file"
 }
 
+# Extract Prisma models explicitly excluded from the Zero generator.
+# These backend-only tables should not be required in the shared Zero schema.
+get_zero_excluded_models() {
+    local schema_file="$1"
+
+    get_schema_content "$schema_file" | awk '
+        $1 == "generator" && $2 == "zero" { in_generator=1; next }
+        in_generator && /^[[:space:]]*}/ { exit }
+        in_generator && /excludeTables[[:space:]]*=/ {
+            line=$0
+            while (match(line, /"[^"]+"/)) {
+                model=substr(line, RSTART + 1, RLENGTH - 2)
+                print model
+                line=substr(line, RSTART + RLENGTH)
+            }
+        }
+    '
+}
+
 # Check if a name is present in a newline-separated list.
 # Arguments: $1 = name, $2 = list
 in_list() {
@@ -238,6 +257,8 @@ validate_prisma_zero_sync() {
     non_zero_models=$(get_non_zero_definitions "$prisma_schema" "model")
     local non_zero_enums
     non_zero_enums=$(get_non_zero_definitions "$prisma_schema" "enum")
+    local zero_excluded_models
+    zero_excluded_models=$(get_zero_excluded_models "$prisma_schema")
 
     # Extract newly added Prisma model names from the staged diff
     local new_prisma_models
@@ -260,6 +281,10 @@ validate_prisma_zero_sync() {
             # Skip models that live in the "non_zero" schema — they are not synced to Zero.
             if in_list "$model" "$non_zero_models"; then
                 log_info "  ⏭ Prisma model '$model' is in the non_zero schema — skipping Zero sync check"
+                continue
+            fi
+            if in_list "$model" "$zero_excluded_models"; then
+                log_info "  ⏭ Prisma model '$model' is excluded from the Zero generator — skipping Zero sync check"
                 continue
             fi
             # Match the PascalCase model name or its @@map'd snake_case table name.

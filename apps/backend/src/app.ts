@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -61,7 +62,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -92,6 +92,7 @@ import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -130,6 +131,8 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
+import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
@@ -169,6 +172,7 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -183,6 +187,10 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import sdlcRoutes from '@/routes/sdlc';
+import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 
 
 export class App {
@@ -384,6 +392,10 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -402,7 +414,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
@@ -444,6 +455,7 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -468,8 +480,9 @@ export class App {
 
     // Internal S2S endpoints (trusted service-to-service calls)
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const s2sKey = process.env['INTERNAL_S2S_KEY'];
-      if (!s2sKey || req.headers['x-s2s-key'] !== s2sKey) {
+      const supplied = req.headers['x-s2s-key'];
+      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
       }
@@ -542,6 +555,18 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
+    this.app.post(
+      '/api/internal/sdlc/claw-callback/:executionId/:step',
+      validateS2SKey,
+      handleSdlcClawCallback,
+    );
+    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    this.app.use(
+      '/api/internal/sdlc/artifact-versions',
+      validateS2SKey,
+      sdlcArtifactVersionsInternalRoutes
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
@@ -571,6 +596,8 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
+    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
@@ -581,8 +608,10 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes (auth required)
-    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
+    // Y-Sweet collaboration routes. Auth already runs for every /api request via
+    // the /api attachment mounts above; applying it here again cost two more DB
+    // round-trips per canvas open.
+    this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 
@@ -843,6 +872,9 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
+    logger.info('Initializing SDLC queue (producer)...');
+    await sdlcQueue.initialize();
+
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -1036,6 +1068,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close SDLC producer queue
+      await sdlcQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Download, X, Presentation } from 'lucide-react';
 import { PptSlideViewer } from '../PptSlideViewer';
@@ -40,7 +41,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
   const exitPresent = useCallback(() => {
     setPresenting(false);
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
+      document.exitFullscreen().catch(() => undefined);
     }
   }, []);
 
@@ -97,7 +98,11 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
 
       URL.revokeObjectURL(blobUrl);
     } catch (error) {
-      console.error('[PptxViewer] Download failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[PptxViewer] Download failed:'),
+        error: error,
+      });
     }
   }, [downloadUrl, filename, base64Data]);
 

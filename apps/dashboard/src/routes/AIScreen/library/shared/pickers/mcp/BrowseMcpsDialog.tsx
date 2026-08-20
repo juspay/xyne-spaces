@@ -1,4 +1,6 @@
 import { Fragment, useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { AGENT_CATEGORIES } from '@/services/claw/agentCategory';
 import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
@@ -54,7 +56,7 @@ const McpCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open MCP detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, state.enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <McpIdentity
@@ -80,7 +82,7 @@ const McpCard = ({
         title={state.enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
         data-track-category='Claw Agents'
         data-track-name='Create agent v2: quick toggle MCP'
-        className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+        className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
       >
         {state.enabled ? (
           <MultipleCrossCancelDefault className='size-4' aria-hidden />

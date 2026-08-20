@@ -706,7 +706,9 @@ const ReleaseDetailScreen = (): ReactElement => {
         <div className='max-w-none'>
           <button
             onClick={() =>
-              void navigate(`/listProjects/${projectId}`, { state: { tab: 'release' } })
+              void navigate(`/listProjects/${projectId}`, {
+                state: { tab: 'release', from: 'releaseManager' },
+              })
             }
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           >

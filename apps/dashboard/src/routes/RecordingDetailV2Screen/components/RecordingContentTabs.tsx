@@ -41,6 +41,7 @@ interface RecordingContentTabsProps {
   /** `transcript` while live, `summary` once ended. */
   secondTab: Exclude<RecordingContentTab, 'notes'>;
   onSelect: (tab: RecordingContentTab) => void;
+  hasSummary: boolean;
   /** The template selected for this recording; labels the segment. */
   selectedTemplate?: RecordingSummaryTemplate;
   /** Swaps the segment's icon for a spinner and locks the menu while regenerating. */
@@ -66,6 +67,7 @@ export const RecordingContentTabs = ({
   visibleTab,
   secondTab,
   onSelect,
+  hasSummary,
   selectedTemplate,
   isRegenerating = false,
   templates = [],
@@ -127,7 +129,7 @@ export const RecordingContentTabs = ({
 
   const renderSummaryTab = (): ReactElement => {
     const isActive = visibleTab === 'summary';
-    const fullLabel = selectedTemplate?.name ?? 'Default summary';
+    const fullLabel = hasSummary ? (selectedTemplate?.name ?? 'Default summary') : 'Summary';
     const label = truncateTemplateName(fullLabel);
 
     const indicator = isActive ? (
@@ -181,9 +183,19 @@ export const RecordingContentTabs = ({
         {indicator}
         <span className='relative z-10 flex items-center gap-2'>
           {icon}
-          {label}
+          <AnimatePresence mode='popLayout' initial={false}>
+            <motion.span
+              key={label}
+              initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+            >
+              {label}
+            </motion.span>
+          </AnimatePresence>
           <AnimatePresence initial={false}>
-            {isActive && onOpenTemplates && (
+            {isActive && onOpenTemplates && hasSummary && (
               <motion.span
                 initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }}
                 animate={{ opacity: 1, scale: 1, width: 14 }}
@@ -200,7 +212,7 @@ export const RecordingContentTabs = ({
       </button>
     );
 
-    if (!onOpenTemplates) return trigger;
+    if (!onOpenTemplates || !hasSummary) return trigger;
 
     return (
       <Popover
