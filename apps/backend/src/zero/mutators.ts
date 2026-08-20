@@ -6756,30 +6756,43 @@ export function createMutators(
           if (!mappedTicket) {
             throw new Error('Ticket to link not found');
           }
-          // The picker only offers same-project tickets; hold hand-made calls to it too.
-          if (mappedTicket.projectId !== parentTicket.projectId) {
-            throw new Error('A sub-ticket must belong to the same project');
-          }
 
           const mappedBoard = await tx.run(zql.boards.where('id', mappedTicket.boardId).one());
           if (!isManualSubTicketBoard(mappedBoard?.boardType)) {
             throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
           }
 
-          // Trees stay one level deep. `create` checks only the parent side because its
-          // new row has no children; an existing ticket can break it from either side.
-          const parentAsSubTickets = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).related('ticketMappings'),
-          );
-          if (parentAsSubTickets.some(row => (row.ticketMappings?.length ?? 0) > 0)) {
-            throw new Error('Cannot add a sub-ticket under a sub-ticket');
-          }
+          // Sub-ticket trees may nest arbitrarily deep, but they must stay TREES. Walk up
+          // from the parent: if the ticket being linked is already an ancestor, this link
+          // would close a loop. The one-parent rule below does not prevent that — a cycle
+          // is precisely the case where every node has exactly one parent.
+          const seenAncestors = new Set<string>();
+          let ancestorCursor: string | null = ticketId;
+          while (ancestorCursor) {
+            // A fresh const per turn: feeding the mutable cursor straight back into the query
+            // it also receives from makes its type circular.
+            const currentTicketId: string = ancestorCursor;
+            if (currentTicketId === mappedTicketId) {
+              throw new Error('Cannot link a ticket to one of its own sub-tickets');
+            }
+            // Guard against pre-existing bad data rather than spinning forever on it.
+            if (seenAncestors.has(currentTicketId)) {
+              break;
+            }
+            seenAncestors.add(currentTicketId);
 
-          const targetHasSubTickets = await tx.run(
-            zql.ticket_sub_ticket_mappings.where('ticketId', mappedTicketId).one(),
-          );
-          if (targetHasSubTickets) {
-            throw new Error('Cannot link a ticket that already has sub-tickets');
+            const asSubTicket = await tx.run(
+              zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
+            );
+            let nextAncestorId: string | null = null;
+            for (const row of asSubTicket) {
+              const parentMapping = (row.ticketMappings ?? [])[0];
+              if (parentMapping) {
+                nextAncestorId = parentMapping.ticketId;
+                break;
+              }
+            }
+            ancestorCursor = nextAncestorId;
           }
 
           // One parent per linked ticket, so the `.one()`/`findFirst` lookups on

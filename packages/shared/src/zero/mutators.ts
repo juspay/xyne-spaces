@@ -4268,15 +4268,6 @@ export const mutators = defineMutators({
           throw new Error('Sub-tickets on this board are managed automatically');
         }
 
-        // All rows, not `.one()`: a ticket can legitimately sit behind more than one
-        // sub_tickets row, and only the ones that still hold a mapping make it a child.
-        const parentAsSubTickets = await tx.run(
-          zql.sub_tickets.where('mappedTicketId', ticketId).related('ticketMappings'),
-        );
-        if (parentAsSubTickets.some(row => (row.ticketMappings?.length ?? 0) > 0)) {
-          throw new Error('Cannot add a sub-ticket under a sub-ticket');
-        }
-
         const mappedTicket = await tx.run(zql.tickets.where('id', mappedTicketId).one());
         const mappedBoard = mappedTicket
           ? await tx.run(zql.boards.where('id', mappedTicket.boardId).one())
@@ -4285,11 +4276,35 @@ export const mutators = defineMutators({
           throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
         }
 
-        const targetHasSubTickets = await tx.run(
-          zql.ticket_sub_ticket_mappings.where('ticketId', mappedTicketId).one(),
-        );
-        if (targetHasSubTickets) {
-          throw new Error('Cannot link a ticket that already has sub-tickets');
+        // Trees may nest, but must stay trees — see the server twin. Walk up from the
+        // parent and reject a link that would close a loop.
+        const seenAncestors = new Set<string>();
+        let ancestorCursor: string | null = ticketId;
+        while (ancestorCursor) {
+          // A fresh const per turn: feeding the mutable cursor straight back into the query
+          // it also receives from makes its type circular.
+          const currentTicketId: string = ancestorCursor;
+          if (currentTicketId === mappedTicketId) {
+            throw new Error('Cannot link a ticket to one of its own sub-tickets');
+          }
+          // Guard against pre-existing bad data rather than spinning forever on it.
+          if (seenAncestors.has(currentTicketId)) {
+            break;
+          }
+          seenAncestors.add(currentTicketId);
+
+          const asSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
+          );
+          let nextAncestorId: string | null = null;
+          for (const row of asSubTicket) {
+            const parentMapping = (row.ticketMappings ?? [])[0];
+            if (parentMapping) {
+              nextAncestorId = parentMapping.ticketId;
+              break;
+            }
+          }
+          ancestorCursor = nextAncestorId;
         }
 
         const existingSubTickets = await tx.run(

@@ -1365,23 +1365,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, []);
 
   // Fetch parent tickets - check if this ticket is a mapped ticket for any sub-ticket
-  const [parentSubTickets, parentSubTicketsDetails] = useCachedQuery(
+  const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
   // Gates the Create Sub-Ticket button, and mirrors subTicket.create's own guard
   // (row existence, not mappings) so the button and the mutator agree.
+  // NOTE: linkExisting has no equivalent depth limit — linked sub-tickets may nest
+  // arbitrarily deep, so the picker below is deliberately NOT gated on this.
   const canCreateNestedSubTicket =
     (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
-
-  // The link picker needs its own predicate, because subTicket.linkExisting's guard is
-  // mappings-aware: a row with no mapping left no longer makes this ticket a child.
-  // The array is [] both before and after resolving, so readiness comes from the
-  // details; 'error' counts as resolved so a failed query cannot hide the picker.
-  const hasResolvedParentSubTickets = parentSubTicketsDetails.type !== 'unknown';
-  const isSubTicketOfAnotherTicket = (parentSubTickets ?? []).some(
-    parentSubTicket => (parentSubTicket.ticketMappings?.length ?? 0) > 0,
-  );
-  const canLinkSubTicket = !isSubTicketOfAnotherTicket;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -1981,15 +1973,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [loadedSubTickets]);
 
   const subTicketPickerOptions = useMemo<SelectorOption[]>(() => {
+    // Direct parents only — deeper ancestors aren't loaded here, and the server's
+    // ancestor walk rejects those with a toast rather than silently linking a loop.
+    const parentIds = new Set(parentTicketIds);
     return (subTicketSearch.tickets ?? [])
-      .filter(candidate => candidate.id !== ticketId && !linkedSubTicketMappedIds.has(candidate.id))
+      .filter(
+        candidate =>
+          candidate.id !== ticketId &&
+          !linkedSubTicketMappedIds.has(candidate.id) &&
+          !parentIds.has(candidate.id),
+      )
       .map(candidate => ({
         value: candidate.id,
         label: candidate.title || candidate.xyneId || candidate.id,
         subtitle: candidate.xyneId || candidate.id,
         icon: null,
       }));
-  }, [subTicketSearch.tickets, ticketId, linkedSubTicketMappedIds]);
+  }, [subTicketSearch.tickets, ticketId, linkedSubTicketMappedIds, parentTicketIds]);
 
   const handleLinkSubTicket = useCallback(
     (mappedTicketId: string | null): void => {
@@ -3029,10 +3029,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
     // Mirrors subTicket.unlink: only a row this feature created is unlinkable, matched
     // on its derived id rather than on the board, so moving the parent's board later
-    // cannot strand the link. Direct children only — node.depth 0 is the ticket on
-    // screen, and a nested row hangs off a different parent.
+    // cannot strand the link. Depth-independent — `node.parentTicketId` is the parent at
+    // THIS level, so a nested row is checked against, and unlinked from, its own parent.
     const canUnlink =
-      node.depth === 0 &&
       Boolean(mappedTicketId) &&
       subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
     const isUnlinking = unlinkingMappingIds.has(node.mappingId);
@@ -3184,10 +3183,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  // Hidden on machine-owned boards, on a ticket that is itself a sub-ticket (the
-  // Create Sub-Ticket button carries the explanation), and until that query resolves.
+  // Hidden only on machine-owned boards. A ticket that is itself a sub-ticket can still
+  // take sub-tickets of its own — trees nest; the server rejects anything that would
+  // close a loop.
   const addSubTicketPicker =
-    !canManageSubTicketLinks || !hasResolvedParentSubTickets || !canLinkSubTicket ? null : (
+    !canManageSubTicketLinks ? null : (
       <div
         className={cn(
           'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
