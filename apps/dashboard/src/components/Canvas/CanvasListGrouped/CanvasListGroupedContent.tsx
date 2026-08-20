@@ -37,6 +37,7 @@ import {
   getChannelDisplayName,
   matchesGroupedCanvasSearch,
 } from './CanvasListGrouped.utils';
+import { mergeCanvasRestLabels, useCanvasLabelMapResult } from '../useCanvasLabels';
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
@@ -180,15 +181,22 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
       showStarredOnly,
     ],
   );
+  const folderCanvasIds = useMemo(() => folderCanvases.map(canvas => canvas.id), [folderCanvases]);
+  const { labelsByCanvasId: folderLabelsByCanvasId, refreshIfStale: refreshFolderLabelsIfStale } =
+    useCanvasLabelMapResult(folderCanvasIds);
+  const folderCanvasesWithLabels = useMemo(
+    () => folderCanvases.map(canvas => mergeCanvasRestLabels(canvas, folderLabelsByCanvasId)),
+    [folderCanvases, folderLabelsByCanvasId],
+  );
   const folderNameMatches = matchesGroupedCanvasSearch(folderGroup.folder.name, searchQuery);
   const visibleFolderCanvases = useMemo(
     () =>
       isSearchActive
-        ? folderCanvases.filter(
+        ? folderCanvasesWithLabels.filter(
             canvas => folderNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : folderCanvases,
-    [folderCanvases, folderNameMatches, isSearchActive, searchQuery],
+        : folderCanvasesWithLabels,
+    [folderCanvasesWithLabels, folderNameMatches, isSearchActive, searchQuery],
   );
   const isRenaming = renamingFolderId === folderGroup.folder.id;
   const isProjectDefaultFolder =
@@ -213,7 +221,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   }
 
   return (
-    <div key={folderGroup.folder.id}>
+    <div key={folderGroup.folder.id} onMouseEnter={() => refreshFolderLabelsIfStale()}>
       <div className={cn(indentClassName, 'relative')}>
         <div className={ROW_CLASS}>
           <button
@@ -443,15 +451,28 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
       showStarredOnly,
     ],
   );
+  const channelRootCanvasIds = useMemo(
+    () => channelRootCanvases.map(canvas => canvas.id),
+    [channelRootCanvases],
+  );
+  const {
+    labelsByCanvasId: channelRootLabelsByCanvasId,
+    refreshIfStale: refreshChannelRootLabelsIfStale,
+  } = useCanvasLabelMapResult(channelRootCanvasIds);
+  const channelRootCanvasesWithLabels = useMemo(
+    () =>
+      channelRootCanvases.map(canvas => mergeCanvasRestLabels(canvas, channelRootLabelsByCanvasId)),
+    [channelRootCanvases, channelRootLabelsByCanvasId],
+  );
   const channelNameMatches = matchesGroupedCanvasSearch(channelName, searchQuery);
   const visibleChannelRootCanvases = useMemo(
     () =>
       isSearchActive
-        ? channelRootCanvases.filter(
+        ? channelRootCanvasesWithLabels.filter(
             canvas => channelNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : channelRootCanvases,
-    [channelNameMatches, channelRootCanvases, isSearchActive, searchQuery],
+        : channelRootCanvasesWithLabels,
+    [channelNameMatches, channelRootCanvasesWithLabels, isSearchActive, searchQuery],
   );
   const channelFolders = useMemo(
     () => toArray<CanvasFolder>(channelFoldersResult),
@@ -473,7 +494,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   }, [channelFolders, onRegisterFolderIds]);
 
   return (
-    <div key={channelGroup.channel.id}>
+    <div key={channelGroup.channel.id} onMouseEnter={() => refreshChannelRootLabelsIfStale()}>
       {showChannelHeader && (
         <div className='group flex items-center pl-3'>
           <button
@@ -630,15 +651,28 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
       showStarredOnly,
     ],
   );
+  const projectRootCanvasIds = useMemo(
+    () => projectRootCanvases.map(canvas => canvas.id),
+    [projectRootCanvases],
+  );
+  const {
+    labelsByCanvasId: projectRootLabelsByCanvasId,
+    refreshIfStale: refreshProjectRootLabelsIfStale,
+  } = useCanvasLabelMapResult(projectRootCanvasIds);
+  const projectRootCanvasesWithLabels = useMemo(
+    () =>
+      projectRootCanvases.map(canvas => mergeCanvasRestLabels(canvas, projectRootLabelsByCanvasId)),
+    [projectRootCanvases, projectRootLabelsByCanvasId],
+  );
   const projectNameMatches = matchesGroupedCanvasSearch(group.project.name, searchQuery);
   const visibleProjectRootCanvases = useMemo(
     () =>
       isSearchActive
-        ? projectRootCanvases.filter(
+        ? projectRootCanvasesWithLabels.filter(
             canvas => projectNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : projectRootCanvases,
-    [isSearchActive, projectNameMatches, projectRootCanvases, searchQuery],
+        : projectRootCanvasesWithLabels,
+    [isSearchActive, projectNameMatches, projectRootCanvasesWithLabels, searchQuery],
   );
 
   useEffect(() => {
@@ -666,7 +700,11 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
     hasMatchingChannel;
 
   return (
-    <section key={group.project.id} className={showProjectHeader ? 'pb-1' : ''}>
+    <section
+      key={group.project.id}
+      className={showProjectHeader ? 'pb-1' : ''}
+      onMouseEnter={() => refreshProjectRootLabelsIfStale()}
+    >
       {showProjectHeader && (
         <div className='group flex items-center'>
           <button
@@ -1009,9 +1047,21 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   isSearchLoading,
 }) => {
   const isSearchActive = searchQuery.length > 0;
+  const personalCanvasIds = useMemo(
+    () => personalCanvases.map(canvas => canvas.id),
+    [personalCanvases],
+  );
+  const {
+    labelsByCanvasId: personalLabelsByCanvasId,
+    refreshIfStale: refreshPersonalLabelsIfStale,
+  } = useCanvasLabelMapResult(personalCanvasIds);
+  const personalCanvasesWithLabels = useMemo(
+    () => personalCanvases.map(canvas => mergeCanvasRestLabels(canvas, personalLabelsByCanvasId)),
+    [personalCanvases, personalLabelsByCanvasId],
+  );
   const personalRootCanvases = useMemo(() => {
     let filtered = filterExcludedCallGeneratedCanvases(
-      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
+      filterArchivedCanvases(personalCanvasesWithLabels, { includeArchived, onlyArchived }),
       excludeCallGeneratedCanvases,
     );
 
@@ -1028,12 +1078,12 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
     includeArchived,
     isSearchActive,
     onlyArchived,
-    personalCanvases,
+    personalCanvasesWithLabels,
     searchQuery,
   ]);
   const sharedRootCanvases = useMemo(() => {
     let filtered = filterExcludedCallGeneratedCanvases(
-      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
+      filterArchivedCanvases(personalCanvasesWithLabels, { includeArchived, onlyArchived }),
       excludeCallGeneratedCanvases,
     );
 
@@ -1048,7 +1098,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
     includeArchived,
     isSearchActive,
     onlyArchived,
-    personalCanvases,
+    personalCanvasesWithLabels,
     searchQuery,
   ]);
 
@@ -1065,7 +1115,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   }
 
   return (
-    <div className='space-y-1'>
+    <div className='space-y-1' onMouseEnter={() => refreshPersonalLabelsIfStale()}>
       {isSearchLoading && (
         <div className='flex items-center justify-center gap-3 px-3 h-9 text-sm text-sidebar-foreground'>
           <Spinner size={16} className='animate-spin shrink-0' />

@@ -7,6 +7,7 @@ import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
+import { useCanvasesWithRestLabels } from '../useCanvasLabels';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 
@@ -59,7 +60,11 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
 
-  const canvasesWithStarState = useMemo(() => withStarredCanvasState(canvases), [canvases]);
+  const canvasesWithLabels = useCanvasesWithRestLabels(canvases);
+  const canvasesWithStarState = useMemo(
+    () => withStarredCanvasState(canvasesWithLabels),
+    [canvasesWithLabels],
+  );
 
   const displayedCanvases = useMemo(
     () =>
