@@ -34,9 +34,6 @@ export interface WorkerStartStreamMessage {
       webSearchEnabled: boolean;
       deepResearchEnabled?: boolean;
       createCanvasEnabled?: boolean;
-      /** Single search + single answer pass instead of the full agentic tool
-       *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
-      instant?: boolean;
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
       messageAttachmentIds?: string[];
@@ -183,7 +180,6 @@ async function executeStream(
         web_search_enabled: requestBody.webSearchEnabled,
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
-        instant: requestBody.instant ?? false,
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,

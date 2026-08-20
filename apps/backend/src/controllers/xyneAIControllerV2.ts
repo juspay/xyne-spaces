@@ -105,11 +105,6 @@ const XyneAIRequestSchemaV2 = z.object({
   web_search_enabled: z.boolean().optional().default(false),
   deepResearchEnabled: z.boolean().optional().default(false),
   deep_research_enabled: z.boolean().optional().default(false),
-  // Single search + single answer pass instead of the full agentic tool
-  // loop — see xyne-claw-auth's run-stream.ts POST / instant branch. Single
-  // word, so camelCase and snake_case are identical — no dual key needed
-  // (unlike webSearchEnabled/web_search_enabled above).
-  instant: z.boolean().optional().default(false),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -246,7 +241,6 @@ export class XyneAIControllerV2 {
       web_search_enabled: webSearchEnabledSC,
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
-      instant,
       researchContext,
       research_context,
       attachments,
@@ -572,7 +566,6 @@ export class XyneAIControllerV2 {
           messageAttachmentIds,
           webSearchEnabled,
           deepResearchEnabled,
-          instant,
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
