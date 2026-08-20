@@ -1,3 +1,10 @@
+## [1.200.0](https://github.com/juspay/xyne-spaces/compare/v1.199.8...v1.200.0) (2026-08-20)
+
+
+### Features
+
+* implement SDLC ([#692](https://github.com/juspay/xyne-spaces/issues/692)) ([05f19e4](https://github.com/juspay/xyne-spaces/commit/05f19e4f4de84639695112be7caff5616628f8c6))
+
 ## [1.199.8](https://github.com/juspay/xyne-spaces/compare/v1.199.7...v1.199.8) (2026-08-20)
 
 
