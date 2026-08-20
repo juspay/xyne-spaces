@@ -19,6 +19,7 @@
  */
 import { callTool } from "./runner.js";
 import type { McpCallResult } from "./types.js";
+import { bitbucketApiUrl, resolveBitbucketBase } from "./adapters/bitbucket.js";
 
 const MAX_CONCURRENT_PER_USER = Number(process.env["BITBUCKET_MAX_CONCURRENCY"] ?? 2);
 const MIN_INTERVAL_MS = Number(process.env["BITBUCKET_MIN_INTERVAL_MS"] ?? 300);
@@ -75,12 +76,16 @@ async function probeBitbucketStatus(
   const m = errorMsg.match(/pull request (\d+) in ([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)/);
   if (!m) return null;
   const [, prId, project, repo] = m;
+  if (!prId || !project || !repo) return null;
   const username = credentials["username"] as string | undefined;
   const token = credentials["token"] as string | undefined;
   if (!username || !token) return null;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-  const url = `${baseUrl}/rest/api/1.0/projects/${project}/repos/${repo}/pull-requests/${prId}`;
   try {
+    // Same validated base + segment-encoded path builder as the local
+    // bitbucket tools: the connection's baseUrl is caller-written, so it is
+    // checked (scheme / allowlist / public address) before any request.
+    const base = await resolveBitbucketBase(credentials);
+    const url = bitbucketApiUrl(base, ["projects", project, "repos", repo, "pull-requests", prId]);
     const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: "Basic " + Buffer.from(`${username}:${token}`).toString("base64") },

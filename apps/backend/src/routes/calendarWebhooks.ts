@@ -198,7 +198,8 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
       } catch (parseErr) {
         logger.error(`${MICROSOFT_TAG} Failed to parse Buffer payload`, {
           error: parseErr instanceof Error ? parseErr.message : String(parseErr),
-          preview: payload.slice(0, 100).toString('hex'),
+          // First 100 bytes as hex (200 hex chars) of the raw Buffer body.
+          preview: payload.toString('hex').slice(0, 200),
         });
         res.status(202).send('Accepted');
         return;

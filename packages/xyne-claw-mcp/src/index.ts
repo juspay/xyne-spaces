@@ -349,9 +349,18 @@ function sleep(ms: number): Promise<void> {
  * server is a subprocess of the CLI), so this works on the user's machine. */
 function openBrowser(url: string): boolean {
 	try {
-		const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-		const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-		execFileSync(cmd, args, { stdio: "ignore" });
+		// The URL comes from the server's device-login response. Only ever hand a
+		// well-formed http(s) URL to the OS opener — never a bare string.
+		const parsed = new URL(url);
+		if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+		const href = parsed.href;
+		if (process.platform === "win32") {
+			// Launch the default browser directly; do not route through cmd.exe
+			// (`cmd /c start`), where `&`, `|`, `^`, `%VAR%` etc. would be interpreted.
+			execFileSync("rundll32", ["url.dll,FileProtocolHandler", href], { stdio: "ignore" });
+		} else {
+			execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [href], { stdio: "ignore" });
+		}
 		return true;
 	} catch {
 		return false;

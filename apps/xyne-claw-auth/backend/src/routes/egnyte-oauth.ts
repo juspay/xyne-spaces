@@ -40,14 +40,35 @@ function getEgnyteCredentials(): { clientId: string; clientSecret: string } {
   return { clientId, clientSecret };
 }
 
+/** A single DNS label: the tenant part of `<tenant>.egnyte.com`. */
+const EGNYTE_TENANT_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+const EGNYTE_HOST_SUFFIX = ".egnyte.com";
+
+/**
+ * Build the domain-scoped Egnyte OAuth endpoint. `domain` reaches us via the
+ * signed OAuth state (and, on refresh, the stored credential), so it is
+ * checked here to be a bare tenant label: the resulting host is always
+ * `<tenant>.egnyte.com` over https and can never name another origin.
+ */
+function egnyteOAuthEndpoint(domain: string): string {
+  if (!EGNYTE_TENANT_RE.test(domain)) {
+    throw new Error("Invalid Egnyte domain: expected the tenant label of <tenant>.egnyte.com");
+  }
+  const endpoint = new URL(`https://${domain}${EGNYTE_HOST_SUFFIX}/puboauth/token`);
+  if (endpoint.protocol !== "https:" || !endpoint.hostname.endsWith(EGNYTE_HOST_SUFFIX)) {
+    throw new Error("Invalid Egnyte domain");
+  }
+  return endpoint.href;
+}
+
 /** Egnyte auth endpoint — domain-scoped. */
 function egnyteAuthUrl(domain: string): string {
-  return `https://${domain}.egnyte.com/puboauth/token`;
+  return egnyteOAuthEndpoint(domain);
 }
 
 /** Egnyte token endpoint — domain-scoped (same path as auth, POST). */
 function egnyteTokenUrl(domain: string): string {
-  return `https://${domain}.egnyte.com/puboauth/token`;
+  return egnyteOAuthEndpoint(domain);
 }
 
 /** Default browser-callback URI. */

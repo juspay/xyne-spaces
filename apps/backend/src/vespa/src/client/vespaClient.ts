@@ -163,7 +163,7 @@ class VespaClient {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
 
-      const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
+      const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${encodeURIComponent(document.docId)}`;
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: {
@@ -191,7 +191,7 @@ class VespaClient {
 
   async getDocument(options: VespaConfigValues & { docId: string }): Promise<any> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${encodeURIComponent(docId)}`;
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
@@ -228,7 +228,7 @@ class VespaClient {
     const { docId, namespace, schema, create } = options;
     // create=true upserts: Vespa builds the doc from these assign ops when it
     // doesn't exist yet, instead of silently no-oping the partial update.
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}${
+    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${encodeURIComponent(docId)}${
       create ? '?create=true' : ''
     }`;
 
@@ -272,7 +272,7 @@ class VespaClient {
 
   async deleteDocument(options: VespaConfigValues & { docId: string }): Promise<void> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${encodeURIComponent(docId)}`;
 
     try {
       const response = await this.fetchWithRetry(url, {

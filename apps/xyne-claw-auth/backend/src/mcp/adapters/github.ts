@@ -102,6 +102,18 @@ const IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
 const GITHUB_API_VERSION = "2026-03-10";
+const GITHUB_API_ORIGIN = "https://api.github.com";
+
+/**
+ * Build an api.github.com URL. The origin is fixed; every caller-supplied
+ * part (owner, repo, PR number) is its own percent-encoded path segment, so
+ * tool-call arguments can shape the path but never the scheme or host.
+ */
+function githubApiUrl(...segments: Array<string | number>): string {
+  const url = new URL(GITHUB_API_ORIGIN);
+  url.pathname = "/" + segments.map((s) => encodeURIComponent(String(s))).join("/");
+  return url.href;
+}
 
 /**
  * GitHub renders a player for a video URL on its OWN bare line; the `![]()`
@@ -182,7 +194,7 @@ export async function handleUploadPrAttachment(
   };
 
   // The upload endpoint keys off the numeric repository id, not owner/name.
-  const lookupRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+  const lookupRes = await fetch(githubApiUrl("repos", owner, repo), {
     headers: { ...auth, Accept: "application/vnd.github+json" },
     signal: AbortSignal.timeout(20_000),
   });
@@ -247,15 +259,12 @@ export async function handleUploadPrAttachment(
   }
 
   // PR/issue comments share the issues endpoint on GitHub.
-  const commentRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments`,
-    {
-      method: "POST",
-      headers: { ...auth, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-      body: JSON.stringify({ body: markdown }),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
+  const commentRes = await fetch(githubApiUrl("repos", owner, repo, "issues", prNumber, "comments"), {
+    method: "POST",
+    headers: { ...auth, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+    body: JSON.stringify({ body: markdown }),
+    signal: AbortSignal.timeout(30_000),
+  });
 
   const citations: Citation[] = [
     { kind: "external", url: prUrl(owner, repo, prNumber), chunkIndex: 1, label: `GitHub PR #${prNumber}` },

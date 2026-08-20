@@ -106,7 +106,7 @@ import {
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl, resolveAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -411,7 +411,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     conversationId,
     piSessionConversationId,
     spacesConversationId,
-    callbackUrl,
+    callbackUrl: rawCallbackUrl,
     systemPrompt,
     agentConfig,
     agentSlug,
@@ -426,7 +426,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     subagentProviders,
     subagentProviderMode,
     providerConfigs,
-    progressUrl,
+    progressUrl: rawProgressUrl,
     attachments,
     recordingRefs,
     contextFiles,
@@ -584,6 +584,26 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     generateFollowUpSuggestions?: boolean;
   };
   const experiment = normalizeExperimentContext(rawExperiment);
+
+  // SSRF fence for the caller-supplied callback/progress URLs. Resolve them
+  // ONCE here, at the edge, into URLs rebuilt on the allowlisted claw-auth
+  // origin (see resolveAllowedCallbackUrl). Every downstream POST — progress
+  // events in agent.ts / subagent-tools.ts, the final result in sendCallback —
+  // then targets a URL whose host and scheme come from our config, never from
+  // the request body. A callbackUrl off the allowlist is rejected up front:
+  // the run's result could never be delivered, so running it would only burn
+  // the budget. A progressUrl off the allowlist is dropped (run proceeds
+  // without live progress), matching the previous behavior.
+  const callbackUrl = resolveAllowedCallbackUrl(rawCallbackUrl);
+  if (typeof rawCallbackUrl === "string" && rawCallbackUrl.trim().length > 0 && !callbackUrl) {
+    clog.error(`[run] Rejecting /run: callbackUrl is not on the allowlisted claw-auth origin: ${rawCallbackUrl}`);
+    res.status(400).json({ success: false, error: "callbackUrl must target the claw-auth origin" });
+    return;
+  }
+  const progressUrl = resolveAllowedCallbackUrl(rawProgressUrl);
+  if (typeof rawProgressUrl === "string" && rawProgressUrl.trim().length > 0 && !progressUrl) {
+    clog.warn(`[run] Ignoring non-allowlisted progressUrl: ${rawProgressUrl}`);
+  }
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
