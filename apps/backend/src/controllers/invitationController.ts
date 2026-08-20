@@ -8,7 +8,7 @@ import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -572,13 +572,17 @@ export class InvitationController {
       await unifiedBotUserService.syncAllBotUsers(workspace.id);
 
       // Create invitation outside the transaction (sends email — non-DB side-effect)
-      const invitation = await invitationService.createInvitation({
-        email: normalizedOwnerEmail,
-        role: WorkspaceRole.OWNER,
-        workspaceId: workspace.id,
-        orgId: org.orgId,
-        invitedBy,
-      });
+      // Run as system because the new org/workspace is not the caller's own —
+      // the OrganizationsACL would filter out the org lookup inside createInvitation.
+      const invitation = await runAsSystem(() =>
+        invitationService.createInvitation({
+          email: normalizedOwnerEmail,
+          role: WorkspaceRole.OWNER,
+          workspaceId: workspace.id,
+          orgId: org.orgId,
+          invitedBy,
+        }),
+      );
       invitationId = invitation.invitationId ?? invitation.id;
 
       const provisionInvitationLink = await buildInvitationLink({ req, workspaceId: workspace.id, invitationId });
