@@ -2945,7 +2945,12 @@ export const queries = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
       limit: z.number(),
-      start: z.object({ createdAt: z.number() }).nullable(),
+      // conversationId is the table's primary key and completes the (createdAt, conversationId)
+      // sort key. It MUST be included for a stable cursor: with createdAt alone, the SQLite
+      // source and the IVM comparator disagree about rows tied on createdAt, which can push an
+      // edit into an empty take window and throw "Bound should be set". Optional for backward
+      // compatibility with callers that don't have it (e.g. the read-cutoff cursor).
+      start: z.object({ createdAt: z.number(), conversationId: z.string().optional() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ ctx, args: { channelId, limit, start, direction } }) => {
@@ -2973,7 +2978,12 @@ export const queries = defineQueries({
 
       // Apply cursor pagination if start is provided
       if (start) {
-        query = query.start({ createdAt: start.createdAt }, { inclusive: direction === 'forward' });
+        query = query.start(
+          start.conversationId != null
+            ? { createdAt: start.createdAt, conversationId: start.conversationId }
+            : { createdAt: start.createdAt },
+          { inclusive: direction === 'forward' },
+        );
       }
 
       // Apply limit
