@@ -4,15 +4,10 @@ import { Virtuoso } from 'react-virtuoso';
 import { Spinner } from '@xyne/icons';
 import { CallStatus } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PanelsTopLeft } from 'lucide-react';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
-import { Dialog } from '../../components/ui/Dialog';
-import {
-  usePaginatedOatsRecordings,
-  type OatsRecordingEntry,
-} from '../../hooks/usePaginatedOatsRecordings';
+import { usePaginatedOatsRecordings } from '../../hooks/usePaginatedOatsRecordings';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
