@@ -2057,7 +2057,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     void applyTicketUpdate(
       {
         id: ticket.id,
-        userGroupId: groupId ?? undefined,
+        userGroupId: groupId,
         updatedAt: Date.now(),
       },
       'Failed to update team',
@@ -3209,15 +3209,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <p className='text-sm text-muted-foreground italic'>Add description</p>
               ) : (
                 <>
-                  <p
+                  <div
                     ref={descriptionRef}
                     className={cn(
                       'whitespace-pre-wrap text-foreground break-all text-sm',
-                      !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                      !showFullDescription && 'overflow-hidden line-clamp-6 sm:line-clamp-8',
                     )}
                   >
                     <RenderMessageWithHTML message={ticket.description} />
-                  </p>
+                  </div>
                   {!showFullDescription && needsReadMore && (
                     <button
                       className='text-xs font-semibold cursor-pointer self-start underline py-1'
@@ -3869,6 +3869,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <UserGroupSelector
                   selectedGroupId={ticket.userGroupId ?? null}
                   onGroupSelect={handleUserGroupChange}
+                  showUnassignOption
+                  unassignLabel='Remove user group'
+                  unassignDescription='Clear the user group from this ticket'
                 />
               }
             />

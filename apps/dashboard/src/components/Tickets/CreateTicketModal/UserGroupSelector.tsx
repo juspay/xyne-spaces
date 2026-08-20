@@ -17,6 +17,18 @@ interface UserGroupSelectorProps {
 
   /** Callback when group selection changes */
   onGroupSelect: (groupId: string | null) => void;
+
+  /** Show an inline clear button when a group is selected */
+  showClearButton?: boolean;
+
+  /** Show a remove option at the top of the dropdown when a group is selected */
+  showUnassignOption?: boolean;
+
+  /** Label for the remove option */
+  unassignLabel?: string;
+
+  /** Description for the remove option */
+  unassignDescription?: string;
 }
 
 /**
@@ -37,6 +49,10 @@ interface UserGroupSelectorProps {
 export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
   selectedGroupId,
   onGroupSelect,
+  showClearButton = false,
+  showUnassignOption = false,
+  unassignLabel = 'Remove user group',
+  unassignDescription = 'Clear the selected user group',
 }) => {
   const [searchValue, setSearchValue] = useState('');
 
@@ -125,6 +141,10 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
       width='auto'
       onSearchChange={setSearchValue}
       disableClientFiltering={true}
+      showClearButton={showClearButton}
+      showUnassignOption={showUnassignOption}
+      unassignLabel={unassignLabel}
+      unassignDescription={unassignDescription}
     />
   );
 };

@@ -42,6 +42,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   testId,
   showUnassignOption = false,
   unassignLabel = 'Unassign',
+  unassignDescription = 'Remove assignee',
   headerAction,
   virtualize = false,
   // Only virtualize (opt-in) once the list is large enough to matter.
@@ -188,7 +189,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       </span>
       <div className='flex-1 min-w-0'>
         <div className='truncate font-medium text-foreground'>{unassignLabel}</div>
-        <div className='truncate text-xs text-muted-foreground'>Remove assignee</div>
+        <div className='truncate text-xs text-muted-foreground'>{unassignDescription}</div>
       </div>
     </button>
   );
