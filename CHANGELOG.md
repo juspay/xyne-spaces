@@ -1,3 +1,10 @@
+## [1.203.2](https://github.com/juspay/xyne-spaces/compare/v1.203.1...v1.203.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* Add V2 queries and update components to support channel membership ([#754](https://github.com/juspay/xyne-spaces/issues/754)) ([9fe712f](https://github.com/juspay/xyne-spaces/commit/9fe712fab4246c5650b42bdbcfde02adac1ed806))
+
 ## [1.203.1](https://github.com/juspay/xyne-spaces/compare/v1.203.0...v1.203.1) (2026-08-20)
 
 
