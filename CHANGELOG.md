@@ -1,3 +1,10 @@
+## [1.200.1](https://github.com/juspay/xyne-spaces/compare/v1.200.0...v1.200.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* upgrade vitest version ([#804](https://github.com/juspay/xyne-spaces/issues/804)) ([d292aff](https://github.com/juspay/xyne-spaces/commit/d292aff701ab298552606ce9a57e6bffdcf95662))
+
 ## [1.200.0](https://github.com/juspay/xyne-spaces/compare/v1.199.8...v1.200.0) (2026-08-20)
 
 
