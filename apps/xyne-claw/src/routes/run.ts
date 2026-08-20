@@ -113,6 +113,7 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -2616,6 +2617,19 @@ async function processTask(
       `Tools: ${subagentTools.length} subagents, ${directTools.length} direct, ${customToolDefs.length} custom, ${parentHoistedTools.length} parent-hoisted, ${kbHoistedTools.length} kb-hoisted${fastModeEnabled ? `, [fast] catalogCandidates=${fastCatalogCandidateItems.length}` : ""}`,
     );
 
+    // Presentation tools (post-code-block / post-diff / post-chart / visualize)
+    // render as cards in the Spaces thread, so a thread run gets them in the
+    // CATALOG regardless of the agent's tools.custom selection. Framework
+    // default, not per-agent config — same rationale as the plan tools below,
+    // but lazy (one index line each) instead of always-active. See
+    // ../presentation-catalog.ts for why these three conditions and no others.
+    const presentationDefaultOn = presentationCatalogDefaultOn({
+      channelId,
+      eventType,
+      conversationId,
+      isScheduledOrAutomationRun,
+    });
+
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
     if (toolsConfigEarly) {
@@ -2668,6 +2682,11 @@ async function processTask(
           // Slash-command contracts own their minimum palette. Keep these
           // per-run tools even when the stored Agent.config did not select them.
           if (forcedTaskCommandTools.has(t.name)) return true;
+          // Thread runs get the presentation tools for free. Surviving this
+          // gate is exactly what lets them reach fastCatalogItems below —
+          // they still can't become always-active, because both catalog
+          // builders keep them out of fastAlwaysActiveToolNames.
+          if (isFreePresentationTool(t as { source?: string }, presentationDefaultOn)) return true;
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
           const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
           if (isAllowedCustom) return true;
@@ -3108,7 +3127,7 @@ async function processTask(
         )
       : undefined;
     if (catalogActive) {
-      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled}`);
+      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled} presentationDefault=${presentationDefaultOn}`);
     }
 
     const tools = allTools.length > 0 ? allTools : undefined;
@@ -3632,6 +3651,19 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${fastModeCatalogPrompt}`
         : fastModeCatalogPrompt;
+    }
+    // Reads as an addendum to the catalog index above: WHY this run has the
+    // presentation catalog (the surface, not the agent's tool config) and HOW
+    // to answer on a chat surface. Empty unless presentation entries actually
+    // survived into this run's catalog.
+    const presentationPrimer = presentationDefaultOn
+      ? buildPresentationPrimer(fastCatalogItems.map((item) => item.entry))
+      : "";
+    if (presentationPrimer) {
+      fullContext = fullContext
+        ? `${fullContext}\n\n${presentationPrimer}`
+        : presentationPrimer;
+      log(`[catalog] presentation primer injected (${presentationPrimer.length} chars)`);
     }
     const fastModeSubagentSkills =
       fastModeEnabled && customSubagents && customSubagents.length > 0
