@@ -144,7 +144,7 @@ export const CanvasVersionHistory = ({
                         className='min-w-0 flex-1 text-left'
                         onClick={() => {
                           onPreview(version);
-                          onClose();
+                          //onClose();
                         }}
                         data-track-category='CANVAS'
                         data-track-name='Preview_Canvas_Version'
