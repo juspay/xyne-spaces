@@ -1,3 +1,10 @@
+## [1.203.1](https://github.com/juspay/xyne-spaces/compare/v1.203.0...v1.203.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* adding runAsSystem for syncBotUsers in new org creation ([#807](https://github.com/juspay/xyne-spaces/issues/807)) ([25aa089](https://github.com/juspay/xyne-spaces/commit/25aa089b0ff81fcad3d05c76284e727d9cf218e1))
+
 ## [1.203.0](https://github.com/juspay/xyne-spaces/compare/v1.202.0...v1.203.0) (2026-08-20)
 
 
