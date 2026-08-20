@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.1](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.11...v1.188.0-release-20260817.1) (2026-08-20)
+
+
+### Features
+
+* implement SDLC (backport to release-20260817) ([#777](https://github.com/juspay/xyne-spaces/issues/777)) ([f090900](https://github.com/juspay/xyne-spaces/commit/f0909001a0dd3924f86bf0f00e3409925300f668)), closes [#692](https://github.com/juspay/xyne-spaces/issues/692)
+
 ## [1.187.1-release-20260817.11](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.10...v1.187.1-release-20260817.11) (2026-08-19)
 
 
