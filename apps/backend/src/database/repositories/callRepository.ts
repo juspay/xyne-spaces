@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -291,6 +291,49 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  async appendLabels(callId: string, labelIds: string[]): Promise<void> {
+    if (labelIds.length === 0) return;
+    const lockKey = `call-labels:${callId}`;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({ where: { id: callId }, select: { labels: true } });
+      if (!call) return;
+
+      const relevantIds = [...new Set([...call.labels, ...labelIds])];
+      const tags = await tx.tag.findMany({
+        where: { id: { in: relevantIds }, sourceId: callId, isDeleted: false },
+        select: { id: true, tag: true, method: true },
+      });
+      const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+      
+      const resolve = (id: string): { slug: string; method: TagMethod } => {
+        const tag = tagById.get(id);
+        return tag ? { slug: tag.tag, method: tag.method as TagMethod } : { slug: id, method: TagMethod.MANUAL };
+      };
+
+      const bySlug = new Map<string, string>();
+
+      for (const id of call.labels) {
+        const { slug, method } = resolve(id);
+        if (method === TagMethod.LLM) continue;
+        bySlug.set(slug, id);
+      }
+
+      for (const id of labelIds) {
+        const { slug } = resolve(id);
+        if (bySlug.has(slug)) continue;
+        bySlug.set(slug, id);
+      }
+
+      const labels = [...bySlug.values()];
+      await tx.call.update({ where: { id: callId }, data: { labels } });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
   }
 
   async findById(id: string): Promise<Call | null> {

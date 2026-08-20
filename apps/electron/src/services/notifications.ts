@@ -86,10 +86,10 @@ export function showCallNotification(
   }
 
   try {
-    const callTypeLabel = data.callType === 'VIDEO' ? 'Video' : 'Audio';
-    
+    // There is one kind of call, so the OS notification says so too. `callType`
+    // stays on the payload — LiveKit room setup and CallKit still key off it.
     const notification = new Notification({
-      title: `Incoming ${callTypeLabel} Call`,
+      title: 'Incoming call',
       body: `${data.callerName} is calling you`,
       silent: false,
       urgency: 'critical',

@@ -32,6 +32,7 @@ import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
+import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -450,6 +451,8 @@ export const mapMessage = async (
     getFlowJsonContentForNotification(args.content || '') ||
     extractPlainTextFromHtml(args.content || '') || '';
 
+  const messageLinks = extractLinksFromContent(args.content || '');
+
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
   // Message acts, denormalized onto the doc so search can filter on them. Stored as a
@@ -505,6 +508,8 @@ export const mapMessage = async (
     docType: VespaDocType.MESSAGE,
     text: messageContent,
     chunks: chunkPlainText(messageContent),
+    links: messageLinks,
+    hasLinks: messageLinks.length > 0,
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",

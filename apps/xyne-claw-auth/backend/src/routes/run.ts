@@ -25,7 +25,13 @@ import {
   resolveCallableAgentSpecForOrchestratorCall,
   resolveOrchestratorCallableAgentsForRun,
 } from "../lib/callable-agent-resolver.js";
-import { ClawSseParser, parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
+import {
+  buildSdlcAgentToolProfile,
+  ClawSseParser,
+  parseToolsConfig,
+  stripPlatformConfigKeys,
+} from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken, verifySessionToken } from "../lib/session-tokens.js";
 import { consumeAlreadyOpenStream, streamDispatcher } from "../lib/consume-claw-stream.js";
 import {
@@ -54,6 +60,9 @@ import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import type { SessionContext } from "./webhook.js";
 const log = createLogger("run");
+const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+  xyneSpacesTools.map((tool) => tool.name),
+);
 
 const router = Router();
 
@@ -1133,6 +1142,24 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...agent.agentConfig,
       ...((req.body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
+    if (agentSlug === "sdlc-agent") {
+      const configuredTools = (mergedAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+      const configuredPermissions =
+        (mergedAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {};
+      mergedAgentConfig = {
+        ...mergedAgentConfig,
+        tools: {
+          ...configuredTools,
+          direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
+          custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
+          subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
+        },
+        toolPermissions: {
+          ...configuredPermissions,
+          ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
+        },
+      };
+    }
     if (!isInternalRun) {
       const {
         sdlcContext: _untrustedSdlcContext,
