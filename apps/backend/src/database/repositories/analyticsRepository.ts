@@ -100,10 +100,6 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Centralized helper to fetch and filter valid messages
-   * Accepts a Prisma where clause and returns only valid messages
-   */
-  /**
    * Excluded channel IDs for analytics filtering
    * These channels are excluded from all analytics message queries
    */
@@ -177,10 +173,6 @@ export class AnalyticsRepository {
     }
 
     return workspaceId;
-  }
-
-  private getWorkspaceFilter(filters: AnalyticsFilters): { workspaceId: string } {
-    return { workspaceId: this.requireWorkspaceId(filters.workspaceId) };
   }
 
   private getCallWorkspaceFilter(workspaceId: string, userIds: string[]): Prisma.CallWhereInput {
@@ -332,10 +324,6 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Helper method to extract start and end dates from date condition
-   * Centralizes the logic to avoid code duplication across time-series methods
-   */
-  /**
    * Normalize a date filter (single Date or a {gte,lte} range) into a Prisma date condition.
    */
   private toDateCondition(dateFilter: Date | { gte: Date; lte?: Date }): { gte: Date; lte?: Date } {
@@ -354,19 +342,39 @@ export class AnalyticsRepository {
   }
 
   /**
+   * Resolve the common analytics scope for a request in one place: the required
+   * workspace id, the normalized date condition, its [startDate, endDate] range,
+   * and the ISO [gte, lte] string bounds. Replaces the per-method prelude that
+   * recomputed these from getDateFilter / requireWorkspaceId / toDateCondition.
+   */
+  private resolveScope(filters: AnalyticsFilters): {
+    workspaceId: string;
+    dateCondition: { gte: Date; lte?: Date };
+    startDate: Date;
+    endDate: Date;
+    gte: string | null;
+    lte: string | null;
+  } {
+    const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const dateCondition = this.toDateCondition(dateFilter);
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { gte, lte } = this.toIsoBounds(dateCondition);
+    return { workspaceId, dateCondition, startDate, endDate, gte, lte };
+  }
+
+  /**
    * Get workflow metrics bucketed by workflowType and status
    */
   async getWorkflowMetrics(filters: AnalyticsFilters) {
-    const dateFilter = getDateFilter(filters);
-    const workspaceFilter = this.getWorkspaceFilter(filters);
-    const dateCondition = this.toDateCondition(dateFilter);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
 
     const groupedData = await this.prisma.workflow.groupBy({
       by: ['workflowType', 'status'],
       where: {
         createdAt: dateCondition,
         NOT: { workflowType: 'Automations' },
-        ...workspaceFilter
+        workspaceId
       },
       _count: {
         id: true
@@ -424,13 +432,7 @@ export class AnalyticsRepository {
    * Counts the number of file attachments shared in the selected time period
    */
   async getFilesShared(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, gte, lte } = this.resolveScope(filters);
 
     // Aggregate entirely in Postgres: the valid-message set is a CTE that the
     // attachment count JOINs against, so no message-id list is round-tripped
@@ -468,11 +470,7 @@ export class AnalyticsRepository {
    * Fetches all messages within date range and processes aggregation in application memory
    */
   async getMessagesExchangedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = this.toDateCondition(dateFilter);
-    const { startDate, endDate } = this.getDateRange(dateCondition);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
     // Per-bucket total plus per-scope breakdown, aggregated in Postgres. Rows in
     // scopes other than the three tracked ones still count toward `value`
@@ -489,9 +487,7 @@ export class AnalyticsRepository {
       `,
     );
 
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     const byKey = new Map<string, { value: number; channel: number; dm: number; groupDm: number }>();
     for (const row of rows) {
@@ -564,21 +560,24 @@ export class AnalyticsRepository {
   }
 
   /**
+   * Pick the hourly or daily bucket generator for the requested granularity.
+   */
+  private generateTimeBuckets(groupBy: 'day' | 'hour', startDate: Date, endDate: Date): string[] {
+    return groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
+  }
+
+  /**
    * Get active users with both aggregate and time-series data in single call
    */
   async getActiveUsersWithChart(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{
     uniqueUsers: number;
     timeSeries: { date: string; value: number }[];
   }> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = this.toDateCondition(dateFilter);
-    const { startDate, endDate } = this.getDateRange(dateCondition);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     // One scan serves both the per-bucket distinct-user series AND the period
     // total. Every activity source (messages, reactions, attachments, tickets,
@@ -707,10 +706,7 @@ export class AnalyticsRepository {
    * Uses the same logic as the time-series to ensure consistency
    */
   async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = this.toDateCondition(dateFilter);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, gte, lte } = this.resolveScope(filters);
 
     // Count the distinct DEFAULT-scope channels the valid messages belong to
     // directly in Postgres (COUNT DISTINCT) instead of building a Set in Node.
@@ -727,11 +723,7 @@ export class AnalyticsRepository {
    * Get active channels time-series data
    */
   async getActiveChannelsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = this.toDateCondition(dateFilter);
-    const { startDate, endDate } = this.getDateRange(dateCondition);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
     // Distinct DEFAULT-scope channels active per bucket, counted in Postgres
     // (COUNT(DISTINCT ...) FILTER) instead of building a per-bucket Set in Node.
@@ -740,9 +732,7 @@ export class AnalyticsRepository {
       Prisma.sql`COUNT(DISTINCT c."channelId") FILTER (WHERE ch."scopeType" = ${ChannelScopeType.DEFAULT})::int AS value`,
     );
 
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
     return this.zeroFillSingle(rows, timeBuckets, groupBy);
   }
 
@@ -751,11 +741,7 @@ export class AnalyticsRepository {
    * Counts the number of users who were onboarded (created in user_presence table) in the selected time period
    */
   async getUsersOnboarded(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
 
     // Count users onboarded in the selected time period
     const usersOnboardedCount = await this.prisma.userPresence.count({
@@ -772,14 +758,7 @@ export class AnalyticsRepository {
    * Get users onboarded time-series data
    */
   async getUsersOnboardedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
 
     // Get user presence records
     const userPresenceRecords = await this.prisma.userPresence.findMany({
@@ -839,11 +818,7 @@ export class AnalyticsRepository {
    * Only counts tickets created by (userType: 'USER')
    */
   async getNumberOfTickets(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -864,14 +839,7 @@ export class AnalyticsRepository {
    * Only counts tickets created by real users (userType: 'USER'), excludes bot-created tickets
    */
   async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -886,9 +854,7 @@ export class AnalyticsRepository {
     });
 
     // Generate time buckets based on groupBy
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     return this.bucketCounts(
       tickets,
@@ -903,11 +869,7 @@ export class AnalyticsRepository {
    * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
    */
   async getNumberOfCanvases(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -927,14 +889,7 @@ export class AnalyticsRepository {
    * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
    */
   async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
 
     const userIds = await this.getUsersId(workspaceId);
 
@@ -948,9 +903,7 @@ export class AnalyticsRepository {
     });
 
     // Generate time buckets based on groupBy
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     return this.bucketCounts(
       canvases,
@@ -968,12 +921,8 @@ export class AnalyticsRepository {
     validCalls: { startedAt: Date; isRecording: boolean }[];
     dateCondition: Date | { gte: Date; lte?: Date };
   }> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
     const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
 
     // Get all calls in the date range
     const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
@@ -1028,9 +977,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Generate time buckets based on groupBy
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
     const callBuckets = new Map<string, number>();
     const recordingBuckets = new Map<string, number>();
 
@@ -1062,12 +1009,8 @@ export class AnalyticsRepository {
    * Only counts calls that lasted more than 60 seconds
    */
   async getTotalCallsDuration(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const { workspaceId, dateCondition } = this.resolveScope(filters);
     const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
 
     // Get calls that have both start and end times
     const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
@@ -1101,15 +1044,8 @@ export class AnalyticsRepository {
    * Only counts calls that lasted more than 60 seconds
    */
   async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
     const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Get calls that have both start and end times
     const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
@@ -1125,9 +1061,7 @@ export class AnalyticsRepository {
     }));
 
     // Generate time buckets based on groupBy
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     // Sum qualifying call durations (seconds) per bucket, then convert to minutes
     const durationSecondsSeries = this.bucketCounts(
@@ -1149,10 +1083,7 @@ export class AnalyticsRepository {
    * Uses database aggregation for optimal performance
    */
   async getTopUsersByMessages(filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const dateCondition = this.toDateCondition(dateFilter);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, gte, lte } = this.resolveScope(filters);
 
     // Group + rank + limit in Postgres. Joining `users` with userType = 'USER'
     // preserves the "real users only, excludes bots" semantics the previous
@@ -1182,15 +1113,7 @@ export class AnalyticsRepository {
    * Get files shared time-series data
    */
   async getFilesSharedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = this.toDateCondition(dateFilter);
-
-    // Extract start and end dates using centralized helper method
-    const { startDate, endDate } = this.getDateRange(dateCondition);
-    const { gte, lte } = this.toIsoBounds(dateCondition);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
     // Get file attachments for valid (non-migrated) messages only, joining the
     // valid-message set as a CTE instead of round-tripping message ids.
@@ -1204,9 +1127,7 @@ export class AnalyticsRepository {
     `);
 
     // Generate time buckets based on groupBy
-    const timeBuckets = groupBy === 'hour'
-      ? this.generateHourlyTimeBuckets(startDate, endDate)
-      : this.generateDailyTimeBuckets(startDate, endDate);
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
     return this.bucketCounts(
       attachments,
