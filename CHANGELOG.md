@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.3...v1.188.0-release-20260817.4) (2026-08-20)
+
+
+### Bug Fixes
+
+* updating catch block to provide actual error ([#815](https://github.com/juspay/xyne-spaces/issues/815)) ([e1d73d6](https://github.com/juspay/xyne-spaces/commit/e1d73d68e332699be5a9d02762c8ec1cba24b8d4))
+
 ## [1.188.0-release-20260817.3](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.2...v1.188.0-release-20260817.3) (2026-08-20)
 
 
