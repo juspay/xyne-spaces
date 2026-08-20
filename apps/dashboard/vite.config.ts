@@ -48,6 +48,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: appBasePath,
+    // Both lanes run from this same project dir, so they would share
+    // node_modules/.vite and invalidate each other's prebundled deps
+    // ("504 Outdated Optimize Dep"). Give the SDLC server its own.
+    ...(isSdlcSurface ? { cacheDir: 'node_modules/.vite-sdlc' } : {}),
     plugins: [
       react(),
       {
