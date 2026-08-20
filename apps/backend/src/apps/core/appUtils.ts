@@ -121,7 +121,7 @@ export async function installApp(appId: string, workspaceId: string) {
       .replace(/[^a-z0-9-]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
-    const email = `${botName}-${workspaceId}@app.xyne.ai`;
+    const email = `${botName}-${appId}-${workspaceId}@app.xyne.ai`;
 
     const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
     if (!workspace) {
