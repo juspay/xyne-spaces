@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.7...v1.188.0-release-20260817.8) (2026-08-20)
+
+
+### Bug Fixes
+
+* strip the router basename before reading the workspace id ([#841](https://github.com/juspay/xyne-spaces/issues/841)) ([865ba14](https://github.com/juspay/xyne-spaces/commit/865ba14169a85817cbb9a91f783e93c97720dd98))
+
 ## [1.188.0-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.6...v1.188.0-release-20260817.7) (2026-08-20)
 
 
