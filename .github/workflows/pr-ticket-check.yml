@@ -1,8 +1,5 @@
 name: PR Ticket Check
 
-# The repo's only ticket gate: .husky/commit-msg (the old commitlint check) is
-# disabled. Squash-merge makes the PR title the commit message on main, so the
-# title is the thing worth validating — individual branch commits never land.
 # `edited` is required in the trigger list: without it a PR whose title is fixed
 # after the fact keeps its stale red check.
 on:
@@ -20,14 +17,9 @@ concurrency:
         && github.head_ref != 'staging'
         && !startsWith(github.head_ref, 'release') }}
 
-# Community Spaces only. The internal deployment is deliberately never queried
-# from CI: the jira-compat endpoint is unauthenticated and exposes ticket
-# titles, and fork PRs would reach it from arbitrary IPs.
 env:
   SPACES_HOST: https://spaces.xyne.ai
   TICKET_PROJECT: TESTCORP
-  # Repository Actions variable, not committed: no workspace id appears anywhere
-  # else in this repo. Unset => the existence check degrades to format-only.
   TICKET_WORKSPACE: ${{ vars.TICKET_WORKSPACE }}
 
 jobs:
@@ -40,8 +32,6 @@ jobs:
       - name: Ticket ID in PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-          # Squash-merge puts this title on main, where semantic-release parses it;
-          # a title with no conventional type yields no version bump, silently.
           TYPES: feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert
         run: |
           set -euo pipefail
@@ -58,9 +48,6 @@ jobs:
           printf 'TICKET_KEYS=%s\n' "$KEYS" >> "$GITHUB_ENV"
           echo "Found: $KEYS"
 
-      # Every key in the title is checked, not just the first. Keys from other
-      # projects (legacy XYNE-####) pass on format alone — they live in the
-      # internal instance, which CI must not query.
       - name: Ticket exists in community Spaces
         run: |
           set -euo pipefail
