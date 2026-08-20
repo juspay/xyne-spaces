@@ -13,6 +13,7 @@ import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
+import { resolveDebugEntity } from '../util/debug-entity';
 
 class EventRouter {
   async emit(event: AutomationEvent, workspaceId: string): Promise<void> {
@@ -54,6 +55,7 @@ class EventRouter {
                   status: AutomationRunStatus.PENDING,
                   tag: 'root',
                   workspaceId,
+                  ...resolveDebugEntity(eventType, payload),
                 },
               });
               await tx.workflowExecutionState.create({

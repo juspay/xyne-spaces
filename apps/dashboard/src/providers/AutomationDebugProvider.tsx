@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   useSyncExternalStore,
+  type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -72,11 +73,8 @@ const ENTITY_LABEL: Record<DebugEntityType, string> = {
   EMAIL: 'this email',
   TICKET: 'this ticket',
 };
-// Ticket runs only cover creation (see the backend route) — surfaced here too.
-const ENTITY_SCOPE_NOTE: Partial<Record<DebugEntityType, string>> = {
-  TICKET:
-    'This is for ticket-creation debugging only. For other details, go to the automations page.',
-};
+// Per-entity caveat about what the backend can correlate; none needed today.
+const ENTITY_SCOPE_NOTE: Partial<Record<DebugEntityType, string>> = {};
 
 const RAIL_WIDTH_KEY = 'xyne-debug-rail-width';
 const MIN_RAIL_WIDTH = 360;
@@ -99,20 +97,29 @@ function AutomationDebugPanel(): ReactElement | null {
     return () => cancelAnimationFrame(raf);
   }, [target]);
 
-  const startResize = (e: { preventDefault: () => void; clientX: number }): void => {
+  // Pointer capture, not document listeners: guarantees the release lands even when the
+  // button comes up outside the viewport, which a document 'mouseup' misses.
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
     e.preventDefault();
     const startX = e.clientX;
-    const onMove = (ev: MouseEvent): void => {
-      const next = Math.min(
-        MAX_RAIL_WIDTH,
-        Math.max(MIN_RAIL_WIDTH, width - (ev.clientX - startX)),
-      );
+    const startWidth = width;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+
+    let next = startWidth;
+    const onMove = (ev: PointerEvent): void => {
+      next = Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, startWidth - (ev.clientX - startX)));
       setWidth(next);
+    };
+    const onUp = (): void => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
       localStorage.setItem(RAIL_WIDTH_KEY, String(next));
     };
-    const onUp = (): void => document.removeEventListener('mousemove', onMove);
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp, { once: true });
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
   };
 
   if (!target) return null;
@@ -136,7 +143,7 @@ function AutomationDebugPanel(): ReactElement | null {
         aria-valuemin={MIN_RAIL_WIDTH}
         aria-valuemax={MAX_RAIL_WIDTH}
         tabIndex={0}
-        onMouseDown={startResize}
+        onPointerDown={startResize}
         onKeyDown={(e): void => {
           const step = e.key === 'ArrowLeft' ? 16 : e.key === 'ArrowRight' ? -16 : 0;
           if (!step) return;
