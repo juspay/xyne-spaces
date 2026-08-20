@@ -27,6 +27,7 @@ import {
   type ComposerContext,
 } from '@/components/AIScreen/composerContext';
 import { cn } from '@/utils/classNames';
+import { TWIN_STROKE_CLASS } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -62,8 +63,7 @@ const ASK_TEXTAREA_MIN = 28;
 const ASK_TEXTAREA_MAX = 100;
 const ASK_TEXTAREA_CLASS =
   'min-h-7 min-w-0 w-full resize-none bg-transparent px-1 text-sm font-[450] tracking-[-0.28px] text-foreground [overflow-wrap:anywhere] placeholder:text-foreground/40 focus:outline-none';
-const ASK_RADIUS_PILL = 18;
-const ASK_RADIUS_EXPANDED = 18;
+const ASK_COMPOSER_WIDTH = 500;
 
 const DigitalTwinNavLabel = ({
   label,
@@ -103,15 +103,10 @@ const DigitalTwinAskComposer = ({
   onUpload: () => void;
   fullWidth?: boolean;
 }): ReactElement => {
-  const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
-  const [composerHeight, setComposerHeight] = useState<number | null>(null);
-  const [heightMotionReady, setHeightMotionReady] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const controlsRef = useRef<HTMLDivElement | null>(null);
   const measureRef = useRef<HTMLSpanElement | null>(null);
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const shellRef = useRef<HTMLDivElement | null>(null);
   const canSend = value.trim().length > 0;
 
   const insertSnippet = useCallback(
@@ -177,20 +172,6 @@ const DigitalTwinAskComposer = ({
         input.style.height = `${ASK_TEXTAREA_MIN}px`;
         input.style.overflowY = 'hidden';
       }
-
-      const form = formRef.current;
-      const shell = shellRef.current;
-      if (form && shell) {
-        const styles = getComputedStyle(form);
-        const nextHeight = Math.round(
-          shell.offsetHeight +
-            parseFloat(styles.borderTopWidth) +
-            parseFloat(styles.borderBottomWidth) +
-            parseFloat(styles.paddingTop) +
-            parseFloat(styles.paddingBottom),
-        );
-        setComposerHeight(current => (current === nextHeight ? current : nextHeight));
-      }
     };
 
     sync();
@@ -199,45 +180,22 @@ const DigitalTwinAskComposer = ({
     return (): void => observer.disconnect();
   }, [expanded, value]);
 
-  useLayoutEffect(() => {
-    if (composerHeight === null || heightMotionReady) return;
-    setHeightMotionReady(true);
-  }, [composerHeight, heightMotionReady]);
-
-  const askRadius = expanded ? ASK_RADIUS_EXPANDED : ASK_RADIUS_PILL;
-  const askTransition = {
-    type: 'tween' as const,
-    duration: reduceMotion === true || !heightMotionReady ? 0 : DIGITAL_TWIN_MOTION.layout,
-    ease: DIGITAL_TWIN_EASE_OUT,
-  };
-
   return (
-    <motion.div
+    <div
       className={cn(
         'dt-ask-composer-shadow w-full overflow-visible bg-transparent',
         !fullWidth && 'max-w-[500px]',
       )}
-      initial={false}
-      animate={{ borderRadius: askRadius }}
-      transition={askTransition}
     >
-      <motion.form
-        ref={formRef}
+      <form
         onSubmit={handleSubmit}
-        initial={false}
-        animate={{
-          height: composerHeight ?? 'auto',
-          borderRadius: askRadius,
-        }}
-        transition={askTransition}
         className={cn(
-          'dt-ask-composer relative flex w-full flex-col overflow-visible bg-background',
-          'border border-foreground/10',
+          'dt-ask-composer relative flex w-full flex-col overflow-visible rounded-[18px]',
+          TWIN_STROKE_CLASS,
         )}
-        style={{ overflow: 'visible' }}
       >
-        <div className='dt-ask-composer-clip isolate flex h-full min-h-0 w-full flex-col justify-center overflow-hidden'>
-          <div ref={shellRef} className='flex w-full shrink-0 flex-col p-1'>
+        <div className='dt-ask-composer-clip isolate flex w-full flex-col justify-center overflow-hidden'>
+          <div className='flex w-full shrink-0 flex-col p-1'>
             <label className='sr-only' htmlFor={inputId}>
               Ask your twin anything
             </label>
@@ -333,8 +291,8 @@ const DigitalTwinAskComposer = ({
             </div>
           </div>
         </div>
-      </motion.form>
-    </motion.div>
+      </form>
+    </div>
   );
 };
 
@@ -354,11 +312,11 @@ const ClawDigitalTwinScreen = (): ReactElement => {
   const [showUpload, setShowUpload] = useState(false);
   const [askValue, setAskValue] = useState('');
   const [askExtras, setAskExtras] = useState<ComposerContext>(EMPTY_COMPOSER_CONTEXT);
-  const [originDocked, setOriginDocked] = useState(false);
-  const [dockRect, setDockRect] = useState({ left: 16, width: 500 });
+  const [dockRect, setDockRect] = useState({ left: 16, width: ASK_COMPOSER_WIDTH });
   const [chatActive, setChatActive] = useState(false);
   const [sessionOverlay, setSessionOverlay] = useState(false);
   const chatActiveRef = useRef(false);
+  const columnRef = useRef<HTMLDivElement | null>(null);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [chatConversationId, setChatConversationId] = useState('');
   const [chatSessionKey, setChatSessionKey] = useState('draft');
@@ -366,32 +324,27 @@ const ClawDigitalTwinScreen = (): ReactElement => {
   const [pendingQuery, setPendingQuery] = useState('');
   const [chatTitleHint, setChatTitleHint] = useState('');
   const [autoSendNonce, setAutoSendNonce] = useState(0);
-  const askComposerOriginRef = useRef<HTMLDivElement | null>(null);
   chatActiveRef.current = chatActive;
 
   useLayoutEffect(() => {
-    const origin = askComposerOriginRef.current;
-    if (!enabled || !origin) {
-      setOriginDocked(false);
-      return;
-    }
+    const column = columnRef.current;
+    if (!enabled || !column) return;
 
     let syncFrame: number | null = null;
 
-    const syncFloatingComposer = (): void => {
+    const syncDockRect = (): void => {
       syncFrame = null;
-      const rect = origin.getBoundingClientRect();
-      setDockRect(current => {
-        const next = { left: rect.left, width: rect.width };
-        return current.left === next.left && current.width === next.width ? current : next;
-      });
-      const nextDocked = rect.bottom <= 0;
-      setOriginDocked(current => (current === nextDocked ? current : nextDocked));
+      const rect = column.getBoundingClientRect();
+      const width = Math.min(ASK_COMPOSER_WIDTH, rect.width);
+      const left = rect.left + (rect.width - width) / 2;
+      setDockRect(current =>
+        current.left === left && current.width === width ? current : { left, width },
+      );
     };
 
     const scheduleSync = (): void => {
       if (syncFrame !== null) return;
-      syncFrame = window.requestAnimationFrame(syncFloatingComposer);
+      syncFrame = window.requestAnimationFrame(syncDockRect);
     };
 
     const syncWhenVisible = (): void => {
@@ -399,7 +352,7 @@ const ClawDigitalTwinScreen = (): ReactElement => {
     };
 
     let scrollContainer: HTMLElement | Window = window;
-    let parent = origin.parentElement;
+    let parent = column.parentElement;
     while (parent) {
       const { overflowY } = window.getComputedStyle(parent);
       if (/^(auto|scroll|overlay)$/.test(overflowY)) {
@@ -409,11 +362,9 @@ const ClawDigitalTwinScreen = (): ReactElement => {
       parent = parent.parentElement;
     }
 
-    syncFloatingComposer();
+    syncDockRect();
     const resizeObserver = new ResizeObserver(scheduleSync);
-    resizeObserver.observe(origin);
-    const intersectionObserver = new IntersectionObserver(scheduleSync);
-    intersectionObserver.observe(origin);
+    resizeObserver.observe(column);
     scrollContainer.addEventListener('scroll', scheduleSync, { passive: true });
     window.addEventListener('resize', scheduleSync);
     window.addEventListener('pageshow', scheduleSync);
@@ -424,7 +375,6 @@ const ClawDigitalTwinScreen = (): ReactElement => {
     return (): void => {
       if (syncFrame !== null) window.cancelAnimationFrame(syncFrame);
       resizeObserver.disconnect();
-      intersectionObserver.disconnect();
       scrollContainer.removeEventListener('scroll', scheduleSync);
       window.removeEventListener('resize', scheduleSync);
       window.removeEventListener('pageshow', scheduleSync);
@@ -583,7 +533,10 @@ const ClawDigitalTwinScreen = (): ReactElement => {
           Skip Digital Twin navigation
         </a>
 
-        <div className='mx-auto flex w-full max-w-[800px] flex-col gap-4 px-4 pb-16 pt-12 sm:px-0'>
+        <div
+          ref={columnRef}
+          className='mx-auto flex w-full max-w-[800px] flex-col gap-4 px-4 pb-32 pt-12 sm:px-0'
+        >
           <header className='flex flex-col'>
             <div className='dt-shell-header flex w-full flex-col items-center gap-4'>
               <div
@@ -601,84 +554,6 @@ const ClawDigitalTwinScreen = (): ReactElement => {
               </h1>
             </div>
           </header>
-
-          {enabled && (
-            <div className='dt-ask-origin -mx-4 px-4 sm:mx-0 sm:px-0'>
-              <div className='dt-ask-origin-bar'>
-                <div
-                  ref={askComposerOriginRef}
-                  className='dt-ask-composer-origin w-full max-w-[500px] overflow-visible'
-                >
-                  <DigitalTwinChatOverlay
-                    variant='origin'
-                    open={false}
-                    sessionActive={false}
-                    docked={originDocked && !sessionOverlay}
-                    dockRect={dockRect}
-                    reduceMotion={reduceMotion}
-                    conversationId={chatConversationId}
-                    sessionKey={chatSessionKey}
-                    startFresh={chatStartFresh}
-                    pendingQuery={pendingQuery}
-                    titleHint={chatTitleHint}
-                    autoSendNonce={autoSendNonce}
-                    extras={askExtras}
-                    onConversationChange={setChatConversationId}
-                    onSelectConversation={handleSelectConversation}
-                    onMaximize={handleMaximizeChat}
-                    onCollapse={handleCollapseChat}
-                    onExpand={handleExpandChat}
-                    onClose={handleCloseChat}
-                  >
-                    <DigitalTwinAskComposer
-                      inputId='digital-twin-ask'
-                      value={askValue}
-                      onValueChange={setAskValue}
-                      extras={askExtras}
-                      onExtrasChange={setAskExtras}
-                      onAsk={handleAskTwin}
-                      onUpload={() => setShowUpload(true)}
-                    />
-                  </DigitalTwinChatOverlay>
-                </div>
-              </div>
-              {sessionOverlay && (
-                <DigitalTwinChatOverlay
-                  variant='session'
-                  open={chatExpanded}
-                  sessionActive={chatActive}
-                  docked
-                  dockRect={dockRect}
-                  reduceMotion={reduceMotion}
-                  conversationId={chatConversationId}
-                  sessionKey={chatSessionKey}
-                  startFresh={chatStartFresh}
-                  pendingQuery={pendingQuery}
-                  titleHint={chatTitleHint}
-                  autoSendNonce={autoSendNonce}
-                  extras={askExtras}
-                  onConversationChange={setChatConversationId}
-                  onSelectConversation={handleSelectConversation}
-                  onMaximize={handleMaximizeChat}
-                  onCollapse={handleCollapseChat}
-                  onExpand={handleExpandChat}
-                  onClose={handleCloseChat}
-                  onExited={handleSessionExited}
-                >
-                  <DigitalTwinAskComposer
-                    inputId='digital-twin-ask-session'
-                    value={askValue}
-                    onValueChange={setAskValue}
-                    extras={askExtras}
-                    onExtrasChange={setAskExtras}
-                    onAsk={handleAskTwin}
-                    onUpload={() => setShowUpload(true)}
-                    fullWidth
-                  />
-                </DigitalTwinChatOverlay>
-              )}
-            </div>
-          )}
 
           {enabled && (
             <nav className='mt-6 flex items-start gap-1 overflow-x-auto' aria-label='Digital Twin'>
@@ -840,6 +715,42 @@ const ClawDigitalTwinScreen = (): ReactElement => {
             </AnimatePresence>
           </main>
         </div>
+
+        {enabled && (
+          <DigitalTwinChatOverlay
+            variant={sessionOverlay ? 'session' : 'origin'}
+            open={chatExpanded}
+            sessionActive={chatActive}
+            docked
+            dockRect={dockRect}
+            reduceMotion={reduceMotion}
+            conversationId={chatConversationId}
+            sessionKey={chatSessionKey}
+            startFresh={chatStartFresh}
+            pendingQuery={pendingQuery}
+            titleHint={chatTitleHint}
+            autoSendNonce={autoSendNonce}
+            extras={askExtras}
+            onConversationChange={setChatConversationId}
+            onSelectConversation={handleSelectConversation}
+            onMaximize={handleMaximizeChat}
+            onCollapse={handleCollapseChat}
+            onExpand={handleExpandChat}
+            onClose={handleCloseChat}
+            onExited={handleSessionExited}
+          >
+            <DigitalTwinAskComposer
+              inputId='digital-twin-ask'
+              value={askValue}
+              onValueChange={setAskValue}
+              extras={askExtras}
+              onExtrasChange={setAskExtras}
+              onAsk={handleAskTwin}
+              onUpload={() => setShowUpload(true)}
+              fullWidth
+            />
+          </DigitalTwinChatOverlay>
+        )}
 
         <EnableModal open={showBackfill} mode='backfill' onClose={() => setShowBackfill(false)} />
         <UploadModal open={showUpload} onClose={() => setShowUpload(false)} />

@@ -1,0 +1,6 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - img "Xyne Logo" [ref=e6]
+      - img "Xyne Logo" [ref=e7]
+  - region "Notifications alt+T"

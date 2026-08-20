@@ -1,0 +1,9 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - img "Xyne" [ref=e6]
+      - main [ref=e7]:
+        - generic [ref=e9]:
+          - heading "Oops, Looks like you found our mistake." [level=1] [ref=e10]
+          - button "Go back" [ref=e11] [cursor=pointer]
+  - region "Notifications alt+T"

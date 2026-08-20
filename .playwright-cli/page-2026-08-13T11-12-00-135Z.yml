@@ -1,0 +1,383 @@
+- generic:
+  - generic:
+    - main:
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - complementary:
+                  - generic:
+                    - generic:
+                      - button:
+                        - text: D
+                        - generic: "18"
+                    - generic:
+                      - navigation:
+                        - list:
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dm
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/chat/activity
+                              - generic: "18"
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/calls
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/recordings
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/projects
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/support
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/guide
+                          - listitem:
+                            - link:
+                              - /url: /cmsq33ux4001hw04qwoo1sci9/releaseManager
+                          - listitem:
+                            - button
+                    - generic:
+                      - button
+                      - generic: D
+                - main:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - complementary:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - button
+                                    - button
+                                    - button
+                                    - button
+                              - generic:
+                                - generic:
+                                  - heading [level=2]: Agent Hub
+                                - generic:
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents
+                                    - generic: Agents
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/mcp
+                                    - generic: MCP
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/skills
+                                    - generic: Skills
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/subagents
+                                    - generic: Subagents
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin
+                                    - generic: Digital Twin
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/organization
+                                    - generic: Organization
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/metrics
+                                    - generic: Metrics
+                                  - link:
+                                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/settings
+                                    - generic: Settings
+                      - separator
+                      - generic:
+                        - generic:
+                          - main:
+                            - generic:
+                              - generic:
+                                - link:
+                                  - /url: "#digital-twin-content"
+                                  - text: Skip Digital Twin navigation
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - heading [level=1]: Your Digital Twin
+                                          - paragraph: Learns from your work, speaks in your voice — every memory approved by you
+                                      - generic:
+                                        - generic: Ask your Digital Twin
+                                        - textbox:
+                                          - /placeholder: Ask anything
+                                        - generic:
+                                          - generic:
+                                            - button [expanded]
+                                            - button
+                                            - button
+                                          - generic:
+                                            - button
+                                            - button [disabled]
+                                    - navigation:
+                                      - link:
+                                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/persona
+                                        - generic: Details
+                                      - link:
+                                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/memories
+                                        - generic: Memories
+                                      - link:
+                                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/proposals
+                                        - generic: Review
+                                      - link:
+                                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/activity
+                                        - generic: Activity
+                                  - main:
+                                    - generic: Digital Twin content
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic: Search details
+                                          - searchbox
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - heading [level=2]: Persona
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic: Description
+                                                - generic:
+                                                  - paragraph: Your personal AI — answers and drafts replies as you would, grounded in memories you've approved.
+                                              - generic:
+                                                - generic: System Prompt
+                                                - generic:
+                                                  - generic:
+                                                    - paragraph: "You are the **Digital Twin** of the user — their personal AI. You speak as them, in first person (\"I\", \"my\", \"we\"). You are not a generic assistant; you are this specific person, with a memory bank of facts about them that they personally approved. ## How to answer any question 1. **Call `memory-search` FIRST.** This returns approved facts about THE USER — their communication style, ongoing projects, relationships, preferences, decisions, and uploaded notes. It is the single source of truth for \"what is this person like\". If memory-search returns relevant facts, use them directly. 2. **Only fall back to Spaces tools when memory is silent or incomplete.** spaces-activity, spaces-messages, spaces-tickets, spaces-search exist for grounding in live workspace data — use them when the question is about something happening right now, or when memory-search returned no useful facts. Do NOT use them as a substitute for memory. 3. **Compose the reply in the user's voice.** First person. Mirror the style cues memory-search surfaced (terse vs. verbose, emoji use, formatting preferences). If memory describes the user's communication style and the draft doesn't match, rewrite the draft. ## Hard rules - **Never fabricate facts about the user.** If memory-search did not return a fact, and the live tools didn't either, say \"I don't have that recorded yet\" — do not guess. - **Memory is the user's consented voice.** Every fact in there was reviewed and approved by the user themselves. Trust those facts over your own assumptions. - **Do not surface other people's private info.** If memory mentions a colleague's opinion or behavior, it's because the user observed it — fine to reference in the user's own reasoning, but never quote it back to a third party in a way that would expose them. - **Action approvals stay the same.** Tools like spaces-create-ticket and spaces-schedule-call return \"Action queued for approval\" — tell the user to approve, never retry. ## What memory-search returns The tool searches one bank scoped to THIS user (tag `user:<userId>`). It will NEVER return facts about other users or generic agent knowledge. If you're unsure whether a fact applies \"to me\", it does — memory-search only knows the requesting user. Categories memory-search organizes facts under: communication style, expertise, ongoing projects, relationships, preferences, decisions, identity/context, and the user's uploaded notes (\"docs\"). Pass natural-language queries; the tool does semantic match. ## Identity You ARE the user. Not \"the user's assistant\" or \"an AI representing the user\". The user. Replies that say \"I'm the user's digital twin and I can help with X\" are wrong — say \"I'm working on X\" or \"I've been focused on X\". First person, every time."
+                                              - generic:
+                                                - generic: Model
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Providers
+                                                      - generic: Top to bottom order
+                                                    - generic:
+                                                      - generic: Spaces platform model
+                                                      - button
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Applies To
+                                                      - generic: When the provider order takes effect
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Always on
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Subagents
+                                                      - generic: A per-subagent override always wins over this
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Spaces default
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Automated runs
+                                                      - generic: Scheduled jobs, automations and error-pipeline runs
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Same as chat
+                                              - generic:
+                                                - generic: Credentials
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Spaces
+                                                      - generic: Platform default no key required
+                                                    - generic: Always Available
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Agent keys
+                                                      - generic: Everyone falls through to their own provider, or to Spaces
+                                                    - generic:
+                                                      - button: Configure
+                                        - generic:
+                                          - heading [level=2]: Behaviour
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic: Constant reminders
+                                                - generic:
+                                                  - generic:
+                                                    - generic: Description
+                                                    - textbox:
+                                                      - /placeholder: eg. Always respond in the user's language
+                                              - generic:
+                                                - generic: Sandbox
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Sandbox repository
+                                                      - generic: Pin this agent to one repo setup so a run can't pick the wrong one.
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: None (agent chooses)
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Read-only multi-repo sandbox
+                                                      - generic: Grep across every cloned repo with no per-project clone. Mutating tools are stripped, so this suits agents that only read code.
+                                                    - generic:
+                                                      - switch
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Research product
+                                                      - generic: Used by query-codebase and review-pull-request. Takes priority over the repository below.
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: None
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Research repository
+                                                      - generic: Used for code research when no product is pinned.
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: None
+                                              - generic:
+                                                - generic: Autonomy
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Suggest goals
+                                                      - generic: Let this agent propose an autonomous run. At the end of a multi-step plan the user gets a one-click button to take the work to completion.
+                                                    - generic:
+                                                      - switch
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Always goal
+                                                      - generic: Run every message as an autonomous loop. Only for agents purpose-built for it — users can type /stop to cancel mid-run.
+                                                    - generic:
+                                                      - switch
+                                              - generic:
+                                                - generic: Verification
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Verify responses
+                                                      - generic: Check factual claims against the gathered tool results before replying. Adds one model call per response.
+                                                    - generic:
+                                                      - switch
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Enforce citations
+                                                      - generic: Nudge the agent to rewrite with inline citations when it used citeable sources but cited none. No extra model call.
+                                                    - generic:
+                                                      - switch
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Auto-cite all tools
+                                                      - generic: Inject citation tokens into every tool result so any output can be cited back to its source.
+                                                    - generic:
+                                                      - switch
+                                              - generic:
+                                                - generic: Output
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Structured output
+                                                      - generic: Force the final answer into a fixed format. The agent still works normally — only the answer is constrained.
+                                                    - generic:
+                                                      - switch
+                                        - generic:
+                                          - heading [level=2]: Tools
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic: Subagents
+                                                  - generic:
+                                                    - button: Manage
+                                                - generic:
+                                                  - paragraph: No subagents added yet.
+                                              - generic:
+                                                - generic:
+                                                  - generic: MCP Tools
+                                                  - generic:
+                                                    - button: Manage
+                                                - generic:
+                                                  - paragraph: No MCP tools added yet.
+                                              - generic:
+                                                - generic:
+                                                  - generic: Built-In tools
+                                                  - generic:
+                                                    - button: Manage
+                                                - generic:
+                                                  - paragraph: No built-in tools added yet.
+                                        - generic:
+                                          - heading [level=2]: Knowledge
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic: Skills
+                                                  - generic:
+                                                    - button: Manage
+                                                - generic:
+                                                  - paragraph: No skills attached yet.
+                                              - generic:
+                                                - generic: Documents
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Applies To
+                                                      - generic: Whose access decides what this agent can read
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Same set for everyone
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Collections
+                                                      - generic: What it can look things up in
+                                                    - generic:
+                                                      - button: Add
+                                                  - paragraph: No collections attached yet.
+                                        - generic:
+                                          - heading [level=2]: People
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic: Access
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Visibility
+                                                      - generic: Who can find and run this agent
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Global (Anyone in the workspace)
+                                                  - generic:
+                                                    - generic:
+                                                      - generic: Default role
+                                                      - generic: What new people get when added
+                                                    - generic:
+                                                      - combobox:
+                                                        - generic: Viewer (Can view & run)
+                                              - generic:
+                                                - generic:
+                                                  - generic: Members
+                                                  - generic:
+                                                    - generic:
+                                                      - button
+                                                      - button
+                                                - generic:
+                                                  - paragraph: No one has access yet.
+                                              - generic:
+                                                - generic: Pending Requests
+                                                - generic:
+                                                  - paragraph: No pending requests.
+    - region "Notifications alt+T"
+  - menu "Add knowledge" [active] [ref=e1577]:
+    - menuitem "Import past work Messages, calls, and canvases" [ref=e1578] [cursor=pointer]:
+      - generic [ref=e1581]:
+        - generic [ref=e1582]: Import past work
+        - generic [ref=e1583]: Messages, calls, and canvases
+    - menuitem "Upload a document Review its facts before use" [ref=e1584] [cursor=pointer]:
+      - generic [ref=e1587]:
+        - generic [ref=e1588]: Upload a document
+        - generic [ref=e1589]: Review its facts before use

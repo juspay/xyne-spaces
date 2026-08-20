@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactElement } from 'react';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import { MultipleCrossCancelDefault, PlusDefault, SearchDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, SearchDefault } from '@xyne/icons';
 import { useClawSubagentShares } from '@/hooks/useClawSubagents';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
@@ -12,6 +12,8 @@ import {
   DetailEmpty,
   DetailLockedNote,
   DetailSection,
+  DetailStack,
+  ManageButton,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { PersonRow } from '../../../agents/detail/people/PersonRow';
@@ -122,8 +124,9 @@ export function SubagentContributorsTabV2({
   };
 
   return (
-    <div className='flex w-full flex-col gap-8'>
+    <DetailStack>
       <DetailSection
+        heading='section'
         label='Contributors'
         info='People who can edit this subagent'
         trailing={
@@ -140,16 +143,11 @@ export function SubagentContributorsTabV2({
               <SearchDefault className='size-4' aria-hidden />
             </button>
             {canShare ? (
-              <button
-                type='button'
+              <ManageButton
+                label='Add contributors'
                 onClick={() => setAddOpen(true)}
-                aria-label='Add contributors'
-                data-track-category='Claw Agents'
-                data-track-name='Subagent detail v2: open add contributor'
-                className={ICON_BUTTON}
-              >
-                <PlusDefault className='size-4' aria-hidden />
-              </button>
+                trackName='Subagent detail v2: open add contributor'
+              />
             ) : (
               <ReadOnlyBadge />
             )}
@@ -229,6 +227,6 @@ export function SubagentContributorsTabV2({
         saving={busyUserId !== null}
         onAdd={target => void addContributor(target)}
       />
-    </div>
+    </DetailStack>
   );
 }

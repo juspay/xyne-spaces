@@ -30,14 +30,14 @@ export function DetailListRow({
     <div className='flex w-full items-center gap-3 border-b border-border p-4 last:border-b-0'>
       {item.iconType !== undefined && <McpLogo type={item.iconType} name={item.name} size='md' />}
 
-      <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
+      <div className='flex min-w-0 flex-1 flex-col gap-1.5 overflow-hidden'>
         <span className='flex min-w-0 items-center gap-1.5'>
-          <span className='truncate text-sm font-medium leading-[22px] text-foreground'>
+          <span className='truncate text-[15px] font-medium leading-[1.2] text-foreground'>
             {item.name}
           </span>
           {item.badge}
         </span>
-        <span className='truncate text-sm leading-5 text-foreground/60'>
+        <span className='truncate text-[15px] font-[450] leading-[1.35] text-foreground/60'>
           {item.description || 'No description added'}
         </span>
       </div>
@@ -92,55 +92,69 @@ export function DetailListCard({
 
   const hidden = Math.max(0, items.length - VISIBLE);
   const shown = expanded ? items : items.slice(0, VISIBLE);
+  const isEmpty = !loading && items.length === 0;
+  const wrapInCard = loading || items.length > 0 || Boolean(children);
+
+  const emptyCopy = <DetailEmpty>{emptyLabel}</DetailEmpty>;
+
+  if (!wrapInCard) {
+    return (
+      <>
+        {note}
+        {emptyCopy}
+      </>
+    );
+  }
 
   return (
-    <DetailCard>
-      {note}
-      {children}
+    <>
+      <DetailCard>
+        {note}
+        {children}
 
-      {loading ? (
-        <div className='flex w-full flex-col'>
-          {[0, 1, 2].map(row => (
-            <div
-              key={row}
-              className='flex items-center gap-3 border-b border-border p-4 last:border-b-0'
-            >
-              <Skeleton className='size-10 shrink-0 rounded-lg' />
-              <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-                <Skeleton className='h-3.5 w-32' />
-                <Skeleton className='h-3 w-full max-w-72' />
+        {loading ? (
+          <div className='flex w-full flex-col'>
+            {[0, 1, 2].map(row => (
+              <div
+                key={row}
+                className='flex items-center gap-3 border-b border-border p-4 last:border-b-0'
+              >
+                <Skeleton className='size-10 shrink-0 rounded-lg' />
+                <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+                  <Skeleton className='h-3.5 w-32' />
+                  <Skeleton className='h-3 w-full max-w-72' />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <DetailEmpty>{emptyLabel}</DetailEmpty>
-      ) : (
-        <div className='flex w-full flex-col'>
-          {shown.map(item => (
-            <DetailListRow
-              key={item.key}
-              item={item}
-              canEdit={canEdit}
-              removeLabel={removeLabel(item)}
-              onRemove={() => onRemove(item)}
-            />
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        ) : isEmpty ? null : (
+          <div className='flex w-full flex-col'>
+            {shown.map(item => (
+              <DetailListRow
+                key={item.key}
+                item={item}
+                canEdit={canEdit}
+                removeLabel={removeLabel(item)}
+                onRemove={() => onRemove(item)}
+              />
+            ))}
+          </div>
+        )}
 
-      {hidden > 0 && (
-        <button
-          type='button'
-          onClick={() => setExpanded(open => !open)}
-          aria-expanded={expanded}
-          data-track-category='Claw Agents'
-          data-track-name='Agent detail v2: expand list'
-          className='flex w-full items-center border-t border-border bg-muted/40 px-4 py-3 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-        >
-          {expanded ? 'Show less' : `View ${hidden} other${hidden === 1 ? '' : 's'}`}
-        </button>
-      )}
-    </DetailCard>
+        {hidden > 0 && (
+          <button
+            type='button'
+            onClick={() => setExpanded(open => !open)}
+            aria-expanded={expanded}
+            data-track-category='Claw Agents'
+            data-track-name='Agent detail v2: expand list'
+            className='flex w-full items-center border-t border-border bg-muted/40 px-4 py-3 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
+          >
+            {expanded ? 'Show less' : `View ${hidden} other${hidden === 1 ? '' : 's'}`}
+          </button>
+        )}
+      </DetailCard>
+      {isEmpty ? emptyCopy : null}
+    </>
   );
 }

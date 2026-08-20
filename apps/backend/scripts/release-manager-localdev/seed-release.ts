@@ -88,6 +88,7 @@ async function ensureBoardTicketForm(input: {
       update: {},
       create: {
         id: uuidv4(),
+        workspaceId: input.workspaceId,
         formId: form.id,
         fieldName: field.name,
         fieldType: field.type as FormFieldType,
@@ -191,6 +192,7 @@ async function seedReleaseSpecsFormAndMappings(): Promise<void> {
         },
         create: {
           id: uuidv4(),
+          workspaceId: ws.id,
           formId: targetFormId,
           contextId: board.id,
           contextType: FormContextType.BOARD,
@@ -287,6 +289,7 @@ async function seedReleaseChangeForms(): Promise<void> {
           update: {},
           create: {
             id: uuidv4(),
+            workspaceId: ws.id,
             formId: form.id,
             fieldName: field.name,
             fieldType: field.type as FormFieldType,

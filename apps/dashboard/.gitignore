@@ -1,1 +1,4 @@
 .env.local
+
+# Local-only component inventory (served by Vite at /component-gallery/)
+component-gallery/

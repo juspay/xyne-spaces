@@ -1,0 +1,497 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - link "Xyne Spaces Component library" [ref=e5] [cursor=pointer]:
+      - /url: /component-gallery/
+      - generic [ref=e7]:
+        - strong [ref=e8]: Xyne Spaces
+        - generic [ref=e9]: Component library
+    - navigation "Component families" [ref=e10]:
+      - paragraph [ref=e11]: Library
+      - button "All components 2,068" [ref=e12] [cursor=pointer]:
+        - generic [ref=e19]: All components
+        - generic [ref=e20]: 2,068
+      - button "Actions 66" [ref=e21] [cursor=pointer]:
+        - generic [ref=e24]: Actions
+        - generic [ref=e25]: "66"
+      - button "Inputs 226" [ref=e26] [cursor=pointer]:
+        - generic [ref=e29]: Inputs
+        - generic [ref=e30]: "226"
+      - button "Selection 51" [ref=e31] [cursor=pointer]:
+        - generic [ref=e34]: Selection
+        - generic [ref=e35]: "51"
+      - button "Navigation 218" [ref=e36] [cursor=pointer]:
+        - generic [ref=e39]: Navigation
+        - generic [ref=e40]: "218"
+      - button "Feedback 56" [ref=e41] [cursor=pointer]:
+        - generic [ref=e44]: Feedback
+        - generic [ref=e45]: "56"
+      - button "Data display 98" [ref=e46] [cursor=pointer]:
+        - generic [ref=e49]: Data display
+        - generic [ref=e50]: "98"
+      - button "Overlays 197" [ref=e51] [cursor=pointer]:
+        - generic [ref=e54]: Overlays
+        - generic [ref=e55]: "197"
+      - button "Messaging 132" [ref=e56] [cursor=pointer]:
+        - generic [ref=e59]: Messaging
+        - generic [ref=e60]: "132"
+      - button "People 31" [ref=e61] [cursor=pointer]:
+        - generic [ref=e64]: People
+        - generic [ref=e65]: "31"
+      - button "Files 65" [ref=e66] [cursor=pointer]:
+        - generic [ref=e69]: Files
+        - generic [ref=e70]: "65"
+      - button "Charts 30" [ref=e71] [cursor=pointer]:
+        - generic [ref=e74]: Charts
+        - generic [ref=e75]: "30"
+      - button "Icons 104" [ref=e76] [cursor=pointer]:
+        - generic [ref=e79]: Icons
+        - generic [ref=e80]: "104"
+      - button "Screens 625" [ref=e81] [cursor=pointer]:
+        - generic [ref=e84]: Screens
+        - generic [ref=e85]: "625"
+      - button "Layout 169" [ref=e86] [cursor=pointer]:
+        - generic [ref=e89]: Layout
+        - generic [ref=e90]: "169"
+    - generic [ref=e91]:
+      - paragraph [ref=e94]:
+        - strong [ref=e95]: Local library
+        - generic [ref=e96]: Updates with your source
+      - generic [ref=e97]: 1,222 files
+  - main [ref=e98]:
+    - generic [ref=e99]:
+      - generic [ref=e100]:
+        - searchbox "Search components" [ref=e104]
+        - generic [ref=e105]: ⌘ K
+      - combobox "Filter by project" [ref=e106]:
+        - option "All projects" [selected]
+        - option "Dashboard"
+        - option "Claw Auth"
+        - option "Site"
+        - option "Dashboard External"
+        - option "Packages"
+      - button "Toggle theme" [ref=e107] [cursor=pointer]
+    - generic [ref=e110]:
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - generic [ref=e113]:
+            - generic [ref=e114]: Design system
+            - generic [ref=e115]: /
+            - generic [ref=e116]: Components
+          - heading "Components" [level=1] [ref=e117]
+          - paragraph [ref=e118]: Browse the building blocks and product UI that make up Xyne Spaces.
+        - generic [ref=e119]:
+          - generic [ref=e120]: 2,068
+          - paragraph [ref=e121]: component definitionsacross 5 projects
+      - generic [ref=e122]:
+        - generic [ref=e127]:
+          - strong [ref=e128]: Visual catalog
+          - paragraph [ref=e129]: Open a card to see the component at working size. App-bound components use a representative context.
+        - generic [ref=e130] [cursor=pointer]:
+          - checkbox "Live components only 72 can render without app state"
+          - generic [ref=e132]:
+            - strong [ref=e133]: Live components only
+            - generic [ref=e134]: 72 can render without app state
+      - region [ref=e135]:
+        - generic [ref=e136]:
+          - generic [ref=e137]:
+            - heading "2,068 components" [level=2] [ref=e138]
+            - paragraph [ref=e139]: All projects · All components
+          - generic [ref=e140]: Visual grid
+        - generic [ref=e147]:
+          - button [ref=e148] [cursor=pointer]:
+            - generic [ref=e154]:
+              - complementary [ref=e155]
+              - main [ref=e156]:
+                - paragraph [ref=e158]
+                - paragraph [ref=e159]
+          - button [ref=e160] [cursor=pointer]
+          - generic [ref=e162]:
+            - strong [ref=e163]: App
+            - generic [ref=e164]: Dashboard
+          - generic [ref=e168]:
+            - generic [ref=e169]: Layout
+            - generic [ref=e170]: Dashboard
+          - button "AcOnSlow Dashboard Icons Dashboard" [ref=e171] [cursor=pointer]:
+            - generic [ref=e180]:
+              - strong [ref=e181]: AcOnSlow
+              - generic [ref=e182]: Dashboard
+            - generic [ref=e186]:
+              - generic [ref=e187]: Icons
+              - generic [ref=e188]: Dashboard
+          - button "Live CollapseIcon Dashboard Icons Dashboard" [ref=e189] [cursor=pointer]:
+            - generic [ref=e190]: Live
+            - generic [ref=e200]:
+              - strong [ref=e201]: CollapseIcon
+              - generic [ref=e202]: Dashboard
+            - generic [ref=e206]:
+              - generic [ref=e207]: Icons
+              - generic [ref=e208]: Dashboard
+          - button "Live EditMessageIcon Dashboard Icons Dashboard" [ref=e209] [cursor=pointer]:
+            - generic [ref=e210]: Live
+            - generic [ref=e220]:
+              - strong [ref=e221]: EditMessageIcon
+              - generic [ref=e222]: Dashboard
+            - generic [ref=e226]:
+              - generic [ref=e227]: Icons
+              - generic [ref=e228]: Dashboard
+          - button "Live EmojiIcon Dashboard Icons Dashboard" [ref=e229] [cursor=pointer]:
+            - generic [ref=e230]: Live
+            - generic [ref=e240]:
+              - strong [ref=e241]: EmojiIcon
+              - generic [ref=e242]: Dashboard
+            - generic [ref=e246]:
+              - generic [ref=e247]: Icons
+              - generic [ref=e248]: Dashboard
+          - button "Live ExpandIcon Dashboard Icons Dashboard" [ref=e249] [cursor=pointer]:
+            - generic [ref=e250]: Live
+            - generic [ref=e260]:
+              - strong [ref=e261]: ExpandIcon
+              - generic [ref=e262]: Dashboard
+            - generic [ref=e266]:
+              - generic [ref=e267]: Icons
+              - generic [ref=e268]: Dashboard
+          - button "Live GoogleLogo Dashboard Icons Dashboard" [ref=e269] [cursor=pointer]:
+            - generic [ref=e270]: Live
+            - generic [ref=e280]:
+              - strong [ref=e281]: GoogleLogo
+              - generic [ref=e282]: Dashboard
+            - generic [ref=e286]:
+              - generic [ref=e287]: Icons
+              - generic [ref=e288]: Dashboard
+          - button "Live InProgressIcon Dashboard Icons Dashboard" [ref=e289] [cursor=pointer]:
+            - generic [ref=e290]: Live
+            - generic [ref=e300]:
+              - strong [ref=e301]: InProgressIcon
+              - generic [ref=e302]: Dashboard
+            - generic [ref=e306]:
+              - generic [ref=e307]: Icons
+              - generic [ref=e308]: Dashboard
+          - button "Live LinkIcon Dashboard Icons Dashboard" [ref=e309] [cursor=pointer]:
+            - generic [ref=e310]: Live
+            - generic [ref=e320]:
+              - strong [ref=e321]: LinkIcon
+              - generic [ref=e322]: Dashboard
+            - generic [ref=e326]:
+              - generic [ref=e327]: Icons
+              - generic [ref=e328]: Dashboard
+          - button "Live MicrosoftLogo Dashboard Icons Dashboard" [ref=e329] [cursor=pointer]:
+            - generic [ref=e330]: Live
+            - generic [ref=e340]:
+              - strong [ref=e341]: MicrosoftLogo
+              - generic [ref=e342]: Dashboard
+            - generic [ref=e346]:
+              - generic [ref=e347]: Icons
+              - generic [ref=e348]: Dashboard
+          - button "Live PinIcon Dashboard Icons Dashboard" [ref=e349] [cursor=pointer]:
+            - generic [ref=e350]: Live
+            - generic [ref=e360]:
+              - strong [ref=e361]: PinIcon
+              - generic [ref=e362]: Dashboard
+            - generic [ref=e366]:
+              - generic [ref=e367]: Icons
+              - generic [ref=e368]: Dashboard
+          - button "Live PinnedIcon Dashboard Icons Dashboard" [ref=e369] [cursor=pointer]:
+            - generic [ref=e370]: Live
+            - generic [ref=e380]:
+              - strong [ref=e381]: PinnedIcon
+              - generic [ref=e382]: Dashboard
+            - generic [ref=e386]:
+              - generic [ref=e387]: Icons
+              - generic [ref=e388]: Dashboard
+          - button "Live StageCircleIcon Dashboard Icons Dashboard" [ref=e389] [cursor=pointer]:
+            - generic [ref=e390]: Live
+            - generic [ref=e400]:
+              - strong [ref=e401]: StageCircleIcon
+              - generic [ref=e402]: Dashboard
+            - generic [ref=e406]:
+              - generic [ref=e407]: Icons
+              - generic [ref=e408]: Dashboard
+          - button "Live SubTicketCountIcon Dashboard Icons Dashboard" [ref=e409] [cursor=pointer]:
+            - generic [ref=e410]: Live
+            - generic [ref=e420]:
+              - strong [ref=e421]: SubTicketCountIcon
+              - generic [ref=e422]: Dashboard
+            - generic [ref=e426]:
+              - generic [ref=e427]: Icons
+              - generic [ref=e428]: Dashboard
+          - button "Live ThreadIcon Dashboard Icons Dashboard" [ref=e429] [cursor=pointer]:
+            - generic [ref=e430]: Live
+            - generic [ref=e440]:
+              - strong [ref=e441]: ThreadIcon
+              - generic [ref=e442]: Dashboard
+            - generic [ref=e446]:
+              - generic [ref=e447]: Icons
+              - generic [ref=e448]: Dashboard
+          - button "Live TicketIcon Dashboard Icons Dashboard" [ref=e449] [cursor=pointer]:
+            - generic [ref=e450]: Live
+            - generic [ref=e460]:
+              - strong [ref=e461]: TicketIcon
+              - generic [ref=e462]: Dashboard
+            - generic [ref=e466]:
+              - generic [ref=e467]: Icons
+              - generic [ref=e468]: Dashboard
+          - button "Live UnpinIcon Dashboard Icons Dashboard" [ref=e469] [cursor=pointer]:
+            - generic [ref=e470]: Live
+            - generic [ref=e480]:
+              - strong [ref=e481]: UnpinIcon
+              - generic [ref=e482]: Dashboard
+            - generic [ref=e486]:
+              - generic [ref=e487]: Icons
+              - generic [ref=e488]: Dashboard
+          - button "Live CodeReviewIcon Dashboard Icons Dashboard" [ref=e489] [cursor=pointer]:
+            - generic [ref=e490]: Live
+            - generic [ref=e500]:
+              - strong [ref=e501]: CodeReviewIcon
+              - generic [ref=e502]: Dashboard
+            - generic [ref=e506]:
+              - generic [ref=e507]: Icons
+              - generic [ref=e508]: Dashboard
+          - button "Live MoreVertIcon Dashboard Icons Dashboard" [ref=e509] [cursor=pointer]:
+            - generic [ref=e510]: Live
+            - generic [ref=e520]:
+              - strong [ref=e521]: MoreVertIcon
+              - generic [ref=e522]: Dashboard
+            - generic [ref=e526]:
+              - generic [ref=e527]: Icons
+              - generic [ref=e528]: Dashboard
+          - button "Live RunningIcon Dashboard Icons Dashboard" [ref=e529] [cursor=pointer]:
+            - generic [ref=e530]: Live
+            - generic [ref=e540]:
+              - strong [ref=e541]: RunningIcon
+              - generic [ref=e542]: Dashboard
+            - generic [ref=e546]:
+              - generic [ref=e547]: Icons
+              - generic [ref=e548]: Dashboard
+          - button "Live CompletedIcon Dashboard Icons Dashboard" [ref=e549] [cursor=pointer]:
+            - generic [ref=e550]: Live
+            - generic [ref=e560]:
+              - strong [ref=e561]: CompletedIcon
+              - generic [ref=e562]: Dashboard
+            - generic [ref=e566]:
+              - generic [ref=e567]: Icons
+              - generic [ref=e568]: Dashboard
+          - button "Live PendingIcon Dashboard Icons Dashboard" [ref=e569] [cursor=pointer]:
+            - generic [ref=e570]: Live
+            - generic [ref=e580]:
+              - strong [ref=e581]: PendingIcon
+              - generic [ref=e582]: Dashboard
+            - generic [ref=e586]:
+              - generic [ref=e587]: Icons
+              - generic [ref=e588]: Dashboard
+          - button "Live FailedIcon Dashboard Icons Dashboard" [ref=e589] [cursor=pointer]:
+            - generic [ref=e590]: Live
+            - generic [ref=e600]:
+              - strong [ref=e601]: FailedIcon
+              - generic [ref=e602]: Dashboard
+            - generic [ref=e606]:
+              - generic [ref=e607]: Icons
+              - generic [ref=e608]: Dashboard
+          - button "Live SkippedIcon Dashboard Icons Dashboard" [ref=e609] [cursor=pointer]:
+            - generic [ref=e610]: Live
+            - generic [ref=e620]:
+              - strong [ref=e621]: SkippedIcon
+              - generic [ref=e622]: Dashboard
+            - generic [ref=e626]:
+              - generic [ref=e627]: Icons
+              - generic [ref=e628]: Dashboard
+          - button "Live RetriesIcon Dashboard Icons Dashboard" [ref=e629] [cursor=pointer]:
+            - generic [ref=e630]: Live
+            - generic [ref=e640]:
+              - strong [ref=e641]: RetriesIcon
+              - generic [ref=e642]: Dashboard
+            - generic [ref=e646]:
+              - generic [ref=e647]: Icons
+              - generic [ref=e648]: Dashboard
+          - button "Live PlayIcon Dashboard Icons Dashboard" [ref=e649] [cursor=pointer]:
+            - generic [ref=e650]: Live
+            - generic [ref=e660]:
+              - strong [ref=e661]: PlayIcon
+              - generic [ref=e662]: Dashboard
+            - generic [ref=e666]:
+              - generic [ref=e667]: Icons
+              - generic [ref=e668]: Dashboard
+          - button "Live PauseIcon Dashboard Icons Dashboard" [ref=e669] [cursor=pointer]:
+            - generic [ref=e670]: Live
+            - generic [ref=e680]:
+              - strong [ref=e681]: PauseIcon
+              - generic [ref=e682]: Dashboard
+            - generic [ref=e686]:
+              - generic [ref=e687]: Icons
+              - generic [ref=e688]: Dashboard
+          - button "Live StopIcon Dashboard Icons Dashboard" [ref=e689] [cursor=pointer]:
+            - generic [ref=e690]: Live
+            - generic [ref=e700]:
+              - strong [ref=e701]: StopIcon
+              - generic [ref=e702]: Dashboard
+            - generic [ref=e706]:
+              - generic [ref=e707]: Icons
+              - generic [ref=e708]: Dashboard
+          - button "Live RestartIcon Dashboard Icons Dashboard" [ref=e709] [cursor=pointer]:
+            - generic [ref=e710]: Live
+            - generic [ref=e720]:
+              - strong [ref=e721]: RestartIcon
+              - generic [ref=e722]: Dashboard
+            - generic [ref=e726]:
+              - generic [ref=e727]: Icons
+              - generic [ref=e728]: Dashboard
+          - button "Live CodeIcon Dashboard Icons Dashboard" [ref=e729] [cursor=pointer]:
+            - generic [ref=e730]: Live
+            - generic [ref=e740]:
+              - strong [ref=e741]: CodeIcon
+              - generic [ref=e742]: Dashboard
+            - generic [ref=e746]:
+              - generic [ref=e747]: Icons
+              - generic [ref=e748]: Dashboard
+          - button "Live BuildIcon Dashboard Icons Dashboard" [ref=e749] [cursor=pointer]:
+            - generic [ref=e750]: Live
+            - generic [ref=e760]:
+              - strong [ref=e761]: BuildIcon
+              - generic [ref=e762]: Dashboard
+            - generic [ref=e766]:
+              - generic [ref=e767]: Icons
+              - generic [ref=e768]: Dashboard
+          - button "Live TestIcon Dashboard Icons Dashboard" [ref=e769] [cursor=pointer]:
+            - generic [ref=e770]: Live
+            - generic [ref=e780]:
+              - strong [ref=e781]: TestIcon
+              - generic [ref=e782]: Dashboard
+            - generic [ref=e786]:
+              - generic [ref=e787]: Icons
+              - generic [ref=e788]: Dashboard
+          - button "Live GitIcon Dashboard Icons Dashboard" [ref=e789] [cursor=pointer]:
+            - generic [ref=e790]: Live
+            - generic [ref=e800]:
+              - strong [ref=e801]: GitIcon
+              - generic [ref=e802]: Dashboard
+            - generic [ref=e806]:
+              - generic [ref=e807]: Icons
+              - generic [ref=e808]: Dashboard
+          - button "Live AgentIcon Dashboard Icons Dashboard" [ref=e809] [cursor=pointer]:
+            - generic [ref=e810]: Live
+            - generic [ref=e820]:
+              - strong [ref=e821]: AgentIcon
+              - generic [ref=e822]: Dashboard
+            - generic [ref=e826]:
+              - generic [ref=e827]: Icons
+              - generic [ref=e828]: Dashboard
+          - button "Live RobotIcon Dashboard Icons Dashboard" [ref=e829] [cursor=pointer]:
+            - generic [ref=e830]: Live
+            - generic [ref=e840]:
+              - strong [ref=e841]: RobotIcon
+              - generic [ref=e842]: Dashboard
+            - generic [ref=e846]:
+              - generic [ref=e847]: Icons
+              - generic [ref=e848]: Dashboard
+          - button "Live AIBrainIcon Dashboard Icons Dashboard" [ref=e849] [cursor=pointer]:
+            - generic [ref=e850]: Live
+            - generic [ref=e860]:
+              - strong [ref=e861]: AIBrainIcon
+              - generic [ref=e862]: Dashboard
+            - generic [ref=e866]:
+              - generic [ref=e867]: Icons
+              - generic [ref=e868]: Dashboard
+          - button "Live CheckCircleIcon Dashboard Icons Dashboard" [ref=e869] [cursor=pointer]:
+            - generic [ref=e870]: Live
+            - generic [ref=e880]:
+              - strong [ref=e881]: CheckCircleIcon
+              - generic [ref=e882]: Dashboard
+            - generic [ref=e886]:
+              - generic [ref=e887]: Icons
+              - generic [ref=e888]: Dashboard
+          - button "Live SettingsIcon Dashboard Icons Dashboard" [ref=e889] [cursor=pointer]:
+            - generic [ref=e890]: Live
+            - generic [ref=e900]:
+              - strong [ref=e901]: SettingsIcon
+              - generic [ref=e902]: Dashboard
+            - generic [ref=e906]:
+              - generic [ref=e907]: Icons
+              - generic [ref=e908]: Dashboard
+          - button "Live AnalysisIcon Dashboard Icons Dashboard" [ref=e909] [cursor=pointer]:
+            - generic [ref=e910]: Live
+            - generic [ref=e920]:
+              - strong [ref=e921]: AnalysisIcon
+              - generic [ref=e922]: Dashboard
+            - generic [ref=e926]:
+              - generic [ref=e927]: Icons
+              - generic [ref=e928]: Dashboard
+          - button "Live SearchIcon Dashboard Icons Dashboard" [ref=e929] [cursor=pointer]:
+            - generic [ref=e930]: Live
+            - generic [ref=e940]:
+              - strong [ref=e941]: SearchIcon
+              - generic [ref=e942]: Dashboard
+            - generic [ref=e946]:
+              - generic [ref=e947]: Icons
+              - generic [ref=e948]: Dashboard
+          - button "Live BookIcon Dashboard Icons Dashboard" [ref=e949] [cursor=pointer]:
+            - generic [ref=e950]: Live
+            - generic [ref=e960]:
+              - strong [ref=e961]: BookIcon
+              - generic [ref=e962]: Dashboard
+            - generic [ref=e966]:
+              - generic [ref=e967]: Icons
+              - generic [ref=e968]: Dashboard
+          - button "Live DeployIcon Dashboard Icons Dashboard" [ref=e969] [cursor=pointer]:
+            - generic [ref=e970]: Live
+            - generic [ref=e980]:
+              - strong [ref=e981]: DeployIcon
+              - generic [ref=e982]: Dashboard
+            - generic [ref=e986]:
+              - generic [ref=e987]: Icons
+              - generic [ref=e988]: Dashboard
+          - button "Live NotExecutedIcon Dashboard Icons Dashboard" [ref=e989] [cursor=pointer]:
+            - generic [ref=e990]: Live
+            - generic [ref=e1000]:
+              - strong [ref=e1001]: NotExecutedIcon
+              - generic [ref=e1002]: Dashboard
+            - generic [ref=e1006]:
+              - generic [ref=e1007]: Icons
+              - generic [ref=e1008]: Dashboard
+          - button "Live FailedStatusIcon Dashboard Icons Dashboard" [ref=e1009] [cursor=pointer]:
+            - generic [ref=e1010]: Live
+            - generic [ref=e1020]:
+              - strong [ref=e1021]: FailedStatusIcon
+              - generic [ref=e1022]: Dashboard
+            - generic [ref=e1026]:
+              - generic [ref=e1027]: Icons
+              - generic [ref=e1028]: Dashboard
+          - button "Live SuccessStatusIcon Dashboard Icons Dashboard" [ref=e1029] [cursor=pointer]:
+            - generic [ref=e1030]: Live
+            - generic [ref=e1040]:
+              - strong [ref=e1041]: SuccessStatusIcon
+              - generic [ref=e1042]: Dashboard
+            - generic [ref=e1046]:
+              - generic [ref=e1047]: Icons
+              - generic [ref=e1048]: Dashboard
+          - button "Live PendingStatusIcon Dashboard Icons Dashboard" [ref=e1049] [cursor=pointer]:
+            - generic [ref=e1050]: Live
+            - generic [ref=e1060]:
+              - strong [ref=e1061]: PendingStatusIcon
+              - generic [ref=e1062]: Dashboard
+            - generic [ref=e1066]:
+              - generic [ref=e1067]: Icons
+              - generic [ref=e1068]: Dashboard
+          - button "Live XyneTelepresenceIcon Dashboard Icons Dashboard" [ref=e1069] [cursor=pointer]:
+            - generic [ref=e1070]: Live
+            - generic [ref=e1080]:
+              - strong [ref=e1081]: XyneTelepresenceIcon
+              - generic [ref=e1082]: Dashboard
+            - generic [ref=e1086]:
+              - generic [ref=e1087]: Icons
+              - generic [ref=e1088]: Dashboard
+          - button "Project Owner Status In progress Done ActivityItem Activity Data display Dashboard" [ref=e1089] [cursor=pointer]:
+            - generic [ref=e1091]:
+              - generic [ref=e1092]:
+                - generic [ref=e1093]: Project
+                - generic [ref=e1094]: Owner
+                - generic [ref=e1095]: Status
+              - emphasis [ref=e1099]: In progress
+              - emphasis [ref=e1103]: Done
+            - generic [ref=e1105]:
+              - strong [ref=e1106]: ActivityItem
+              - generic [ref=e1107]: Activity
+            - generic [ref=e1111]:
+              - generic [ref=e1112]: Data display
+              - generic [ref=e1113]: Dashboard
+        - button "Show 48 more" [ref=e1114] [cursor=pointer]
+  - complementary [ref=e1115]
+  - status

@@ -25,6 +25,7 @@ import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
+import { Agentation } from 'agentation';
 import {
   CheckTickCircle,
   AlertCircle,
@@ -168,6 +169,7 @@ const App = (): ReactElement => {
                         },
                       }}
                     />
+                    {import.meta.env.DEV && <Agentation endpoint='http://localhost:4747' />}
                   </TooltipProvider>
                 </ShortcutsProvider>
               </ThemeProvider>

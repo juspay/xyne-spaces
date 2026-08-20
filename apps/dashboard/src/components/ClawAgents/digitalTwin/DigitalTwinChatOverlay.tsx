@@ -22,6 +22,7 @@ import { ChevronDown, MaximizeTwoArrow, X } from '@/components/ClawAgents/digita
 import type { ComposerContext } from '@/components/AIScreen/composerContext';
 import { useV2SessionInvalidator, useV2SessionsList } from '@/hooks/useAskAISessionsV2';
 import { cn } from '@/utils/classNames';
+import { TWIN_STROKE_CLASS } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { DIGITAL_TWIN_EASE_OUT, DIGITAL_TWIN_MOTION } from './motion';
 
 const TWIN_AGENT_SLUG = 'digital-twin';
@@ -48,7 +49,6 @@ const findScrollPort = (start: HTMLElement | null): HTMLElement | null => {
 const isInsideChatOverlay = (target: EventTarget | null, host: HTMLElement | null): boolean => {
   if (!(target instanceof Element)) return false;
   if (host?.contains(target)) return true;
-  if (target.closest('.dt-ask-composer-origin')) return true;
   return Boolean(
     target.closest(
       '[data-radix-popper-content-wrapper], [data-radix-dropdown-menu-content], [data-radix-menu-content], [data-radix-dialog-content], [data-radix-dialog-overlay], [role="dialog"], .dt-menu-content, .dt-filter-menu-content, .dt-composer-plus-menu',
@@ -134,9 +134,21 @@ export const DigitalTwinChatOverlay = ({
   const frameRadius =
     open && !closing ? EXPANDED_RADIUS : showSessionChrome ? COMPACT_RADIUS : EXPANDED_RADIUS;
   const sessionCard = showSessionChrome && !closing;
+  const overlayMode = closing ? 'closing' : !showSessionChrome ? 'idle' : open ? 'expanded' : 'compact';
+  const overlayModeRef = useRef(overlayMode);
+  const overlayStateTweenRef = useRef(false);
+  if (overlayModeRef.current !== overlayMode) {
+    overlayModeRef.current = overlayMode;
+    overlayStateTweenRef.current = true;
+  }
   const overlayTween = {
     type: 'tween' as const,
     duration,
+    ease: DIGITAL_TWIN_EASE_OUT,
+  };
+  const underlayTween = {
+    type: 'tween' as const,
+    duration: reduceMotion === true || !overlayStateTweenRef.current ? 0 : duration,
     ease: DIGITAL_TWIN_EASE_OUT,
   };
 
@@ -195,8 +207,12 @@ export const DigitalTwinChatOverlay = ({
   }, [showSessionChrome, closing, docked, composerHeight]);
 
   useLayoutEffect(() => {
-    if (!docked || variant === 'session') {
-      setDockSlideOpen(variant === 'session');
+    if (!docked) {
+      setDockSlideOpen(false);
+      return;
+    }
+    if (variant === 'session') {
+      setDockSlideOpen(true);
       return;
     }
     const frame = window.requestAnimationFrame(() => setDockSlideOpen(true));
@@ -244,6 +260,7 @@ export const DigitalTwinChatOverlay = ({
   };
 
   const handleFrameAnimationComplete = (): void => {
+    overlayStateTweenRef.current = false;
     if (!closing || exitedRef.current) return;
     exitedRef.current = true;
     onExited?.();
@@ -255,12 +272,10 @@ export const DigitalTwinChatOverlay = ({
       className='dt-chat-overlay-host'
       style={
         {
-          ...(showSessionChrome
-            ? { height: 0 }
-            : outOfFlow && composerHeight > 0
-              ? { height: composerHeight }
-              : {}),
-          ...(docked ? { '--dt-ask-dock-center': `${dockRect.left + dockRect.width / 2}px` } : {}),
+          height: 0,
+          ...(docked
+            ? { '--dt-ask-dock-center': `${dockRect.left + dockRect.width / 2}px` }
+            : {}),
         } as CSSProperties
       }
     >
@@ -282,10 +297,12 @@ export const DigitalTwinChatOverlay = ({
         transition={overlayTween}
         style={{ overflow: 'visible' }}
         className={cn(
-          'dt-chat-overlay-frame relative flex w-full flex-col justify-end overflow-visible',
-          sessionCard ? 'bg-background' : 'bg-transparent',
+          'dt-chat-overlay-frame flex w-full flex-col justify-end overflow-visible',
+          !outOfFlow && 'relative',
+          !sessionCard && 'bg-transparent',
           outOfFlow && 'dt-chat-overlay-panel',
           sessionCard && 'dt-chat-overlay dt-has-underlay',
+          sessionCard && TWIN_STROKE_CLASS,
           docked && 'is-docked',
           docked && variant !== 'session' && 't-panel-slide',
         )}
@@ -296,7 +313,7 @@ export const DigitalTwinChatOverlay = ({
             className='dt-chat-overlay-clip dt-chat-overlay-underlay relative flex min-h-0 w-full shrink-0 flex-col overflow-hidden'
             initial={reduceMotion === true ? false : { height: 0 }}
             animate={{ height: underlayHeight }}
-            transition={overlayTween}
+            transition={underlayTween}
             onAnimationComplete={handleFrameAnimationComplete}
           >
             <motion.div

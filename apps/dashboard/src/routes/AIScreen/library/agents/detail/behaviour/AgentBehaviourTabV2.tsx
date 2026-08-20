@@ -131,7 +131,7 @@ export function AgentBehaviourTabV2({
     ...research.repositories.map(option => ({ value: option.id, label: option.name })),
   ];
 
-  // Twin: Figma 1602:39286 setting-subcategory (14/450/1.35/tertiary), not nested field titles.
+  // Twin: setting-subcategory (14/400/1.35/tertiary), not nested field titles.
   const nestedHeading: DetailHeading =
     typeScale === 'twin' ? 'subcategory' : nestedDetailHeading(typeScale);
 

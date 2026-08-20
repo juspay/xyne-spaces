@@ -1,0 +1,508 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - generic [ref=e8]:
+        - complementary [ref=e9]:
+          - generic [ref=e11]:
+            - button "Switch workspace" [ref=e13] [cursor=pointer]:
+              - text: D
+              - generic [ref=e14]: "18"
+            - navigation [ref=e16]:
+              - list [ref=e17]:
+                - listitem [ref=e18]:
+                  - link "Chat" [ref=e19] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir
+                - listitem [ref=e22]:
+                  - link "DMs unread" [ref=e23] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dm
+                - listitem [ref=e27]:
+                  - link "Activity" [ref=e28] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/chat/activity
+                    - generic [ref=e31]: "18"
+                - listitem [ref=e32]:
+                  - link "Calls" [ref=e33] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/calls
+                - listitem [ref=e36]:
+                  - link "Recordings" [ref=e37] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/recordings
+                - listitem [ref=e40]:
+                  - link "Tickets" [ref=e41] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/projects
+                - listitem [ref=e44]:
+                  - link "Support" [ref=e45] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/support
+                - listitem [ref=e48]:
+                  - link "User Guide" [ref=e49] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/guide
+                - listitem [ref=e52]:
+                  - link "Release Manager" [ref=e53] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/releaseManager
+                - listitem [ref=e56]:
+                  - button "More" [expanded] [active] [ref=e57] [cursor=pointer]
+            - generic [ref=e62]:
+              - button "Support" [ref=e63] [cursor=pointer]
+              - generic [ref=e66] [cursor=pointer]: D
+        - main [ref=e71]:
+          - generic [ref=e73]:
+            - complementary [ref=e76]:
+              - generic [ref=e77]:
+                - generic [ref=e80]:
+                  - button "Share workspace link" [ref=e81] [cursor=pointer]
+                  - button "Back" [ref=e84] [cursor=pointer]
+                  - button "Forward" [ref=e87] [cursor=pointer]
+                  - button "Search" [ref=e90] [cursor=pointer]
+                - generic [ref=e93]:
+                  - heading "Inbox" [level=2] [ref=e95]
+                  - region "Channels and direct messages" [ref=e96]:
+                    - generic [ref=e97]:
+                      - button "New Message" [ref=e98] [cursor=pointer]
+                      - button "Threads" [ref=e103] [cursor=pointer]
+                      - button "Unreads" [ref=e108] [cursor=pointer]
+                      - button "Bookmarks" [ref=e113] [cursor=pointer]
+                      - button "Drafts & Sent" [ref=e118] [cursor=pointer]
+                      - button "Recap" [ref=e123] [cursor=pointer]
+                    - generic [ref=e129]:
+                      - generic [ref=e131]:
+                        - generic [ref=e132]:
+                          - button "Starred" [expanded] [ref=e133] [cursor=pointer]
+                          - button "Section options" [ref=e138] [cursor=pointer]
+                        - region "Starred" [ref=e143]:
+                          - generic [ref=e144]:
+                            - button [ref=e145] [cursor=pointer]:
+                              - link "general" [ref=e146]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/wqv0wwflb36cerfzbvkl49mw
+                            - button [ref=e153] [cursor=pointer]:
+                              - link "squad-digital-twin" [ref=e154]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/b66b3ojxjd0501s3hkhhjy0k
+                      - generic [ref=e162]:
+                        - generic [ref=e163]:
+                          - button "Channels" [expanded] [ref=e164] [cursor=pointer]
+                          - generic [ref=e169]:
+                            - button [ref=e170] [cursor=pointer]
+                            - button [ref=e173] [cursor=pointer]
+                            - button "Section options" [ref=e176] [cursor=pointer]
+                        - region "Channels" [ref=e181]:
+                          - generic [ref=e182]:
+                            - button [ref=e183] [cursor=pointer]:
+                              - link "incidents" [ref=e184]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/xwwvn062e3y5taaicr8ss9wy
+                            - button [ref=e191] [cursor=pointer]:
+                              - link "random 2" [ref=e192]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/ku80q6x1cjs0su435rxh7zy2
+                                - generic [ref=e193]:
+                                  - generic [ref=e197]: random
+                                  - generic [ref=e199]: "2"
+                            - button [ref=e200] [cursor=pointer]:
+                              - link "ai-help 1" [ref=e201]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/xhkg3d1aq46hbastsxwubxn0
+                                - generic [ref=e202]:
+                                  - generic [ref=e206]: ai-help
+                                  - generic [ref=e208]: "1"
+                            - button [ref=e209] [cursor=pointer]:
+                              - link "engineering 2" [ref=e210]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/hk18ad6qwqun89syapkb2t8x
+                                - generic [ref=e211]:
+                                  - generic [ref=e215]: engineering
+                                  - generic [ref=e217]: "2"
+                            - button [ref=e218] [cursor=pointer]:
+                              - link "announcements 2" [ref=e219]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/mtjqdjy31p7h22uzp9zk629w
+                                - generic [ref=e220]:
+                                  - generic [ref=e224]: announcements
+                                  - generic [ref=e226]: "2"
+                            - button [ref=e227] [cursor=pointer]:
+                              - link "automations 2" [ref=e228]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/entomn5vgocfa3vxslbpqc3g
+                                - generic [ref=e229]:
+                                  - generic [ref=e233]: automations
+                                  - generic [ref=e235]: "2"
+                            - button [ref=e236] [cursor=pointer]:
+                              - link "onboarding 2" [ref=e237]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/tktisrl8i73bmppg1ebhy5lu
+                                - generic [ref=e238]:
+                                  - generic [ref=e242]: onboarding
+                                  - generic [ref=e244]: "2"
+                            - button [ref=e245] [cursor=pointer]:
+                              - link "claw-lab" [ref=e246]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/zl31e4b0fyv8udnbx4c2g6au
+                            - button [ref=e253] [cursor=pointer]:
+                              - link "product 1" [ref=e254]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/l0dng6lpck7zznvps4qne7tj
+                                - generic [ref=e255]:
+                                  - generic [ref=e259]: product
+                                  - generic [ref=e261]: "1"
+                            - button [ref=e262] [cursor=pointer]:
+                              - link "releases 1" [ref=e263]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/hgw7zs6cgpavvp7kuktq3rjc
+                                - generic [ref=e264]:
+                                  - generic [ref=e268]: releases
+                                  - generic [ref=e270]: "1"
+                            - button [ref=e271] [cursor=pointer]:
+                              - link "customer-voice 2" [ref=e272]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/ixxffznz8tn28pj9p2j45j4z
+                                - generic [ref=e273]:
+                                  - generic [ref=e277]: customer-voice
+                                  - generic [ref=e279]: "2"
+                            - button [ref=e280] [cursor=pointer]:
+                              - link "knowledge 1" [ref=e281]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/ui66r3k30kcyzp4sv8a4pglm
+                                - generic [ref=e282]:
+                                  - generic [ref=e286]: knowledge
+                                  - generic [ref=e288]: "1"
+                      - generic [ref=e289]:
+                        - generic [ref=e290]:
+                          - button "Direct Messages" [expanded] [ref=e291] [cursor=pointer]
+                          - button [ref=e296] [cursor=pointer]
+                          - button "Section options" [ref=e299] [cursor=pointer]
+                        - region "Direct Messages" [ref=e304]:
+                          - generic [ref=e305]:
+                            - button [ref=e306] [cursor=pointer]:
+                              - link "Anika Brooks Anika Brooks" [ref=e307]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/gejio0ce9aue3h6ym91r4jpz
+                                - generic [ref=e308]:
+                                  - img "Anika Brooks" [ref=e312]
+                                  - generic [ref=e313]: Anika Brooks
+                            - button [ref=e315] [cursor=pointer]:
+                              - link "Rohan Tanaka Rohan Tanaka" [ref=e316]:
+                                - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir/ppm981v6ra48t1qi50nfzof7
+                                - generic [ref=e317]:
+                                  - img "Rohan Tanaka" [ref=e321]
+                                  - generic [ref=e322]: Rohan Tanaka
+                      - status [ref=e324]
+            - separator
+            - main [ref=e327]:
+              - generic [ref=e334]:
+                - generic [ref=e335]:
+                  - generic [ref=e336]:
+                    - generic [ref=e337]:
+                      - button [ref=e338] [cursor=pointer]
+                      - button "general" [ref=e339] [cursor=pointer]
+                    - generic [ref=e344]:
+                      - button "16" [ref=e345] [cursor=pointer]
+                      - button [ref=e348] [cursor=pointer]
+                      - button [ref=e350] [cursor=pointer]
+                      - button [ref=e351] [cursor=pointer]
+                      - button [ref=e352] [cursor=pointer]
+                      - button [ref=e355] [cursor=pointer]
+                  - tablist [ref=e357]:
+                    - tab "Messages" [selected] [ref=e358] [cursor=pointer]
+                    - tab "Files" [ref=e363] [cursor=pointer]
+                    - tab "Pins" [ref=e368] [cursor=pointer]
+                    - tab "Canvas" [ref=e373] [cursor=pointer]
+                    - tab "Links" [ref=e378] [cursor=pointer]
+                    - tab "Tickets" [ref=e383] [cursor=pointer]
+                - generic [ref=e389]:
+                  - generic [ref=e390]:
+                    - generic: Friday, August 7
+                    - generic [ref=e393]:
+                      - generic [ref=e397]:
+                        - generic [ref=e398]:
+                          - button "View devesh.prakash profile" [ref=e400] [cursor=pointer]:
+                            - button "D" [ref=e401]
+                          - generic [ref=e405]:
+                            - generic [ref=e406]:
+                              - button [ref=e408] [cursor=pointer]:
+                                - button "View devesh.prakash profile" [ref=e410]:
+                                  - generic [ref=e411]: devesh.prakash
+                              - heading "5:17 PM" [level=3] [ref=e412] [cursor=pointer]
+                            - generic [ref=e413]: If you find yourself doing the same three clicks every day, look at automations before you accept it as your life. Ours moves anything untouched for a week back to triage.
+                        - button "2 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e418] [cursor=pointer]:
+                          - generic [ref=e419]: 2 replies
+                          - generic [ref=e420]:
+                            - generic [ref=e421]: Last activity Aug 5
+                            - generic [ref=e422]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e426]:
+                        - generic [ref=e427]:
+                          - button "View Mei Tanaka profile" [ref=e429] [cursor=pointer]:
+                            - button [ref=e430]:
+                              - img "Mei Tanaka" [ref=e433]
+                          - generic [ref=e434]:
+                            - generic [ref=e435]:
+                              - button [ref=e437] [cursor=pointer]:
+                                - button "View Mei Tanaka profile" [ref=e439]:
+                                  - generic [ref=e440]: Mei Tanaka
+                              - heading "5:37 PM" [level=3] [ref=e441] [cursor=pointer]
+                            - generic [ref=e442]: On my side the desk has been the big one. Customer emails land here, we reply from here, and turning one into a ticket is a click instead of a copy-paste ritual.
+                        - button "2 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e447] [cursor=pointer]:
+                          - generic [ref=e448]: 2 replies
+                          - generic [ref=e449]:
+                            - generic [ref=e450]: Last activity Aug 5
+                            - generic [ref=e451]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e455]:
+                        - generic [ref=e456]:
+                          - button "View devesh.prakash profile" [ref=e458] [cursor=pointer]:
+                            - button "D" [ref=e459]
+                          - generic [ref=e463]:
+                            - generic [ref=e464]:
+                              - button [ref=e466] [cursor=pointer]:
+                                - button "View devesh.prakash profile" [ref=e468]:
+                                  - generic [ref=e469]: devesh.prakash
+                              - heading "5:57 PM" [level=3] [ref=e470] [cursor=pointer]
+                            - generic [ref=e471]: Reminder that calls are in here too — no separate app. Start one from a channel and whoever's around can join.
+                        - button "3 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e476] [cursor=pointer]:
+                          - generic [ref=e477]: 3 replies
+                          - generic [ref=e478]:
+                            - generic [ref=e479]: Last activity Aug 5
+                            - generic [ref=e480]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e484]:
+                        - generic [ref=e485]:
+                          - button "View Sara Iyer profile" [ref=e487] [cursor=pointer]:
+                            - button [ref=e488]:
+                              - img "Sara Iyer" [ref=e491]
+                          - generic [ref=e492]:
+                            - generic [ref=e493]:
+                              - button [ref=e495] [cursor=pointer]:
+                                - button "View Sara Iyer profile" [ref=e497]:
+                                  - generic [ref=e498]: Sara Iyer
+                              - heading "6:17 PM" [level=3] [ref=e499] [cursor=pointer]
+                            - generic [ref=e500]: I've moved the flow diagrams to canvases instead of the design tool — mostly because people actually comment on them here. Nobody ever opened the links I used to paste.
+                        - button "2 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e505] [cursor=pointer]:
+                          - generic [ref=e506]: 2 replies
+                          - generic [ref=e507]:
+                            - generic [ref=e508]: Last activity Aug 5
+                            - generic [ref=e509]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e513]:
+                        - generic [ref=e514]:
+                          - button "View Daniel Okafor profile" [ref=e516] [cursor=pointer]:
+                            - button [ref=e517]:
+                              - img "Daniel Okafor" [ref=e520]
+                          - generic [ref=e521]:
+                            - generic [ref=e522]:
+                              - button [ref=e524] [cursor=pointer]:
+                                - button "View Daniel Okafor profile" [ref=e526]:
+                                  - generic [ref=e527]: Daniel Okafor
+                              - heading "6:37 PM" [level=3] [ref=e528] [cursor=pointer]
+                            - generic [ref=e529]: Has anyone used Claw for something real? I've been ignoring the agents tab.
+                        - button "4 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e534] [cursor=pointer]:
+                          - generic [ref=e535]: 4 replies
+                          - generic [ref=e536]:
+                            - generic [ref=e537]: Last activity Aug 5
+                            - generic [ref=e538]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e542]:
+                        - generic [ref=e543]:
+                          - button "View Tom Alvarez profile" [ref=e545] [cursor=pointer]:
+                            - button [ref=e546]:
+                              - img "Tom Alvarez" [ref=e549]
+                          - generic [ref=e550]:
+                            - generic [ref=e551]:
+                              - button [ref=e553] [cursor=pointer]:
+                                - button "View Tom Alvarez profile" [ref=e555]:
+                                  - generic [ref=e556]: Tom Alvarez
+                              - heading "6:57 PM" [level=3] [ref=e557] [cursor=pointer]
+                            - generic [ref=e558]: The thing I did not expect to like is Ask AI. I asked what we decided about the onboarding flow and it pulled the actual conversation from three weeks ago plus the ticket that came out of it.
+                        - button "4 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e563] [cursor=pointer]:
+                          - generic [ref=e564]: 4 replies
+                          - generic [ref=e565]:
+                            - generic [ref=e566]: Last activity Aug 5
+                            - generic [ref=e567]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e571]:
+                        - generic [ref=e572]:
+                          - button "View Sara Iyer profile" [ref=e574] [cursor=pointer]:
+                            - button [ref=e575]:
+                              - img "Sara Iyer" [ref=e578]
+                          - generic [ref=e579]:
+                            - generic [ref=e580]:
+                              - button [ref=e582] [cursor=pointer]:
+                                - button "View Sara Iyer profile" [ref=e584]:
+                                  - generic [ref=e585]: Sara Iyer
+                              - heading "7:17 PM" [level=3] [ref=e586] [cursor=pointer]
+                            - generic [ref=e587]: Can someone give me the short version of what lives where? I keep guessing.
+                        - button "4 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e592] [cursor=pointer]:
+                          - generic [ref=e593]: 4 replies
+                          - generic [ref=e594]:
+                            - generic [ref=e595]: Last activity Aug 5
+                            - generic [ref=e596]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e600]:
+                        - generic [ref=e601]:
+                          - button "View devesh.prakash profile" [ref=e603] [cursor=pointer]:
+                            - button "D" [ref=e604]
+                          - generic [ref=e608]:
+                            - generic [ref=e609]:
+                              - button [ref=e611] [cursor=pointer]:
+                                - button "View devesh.prakash profile" [ref=e613]:
+                                  - generic [ref=e614]: devesh.prakash
+                              - heading "7:37 PM" [level=3] [ref=e615] [cursor=pointer]
+                            - generic [ref=e619]:
+                              - text: Morning everyone
+                              - generic [ref=e620]: 👋
+                              - text: We're fully on Spaces from this week — the old tool is read-only now. Shout if anything is missing and I'll sort it out.
+                        - button "3 replies Last activity Aug 5 View thread Last activity Aug 5" [ref=e622] [cursor=pointer]:
+                          - generic [ref=e623]: 3 replies
+                          - generic [ref=e624]:
+                            - generic [ref=e625]: Last activity Aug 5
+                            - generic [ref=e626]: View thread
+                            - generic: Last activity Aug 5
+                      - generic [ref=e631]:
+                        - button "View devesh.prakash profile" [ref=e633] [cursor=pointer]:
+                          - button "D" [ref=e634]
+                        - generic [ref=e638]:
+                          - generic [ref=e639]: Bookmark
+                          - generic [ref=e643]:
+                            - button [ref=e645] [cursor=pointer]:
+                              - button "View devesh.prakash profile" [ref=e647]:
+                                - generic [ref=e648]: devesh.prakash
+                            - heading "6:32 PM" [level=3] [ref=e649] [cursor=pointer]
+                          - generic [ref=e650]: Morning standup notes are on the canvas from yesterday — same link as always.
+                      - generic [ref=e655]:
+                        - generic [ref=e656]: Yesterday
+                        - generic [ref=e662]:
+                          - generic [ref=e663]:
+                            - button "View Mei Tanaka profile" [ref=e665] [cursor=pointer]:
+                              - button [ref=e666]:
+                                - img "Mei Tanaka" [ref=e669]
+                            - generic [ref=e670]:
+                              - generic [ref=e671]:
+                                - button [ref=e673] [cursor=pointer]:
+                                  - button "View Mei Tanaka profile" [ref=e675]:
+                                    - generic [ref=e676]: Mei Tanaka
+                                - heading "9:17 AM" [level=3] [ref=e677] [cursor=pointer]
+                              - generic [ref=e678]:
+                                - generic [ref=e679]: CSV import fails on files exported from Excel
+                                - button "PLAT-3 CSV import fails on files exported from Excel Triage Arjun Rao" [ref=e684] [cursor=pointer]:
+                                  - generic [ref=e685]: PLAT-3
+                                  - heading "CSV import fails on files exported from Excel" [level=3] [ref=e686]
+                                  - generic [ref=e687]:
+                                    - generic [ref=e688]: Triage
+                                    - img "Arjun Rao" [ref=e695]
+                          - button "4 replies Last activity 1d ago View thread Last activity 1d ago" [ref=e697] [cursor=pointer]:
+                            - generic [ref=e698]: 4 replies
+                            - generic [ref=e699]:
+                              - generic [ref=e700]: Last activity 1d ago
+                              - generic [ref=e701]: View thread
+                              - generic: Last activity 1d ago
+                      - generic [ref=e705]:
+                        - generic [ref=e706]:
+                          - button "View devesh.prakash profile" [ref=e708] [cursor=pointer]:
+                            - button "D" [ref=e709]
+                          - generic [ref=e713]:
+                            - generic [ref=e714]:
+                              - button [ref=e716] [cursor=pointer]:
+                                - button "View devesh.prakash profile" [ref=e718]:
+                                  - generic [ref=e719]: devesh.prakash
+                              - heading "10:47 AM" [level=3] [ref=e720] [cursor=pointer]
+                            - generic [ref=e721]:
+                              - generic [ref=e722]: Stale tickets should return to triage automatically
+                              - button "PLAT-6 Stale tickets should return to triage automatically Done D" [ref=e727] [cursor=pointer]:
+                                - generic [ref=e728]: PLAT-6
+                                - heading "Stale tickets should return to triage automatically" [level=3] [ref=e729]
+                                - generic [ref=e730]:
+                                  - generic [ref=e731]: Done
+                                  - generic [ref=e736]: D
+                        - button "4 replies Last activity 1d ago View thread Last activity 1d ago" [ref=e740] [cursor=pointer]:
+                          - generic [ref=e741]: 4 replies
+                          - generic [ref=e742]:
+                            - generic [ref=e743]: Last activity 1d ago
+                            - generic [ref=e744]: View thread
+                            - generic: Last activity 1d ago
+                      - generic [ref=e748]:
+                        - generic [ref=e749]:
+                          - button "View Daniel Okafor profile" [ref=e751] [cursor=pointer]:
+                            - button [ref=e752]:
+                              - img "Daniel Okafor" [ref=e755]
+                          - generic [ref=e756]:
+                            - generic [ref=e757]:
+                              - button [ref=e759] [cursor=pointer]:
+                                - button "View Daniel Okafor profile" [ref=e761]:
+                                  - generic [ref=e762]: Daniel Okafor
+                              - heading "12:17 PM" [level=3] [ref=e763] [cursor=pointer]
+                            - generic [ref=e764]:
+                              - generic [ref=e765]: Post ticket summary to the originating channel on Done
+                              - button "PLAT-9 Post ticket summary to the originating channel on Done In Progress Tom Alvarez" [ref=e770] [cursor=pointer]:
+                                - generic [ref=e771]: PLAT-9
+                                - heading "Post ticket summary to the originating channel on Done" [level=3] [ref=e772]
+                                - generic [ref=e773]:
+                                  - generic [ref=e774]: In Progress
+                                  - img "Tom Alvarez" [ref=e781]
+                        - button "4 replies Last activity 1d ago View thread Last activity 1d ago" [ref=e783] [cursor=pointer]:
+                          - generic [ref=e784]: 4 replies
+                          - generic [ref=e785]:
+                            - generic [ref=e786]: Last activity 1d ago
+                            - generic [ref=e787]: View thread
+                            - generic: Last activity 1d ago
+                  - generic [ref=e791]:
+                    - generic [ref=e792]:
+                      - textbox "Message input" [ref=e794]:
+                        - paragraph [ref=e795]
+                      - generic: "Send a message in #general"
+                    - generic [ref=e796]:
+                      - generic [ref=e797]:
+                        - button "Add content" [ref=e798] [cursor=pointer]
+                        - button "Insert emoji" [ref=e801] [cursor=pointer]
+                        - button "Mention user" [ref=e804] [cursor=pointer]
+                        - button "Mention channel" [ref=e807] [cursor=pointer]
+                        - button "Toggle formatting toolbar" [ref=e810] [cursor=pointer]
+                      - generic [ref=e813]:
+                        - button "Start voice input" [ref=e814] [cursor=pointer]
+                        - generic [ref=e818]:
+                          - button "Send message" [disabled] [ref=e819]
+                          - button [ref=e823] [cursor=pointer]
+    - region "Notifications alt+T"
+  - dialog [ref=e828]:
+    - generic [ref=e829]:
+      - paragraph [ref=e830]: More
+      - list [ref=e831]:
+        - listitem [ref=e832]:
+          - link "My Canvas" [ref=e833] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/chat/canvas
+        - listitem [ref=e838]:
+          - link "Automations" [ref=e839] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/automations
+        - listitem [ref=e844]:
+          - link "Scheduled Messages" [ref=e845] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/scheduled-messages
+        - listitem [ref=e850]:
+          - link "User Groups" [ref=e851] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/user-groups
+        - listitem [ref=e856]:
+          - link "User Management" [ref=e857] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/resource-access
+        - listitem [ref=e862]:
+          - link "Workspace Management" [ref=e863] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/workspace-management
+        - listitem [ref=e869]:
+          - link "Organisations" [ref=e870] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/organisations
+        - listitem [ref=e875]:
+          - link "Analytics" [ref=e876] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/analytics
+        - listitem [ref=e881]:
+          - link "Forms" [ref=e882] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/forms
+        - listitem [ref=e887]:
+          - link "Apps" [ref=e888] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/apps
+        - listitem [ref=e893]:
+          - link "Insights" [ref=e894] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/product-insights
+        - listitem [ref=e899]:
+          - link "Knowledge Base" [ref=e900] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/knowledge-base
+        - listitem [ref=e905]:
+          - link "Context" [ref=e906] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/memory
+        - listitem [ref=e911]:
+          - link "Dashboards" [ref=e912] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/dashboards
+        - listitem [ref=e920]:
+          - link "List Projects" [ref=e921] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/listProjects
+        - listitem [ref=e926]:
+          - link "Jira Migration" [ref=e927] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/jira-migration
+        - listitem [ref=e932]:
+          - link "WhatsApp Migration" [ref=e933] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/migration/whatsapp
+        - listitem [ref=e938]:
+          - link "Team Intelligence" [ref=e939] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/team-intelligence
+        - listitem [ref=e944]:
+          - link "Claw Agents" [ref=e945] [cursor=pointer]:
+            - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents
+      - button "Customize toolbar" [ref=e951] [cursor=pointer]

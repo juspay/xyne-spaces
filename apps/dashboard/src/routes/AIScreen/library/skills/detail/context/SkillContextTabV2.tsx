@@ -10,6 +10,7 @@ import {
   DetailEmptyState,
   DetailLockedNote,
   DetailSection,
+  DetailStack,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import type { SkillDetailActions } from '../useSkillDetailActions';
@@ -105,8 +106,9 @@ export function SkillContextTabV2({
   };
 
   return (
-    <div className='flex w-full flex-col gap-8'>
+    <DetailStack>
       <DetailSection
+        heading='section'
         label='Files'
         info='Sibling files that ship alongside the instructions'
         trailing={
@@ -157,7 +159,7 @@ export function SkillContextTabV2({
                 >
                   <FileText className='size-4' />
                 </span>
-                <span className='min-w-0 flex-1 truncate text-sm font-medium leading-[22px] text-foreground'>
+                <span className='min-w-0 flex-1 truncate text-[15px] font-medium leading-[1.2] text-foreground'>
                   {file.relativePath}
                 </span>
                 <span className='shrink-0 whitespace-nowrap text-xs leading-4 text-muted-foreground'>
@@ -172,6 +174,7 @@ export function SkillContextTabV2({
       <DetailSection
         label='System Prompt'
         info='The instructions an agent reads when it runs this skill'
+        heading='field'
         trailing={
           canEdit ? (
             <UploadButton
@@ -199,6 +202,6 @@ export function SkillContextTabV2({
           </DetailCard>
         )}
       </DetailSection>
-    </div>
+    </DetailStack>
   );
 }

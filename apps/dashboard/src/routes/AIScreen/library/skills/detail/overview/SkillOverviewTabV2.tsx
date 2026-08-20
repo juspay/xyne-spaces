@@ -3,11 +3,14 @@ import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
 import { Pill } from '../../../shared/primitives/Pill';
 import {
-  DetailCard,
   DetailEmpty,
+  DetailGroup,
   DetailLockedNote,
   DetailProse,
+  DetailRow,
   DetailSection,
+  DetailStack,
+  DetailTextField,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import type { SkillDetailActions } from '../useSkillDetailActions';
@@ -25,37 +28,36 @@ export function SkillOverviewTabV2({
   const { canEdit } = actions;
 
   return (
-    <div className='flex w-full flex-col gap-8'>
+    <DetailStack gap='page'>
       <DetailSection
         label='Description'
         info='What this skill is for, shown wherever it can be attached'
+        heading='field'
         {...(canEdit ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const })}
       >
-        <DetailCard>
+        <DetailTextField>
           {!canEdit && <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>}
           {skill.description ? (
             <DetailProse>{skill.description}</DetailProse>
           ) : (
             <DetailEmpty>No description added</DetailEmpty>
           )}
-        </DetailCard>
+        </DetailTextField>
       </DetailSection>
 
       {canEdit && (
-        <DetailSection label='Danger Zone' info='Irreversible actions on this skill'>
-          <DetailCard>
-            <div className='flex w-full items-center gap-3 p-4'>
-              <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                <span className='flex min-w-0 items-center gap-1.5'>
-                  <span className='truncate text-sm font-medium leading-[22px] text-foreground'>
-                    Delete this skill
-                  </span>
-                  <Pill tone='neutral'>{skill.scope === 'global' ? 'Global' : 'Personal'}</Pill>
-                </span>
-                <span className='truncate text-sm leading-5 text-foreground/60'>
-                  Once you delete a skill, there is no going back. Please be certain.
-                </span>
-              </div>
+        <DetailSection
+          heading='section'
+          label='Danger Zone'
+          info='Irreversible actions on this skill'
+        >
+          <DetailGroup>
+            <DetailRow
+              title='Delete this skill'
+              hint='Once you delete a skill, there is no going back. Please be certain.'
+              last
+            >
+              <Pill tone='neutral'>{skill.scope === 'global' ? 'Global' : 'Personal'}</Pill>
               <button
                 type='button'
                 onClick={() => setDeleteOpen(true)}
@@ -66,8 +68,8 @@ export function SkillOverviewTabV2({
               >
                 Delete this skill
               </button>
-            </div>
-          </DetailCard>
+            </DetailRow>
+          </DetailGroup>
         </DetailSection>
       )}
 
@@ -81,6 +83,6 @@ export function SkillOverviewTabV2({
         loading={actions.busy.deleting}
         onConfirm={() => void actions.remove()}
       />
-    </div>
+    </DetailStack>
   );
 }

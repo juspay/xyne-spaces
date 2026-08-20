@@ -6,6 +6,8 @@ import { DetailListCard, type DetailListItem } from '../../../shared/primitives/
 import {
   DetailLockedNote,
   DetailSection,
+  DetailStack,
+  ManageButton,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { BrowseSkillsDialog } from '../../../shared/pickers/skill/BrowseSkillsDialog';
@@ -22,21 +24,6 @@ const SOURCE_LABELS: Record<string, string> = {
   'user-created': 'Custom',
   uploaded: 'Uploaded',
 };
-
-function ManageButton({ label, onClick }: { label: string; onClick: () => void }): ReactElement {
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      aria-label={label}
-      data-track-category='Claw Agents'
-      data-track-name='Subagent detail v2: manage skills'
-      className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
-    >
-      Manage
-    </button>
-  );
-}
 
 export function SubagentKnowledgeTabV2({
   subagent,
@@ -87,60 +74,63 @@ export function SubagentKnowledgeTabV2({
   };
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Skills'
-        info='Playbooks this subagent can consult while it runs'
-        trailing={
-          canEdit ? (
-            <ManageButton
-              label='Manage skills'
-              onClick={() => {
-                setDraftIds(attachedIds);
-                setBrowseOpen(true);
-              }}
-            />
-          ) : (
-            <ReadOnlyBadge />
-          )
-        }
-        trailingAlign='end'
-      >
-        <DetailListCard
-          items={items}
-          loading={skills.loading}
-          emptyLabel='No skills attached yet.'
-          canEdit={canEdit && !saving}
-          note={note}
-          removeLabel={item => `Remove ${item.name}`}
-          onRemove={item =>
-            void save(
-              { skillIds: attachedIds.filter(id => id !== item.key) },
-              `${item.name} removed`,
+    <DetailSection heading='section' label='Knowledge'>
+      <DetailStack>
+        <DetailSection
+          label='Skills'
+          info='Playbooks this subagent can consult while it runs'
+          trailing={
+            canEdit ? (
+              <ManageButton
+                label='Manage skills'
+                trackName='Subagent detail v2: manage skills'
+                onClick={() => {
+                  setDraftIds(attachedIds);
+                  setBrowseOpen(true);
+                }}
+              />
+            ) : (
+              <ReadOnlyBadge />
             )
           }
+          trailingAlign='end'
+        >
+          <DetailListCard
+            items={items}
+            loading={skills.loading}
+            emptyLabel='No skills attached yet.'
+            canEdit={canEdit && !saving}
+            note={note}
+            removeLabel={item => `Remove ${item.name}`}
+            onRemove={item =>
+              void save(
+                { skillIds: attachedIds.filter(id => id !== item.key) },
+                `${item.name} removed`,
+              )
+            }
+          />
+        </DetailSection>
+
+        {saving && (
+          <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
+            <Loader2 className='size-3.5 animate-spin' aria-hidden />
+            Saving…
+          </span>
+        )}
+
+        <BrowseSkillsDialog
+          open={browseOpen}
+          onOpenChange={open => {
+            if (!open) closeBrowse();
+          }}
+          catalog={skills.entries}
+          loading={skills.loading}
+          isError={skills.isError}
+          onRetry={skills.refetch}
+          selectedIds={draftIds ?? attachedIds}
+          onChange={setDraftIds}
         />
-      </DetailSection>
-
-      {saving && (
-        <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
-          <Loader2 className='size-3.5 animate-spin' aria-hidden />
-          Saving…
-        </span>
-      )}
-
-      <BrowseSkillsDialog
-        open={browseOpen}
-        onOpenChange={open => {
-          if (!open) closeBrowse();
-        }}
-        catalog={skills.entries}
-        loading={skills.loading}
-        isError={skills.isError}
-        onRetry={skills.refetch}
-        selectedIds={draftIds ?? attachedIds}
-        onChange={setDraftIds}
-      />
-    </div>
+      </DetailStack>
+    </DetailSection>
   );
 }

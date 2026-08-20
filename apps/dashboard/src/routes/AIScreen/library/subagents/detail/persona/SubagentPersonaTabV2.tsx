@@ -2,12 +2,14 @@ import { type ReactElement } from 'react';
 import type { SubagentDef } from '@/services/claw/clawSubagentsTypes';
 import { ProseBox } from '../../../shared/primitives/ProseBox';
 import {
-  DetailCard,
   DetailEmpty,
+  DetailGroup,
   DetailLockedNote,
   DetailProse,
   DetailRow,
   DetailSection,
+  DetailStack,
+  DetailTextField,
   DetailValue,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
@@ -32,38 +34,46 @@ export function SubagentPersonaTabV2({
   const badge = canEdit ? {} : { trailing: <ReadOnlyBadge />, trailingAlign: 'end' as const };
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Description'
-        info='The one-liner the parent agent reads when deciding who to delegate to'
-        {...badge}
-      >
-        <DetailCard>
-          {note}
-          {subagent.description ? (
-            <DetailProse>{subagent.description}</DetailProse>
+    <DetailStack gap='page'>
+      <DetailStack>
+        <DetailSection
+          label='Description'
+          info='The one-liner the parent agent reads when deciding who to delegate to'
+          heading='field'
+          {...badge}
+        >
+          <DetailTextField>
+            {note}
+            {subagent.description ? (
+              <DetailProse>{subagent.description}</DetailProse>
+            ) : (
+              <DetailEmpty>No description added</DetailEmpty>
+            )}
+          </DetailTextField>
+        </DetailSection>
+
+        <DetailSection
+          label='System Prompt'
+          info='The persona and instructions the model receives before it runs'
+          heading='field'
+          {...badge}
+        >
+          {subagent.systemPrompt ? (
+            <ProseBox>{subagent.systemPrompt}</ProseBox>
           ) : (
-            <DetailEmpty>No description added</DetailEmpty>
+            <DetailTextField>
+              <DetailEmpty>No system prompt set</DetailEmpty>
+            </DetailTextField>
           )}
-        </DetailCard>
-      </DetailSection>
+        </DetailSection>
+      </DetailStack>
 
       <DetailSection
-        label='System Prompt'
-        info='The persona and instructions the model receives before it runs'
-        {...badge}
+        heading='section'
+        label='Identity'
+        info='How this subagent is addressed and reported'
       >
-        {subagent.systemPrompt ? (
-          <ProseBox>{subagent.systemPrompt}</ProseBox>
-        ) : (
-          <DetailCard>
-            <DetailEmpty>No system prompt set</DetailEmpty>
-          </DetailCard>
-        )}
-      </DetailSection>
-
-      <DetailSection label='Identity' info='How this subagent is addressed and reported'>
-        <DetailCard>
+        <DetailGroup>
           <DetailRow title='Handle' hint='The name agents delegate to — fixed once created'>
             <DetailValue>{subagent.name}</DetailValue>
           </DetailRow>
@@ -84,8 +94,8 @@ export function SubagentPersonaTabV2({
                 : 'None set'}
             </DetailValue>
           </DetailRow>
-        </DetailCard>
+        </DetailGroup>
       </DetailSection>
-    </div>
+    </DetailStack>
   );
 }

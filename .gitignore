@@ -238,3 +238,4 @@ security-reports/
 /vespa-core/generated
 #vespa models
 /vespa-core/vespa/models/*
+.gstack/

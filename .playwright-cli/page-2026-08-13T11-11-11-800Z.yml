@@ -1,0 +1,302 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e8]:
+      - complementary [ref=e9]:
+        - generic [ref=e11]:
+          - button "Switch workspace" [ref=e13] [cursor=pointer]:
+            - text: D
+            - generic [ref=e14]: "18"
+          - navigation [ref=e16]:
+            - list [ref=e17]:
+              - listitem [ref=e18]:
+                - link "Chat" [ref=e19] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir
+              - listitem [ref=e22]:
+                - link "DMs unread" [ref=e23] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dm
+              - listitem [ref=e27]:
+                - link "Activity" [ref=e28] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/activity
+                  - generic [ref=e31]: "18"
+              - listitem [ref=e32]:
+                - link "Calls" [ref=e33] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/calls
+              - listitem [ref=e36]:
+                - link "Recordings" [ref=e37] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/recordings
+              - listitem [ref=e40]:
+                - link "Tickets" [ref=e41] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/projects
+              - listitem [ref=e44]:
+                - link "Support" [ref=e45] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/support
+              - listitem [ref=e48]:
+                - link "User Guide" [ref=e49] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/guide
+              - listitem [ref=e52]:
+                - link "Release Manager" [ref=e53] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/releaseManager
+              - listitem [ref=e56]:
+                - button "More" [ref=e57] [cursor=pointer]
+          - generic [ref=e62]:
+            - button "Support" [ref=e63] [cursor=pointer]
+            - generic [ref=e66] [cursor=pointer]: D
+      - main [ref=e71]:
+        - generic [ref=e953]:
+          - complementary [ref=e956]:
+            - generic [ref=e957]:
+              - generic [ref=e960]:
+                - button "Share workspace link" [ref=e961] [cursor=pointer]
+                - button "Back" [ref=e964] [cursor=pointer]
+                - button "Forward" [ref=e967] [cursor=pointer]
+                - button "Search" [ref=e970] [cursor=pointer]
+              - generic [ref=e973]:
+                - heading "Agent Hub" [level=2] [ref=e975]
+                - generic [ref=e976]:
+                  - link "Agents" [ref=e977] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents
+                  - link "MCP" [ref=e982] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/mcp
+                  - link "Skills" [ref=e987] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/skills
+                  - link "Subagents" [ref=e992] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/subagents
+                  - link "Digital Twin" [active] [ref=e997] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin
+                  - link "Organization" [ref=e1002] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/organization
+                  - link "Metrics" [ref=e1007] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/metrics
+                  - link "Settings" [ref=e1012] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/settings
+          - separator [ref=e1018]
+          - main [ref=e1022]:
+            - generic [ref=e1227]:
+              - link "Skip Digital Twin navigation" [ref=e1228] [cursor=pointer]:
+                - /url: "#digital-twin-content"
+              - generic [ref=e1229]:
+                - generic [ref=e1230]:
+                  - generic [ref=e1231]:
+                    - generic [ref=e1234]:
+                      - heading "Your Digital Twin" [level=1] [ref=e1235]
+                      - paragraph [ref=e1236]: Learns from your work, speaks in your voice — every memory approved by you
+                    - generic [ref=e1237]:
+                      - generic [ref=e1238]: Ask your Digital Twin
+                      - textbox "Ask your Digital Twin" [ref=e1239]:
+                        - /placeholder: Ask anything
+                      - generic [ref=e1240]:
+                        - generic [ref=e1241]:
+                          - button "Add knowledge" [ref=e1242] [cursor=pointer]
+                          - button "Insert command" [ref=e1245] [cursor=pointer]
+                          - button "Mention" [ref=e1248] [cursor=pointer]
+                        - generic [ref=e1251]:
+                          - button "Start voice input" [ref=e1252] [cursor=pointer]
+                          - button "Send" [disabled] [ref=e1256]
+                  - navigation "Digital Twin" [ref=e1259]:
+                    - link "Details" [ref=e1260] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/persona
+                    - link "Memories" [ref=e1263] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/memories
+                    - link "Review" [ref=e1265] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/proposals
+                    - link "Activity" [ref=e1267] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin/activity
+                - main [ref=e1269]:
+                  - generic [ref=e1270]: Digital Twin content
+                  - generic [ref=e1273]:
+                    - generic [ref=e1274]: Search details
+                    - searchbox "Search details" [ref=e1275]
+                  - generic [ref=e1277]:
+                    - generic [ref=e1278]:
+                      - heading "Persona" [level=2] [ref=e1279]
+                      - generic [ref=e1281]:
+                        - generic [ref=e1282]:
+                          - generic [ref=e1283]: Description
+                          - paragraph [ref=e1289]: Your personal AI — answers and drafts replies as you would, grounded in memories you've approved.
+                        - generic [ref=e1290]:
+                          - generic [ref=e1291]: System Prompt
+                          - paragraph [ref=e1298]: "You are the **Digital Twin** of the user — their personal AI. You speak as them, in first person (\"I\", \"my\", \"we\"). You are not a generic assistant; you are this specific person, with a memory bank of facts about them that they personally approved. ## How to answer any question 1. **Call `memory-search` FIRST.** This returns approved facts about THE USER — their communication style, ongoing projects, relationships, preferences, decisions, and uploaded notes. It is the single source of truth for \"what is this person like\". If memory-search returns relevant facts, use them directly. 2. **Only fall back to Spaces tools when memory is silent or incomplete.** spaces-activity, spaces-messages, spaces-tickets, spaces-search exist for grounding in live workspace data — use them when the question is about something happening right now, or when memory-search returned no useful facts. Do NOT use them as a substitute for memory. 3. **Compose the reply in the user's voice.** First person. Mirror the style cues memory-search surfaced (terse vs. verbose, emoji use, formatting preferences). If memory describes the user's communication style and the draft doesn't match, rewrite the draft. ## Hard rules - **Never fabricate facts about the user.** If memory-search did not return a fact, and the live tools didn't either, say \"I don't have that recorded yet\" — do not guess. - **Memory is the user's consented voice.** Every fact in there was reviewed and approved by the user themselves. Trust those facts over your own assumptions. - **Do not surface other people's private info.** If memory mentions a colleague's opinion or behavior, it's because the user observed it — fine to reference in the user's own reasoning, but never quote it back to a third party in a way that would expose them. - **Action approvals stay the same.** Tools like spaces-create-ticket and spaces-schedule-call return \"Action queued for approval\" — tell the user to approve, never retry. ## What memory-search returns The tool searches one bank scoped to THIS user (tag `user:<userId>`). It will NEVER return facts about other users or generic agent knowledge. If you're unsure whether a fact applies \"to me\", it does — memory-search only knows the requesting user. Categories memory-search organizes facts under: communication style, expertise, ongoing projects, relationships, preferences, decisions, identity/context, and the user's uploaded notes (\"docs\"). Pass natural-language queries; the tool does semantic match. ## Identity You ARE the user. Not \"the user's assistant\" or \"an AI representing the user\". The user. Replies that say \"I'm the user's digital twin and I can help with X\" are wrong — say \"I'm working on X\" or \"I've been focused on X\". First person, every time."
+                        - generic [ref=e1299]:
+                          - generic [ref=e1300]: Model
+                          - generic [ref=e1305]:
+                            - generic [ref=e1306]:
+                              - generic [ref=e1307]:
+                                - generic [ref=e1308]: Providers
+                                - generic [ref=e1309]: Top to bottom order
+                              - generic [ref=e1310]:
+                                - generic [ref=e1311]: Spaces platform model
+                                - button "Edit provider order" [ref=e1312] [cursor=pointer]
+                            - generic [ref=e1315]:
+                              - generic [ref=e1316]:
+                                - generic [ref=e1317]: Applies To
+                                - generic [ref=e1318]: When the provider order takes effect
+                              - combobox "When to use the agent's premium provider" [ref=e1320] [cursor=pointer]:
+                                - generic: Always on
+                            - generic [ref=e1321]:
+                              - generic [ref=e1322]:
+                                - generic [ref=e1323]: Subagents
+                                - generic [ref=e1324]: A per-subagent override always wins over this
+                              - combobox "Which provider subagents run on" [ref=e1326] [cursor=pointer]:
+                                - generic: Spaces default
+                            - generic [ref=e1327]:
+                              - generic [ref=e1328]:
+                                - generic [ref=e1329]: Automated runs
+                                - generic [ref=e1330]: Scheduled jobs, automations and error-pipeline runs
+                              - combobox "Which provider automation and scheduled runs use" [ref=e1332] [cursor=pointer]:
+                                - generic: Same as chat
+                        - generic [ref=e1333]:
+                          - generic [ref=e1334]: Credentials
+                          - generic [ref=e1339]:
+                            - generic [ref=e1340]:
+                              - generic [ref=e1341]:
+                                - generic [ref=e1342]: Spaces
+                                - generic [ref=e1343]: Platform default no key required
+                              - generic [ref=e1344]: Always Available
+                            - generic [ref=e1346]:
+                              - generic [ref=e1347]:
+                                - generic [ref=e1348]: Agent keys
+                                - generic [ref=e1349]: Everyone falls through to their own provider, or to Spaces
+                              - button "Configure" [ref=e1351] [cursor=pointer]
+                    - generic [ref=e1354]:
+                      - heading "Behaviour" [level=2] [ref=e1355]
+                      - generic [ref=e1357]:
+                        - generic [ref=e1358]:
+                          - generic [ref=e1359]: Constant reminders
+                          - generic [ref=e1365]:
+                            - generic [ref=e1366]: Description
+                            - textbox "Description" [ref=e1367]:
+                              - /placeholder: eg. Always respond in the user's language
+                        - generic [ref=e1368]:
+                          - generic [ref=e1369]: Sandbox
+                          - generic [ref=e1374]:
+                            - generic [ref=e1375]:
+                              - generic [ref=e1376]:
+                                - generic [ref=e1377]: Sandbox repository
+                                - generic [ref=e1378]: Pin this agent to one repo setup so a run can't pick the wrong one.
+                              - combobox "Sandbox repository" [ref=e1380] [cursor=pointer]:
+                                - generic: None (agent chooses)
+                            - generic [ref=e1381]:
+                              - generic [ref=e1382]:
+                                - generic [ref=e1383]: Read-only multi-repo sandbox
+                                - generic [ref=e1384]: Grep across every cloned repo with no per-project clone. Mutating tools are stripped, so this suits agents that only read code.
+                              - switch "Read-only multi-repo sandbox" [ref=e1386] [cursor=pointer]
+                            - generic [ref=e1388]:
+                              - generic [ref=e1389]:
+                                - generic [ref=e1390]: Research product
+                                - generic [ref=e1391]: Used by query-codebase and review-pull-request. Takes priority over the repository below.
+                              - combobox "Research product" [ref=e1393] [cursor=pointer]:
+                                - generic: None
+                            - generic [ref=e1394]:
+                              - generic [ref=e1395]:
+                                - generic [ref=e1396]: Research repository
+                                - generic [ref=e1397]: Used for code research when no product is pinned.
+                              - combobox "Research repository" [ref=e1399] [cursor=pointer]:
+                                - generic: None
+                        - generic [ref=e1400]:
+                          - generic [ref=e1401]: Autonomy
+                          - generic [ref=e1406]:
+                            - generic [ref=e1407]:
+                              - generic [ref=e1408]:
+                                - generic [ref=e1409]: Suggest goals
+                                - generic [ref=e1410]: Let this agent propose an autonomous run. At the end of a multi-step plan the user gets a one-click button to take the work to completion.
+                              - switch "Suggest goals" [ref=e1412] [cursor=pointer]
+                            - generic [ref=e1414]:
+                              - generic [ref=e1415]:
+                                - generic [ref=e1416]: Always goal
+                                - generic [ref=e1417]: Run every message as an autonomous loop. Only for agents purpose-built for it — users can type /stop to cancel mid-run.
+                              - switch "Always goal" [ref=e1419] [cursor=pointer]
+                        - generic [ref=e1421]:
+                          - generic [ref=e1422]: Verification
+                          - generic [ref=e1427]:
+                            - generic [ref=e1428]:
+                              - generic [ref=e1429]:
+                                - generic [ref=e1430]: Verify responses
+                                - generic [ref=e1431]: Check factual claims against the gathered tool results before replying. Adds one model call per response.
+                              - switch "Verify responses" [ref=e1433] [cursor=pointer]
+                            - generic [ref=e1435]:
+                              - generic [ref=e1436]:
+                                - generic [ref=e1437]: Enforce citations
+                                - generic [ref=e1438]: Nudge the agent to rewrite with inline citations when it used citeable sources but cited none. No extra model call.
+                              - switch "Enforce citations" [ref=e1440] [cursor=pointer]
+                            - generic [ref=e1442]:
+                              - generic [ref=e1443]:
+                                - generic [ref=e1444]: Auto-cite all tools
+                                - generic [ref=e1445]: Inject citation tokens into every tool result so any output can be cited back to its source.
+                              - switch "Auto-cite all tools" [ref=e1447] [cursor=pointer]
+                        - generic [ref=e1449]:
+                          - generic [ref=e1450]: Output
+                          - generic [ref=e1456]:
+                            - generic [ref=e1457]:
+                              - generic [ref=e1458]: Structured output
+                              - generic [ref=e1459]: Force the final answer into a fixed format. The agent still works normally — only the answer is constrained.
+                            - switch "Structured output" [ref=e1461] [cursor=pointer]
+                    - generic [ref=e1463]:
+                      - heading "Tools" [level=2] [ref=e1464]
+                      - generic [ref=e1466]:
+                        - generic [ref=e1467]:
+                          - generic [ref=e1468]:
+                            - generic [ref=e1469]: Subagents
+                            - button "Manage subagents" [ref=e1474] [cursor=pointer]: Manage
+                          - paragraph [ref=e1476]: No subagents added yet.
+                        - generic [ref=e1477]:
+                          - generic [ref=e1478]:
+                            - generic [ref=e1479]: MCP Tools
+                            - button "Manage MCP tools" [ref=e1484] [cursor=pointer]: Manage
+                          - paragraph [ref=e1486]: No MCP tools added yet.
+                        - generic [ref=e1487]:
+                          - generic [ref=e1488]:
+                            - generic [ref=e1489]: Built-In tools
+                            - button "Manage built-in tools" [ref=e1494] [cursor=pointer]: Manage
+                          - paragraph [ref=e1496]: No built-in tools added yet.
+                    - generic [ref=e1497]:
+                      - heading "Knowledge" [level=2] [ref=e1498]
+                      - generic [ref=e1500]:
+                        - generic [ref=e1501]:
+                          - generic [ref=e1502]:
+                            - generic [ref=e1503]: Skills
+                            - button "Manage skills" [ref=e1508] [cursor=pointer]: Manage
+                          - paragraph [ref=e1510]: No skills attached yet.
+                        - generic [ref=e1511]:
+                          - generic [ref=e1512]: Documents
+                          - generic [ref=e1517]:
+                            - generic [ref=e1518]:
+                              - generic [ref=e1519]:
+                                - generic [ref=e1520]: Applies To
+                                - generic [ref=e1521]: Whose access decides what this agent can read
+                              - combobox "Who this applies to" [ref=e1523] [cursor=pointer]:
+                                - generic: Same set for everyone
+                            - generic [ref=e1524]:
+                              - generic [ref=e1525]:
+                                - generic [ref=e1526]: Collections
+                                - generic [ref=e1527]: What it can look things up in
+                              - button "Add" [ref=e1529] [cursor=pointer]
+                            - paragraph [ref=e1532]: No collections attached yet.
+                    - generic [ref=e1533]:
+                      - heading "People" [level=2] [ref=e1534]
+                      - generic [ref=e1536]:
+                        - generic [ref=e1537]:
+                          - generic [ref=e1538]: Access
+                          - generic [ref=e1543]:
+                            - generic [ref=e1544]:
+                              - generic [ref=e1545]:
+                                - generic [ref=e1546]: Visibility
+                                - generic [ref=e1547]: Who can find and run this agent
+                              - combobox "Agent visibility" [ref=e1549] [cursor=pointer]:
+                                - generic: Global (Anyone in the workspace)
+                            - generic [ref=e1550]:
+                              - generic [ref=e1551]:
+                                - generic [ref=e1552]: Default role
+                                - generic [ref=e1553]: What new people get when added
+                              - combobox "Default role for new people" [ref=e1555] [cursor=pointer]:
+                                - generic: Viewer (Can view & run)
+                        - generic [ref=e1556]:
+                          - generic [ref=e1557]:
+                            - generic [ref=e1558]: Members
+                            - generic [ref=e1560]:
+                              - button "Search members" [ref=e1561] [cursor=pointer]
+                              - button "Add people" [ref=e1564] [cursor=pointer]
+                          - paragraph [ref=e1568]: No one has access yet.
+                        - generic [ref=e1569]:
+                          - generic [ref=e1570]: Pending Requests
+                          - paragraph [ref=e1576]: No pending requests.
+  - region "Notifications alt+T"

@@ -179,7 +179,17 @@ export function useFallbackHydratedQuery<
         // Let delta query run without watermark filter as fallback
         setWatermark(1);
       });
-  }, [enabled, isHydrated, watermark, hasCachedData, cachedLastUpdatedAt, hash, query, executeFallback]);
+  }, [
+    enabled,
+    isHydrated,
+    idbLoaded,
+    watermark,
+    hasCachedData,
+    cachedLastUpdatedAt,
+    hash,
+    query,
+    executeFallback,
+  ]);
 
   // Phase 2: Delta subscription — only after watermark is set
   const deltaEnabled = enabled && watermark > 0;

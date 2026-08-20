@@ -1,0 +1,109 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e8]:
+      - complementary [ref=e9]:
+        - generic [ref=e11]:
+          - button "Switch workspace" [ref=e13] [cursor=pointer]:
+            - text: D
+            - generic [ref=e14]: "18"
+          - navigation [ref=e16]:
+            - list [ref=e17]:
+              - listitem [ref=e18]:
+                - link "Chat" [ref=e19] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir
+              - listitem [ref=e22]:
+                - link "DMs unread" [ref=e23] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dm
+              - listitem [ref=e27]:
+                - link "Activity" [ref=e28] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/activity
+                  - generic [ref=e31]: "18"
+              - listitem [ref=e32]:
+                - link "Calls" [ref=e33] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/calls
+              - listitem [ref=e36]:
+                - link "Recordings" [ref=e37] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/recordings
+              - listitem [ref=e40]:
+                - link "Tickets" [ref=e41] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/projects
+              - listitem [ref=e44]:
+                - link "Support" [ref=e45] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/support
+              - listitem [ref=e48]:
+                - link "User Guide" [ref=e49] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/guide
+              - listitem [ref=e52]:
+                - link "Release Manager" [ref=e53] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/releaseManager
+              - listitem [ref=e56]:
+                - button "More" [ref=e57] [cursor=pointer]
+          - generic [ref=e62]:
+            - button "Support" [ref=e63] [cursor=pointer]
+            - generic [ref=e66] [cursor=pointer]: D
+      - main [ref=e71]:
+        - generic [ref=e1568]:
+          - complementary "AI Sidebar" [ref=e1571]:
+            - generic [ref=e1572]:
+              - generic [ref=e1575]:
+                - button "Share workspace link" [ref=e1576] [cursor=pointer]
+                - button "Back" [ref=e1579] [cursor=pointer]
+                - button "Forward" [ref=e1582] [cursor=pointer]
+                - button "Search" [ref=e1585] [cursor=pointer]
+              - generic [ref=e1588]:
+                - heading "Xyne AI" [level=2] [ref=e1590]
+                - generic [ref=e1591]:
+                  - navigation [ref=e1592]:
+                    - button "New Chat" [ref=e1593] [cursor=pointer]
+                    - link "Knowledge" [ref=e1598] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/knowledge
+                    - link "Library" [ref=e1603] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/library
+                    - link "Digital twin" [ref=e1610] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/digital-twin
+                    - link "Metrics" [ref=e1615] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/metrics
+                    - link "Settings" [ref=e1620] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/settings
+                    - link "Admin" [ref=e1626] [cursor=pointer]:
+                      - /url: /cmsq33ux4001hw04qwoo1sci9/ai/admin
+                  - generic [ref=e1631]:
+                    - generic [ref=e1632]:
+                      - button "Recents" [expanded] [ref=e1633] [cursor=pointer]
+                      - button "New chat" [ref=e1637] [cursor=pointer]
+                    - list [ref=e1641]:
+                      - listitem [ref=e1642]:
+                        - button "This is a long Digital Twin draft that should wrap onto a second line instead of" [ref=e1644] [cursor=pointer]
+                      - listitem [ref=e1646]:
+                        - button "hi" [ref=e1648] [cursor=pointer]
+          - separator [ref=e1650]
+          - generic [ref=e1656]:
+            - heading "This is a long Digital Twin draft that s" [level=1] [ref=e1658]
+            - log "Chat messages" [ref=e1659]:
+              - generic [ref=e1660]:
+                - generic [ref=e1663]:
+                  - button "Edit message" [ref=e1664] [cursor=pointer]
+                  - generic [ref=e1668]: This is a long Digital Twin draft that should wrap onto a second line instead of clipping inside the 38px pill overflow-hidden composer.
+                - generic [ref=e1671]:
+                  - button "Thinking…" [disabled] [ref=e1675]:
+                    - generic [ref=e1678]: ⠧
+                    - generic [ref=e1682]: · 6.0s
+                  - button "Debug this response" [ref=e1683] [cursor=pointer]
+            - generic [ref=e1695]:
+              - generic [ref=e1697]:
+                - textbox "Write a message..." [active] [ref=e1699]
+                - generic [ref=e1700]:
+                  - generic [ref=e1701]:
+                    - button "Attach" [ref=e1702] [cursor=pointer]
+                    - button "Add context" [ref=e1705] [cursor=pointer]:
+                      - generic [ref=e1706]: /
+                    - button "Select collections" [ref=e1708] [cursor=pointer]
+                    - button "You don't have access to web search." [disabled] [ref=e1712]
+                    - button "You don't have access to deep research." [disabled] [ref=e1716]
+                    - button "Create canvas" [ref=e1721] [cursor=pointer]
+                  - generic [ref=e1725]:
+                    - button "Digital Twin" [disabled] [ref=e1726]
+                    - button "Start voice input" [disabled] [ref=e1731]
+                    - button "Stop generating" [ref=e1735] [cursor=pointer]
+              - paragraph [ref=e1738]: Xyne can make mistakes. Verify important details.
+  - region "Notifications alt+T"

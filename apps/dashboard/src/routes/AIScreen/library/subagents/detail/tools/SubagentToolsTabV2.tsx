@@ -6,6 +6,8 @@ import { DetailListCard, type DetailListItem } from '../../../shared/primitives/
 import {
   DetailLockedNote,
   DetailSection,
+  DetailStack,
+  ManageButton,
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { BrowseSubagentToolsDialog } from '../../create/toolbox/BrowseSubagentToolsDialog';
@@ -28,21 +30,6 @@ const BUILT_IN_NOTE =
 
 const withIcon = (kind: SubagentToolKind, source: string): { iconType?: string } =>
   kind === 'server' ? { iconType: source } : {};
-
-function ManageButton({ label, onClick }: { label: string; onClick: () => void }): ReactElement {
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      aria-label={label}
-      data-track-category='Claw Agents'
-      data-track-name='Subagent detail v2: manage tools'
-      className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
-    >
-      Manage
-    </button>
-  );
-}
 
 export function SubagentToolsTabV2({
   subagent,
@@ -96,75 +83,78 @@ export function SubagentToolsTabV2({
   const activeSection = manage ? sections.find(entry => entry.kind === manage) : undefined;
 
   return (
-    <div className='flex w-full flex-col gap-8'>
-      {sections.map(section => {
-        const picked = selectedIn(section);
-        const items: DetailListItem[] = picked.map(tool => ({
-          key: tool.key,
-          name: tool.name,
-          description: tool.source,
-          ...withIcon(section.kind, tool.source),
-        }));
+    <DetailSection heading='section' label='Tools'>
+      <DetailStack>
+        {sections.map(section => {
+          const picked = selectedIn(section);
+          const items: DetailListItem[] = picked.map(tool => ({
+            key: tool.key,
+            name: tool.name,
+            description: tool.source,
+            ...withIcon(section.kind, tool.source),
+          }));
 
-        return (
-          <DetailSection
-            key={section.kind}
-            label={section.title}
-            info={section.caption}
-            trailing={
-              canEdit ? (
-                <ManageButton
-                  label={`Manage ${section.title}`}
-                  onClick={() => {
-                    setDraft(saved);
-                    setManage(section.kind);
-                  }}
-                />
-              ) : (
-                <ReadOnlyBadge />
-              )
-            }
-            trailingAlign='end'
-          >
-            <DetailListCard
-              items={items}
-              loading={tools.isLoading}
-              emptyLabel={`No ${section.title.toLowerCase()} added yet.`}
-              canEdit={canEdit && !saving}
-              note={note}
-              removeLabel={item => `Remove ${item.name}`}
-              onRemove={item => {
-                const tool = picked.find(entry => entry.key === item.key);
-                if (!tool) return;
-                persist(
-                  setToolsSelected(saved, section.kind, [tool], false),
-                  `${item.name} removed`,
-                );
-              }}
-            />
-          </DetailSection>
-        );
-      })}
+          return (
+            <DetailSection
+              key={section.kind}
+              label={section.title}
+              info={section.caption}
+              trailing={
+                canEdit ? (
+                  <ManageButton
+                    label={`Manage ${section.title}`}
+                    trackName='Subagent detail v2: manage tools'
+                    onClick={() => {
+                      setDraft(saved);
+                      setManage(section.kind);
+                    }}
+                  />
+                ) : (
+                  <ReadOnlyBadge />
+                )
+              }
+              trailingAlign='end'
+            >
+              <DetailListCard
+                items={items}
+                loading={tools.isLoading}
+                emptyLabel={`No ${section.title.toLowerCase()} added yet.`}
+                canEdit={canEdit && !saving}
+                note={note}
+                removeLabel={item => `Remove ${item.name}`}
+                onRemove={item => {
+                  const tool = picked.find(entry => entry.key === item.key);
+                  if (!tool) return;
+                  persist(
+                    setToolsSelected(saved, section.kind, [tool], false),
+                    `${item.name} removed`,
+                  );
+                }}
+              />
+            </DetailSection>
+          );
+        })}
 
-      {saving && (
-        <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
-          <Loader2 className='size-3.5 animate-spin' aria-hidden />
-          Saving…
-        </span>
-      )}
+        {saving && (
+          <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
+            <Loader2 className='size-3.5 animate-spin' aria-hidden />
+            Saving…
+          </span>
+        )}
 
-      {activeSection && (
-        <BrowseSubagentToolsDialog
-          open
-          onOpenChange={open => {
-            if (!open) closeManage();
-          }}
-          section={activeSection}
-          selection={draft ?? saved}
-          onSelectionChange={setDraft}
-          loading={tools.isLoading}
-        />
-      )}
-    </div>
+        {activeSection && (
+          <BrowseSubagentToolsDialog
+            open
+            onOpenChange={open => {
+              if (!open) closeManage();
+            }}
+            section={activeSection}
+            selection={draft ?? saved}
+            onSelectionChange={setDraft}
+            loading={tools.isLoading}
+          />
+        )}
+      </DetailStack>
+    </DetailSection>
   );
 }

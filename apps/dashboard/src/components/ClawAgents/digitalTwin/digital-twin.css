@@ -27,6 +27,8 @@
   --dt-ease: cubic-bezier(0.25, 1, 0.5, 1);
   --dt-input-fill: hsl(var(--muted));
   --dt-input-border: hsl(var(--foreground) / 0.1);
+  /* Composer + overlay paper — `--background` (white in light, theme surface in midnight). */
+  --dt-ask-surface: var(--dt-paper);
   /* Figma 1615:43372 text-field elevation (current effects): 0/36/10/0 @ 0%,
      0/23/9/0 @ 0%, 0/13/8/0 @ 2%, 0/6/6/0 @ 3%, 0/1/3/0 @ 3% (black, same
      family as other DT elevation shadows — not foreground, which would invert
@@ -60,9 +62,9 @@
   max-width: none;
 }
 
-/* The origin pill stays in document flow. After send, a separate session
-   overlay docks to the viewport bottom; height grows up from that bar so the
-   ask footer does not translate down the page. The top origin pill remains. */
+/* Ask composer is always a bottom-docked overlay (idle pill, compact session,
+   expanded thread). It is out of document flow so Overview/Configuration stay
+   visible; height grows up from the ask bar. */
 .digital-twin-ledger .dt-ask-origin {
   position: relative;
   padding-top: 1rem;
@@ -86,6 +88,18 @@
 
 .digital-twin-ledger .dt-ask-composer-shadow {
   box-shadow: var(--dt-ask-composer-elevated-shadow);
+}
+
+.digital-twin-ledger .dt-ask-composer,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay,
+.digital-twin-ledger .dt-chat-overlay-underlay {
+  background-color: var(--dt-ask-surface);
+}
+
+.digital-twin-ledger .dt-ask-composer,
+.digital-twin-ledger .dt-chat-overlay.dt-has-underlay {
+  /* TWIN_STROKE_CLASS — same hairline as Overview / Configuration. */
+  border: 0.8px solid hsl(var(--foreground) / 0.1);
 }
 
 .digital-twin-ledger .dt-ask-origin-bar {
@@ -135,7 +149,7 @@
 .digital-twin-ledger .dt-chat-overlay-panel.is-docked {
   position: fixed;
   bottom: 1.5rem;
-  left: var(--dt-ask-dock-center);
+  left: var(--dt-ask-dock-center, 50%);
   z-index: 60;
 }
 
@@ -146,7 +160,6 @@
 .digital-twin-ledger .dt-chat-overlay {
   z-index: 30;
   overflow: visible !important;
-  border: 1px solid hsl(var(--border));
   border-radius: 20px;
   box-shadow: var(--dt-ask-composer-elevated-shadow);
 }

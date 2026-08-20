@@ -1,0 +1,220 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e8]:
+      - complementary [ref=e9]:
+        - generic [ref=e11]:
+          - button "Switch workspace" [ref=e13] [cursor=pointer]:
+            - text: D
+            - generic [ref=e14]: "18"
+          - navigation [ref=e16]:
+            - list [ref=e17]:
+              - listitem [ref=e18]:
+                - link "Chat" [ref=e19] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dir
+              - listitem [ref=e22]:
+                - link "DMs unread" [ref=e23] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/dm
+              - listitem [ref=e27]:
+                - link "Activity" [ref=e28] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/chat/activity
+                  - generic [ref=e31]: "18"
+              - listitem [ref=e32]:
+                - link "Calls" [ref=e33] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/calls
+              - listitem [ref=e36]:
+                - link "Recordings" [ref=e37] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/recordings
+              - listitem [ref=e40]:
+                - link "Tickets" [ref=e41] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/projects
+              - listitem [ref=e44]:
+                - link "Support" [ref=e45] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/support
+              - listitem [ref=e48]:
+                - link "User Guide" [ref=e49] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/guide
+              - listitem [ref=e52]:
+                - link "Release Manager" [ref=e53] [cursor=pointer]:
+                  - /url: /cmsq33ux4001hw04qwoo1sci9/releaseManager
+              - listitem [ref=e56]:
+                - button "More" [active] [ref=e57] [cursor=pointer]
+          - generic [ref=e62]:
+            - button "Support" [ref=e63] [cursor=pointer]
+            - generic [ref=e66] [cursor=pointer]: D
+      - main [ref=e71]:
+        - generic [ref=e953]:
+          - complementary [ref=e956]:
+            - generic [ref=e957]:
+              - generic [ref=e960]:
+                - button "Share workspace link" [ref=e961] [cursor=pointer]
+                - button "Back" [ref=e964] [cursor=pointer]
+                - button "Forward" [ref=e967] [cursor=pointer]
+                - button "Search" [ref=e970] [cursor=pointer]
+              - generic [ref=e973]:
+                - heading "Agent Hub" [level=2] [ref=e975]
+                - generic [ref=e976]:
+                  - link "Agents" [ref=e977] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents
+                  - link "MCP" [ref=e982] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/mcp
+                  - link "Skills" [ref=e987] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/skills
+                  - link "Subagents" [ref=e992] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/subagents
+                  - link "Digital Twin" [ref=e997] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/digital-twin
+                  - link "Organization" [ref=e1002] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/organization
+                  - link "Metrics" [ref=e1007] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/metrics
+                  - link "Settings" [ref=e1012] [cursor=pointer]:
+                    - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/settings
+          - separator [ref=e1018]
+          - main [ref=e1022]:
+            - generic [ref=e1025]:
+              - navigation [ref=e1026]:
+                - generic [ref=e1027]: Categories
+                - button "All 18" [ref=e1028] [cursor=pointer]:
+                  - generic [ref=e1029]: All
+                  - generic [ref=e1030]: "18"
+                - button "Communication 2" [ref=e1031] [cursor=pointer]:
+                  - generic [ref=e1032]: Communication
+                  - generic [ref=e1033]: "2"
+                - button "Code 1" [ref=e1034] [cursor=pointer]:
+                  - generic [ref=e1035]: Code
+                  - generic [ref=e1036]: "1"
+                - button "Research 1" [ref=e1037] [cursor=pointer]:
+                  - generic [ref=e1038]: Research
+                  - generic [ref=e1039]: "1"
+                - button "Productivity 1" [ref=e1040] [cursor=pointer]:
+                  - generic [ref=e1041]: Productivity
+                  - generic [ref=e1042]: "1"
+                - button "Other 13" [ref=e1043] [cursor=pointer]:
+                  - generic [ref=e1044]: Other
+                  - generic [ref=e1045]: "13"
+              - generic [ref=e1046]:
+                - generic [ref=e1047]:
+                  - heading "Agents" [level=1] [ref=e1048]
+                  - generic [ref=e1049]:
+                    - textbox "Search agents" [ref=e1051]
+                    - button "Create agent" [ref=e1052] [cursor=pointer]
+                - generic [ref=e1054]:
+                  - generic [ref=e1055]:
+                    - generic [ref=e1056]:
+                      - heading "My agents" [level=2] [ref=e1057]
+                      - generic [ref=e1058]: "8"
+                    - generic [ref=e1059]:
+                      - link "Code reviewer [mature-library] [mature-library] Personal agent for code reviewer workflows." [ref=e1060] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-04?tab=persona
+                        - generic [ref=e1061]: CR
+                        - generic [ref=e1062]:
+                          - generic [ref=e1063]: Code reviewer [mature-library]
+                          - paragraph [ref=e1066]: "[mature-library] Personal agent for code reviewer workflows."
+                      - link "Customer advocate [mature-library] [mature-library] Personal agent for customer advocate workflows." [ref=e1069] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-03?tab=persona
+                        - generic [ref=e1070]: CA
+                        - generic [ref=e1071]:
+                          - generic [ref=e1072]: Customer advocate [mature-library]
+                          - paragraph [ref=e1075]: "[mature-library] Personal agent for customer advocate workflows."
+                      - link "Docs curator [mature-library] [mature-library] Personal agent for docs curator workflows." [ref=e1078] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-05?tab=persona
+                        - generic [ref=e1079]: DC
+                        - generic [ref=e1080]:
+                          - generic [ref=e1081]: Docs curator [mature-library]
+                          - paragraph [ref=e1084]: "[mature-library] Personal agent for docs curator workflows."
+                      - link "Incident commander [mature-library] [mature-library] Personal agent for incident commander workflows." [ref=e1087] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-02?tab=persona
+                        - generic [ref=e1088]: IC
+                        - generic [ref=e1089]:
+                          - generic [ref=e1090]: Incident commander [mature-library]
+                          - paragraph [ref=e1093]: "[mature-library] Personal agent for incident commander workflows."
+                      - link "Metrics analyst [mature-library] [mature-library] Personal agent for metrics analyst workflows." [ref=e1096] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-06?tab=persona
+                        - generic [ref=e1097]: MA
+                        - generic [ref=e1098]:
+                          - generic [ref=e1099]: Metrics analyst [mature-library]
+                          - paragraph [ref=e1102]: "[mature-library] Personal agent for metrics analyst workflows."
+                      - link "Release shepherd [mature-library] [mature-library] Personal agent for release shepherd workflows." [ref=e1105] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-01?tab=persona
+                        - generic [ref=e1106]: RS
+                        - generic [ref=e1107]:
+                          - generic [ref=e1108]: Release shepherd [mature-library]
+                          - paragraph [ref=e1111]: "[mature-library] Personal agent for release shepherd workflows."
+                      - link "Research assistant [mature-library] [mature-library] Personal agent for research assistant workflows." [ref=e1114] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-08?tab=persona
+                        - generic [ref=e1115]: RA
+                        - generic [ref=e1116]:
+                          - generic [ref=e1117]: Research assistant [mature-library]
+                          - paragraph [ref=e1120]: "[mature-library] Personal agent for research assistant workflows."
+                      - link "Ticket triager [mature-library] [mature-library] Personal agent for ticket triager workflows." [ref=e1123] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/mature-agent-07?tab=persona
+                        - generic [ref=e1124]: TT
+                        - generic [ref=e1125]:
+                          - generic [ref=e1126]: Ticket triager [mature-library]
+                          - paragraph [ref=e1129]: "[mature-library] Personal agent for ticket triager workflows."
+                  - generic [ref=e1132]:
+                    - generic [ref=e1133]:
+                      - heading "Global" [level=2] [ref=e1134]
+                      - generic [ref=e1135]: "10"
+                    - generic [ref=e1136]:
+                      - link "Ask AI Intelligent assistant for workspace search, document creation, and data analysis." [ref=e1137] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/ask-ai?tab=persona
+                        - generic [ref=e1138]: AA
+                        - generic [ref=e1139]:
+                          - generic [ref=e1140]: Ask AI
+                          - paragraph [ref=e1143]: Intelligent assistant for workspace search, document creation, and data analysis.
+                      - link "Assistant Acts as the user's digital representative — the default agent for all calls." [ref=e1146] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/assistant?tab=persona
+                        - generic [ref=e1147]: AS
+                        - generic [ref=e1148]:
+                          - generic [ref=e1149]: Assistant
+                          - paragraph [ref=e1152]: Acts as the user's digital representative — the default agent for all calls.
+                      - link "Claw Claw concierge — answers platform questions and suggests the right agent for any task." [ref=e1155] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/claw?tab=persona
+                        - generic [ref=e1156]: CL
+                        - generic [ref=e1157]:
+                          - generic [ref=e1158]: Claw
+                          - paragraph [ref=e1161]: Claw concierge — answers platform questions and suggests the right agent for any task.
+                      - link "Dashboard AI Builds and edits dynamic dashboards from natural language." [ref=e1164] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/dashboard-ai?tab=persona
+                        - generic [ref=e1165]: DA
+                        - generic [ref=e1166]:
+                          - generic [ref=e1167]: Dashboard AI
+                          - paragraph [ref=e1170]: Builds and edits dynamic dashboards from natural language.
+                      - link "Digital Twin Your personal AI — answers and drafts replies as you would, grounded in memories you've approved." [ref=e1173] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/digital-twin?tab=persona
+                        - generic [ref=e1174]: DT
+                        - generic [ref=e1175]:
+                          - generic [ref=e1176]: Digital Twin
+                          - paragraph [ref=e1179]: Your personal AI — answers and drafts replies as you would, grounded in memories you've approved.
+                      - link "Google Assistant Gmail, Calendar, Contacts, Tasks, and Drive — search emails, manage events, look up contacts, track tasks, read files." [ref=e1182] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/google-agent?tab=persona
+                        - generic [ref=e1183]: GA
+                        - generic [ref=e1184]:
+                          - generic [ref=e1185]: Google Assistant
+                          - paragraph [ref=e1188]: Gmail, Calendar, Contacts, Tasks, and Drive — search emails, manage events, look up contacts, track tasks, read files.
+                      - link "Microsoft Assistant Outlook Mail, Calendar, Contacts, To Do, OneDrive, and Teams — search emails, manage events, look up contacts, track tasks, read files, and collaborate on Teams." [ref=e1191] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/microsoft-agent?tab=persona
+                        - generic [ref=e1192]: MA
+                        - generic [ref=e1193]:
+                          - generic [ref=e1194]: Microsoft Assistant
+                          - paragraph [ref=e1197]: Outlook Mail, Calendar, Contacts, To Do, OneDrive, and Teams — search emails, manage events, look up contacts, track tasks, read files, and collaborate on Teams.
+                      - link "Sandbox Isolated code execution in Kata/QEMU microVMs — run shell commands, scripts, multi-step workflows, and full xyne-spaces dev environment setup safely." [ref=e1200] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/sandbox-agent?tab=persona
+                        - generic [ref=e1201]: SA
+                        - generic [ref=e1202]:
+                          - generic [ref=e1203]: Sandbox
+                          - paragraph [ref=e1206]: Isolated code execution in Kata/QEMU microVMs — run shell commands, scripts, multi-step workflows, and full xyne-spaces dev environment setup safely.
+                      - link "Xyne Doctor Investigates bugs in the xyne-spaces codebase, implements fixes, and creates PRs." [ref=e1209] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/doctor-agent?tab=persona
+                        - generic [ref=e1210]: XD
+                        - generic [ref=e1211]:
+                          - generic [ref=e1212]: Xyne Doctor
+                          - paragraph [ref=e1215]: Investigates bugs in the xyne-spaces codebase, implements fixes, and creates PRs.
+                      - link "Xyne Grafana Monitoring and observability agent — investigates incidents, analyzes logs and metrics from Grafana and VictoriaMetrics." [ref=e1218] [cursor=pointer]:
+                        - /url: /cmsq33ux4001hw04qwoo1sci9/claw-agents/agents/grafana-agent?tab=persona
+                        - generic [ref=e1219]: XG
+                        - generic [ref=e1220]:
+                          - generic [ref=e1221]: Xyne Grafana
+                          - paragraph [ref=e1224]: Monitoring and observability agent — investigates incidents, analyzes logs and metrics from Grafana and VictoriaMetrics.
+  - region "Notifications alt+T"

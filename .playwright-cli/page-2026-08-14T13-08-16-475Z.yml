@@ -1,0 +1,699 @@
+- generic [ref=f2e3]:
+  - complementary [ref=f2e4]:
+    - link "Xyne Spaces Component library" [ref=f2e5] [cursor=pointer]:
+      - /url: /component-gallery/
+      - generic [ref=f2e7]:
+        - strong [ref=f2e8]: Xyne Spaces
+        - generic [ref=f2e9]: Component library
+    - navigation "Component families" [ref=f2e10]:
+      - paragraph [ref=f2e11]: Library
+      - button "All components 2,068" [ref=f2e12] [cursor=pointer]:
+        - generic [ref=f2e19]: All components
+        - generic [ref=f2e20]: 2,068
+      - button "Actions 66" [ref=f2e21] [cursor=pointer]:
+        - generic [ref=f2e24]: Actions
+        - generic [ref=f2e25]: "66"
+      - button "Inputs 226" [ref=f2e26] [cursor=pointer]:
+        - generic [ref=f2e29]: Inputs
+        - generic [ref=f2e30]: "226"
+      - button "Selection 51" [ref=f2e31] [cursor=pointer]:
+        - generic [ref=f2e34]: Selection
+        - generic [ref=f2e35]: "51"
+      - button "Navigation 218" [ref=f2e36] [cursor=pointer]:
+        - generic [ref=f2e39]: Navigation
+        - generic [ref=f2e40]: "218"
+      - button "Feedback 56" [ref=f2e41] [cursor=pointer]:
+        - generic [ref=f2e44]: Feedback
+        - generic [ref=f2e45]: "56"
+      - button "Data display 98" [ref=f2e46] [cursor=pointer]:
+        - generic [ref=f2e49]: Data display
+        - generic [ref=f2e50]: "98"
+      - button "Overlays 197" [ref=f2e51] [cursor=pointer]:
+        - generic [ref=f2e54]: Overlays
+        - generic [ref=f2e55]: "197"
+      - button "Messaging 132" [ref=f2e56] [cursor=pointer]:
+        - generic [ref=f2e59]: Messaging
+        - generic [ref=f2e60]: "132"
+      - button "People 31" [ref=f2e61] [cursor=pointer]:
+        - generic [ref=f2e64]: People
+        - generic [ref=f2e65]: "31"
+      - button "Files 65" [ref=f2e66] [cursor=pointer]:
+        - generic [ref=f2e69]: Files
+        - generic [ref=f2e70]: "65"
+      - button "Charts 30" [ref=f2e71] [cursor=pointer]:
+        - generic [ref=f2e74]: Charts
+        - generic [ref=f2e75]: "30"
+      - button "Icons 104" [ref=f2e76] [cursor=pointer]:
+        - generic [ref=f2e79]: Icons
+        - generic [ref=f2e80]: "104"
+      - button "Screens 625" [ref=f2e81] [cursor=pointer]:
+        - generic [ref=f2e84]: Screens
+        - generic [ref=f2e85]: "625"
+      - button "Layout 169" [ref=f2e86] [cursor=pointer]:
+        - generic [ref=f2e89]: Layout
+        - generic [ref=f2e90]: "169"
+    - generic [ref=f2e91]:
+      - paragraph [ref=f2e94]:
+        - strong [ref=f2e95]: Local library
+        - generic [ref=f2e96]: Updates with your source
+      - generic [ref=f2e97]: 1,222 files
+  - main [ref=f2e98]:
+    - generic [ref=f2e99]:
+      - generic [ref=f2e100]:
+        - searchbox "Search components" [ref=f2e104]
+        - generic [ref=f2e105]: ⌘ K
+      - combobox "Filter by project" [ref=f2e106]:
+        - option "All projects" [selected]
+        - option "Dashboard"
+        - option "Claw Auth"
+        - option "Site"
+        - option "Dashboard External"
+        - option "Packages"
+      - button "Toggle theme" [ref=f2e107] [cursor=pointer]
+    - generic [ref=f2e110]:
+      - generic [ref=f2e111]:
+        - generic [ref=f2e112]:
+          - generic [ref=f2e113]:
+            - generic [ref=f2e114]: Design system
+            - generic [ref=f2e115]: /
+            - generic [ref=f2e116]: Components
+          - heading "Components" [level=1] [ref=f2e117]
+          - paragraph [ref=f2e118]: Browse the building blocks and product UI that make up Xyne Spaces.
+        - generic [ref=f2e119]:
+          - generic [ref=f2e120]: 2,068
+          - paragraph [ref=f2e121]: component definitionsacross 5 projects
+      - generic [ref=f2e122]:
+        - generic [ref=f2e127]:
+          - strong [ref=f2e128]: Visual catalog
+          - paragraph [ref=f2e129]: Open a card to see the component at working size. App-bound components use a representative context.
+        - generic [ref=f2e130] [cursor=pointer]:
+          - checkbox "Live components only 72 can render without app state"
+          - generic [ref=f2e132]:
+            - strong [ref=f2e133]: Live components only
+            - generic [ref=f2e134]: 72 can render without app state
+      - region [ref=f2e135]:
+        - generic [ref=f2e136]:
+          - generic [ref=f2e137]:
+            - heading "2,068 components" [level=2] [ref=f2e138]
+            - paragraph [ref=f2e139]: All projects · All components
+          - generic [ref=f2e140]: Visual grid
+        - generic [ref=f2e147]:
+          - button "Live Continue Cancel ••• Button Button Actions Dashboard" [active] [ref=f2e148] [cursor=pointer]:
+            - generic [ref=f2e149]:
+              - generic [ref=f2e150]: Live
+              - generic [ref=f2e152]:
+                - generic [ref=f2e153]: Continue
+                - generic [ref=f2e154]: Cancel
+                - generic [ref=f2e155]: •••
+            - generic [ref=f2e157]:
+              - strong [ref=f2e158]: Button
+              - generic [ref=f2e159]: Button
+            - generic [ref=f2e163]:
+              - generic [ref=f2e164]: Actions
+              - generic [ref=f2e165]: Dashboard
+          - button "Continue Cancel ••• Button Button Actions Packages" [ref=f2e166] [cursor=pointer]:
+            - generic [ref=f2e168]:
+              - generic [ref=f2e169]: Continue
+              - generic [ref=f2e170]: Cancel
+              - generic [ref=f2e171]: •••
+            - generic [ref=f2e173]:
+              - strong [ref=f2e174]: Button
+              - generic [ref=f2e175]: Button
+            - generic [ref=f2e179]:
+              - generic [ref=f2e180]: Actions
+              - generic [ref=f2e181]: Packages
+          - button "Live Workspace name Design team ⌘ K Make it easy to recognize Input Input Inputs Dashboard" [ref=f2e182] [cursor=pointer]:
+            - generic [ref=f2e183]:
+              - generic [ref=f2e184]: Live
+              - generic [ref=f2e186]:
+                - generic [ref=f2e187]: Workspace name
+                - generic [ref=f2e188]:
+                  - generic [ref=f2e189]: Design team
+                  - generic [ref=f2e190]: ⌘ K
+                - generic [ref=f2e191]: Make it easy to recognize
+            - generic [ref=f2e193]:
+              - strong [ref=f2e194]: Input
+              - generic [ref=f2e195]: Input
+            - generic [ref=f2e199]:
+              - generic [ref=f2e200]: Inputs
+              - generic [ref=f2e201]: Dashboard
+          - button "Live Workspace name Design team ⌘ K Make it easy to recognize Textarea Textarea Inputs Dashboard" [ref=f2e202] [cursor=pointer]:
+            - generic [ref=f2e203]:
+              - generic [ref=f2e204]: Live
+              - generic [ref=f2e206]:
+                - generic [ref=f2e207]: Workspace name
+                - generic [ref=f2e208]:
+                  - generic [ref=f2e209]: Design team
+                  - generic [ref=f2e210]: ⌘ K
+                - generic [ref=f2e211]: Make it easy to recognize
+            - generic [ref=f2e213]:
+              - strong [ref=f2e214]: Textarea
+              - generic [ref=f2e215]: Textarea
+            - generic [ref=f2e219]:
+              - generic [ref=f2e220]: Inputs
+              - generic [ref=f2e221]: Dashboard
+          - button "Live All Open Closed Checkbox Checkbox Selection Dashboard" [ref=f2e222] [cursor=pointer]:
+            - generic [ref=f2e223]:
+              - generic [ref=f2e224]: Live
+              - generic [ref=f2e226]:
+                - generic [ref=f2e227]: All
+                - generic [ref=f2e228]: Open
+                - generic [ref=f2e229]: Closed
+            - generic [ref=f2e232]:
+              - strong [ref=f2e233]: Checkbox
+              - generic [ref=f2e234]: Checkbox
+            - generic [ref=f2e238]:
+              - generic [ref=f2e239]: Selection
+              - generic [ref=f2e240]: Dashboard
+          - button "Live All Open Closed FilterPills FilterPills Selection Dashboard" [ref=f2e241] [cursor=pointer]:
+            - generic [ref=f2e242]:
+              - generic [ref=f2e243]: Live
+              - generic [ref=f2e245]:
+                - generic [ref=f2e246]: All
+                - generic [ref=f2e247]: Open
+                - generic [ref=f2e248]: Closed
+            - generic [ref=f2e251]:
+              - strong [ref=f2e252]: FilterPills
+              - generic [ref=f2e253]: FilterPills
+            - generic [ref=f2e257]:
+              - generic [ref=f2e258]: Selection
+              - generic [ref=f2e259]: Dashboard
+          - button "Live All Open Closed SegmentedToggle SegmentedToggle Selection Dashboard" [ref=f2e260] [cursor=pointer]:
+            - generic [ref=f2e261]:
+              - generic [ref=f2e262]: Live
+              - generic [ref=f2e264]:
+                - generic [ref=f2e265]: All
+                - generic [ref=f2e266]: Open
+                - generic [ref=f2e267]: Closed
+            - generic [ref=f2e270]:
+              - strong [ref=f2e271]: SegmentedToggle
+              - generic [ref=f2e272]: SegmentedToggle
+            - generic [ref=f2e276]:
+              - generic [ref=f2e277]: Selection
+              - generic [ref=f2e278]: Dashboard
+          - button "Live All Open Closed Switch Switch Selection Dashboard" [ref=f2e279] [cursor=pointer]:
+            - generic [ref=f2e280]:
+              - generic [ref=f2e281]: Live
+              - generic [ref=f2e283]:
+                - generic [ref=f2e284]: All
+                - generic [ref=f2e285]: Open
+                - generic [ref=f2e286]: Closed
+            - generic [ref=f2e289]:
+              - strong [ref=f2e290]: Switch
+              - generic [ref=f2e291]: Switch
+            - generic [ref=f2e295]:
+              - generic [ref=f2e296]: Selection
+              - generic [ref=f2e297]: Dashboard
+          - button "All Open Closed Switch Switch Selection Packages" [ref=f2e298] [cursor=pointer]:
+            - generic [ref=f2e300]:
+              - generic [ref=f2e301]: All
+              - generic [ref=f2e302]: Open
+              - generic [ref=f2e303]: Closed
+            - generic [ref=f2e306]:
+              - strong [ref=f2e307]: Switch
+              - generic [ref=f2e308]: Switch
+            - generic [ref=f2e312]:
+              - generic [ref=f2e313]: Selection
+              - generic [ref=f2e314]: Packages
+          - button "Live x Tabs Tabs Navigation Dashboard" [ref=f2e315] [cursor=pointer]:
+            - generic [ref=f2e316]:
+              - generic [ref=f2e317]: Live
+              - generic [ref=f2e319]: x
+            - generic [ref=f2e327]:
+              - strong [ref=f2e328]: Tabs
+              - generic [ref=f2e329]: Tabs
+            - generic [ref=f2e333]:
+              - generic [ref=f2e334]: Navigation
+              - generic [ref=f2e335]: Dashboard
+          - button "x Tabs Tabs Navigation Packages" [ref=f2e336] [cursor=pointer]:
+            - generic [ref=f2e337]: x
+            - generic [ref=f2e346]:
+              - strong [ref=f2e347]: Tabs
+              - generic [ref=f2e348]: Tabs
+            - generic [ref=f2e352]:
+              - generic [ref=f2e353]: Navigation
+              - generic [ref=f2e354]: Packages
+          - button "Live ✓ Changes saved Your workspace is up to date. TextShimmer ShimmerText Feedback Dashboard" [ref=f2e355] [cursor=pointer]:
+            - generic [ref=f2e356]:
+              - generic [ref=f2e357]: Live
+              - generic [ref=f2e359]:
+                - generic [ref=f2e360]: ✓
+                - generic [ref=f2e361]:
+                  - generic [ref=f2e362]: Changes saved
+                  - generic [ref=f2e363]: Your workspace is up to date.
+            - generic [ref=f2e366]:
+              - strong [ref=f2e367]: TextShimmer
+              - generic [ref=f2e368]: ShimmerText
+            - generic [ref=f2e372]:
+              - generic [ref=f2e373]: Feedback
+              - generic [ref=f2e374]: Dashboard
+          - button "Live ✓ Changes saved Your workspace is up to date. Skeleton Skeleton Feedback Dashboard" [ref=f2e375] [cursor=pointer]:
+            - generic [ref=f2e376]:
+              - generic [ref=f2e377]: Live
+              - generic [ref=f2e379]:
+                - generic [ref=f2e380]: ✓
+                - generic [ref=f2e381]:
+                  - generic [ref=f2e382]: Changes saved
+                  - generic [ref=f2e383]: Your workspace is up to date.
+            - generic [ref=f2e386]:
+              - strong [ref=f2e387]: Skeleton
+              - generic [ref=f2e388]: Skeleton
+            - generic [ref=f2e392]:
+              - generic [ref=f2e393]: Feedback
+              - generic [ref=f2e394]: Dashboard
+          - button "Live ✓ Changes saved Your workspace is up to date. StatusIndicator StatusIndicator Feedback Dashboard" [ref=f2e395] [cursor=pointer]:
+            - generic [ref=f2e396]:
+              - generic [ref=f2e397]: Live
+              - generic [ref=f2e399]:
+                - generic [ref=f2e400]: ✓
+                - generic [ref=f2e401]:
+                  - generic [ref=f2e402]: Changes saved
+                  - generic [ref=f2e403]: Your workspace is up to date.
+            - generic [ref=f2e406]:
+              - strong [ref=f2e407]: StatusIndicator
+              - generic [ref=f2e408]: StatusIndicator
+            - generic [ref=f2e412]:
+              - generic [ref=f2e413]: Feedback
+              - generic [ref=f2e414]: Dashboard
+          - button "✓ Changes saved Your workspace is up to date. Badge Badge Feedback Packages" [ref=f2e415] [cursor=pointer]:
+            - generic [ref=f2e417]:
+              - generic [ref=f2e418]: ✓
+              - generic [ref=f2e419]:
+                - generic [ref=f2e420]: Changes saved
+                - generic [ref=f2e421]: Your workspace is up to date.
+            - generic [ref=f2e424]:
+              - strong [ref=f2e425]: Badge
+              - generic [ref=f2e426]: Badge
+            - generic [ref=f2e430]:
+              - generic [ref=f2e431]: Feedback
+              - generic [ref=f2e432]: Packages
+          - button "✓ Changes saved Your workspace is up to date. Skeleton Skeleton Feedback Packages" [ref=f2e433] [cursor=pointer]:
+            - generic [ref=f2e435]:
+              - generic [ref=f2e436]: ✓
+              - generic [ref=f2e437]:
+                - generic [ref=f2e438]: Changes saved
+                - generic [ref=f2e439]: Your workspace is up to date.
+            - generic [ref=f2e442]:
+              - strong [ref=f2e443]: Skeleton
+              - generic [ref=f2e444]: Skeleton
+            - generic [ref=f2e448]:
+              - generic [ref=f2e449]: Feedback
+              - generic [ref=f2e450]: Packages
+          - button "Continue Cancel ••• ActivityUnreadsFloatingButton Activity Actions Dashboard" [ref=f2e451] [cursor=pointer]:
+            - generic [ref=f2e453]:
+              - generic [ref=f2e454]: Continue
+              - generic [ref=f2e455]: Cancel
+              - generic [ref=f2e456]: •••
+            - generic [ref=f2e458]:
+              - strong [ref=f2e459]: ActivityUnreadsFloatingButton
+              - generic [ref=f2e460]: Activity
+            - generic [ref=f2e464]:
+              - generic [ref=f2e465]: Actions
+              - generic [ref=f2e466]: Dashboard
+          - button "Continue Cancel ••• VariableInsertButton Automation Actions Dashboard" [ref=f2e467] [cursor=pointer]:
+            - generic [ref=f2e469]:
+              - generic [ref=f2e470]: Continue
+              - generic [ref=f2e471]: Cancel
+              - generic [ref=f2e472]: •••
+            - generic [ref=f2e474]:
+              - strong [ref=f2e475]: VariableInsertButton
+              - generic [ref=f2e476]: Automation
+            - generic [ref=f2e480]:
+              - generic [ref=f2e481]: Actions
+              - generic [ref=f2e482]: Dashboard
+          - button "Continue Cancel ••• UseVariableButton Automation Actions Dashboard" [ref=f2e483] [cursor=pointer]:
+            - generic [ref=f2e485]:
+              - generic [ref=f2e486]: Continue
+              - generic [ref=f2e487]: Cancel
+              - generic [ref=f2e488]: •••
+            - generic [ref=f2e490]:
+              - strong [ref=f2e491]: UseVariableButton
+              - generic [ref=f2e492]: Automation
+            - generic [ref=f2e496]:
+              - generic [ref=f2e497]: Actions
+              - generic [ref=f2e498]: Dashboard
+          - button "Continue Cancel ••• EmailReceivedFilterForm Automation Actions Dashboard" [ref=f2e499] [cursor=pointer]:
+            - generic [ref=f2e501]:
+              - generic [ref=f2e502]: Continue
+              - generic [ref=f2e503]: Cancel
+              - generic [ref=f2e504]: •••
+            - generic [ref=f2e506]:
+              - strong [ref=f2e507]: EmailReceivedFilterForm
+              - generic [ref=f2e508]: Automation
+            - generic [ref=f2e512]:
+              - generic [ref=f2e513]: Actions
+              - generic [ref=f2e514]: Dashboard
+          - button "Continue Cancel ••• TicketUpdatedFormFieldsSection Automation Actions Dashboard" [ref=f2e515] [cursor=pointer]:
+            - generic [ref=f2e517]:
+              - generic [ref=f2e518]: Continue
+              - generic [ref=f2e519]: Cancel
+              - generic [ref=f2e520]: •••
+            - generic [ref=f2e522]:
+              - strong [ref=f2e523]: TicketUpdatedFormFieldsSection
+              - generic [ref=f2e524]: Automation
+            - generic [ref=f2e528]:
+              - generic [ref=f2e529]: Actions
+              - generic [ref=f2e530]: Dashboard
+          - button "Continue Cancel ••• TriggerCard Automation Actions Dashboard" [ref=f2e531] [cursor=pointer]:
+            - generic [ref=f2e533]:
+              - generic [ref=f2e534]: Continue
+              - generic [ref=f2e535]: Cancel
+              - generic [ref=f2e536]: •••
+            - generic [ref=f2e538]:
+              - strong [ref=f2e539]: TriggerCard
+              - generic [ref=f2e540]: Automation
+            - generic [ref=f2e544]:
+              - generic [ref=f2e545]: Actions
+              - generic [ref=f2e546]: Dashboard
+          - button "Continue Cancel ••• TriggerEmptyStateBody Automation Actions Dashboard" [ref=f2e547] [cursor=pointer]:
+            - generic [ref=f2e549]:
+              - generic [ref=f2e550]: Continue
+              - generic [ref=f2e551]: Cancel
+              - generic [ref=f2e552]: •••
+            - generic [ref=f2e554]:
+              - strong [ref=f2e555]: TriggerEmptyStateBody
+              - generic [ref=f2e556]: Automation
+            - generic [ref=f2e560]:
+              - generic [ref=f2e561]: Actions
+              - generic [ref=f2e562]: Dashboard
+          - button "Continue Cancel ••• TriggerPickerContent Automation Actions Dashboard" [ref=f2e563] [cursor=pointer]:
+            - generic [ref=f2e565]:
+              - generic [ref=f2e566]: Continue
+              - generic [ref=f2e567]: Cancel
+              - generic [ref=f2e568]: •••
+            - generic [ref=f2e570]:
+              - strong [ref=f2e571]: TriggerPickerContent
+              - generic [ref=f2e572]: Automation
+            - generic [ref=f2e576]:
+              - generic [ref=f2e577]: Actions
+              - generic [ref=f2e578]: Dashboard
+          - button "Continue Cancel ••• WebhookTriggerForm Automation Actions Dashboard" [ref=f2e579] [cursor=pointer]:
+            - generic [ref=f2e581]:
+              - generic [ref=f2e582]: Continue
+              - generic [ref=f2e583]: Cancel
+              - generic [ref=f2e584]: •••
+            - generic [ref=f2e586]:
+              - strong [ref=f2e587]: WebhookTriggerForm
+              - generic [ref=f2e588]: Automation
+            - generic [ref=f2e592]:
+              - generic [ref=f2e593]: Actions
+              - generic [ref=f2e594]: Dashboard
+          - button "Continue Cancel ••• Field Automation Actions Dashboard" [ref=f2e595] [cursor=pointer]:
+            - generic [ref=f2e597]:
+              - generic [ref=f2e598]: Continue
+              - generic [ref=f2e599]: Cancel
+              - generic [ref=f2e600]: •••
+            - generic [ref=f2e602]:
+              - strong [ref=f2e603]: Field
+              - generic [ref=f2e604]: Automation
+            - generic [ref=f2e608]:
+              - generic [ref=f2e609]: Actions
+              - generic [ref=f2e610]: Dashboard
+          - button "Continue Cancel ••• RowMenuButton Automation Actions Dashboard" [ref=f2e611] [cursor=pointer]:
+            - generic [ref=f2e613]:
+              - generic [ref=f2e614]: Continue
+              - generic [ref=f2e615]: Cancel
+              - generic [ref=f2e616]: •••
+            - generic [ref=f2e618]:
+              - strong [ref=f2e619]: RowMenuButton
+              - generic [ref=f2e620]: Automation
+            - generic [ref=f2e624]:
+              - generic [ref=f2e625]: Actions
+              - generic [ref=f2e626]: Dashboard
+          - button "Continue Cancel ••• StageActionsPanel Board Actions Dashboard" [ref=f2e627] [cursor=pointer]:
+            - generic [ref=f2e629]:
+              - generic [ref=f2e630]: Continue
+              - generic [ref=f2e631]: Cancel
+              - generic [ref=f2e632]: •••
+            - generic [ref=f2e634]:
+              - strong [ref=f2e635]: StageActionsPanel
+              - generic [ref=f2e636]: Board
+            - generic [ref=f2e640]:
+              - generic [ref=f2e641]: Actions
+              - generic [ref=f2e642]: Dashboard
+          - button "Continue Cancel ••• CallControls Call Actions Dashboard" [ref=f2e643] [cursor=pointer]:
+            - generic [ref=f2e645]:
+              - generic [ref=f2e646]: Continue
+              - generic [ref=f2e647]: Cancel
+              - generic [ref=f2e648]: •••
+            - generic [ref=f2e650]:
+              - strong [ref=f2e651]: CallControls
+              - generic [ref=f2e652]: Call
+            - generic [ref=f2e656]:
+              - generic [ref=f2e657]: Actions
+              - generic [ref=f2e658]: Dashboard
+          - button "Continue Cancel ••• RecordingButton Call Actions Dashboard" [ref=f2e659] [cursor=pointer]:
+            - generic [ref=f2e661]:
+              - generic [ref=f2e662]: Continue
+              - generic [ref=f2e663]: Cancel
+              - generic [ref=f2e664]: •••
+            - generic [ref=f2e666]:
+              - strong [ref=f2e667]: RecordingButton
+              - generic [ref=f2e668]: Call
+            - generic [ref=f2e672]:
+              - generic [ref=f2e673]: Actions
+              - generic [ref=f2e674]: Dashboard
+          - button "Continue Cancel ••• CallJoinButton Call Actions Dashboard" [ref=f2e675] [cursor=pointer]:
+            - generic [ref=f2e677]:
+              - generic [ref=f2e678]: Continue
+              - generic [ref=f2e679]: Cancel
+              - generic [ref=f2e680]: •••
+            - generic [ref=f2e682]:
+              - strong [ref=f2e683]: CallJoinButton
+              - generic [ref=f2e684]: Call
+            - generic [ref=f2e688]:
+              - generic [ref=f2e689]: Actions
+              - generic [ref=f2e690]: Dashboard
+          - button "Continue Cancel ••• CallTrigger Call Actions Dashboard" [ref=f2e691] [cursor=pointer]:
+            - generic [ref=f2e693]:
+              - generic [ref=f2e694]: Continue
+              - generic [ref=f2e695]: Cancel
+              - generic [ref=f2e696]: •••
+            - generic [ref=f2e698]:
+              - strong [ref=f2e699]: CallTrigger
+              - generic [ref=f2e700]: Call
+            - generic [ref=f2e704]:
+              - generic [ref=f2e705]: Actions
+              - generic [ref=f2e706]: Dashboard
+          - button "Continue Cancel ••• Divider Call Actions Dashboard" [ref=f2e707] [cursor=pointer]:
+            - generic [ref=f2e709]:
+              - generic [ref=f2e710]: Continue
+              - generic [ref=f2e711]: Cancel
+              - generic [ref=f2e712]: •••
+            - generic [ref=f2e714]:
+              - strong [ref=f2e715]: Divider
+              - generic [ref=f2e716]: Call
+            - generic [ref=f2e720]:
+              - generic [ref=f2e721]: Actions
+              - generic [ref=f2e722]: Dashboard
+          - button "Continue Cancel ••• DrawingToolbar Call Actions Dashboard" [ref=f2e723] [cursor=pointer]:
+            - generic [ref=f2e725]:
+              - generic [ref=f2e726]: Continue
+              - generic [ref=f2e727]: Cancel
+              - generic [ref=f2e728]: •••
+            - generic [ref=f2e730]:
+              - strong [ref=f2e731]: DrawingToolbar
+              - generic [ref=f2e732]: Call
+            - generic [ref=f2e736]:
+              - generic [ref=f2e737]: Actions
+              - generic [ref=f2e738]: Dashboard
+          - button "Continue Cancel ••• HostControlsPanel Call Actions Dashboard" [ref=f2e739] [cursor=pointer]:
+            - generic [ref=f2e741]:
+              - generic [ref=f2e742]: Continue
+              - generic [ref=f2e743]: Cancel
+              - generic [ref=f2e744]: •••
+            - generic [ref=f2e746]:
+              - strong [ref=f2e747]: HostControlsPanel
+              - generic [ref=f2e748]: Call
+            - generic [ref=f2e752]:
+              - generic [ref=f2e753]: Actions
+              - generic [ref=f2e754]: Dashboard
+          - button "Continue Cancel ••• PaginationControls Call Actions Dashboard" [ref=f2e755] [cursor=pointer]:
+            - generic [ref=f2e757]:
+              - generic [ref=f2e758]: Continue
+              - generic [ref=f2e759]: Cancel
+              - generic [ref=f2e760]: •••
+            - generic [ref=f2e762]:
+              - strong [ref=f2e763]: PaginationControls
+              - generic [ref=f2e764]: Call
+            - generic [ref=f2e768]:
+              - generic [ref=f2e769]: Actions
+              - generic [ref=f2e770]: Dashboard
+          - button "Continue Cancel ••• ThreadCallButton Call Actions Dashboard" [ref=f2e771] [cursor=pointer]:
+            - generic [ref=f2e773]:
+              - generic [ref=f2e774]: Continue
+              - generic [ref=f2e775]: Cancel
+              - generic [ref=f2e776]: •••
+            - generic [ref=f2e778]:
+              - strong [ref=f2e779]: ThreadCallButton
+              - generic [ref=f2e780]: Call
+            - generic [ref=f2e784]:
+              - generic [ref=f2e785]: Actions
+              - generic [ref=f2e786]: Dashboard
+          - button "Continue Cancel ••• UpcomingCallActionsMenuItems Call Actions Dashboard" [ref=f2e787] [cursor=pointer]:
+            - generic [ref=f2e789]:
+              - generic [ref=f2e790]: Continue
+              - generic [ref=f2e791]: Cancel
+              - generic [ref=f2e792]: •••
+            - generic [ref=f2e794]:
+              - strong [ref=f2e795]: UpcomingCallActionsMenuItems
+              - generic [ref=f2e796]: Call
+            - generic [ref=f2e800]:
+              - generic [ref=f2e801]: Actions
+              - generic [ref=f2e802]: Dashboard
+          - button "Continue Cancel ••• CanvasToolbarAttachedActions Canvas Actions Dashboard" [ref=f2e803] [cursor=pointer]:
+            - generic [ref=f2e805]:
+              - generic [ref=f2e806]: Continue
+              - generic [ref=f2e807]: Cancel
+              - generic [ref=f2e808]: •••
+            - generic [ref=f2e810]:
+              - strong [ref=f2e811]: CanvasToolbarAttachedActions
+              - generic [ref=f2e812]: Canvas
+            - generic [ref=f2e816]:
+              - generic [ref=f2e817]: Actions
+              - generic [ref=f2e818]: Dashboard
+          - button "Continue Cancel ••• AddReactionActionView Chat Actions Dashboard" [ref=f2e819] [cursor=pointer]:
+            - generic [ref=f2e821]:
+              - generic [ref=f2e822]: Continue
+              - generic [ref=f2e823]: Cancel
+              - generic [ref=f2e824]: •••
+            - generic [ref=f2e826]:
+              - strong [ref=f2e827]: AddReactionActionView
+              - generic [ref=f2e828]: Chat
+            - generic [ref=f2e832]:
+              - generic [ref=f2e833]: Actions
+              - generic [ref=f2e834]: Dashboard
+          - button "Continue Cancel ••• ResultActionsMenu Chat Actions Dashboard" [ref=f2e835] [cursor=pointer]:
+            - generic [ref=f2e837]:
+              - generic [ref=f2e838]: Continue
+              - generic [ref=f2e839]: Cancel
+              - generic [ref=f2e840]: •••
+            - generic [ref=f2e842]:
+              - strong [ref=f2e843]: ResultActionsMenu
+              - generic [ref=f2e844]: Chat
+            - generic [ref=f2e848]:
+              - generic [ref=f2e849]: Actions
+              - generic [ref=f2e850]: Dashboard
+          - button "Continue Cancel ••• HoverActionsToolbar Chat Actions Dashboard" [ref=f2e851] [cursor=pointer]:
+            - generic [ref=f2e853]:
+              - generic [ref=f2e854]: Continue
+              - generic [ref=f2e855]: Cancel
+              - generic [ref=f2e856]: •••
+            - generic [ref=f2e858]:
+              - strong [ref=f2e859]: HoverActionsToolbar
+              - generic [ref=f2e860]: Chat
+            - generic [ref=f2e864]:
+              - generic [ref=f2e865]: Actions
+              - generic [ref=f2e866]: Dashboard
+          - button "Continue Cancel ••• MessageHoverToolbar Chat Actions Dashboard" [ref=f2e867] [cursor=pointer]:
+            - generic [ref=f2e869]:
+              - generic [ref=f2e870]: Continue
+              - generic [ref=f2e871]: Cancel
+              - generic [ref=f2e872]: •••
+            - generic [ref=f2e874]:
+              - strong [ref=f2e875]: MessageHoverToolbar
+              - generic [ref=f2e876]: Chat
+            - generic [ref=f2e880]:
+              - generic [ref=f2e881]: Actions
+              - generic [ref=f2e882]: Dashboard
+          - button "Continue Cancel ••• ThreadCatchupSummaryButton Chat Actions Dashboard" [ref=f2e883] [cursor=pointer]:
+            - generic [ref=f2e885]:
+              - generic [ref=f2e886]: Continue
+              - generic [ref=f2e887]: Cancel
+              - generic [ref=f2e888]: •••
+            - generic [ref=f2e890]:
+              - strong [ref=f2e891]: ThreadCatchupSummaryButton
+              - generic [ref=f2e892]: Chat
+            - generic [ref=f2e896]:
+              - generic [ref=f2e897]: Actions
+              - generic [ref=f2e898]: Dashboard
+          - button "Continue Cancel ••• CopyJsonButton Chat Actions Dashboard" [ref=f2e899] [cursor=pointer]:
+            - generic [ref=f2e901]:
+              - generic [ref=f2e902]: Continue
+              - generic [ref=f2e903]: Cancel
+              - generic [ref=f2e904]: •••
+            - generic [ref=f2e906]:
+              - strong [ref=f2e907]: CopyJsonButton
+              - generic [ref=f2e908]: Chat
+            - generic [ref=f2e912]:
+              - generic [ref=f2e913]: Actions
+              - generic [ref=f2e914]: Dashboard
+          - button "Continue Cancel ••• MessageActions Chat Actions Dashboard" [ref=f2e915] [cursor=pointer]:
+            - generic [ref=f2e917]:
+              - generic [ref=f2e918]: Continue
+              - generic [ref=f2e919]: Cancel
+              - generic [ref=f2e920]: •••
+            - generic [ref=f2e922]:
+              - strong [ref=f2e923]: MessageActions
+              - generic [ref=f2e924]: Chat
+            - generic [ref=f2e928]:
+              - generic [ref=f2e929]: Actions
+              - generic [ref=f2e930]: Dashboard
+          - button "Continue Cancel ••• PendingActionBlock Chat Actions Dashboard" [ref=f2e931] [cursor=pointer]:
+            - generic [ref=f2e933]:
+              - generic [ref=f2e934]: Continue
+              - generic [ref=f2e935]: Cancel
+              - generic [ref=f2e936]: •••
+            - generic [ref=f2e938]:
+              - strong [ref=f2e939]: PendingActionBlock
+              - generic [ref=f2e940]: Chat
+            - generic [ref=f2e944]:
+              - generic [ref=f2e945]: Actions
+              - generic [ref=f2e946]: Dashboard
+          - button "Continue Cancel ••• PendingActionItem Chat Actions Dashboard" [ref=f2e947] [cursor=pointer]:
+            - generic [ref=f2e949]:
+              - generic [ref=f2e950]: Continue
+              - generic [ref=f2e951]: Cancel
+              - generic [ref=f2e952]: •••
+            - generic [ref=f2e954]:
+              - strong [ref=f2e955]: PendingActionItem
+              - generic [ref=f2e956]: Chat
+            - generic [ref=f2e960]:
+              - generic [ref=f2e961]: Actions
+              - generic [ref=f2e962]: Dashboard
+        - button "Show 48 more" [ref=f2e963] [cursor=pointer]
+  - complementary "Component preview" [ref=f2e966]:
+    - generic [ref=f2e967]:
+      - generic [ref=f2e968]:
+        - generic [ref=f2e969]: Live component
+        - heading "Button" [level=2] [ref=f2e971]
+      - button "Close preview" [ref=f2e972] [cursor=pointer]
+    - generic [ref=f2e975]:
+      - generic [ref=f2e976]:
+        - generic [ref=f2e977]:
+          - generic [ref=f2e978]: Preview
+          - generic [ref=f2e979]: Actions
+        - generic [ref=f2e981]:
+          - generic [ref=f2e982]:
+            - generic [ref=f2e983]: Primary
+            - button "Continue" [ref=f2e985] [cursor=pointer]
+          - generic [ref=f2e986]:
+            - generic [ref=f2e987]: Secondary
+            - button "Add people" [ref=f2e989] [cursor=pointer]
+          - generic [ref=f2e990]:
+            - generic [ref=f2e991]: Outline
+            - button "Cancel" [ref=f2e993] [cursor=pointer]
+          - generic [ref=f2e994]:
+            - generic [ref=f2e995]: Destructive
+            - button "Delete" [ref=f2e997] [cursor=pointer]
+          - generic [ref=f2e998]:
+            - generic [ref=f2e999]: Disabled
+            - generic [ref=f2e1000]:
+              - button "Unavailable" [disabled]
+      - generic [ref=f2e1001]:
+        - generic [ref=f2e1002]:
+          - generic [ref=f2e1003]: Project
+          - strong [ref=f2e1004]: Dashboard
+        - generic [ref=f2e1005]:
+          - generic [ref=f2e1006]: Feature area
+          - strong [ref=f2e1007]: Button
+        - generic [ref=f2e1008]:
+          - generic [ref=f2e1009]: Type
+          - strong [ref=f2e1010]: Primitive
+      - generic [ref=f2e1011]:
+        - generic [ref=f2e1012]: Where it lives
+        - button "Button.tsx apps/dashboard/src/components/ui/Button/Button.tsx:69" [ref=f2e1014] [cursor=pointer]:
+          - generic [ref=f2e1015]:
+            - strong [ref=f2e1016]: Button.tsx
+            - generic [ref=f2e1017]: apps/dashboard/src/components/ui/Button/Button.tsx:69
+  - status
