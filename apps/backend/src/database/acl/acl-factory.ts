@@ -499,7 +499,7 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
-    default:
+    case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
   }
