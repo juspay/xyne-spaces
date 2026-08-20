@@ -6,6 +6,7 @@ import {
   CalendarIcon,
   FlowArrowIcon,
   PlugsConnectedIcon,
+  LockIcon,
   CaretLeftIcon,
   CaretRightIcon,
   CheckCircleIcon,
@@ -32,6 +33,7 @@ import { useSnackbar } from "../ui/Snackbar";
 import { RunHistoryTab } from "./tabs/RunHistoryTab";
 import { ContributorsTab } from "./tabs/ContributorsTab";
 import { MemoryTab } from "./tabs/MemoryTab";
+import { PrivacyTab } from "./tabs/PrivacyTab";
 import { ScheduledJobsTab } from "./tabs/ScheduledJobsTab";
 import { WorkflowsTab } from "./tabs/WorkflowsTab";
 import { AgentMcpTabV3 } from "./tabs/AgentMcpTabV3";
@@ -50,6 +52,7 @@ export type TabId =
   | "overview"
   | "run-history"
   | "contributors"
+  | "privacy"
   | "memory"
   | "scheduled-jobs"
   | "workflows"
@@ -259,6 +262,13 @@ export function AgentDetailRightColumn({
       : "This agent hasn't been used yet — it'll show activity here once it runs.";
 
   const peopleStatus = shareCount > 0 ? `You + ${shareCount} ${shareCount === 1 ? "person" : "people"}` : "Just you";
+  // Invocation privacy (config.privacy) — mirrors isAgentInvocableBy.
+  const privacyRaw = (agent.config?.["privacy"] as { mode?: unknown; whitelist?: unknown } | undefined);
+  const privacyWhitelisted = privacyRaw?.mode === "whitelist";
+  const privacyCount = privacyWhitelisted && Array.isArray(privacyRaw?.whitelist) ? privacyRaw.whitelist.length : 0;
+  const privacyStatus = privacyWhitelisted
+    ? `Whitelist · ${privacyCount} ${privacyCount === 1 ? "person" : "people"}`
+    : "Everyone can call it";
   const pendingRequestCount = cloneRequests.length + delegationRequests.length;
   const requestStatus =
     pendingRequestCount > 0
@@ -293,6 +303,14 @@ export function AgentDetailRightColumn({
       label: "People",
       status: peopleStatus,
       icon: UsersThreeIcon,
+      show: true,
+    },
+    {
+      id: "privacy",
+      label: "Privacy",
+      status: privacyStatus,
+      icon: LockIcon,
+      badge: privacyCount || undefined,
       show: true,
     },
     {
@@ -382,6 +400,9 @@ export function AgentDetailRightColumn({
             <ContributorsTab agent={agent} userId={userId} permissions={permissions} />
           )}
           {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
+          {activeTab === "privacy" && (
+            <PrivacyTab agent={agent} userId={userId} canEdit={permissions.canEdit} />
+          )}
           {activeTab === "scheduled-jobs" && (
             <ScheduledJobsTab jobs={scheduledJobs} onJobsChange={onJobsChange} />
           )}
