@@ -1,7 +1,7 @@
 {
   "name": "@xyne/spaces-contract",
   "version": "0.1.0",
-  "description": "Shared API contract for the Xyne Spaces public API: error codes, scopes, and response schemas",
+  "description": "Shared API contract for the Xyne Spaces public API: error codes and the search request schema",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

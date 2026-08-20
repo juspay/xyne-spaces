@@ -26,7 +26,7 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export interface ErrorDefinition {
   readonly status: number;
-  /** Safe to replay the identical request? Writes additionally require an idempotency key. */
+  /** Safe to replay the identical request? */
   readonly retryable: boolean;
   readonly description: string;
 }

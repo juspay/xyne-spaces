@@ -27,10 +27,8 @@ packages:
   - packages/xyne-claw-pi-plugin
   - packages/xyne-spaces-contract
   - packages/xyne-spaces-sdk
-  - packages/xyne-spaces-browser-plugin
 
   - tools/xyne-automation
   - tools/xyne-automation-old
   - tools/deadcode-analyzer
   - tools/fcm-ota-trigger
-  - tools/xyne-spaces-openapi-gen
