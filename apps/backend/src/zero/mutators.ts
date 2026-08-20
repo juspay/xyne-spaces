@@ -14923,6 +14923,7 @@ export function createMutators(
           autoDraftAgentSlug: z.string().optional().nullable(),
           metricsEnabled: z.boolean().optional(),
           frtStageNames: z.string().optional().nullable(),
+          appWebhookDeliveryEnabled: z.boolean().optional(),
         }),
         async ({
           tx,
@@ -14938,6 +14939,7 @@ export function createMutators(
             autoDraftAgentSlug,
             metricsEnabled,
             frtStageNames,
+            appWebhookDeliveryEnabled,
           },
         }) => {
           const existing = await tx.run(
@@ -14956,6 +14958,7 @@ export function createMutators(
               ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
               ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
               ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+              ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -14982,6 +14985,7 @@ export function createMutators(
               priorityClassificationThreshold: 0.5,
               metricsEnabled: metricsEnabled ?? false,
               frtStageNames: frtStageNames ?? null,
+              appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
             });
           }
         },

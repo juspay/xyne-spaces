@@ -59,6 +59,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setTwoStepSend,
     autoMergeEmails,
     setAutoMergeEmails,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -281,6 +283,26 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {isApp && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Send replies to app webhook</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Forward every reply to the app webhook, and accept the reply only once the webhook
+              responds with 200. Turn this off if the app does not consume replies — replies are
+              then stored on the ticket only.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={appWebhookDeliveryEnabled}
+            onCheckedChange={setAppWebhookDeliveryEnabled}
+            disabled={!canManage}
+            aria-label='Toggle sending replies to the app webhook'
+          />
         </div>
       )}
 

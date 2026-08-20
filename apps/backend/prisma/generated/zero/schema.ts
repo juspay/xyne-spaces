@@ -1340,6 +1340,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    appWebhookDeliveryEnabled: boolean(),
   })
   .primaryKey("channelId");
 

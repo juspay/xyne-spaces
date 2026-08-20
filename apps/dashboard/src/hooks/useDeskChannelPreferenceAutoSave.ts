@@ -15,6 +15,7 @@ export type ChannelPreferencePatch = {
   autoDraftAgentSlug?: string | null;
   metricsEnabled?: boolean;
   frtStageNames?: string | null;
+  appWebhookDeliveryEnabled?: boolean;
 };
 
 /**
