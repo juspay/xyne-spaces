@@ -157,7 +157,9 @@ export const agentRepository = {
    * The clone is meant to be a WORKING replica, so everything that defines
    * what the agent is and does comes across —
    *   1. systemPrompt   (also seeded as prompt version v1)
-   *   2. description / color / modelId / delegationTier / enabled
+   *   2. description / color / modelId / enabled — a paused agent yields a
+   *                        paused copy, so cloning never silently puts a
+   *                        withdrawn agent back in service
    *   3. config          — the ENTIRE json blob. This is the one that matters:
    *                        `config.tools` is the real tool palette every read
    *                        path uses (mcp.ts parseToolsConfig, the agent-config
@@ -167,9 +169,17 @@ export const agentRepository = {
    *   4. tools           — AgentTool rows, including each tool's `permission`
    *   5. skills          — AgentSkill junction links
    *   6. knowledge base  — kbScope + every AgentCollection grant
-   *   7. MCP connections — including the encrypted credential blobs
+   *   7. MCP connections — ONLY when the cloner already owns the source, since
+   *                        the rows carry credential blobs (see below)
    *
    * Everything past that point stays OUT, each for its own reason:
+   *   • MCP connections when cloning SOMEONE ELSE's agent — the row's encrypted
+   *     credentials are decrypted per-agent at tool-execution time, so a copy
+   *     is a standing grant on the source owner's third-party account that
+   *     survives share revocation and deletion of the source connection.
+   *   • `delegationTier` — admin-only on the update route ("Only claw admins
+   *     can change delegationTier") and not settable on create, so copying it
+   *     would make cloning the one non-admin path to an elevated tier.
    *   • Spaces app identity (`spacesAppId` is @unique, plus `spacesAppToken` /
    *     `signingSecret`) and SurfaceAgent registrations — these are WHO the
    *     agent is on an external surface. A copy would receive the source's
@@ -224,7 +234,6 @@ export const agentRepository = {
           description: source.description,
           color: source.color,
           modelId: source.modelId,
-          delegationTier: source.delegationTier,
           enabled: source.enabled,
           kbScope: source.kbScope,
           config: source.config as Prisma.InputJsonValue,
@@ -264,11 +273,18 @@ export const agentRepository = {
         });
       }
 
-      // MCP instances, credential blobs included. Ciphertext is copied as-is:
-      // same deployment, same CONFIG.encryptionKey, so no re-encryption is
-      // needed. `createdByUserId` keeps pointing at whoever actually pasted the
-      // secret — that is what the audit trail is for.
-      if (source.mcpConnections.length > 0) {
+      // MCP instances — SELF-CLONES ONLY. The row carries the credential blob
+      // (encryptedCreds/iv/authTag is NOT NULL, so there is no credential-less
+      // copy to make), and the runtime decrypts it per-agent, meaning the
+      // clone's tool calls authenticate as whoever pasted the secret. Copying
+      // that to an agent owned by SOMEONE ELSE hands them a standing grant on
+      // the source owner's third-party account which outlives both revoking
+      // their share and deleting the connection on the source — nothing ever
+      // rotates or back-references a copied blob. When the cloner is already
+      // the owner no trust boundary is crossed, so their own credentials
+      // travel and cloning your own agent still produces a working replica.
+      const selfClone = source.ownerUserId !== null && source.ownerUserId === newOwnerId;
+      if (selfClone && source.mcpConnections.length > 0) {
         await tx.agentMcpConnection.createMany({
           data: source.mcpConnections.map((c) => ({
             agentId: clone.id,

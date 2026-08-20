@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Dialog } from "./ui/Dialog";
 import { Button } from "./ui/Button";
@@ -27,14 +27,22 @@ export function SkillPickerDialog({ open, onOpenChange, userId, selectedIds, onA
     if (open) setSelected(new Set(selectedIds));
   }, [open, selectedIds]);
 
+  // Cache the listing per userId rather than "once ever": the previous guard
+  // (skills.length > 0) meant a userId arriving after the first fetch could
+  // never refresh the list, so the viewer's personal skills stayed missing for
+  // the component's lifetime — the exact bug passing userId is meant to fix.
+  const fetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || skills.length > 0) return;
+    if (!open) return;
+    const key = userId ?? "";
+    if (fetchedFor.current === key) return;
+    fetchedFor.current = key;
     setLoading(true);
     listSkills(userId)
       .then(setSkills)
-      .catch(() => {})
+      .catch(() => { fetchedFor.current = null; })
       .finally(() => setLoading(false));
-  }, [open, skills.length, userId]);
+  }, [open, userId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

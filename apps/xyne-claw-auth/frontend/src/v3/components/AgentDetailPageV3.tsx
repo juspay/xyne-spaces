@@ -119,6 +119,20 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [availableModels, setAvailableModels] = useState<ClaudeModelInfo[]>([]);
   const [availableTools, setAvailableTools] = useState<AvailableTools | null>(null);
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
+  // Skills the agent already has, hydrated by the agent payload itself. Kept
+  // separately because listSkills() only ever returns global skills plus the
+  // VIEWER's own — a personal skill belonging to someone else (which is exactly
+  // what a cloned agent carries) is absent from that list, and the skill pills
+  // render off the palette, so without this the attached skill shows as nothing.
+  const [attachedSkills, setAttachedSkills] = useState<Skill[]>([]);
+  /** Skill palette for the Knowledge card: everything the viewer may pick from,
+   *  plus any already-attached skill the listing doesn't include. */
+  const skillPalette = useMemo(() => {
+    const byId = new Map(availableSkills.map((sk) => [sk.id, sk]));
+    for (const sk of attachedSkills) if (!byId.has(sk.id)) byId.set(sk.id, sk);
+    return [...byId.values()];
+  }, [availableSkills, attachedSkills]);
+
   /** User's per-provider credentials. Used to gray-out unconfigured providers
       in the Provider dropdown — Spaces is always available, every other
       provider is enabled only when the user has set up credentials. */
@@ -276,6 +290,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setPrompt(agentData.systemPrompt ?? agentData.description ?? "");
         setDraftTools(extractToolsFromConfig(agentData.config));
         setDraftSkillIds((agentData.skills ?? []).map((s) => s.skillId));
+        setAttachedSkills(
+          (agentData.skills ?? []).map((s) => ({ id: s.skillId, ...s.skill }) as Skill),
+        );
         setDraftKbResources((agentData.collections ?? []).map((c) => ({ collectionId: c.collectionId, fileId: c.fileId })));
         setDraftKbScope(agentData.kbScope === "USER" ? "USER" : "COLLECTIONS");
         setDraftProvider(provider);
@@ -1019,7 +1036,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onRemoveDelegationConfigEntry={handleRemoveDelegationConfigEntry}
             draftSkillIds={draftSkillIds}
             onToggleSkill={toggleSkill}
-            availableSkills={availableSkills}
+            availableSkills={skillPalette}
             draftKbResources={draftKbResources}
             onDraftKbResourcesChange={setDraftKbResources}
             draftKbScope={draftKbScope}
@@ -1175,6 +1192,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
         needsApproval={!permissions?.canEdit}
+        isOwnAgent={agent.ownerUserId === userId}
+        sourceEnabled={agent.enabled}
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}
       />
