@@ -246,6 +246,54 @@ function pushThreadCitation(
   });
 }
 
+/**
+ * Strip Vespa's `<hi>` highlight tags for use as a citation LABEL. `cleanSnippet`
+ * turns them into `**bold**`, which is right for prose but renders as literal
+ * asterisks inside a chip, so labels get the plain form.
+ */
+function plainLabel(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const stripped = text.replace(/<\/?hi>/gi, "").trim();
+  return stripped || undefined;
+}
+
+/**
+ * Cite a call at whatever target it actually has.
+ *
+ * A channel call lives in a thread, so `pushThreadCitation` is right for it. A
+ * note-taker recording has neither channel nor conversation — it is created from
+ * a LiveKit webhook and never posted anywhere — so a thread citation silently
+ * produced nothing while the row still rendered an inline `[clf-…#N]` token.
+ * That left a chip with no citation behind it, which the dashboard treats as an
+ * unlinkable auto-citation and routes to the debug panel on click. Recordings
+ * get a `recording` citation pointing at `/recordings/:externalId` instead.
+ *
+ * Returns whether anything was emitted, so callers can skip the inline token for
+ * a call that has no linkable target at all rather than render a dead chip.
+ */
+function pushCallCitation(
+  out: Citation[],
+  call: { id: string; externalId?: string; callType?: string; channelId?: string },
+  conversationId: string | undefined,
+  chunkIndex: number,
+  label?: string,
+): boolean {
+  if (call.callType === "HEADLESS" && call.externalId) {
+    out.push({
+      kind: "recording",
+      recordingId: call.externalId,
+      chunkIndex,
+      ...(label ? { label } : {}),
+    });
+    return true;
+  }
+  if (call.channelId) {
+    pushThreadCitation(out, call.channelId, conversationId, chunkIndex, label);
+    return true;
+  }
+  return false;
+}
+
 function pushCanvasCitation(
   out: Citation[],
   viewAccessId: string | undefined | null,
@@ -3974,8 +4022,13 @@ const spacesCalls: ToolDef = {
           );
         parts.push(`  ID: ${c.id}`);
         const conversationId = (c.metadata as { conversationId?: string } | null | undefined)?.conversationId;
-        pushThreadCitation(citations, c.channelId, conversationId, idx + 1, c.title ?? "Call");
-        return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
+        // Only prefix the inline citation token when the row actually has a
+        // link target — a token with no citation behind it renders as a chip
+        // that goes nowhere (it opens the debug panel).
+        const cited = pushCallCitation(citations, c, conversationId, idx + 1, c.title ?? "Call");
+        return cited
+          ? prefixChunk(idx + 1, parts[0]!, parts.slice(1))
+          : [parts[0]!, ...parts.slice(1)].join("\n");
       });
       const channelInfo = await resolveChannelInfo(
         citations.map((c) => c.channelId).filter((v): v is string => !!v),
@@ -4893,15 +4946,34 @@ const spacesMeetingInsights: ToolDef = {
           if (callId)
             subLines.push(`Full transcript: spaces-calls callId=${callId} includeTranscript=true`);
 
-          // Harvest a thread citation when the search row carries channel +
-          // conversation IDs (matches what spaces-search:harvest does at :241).
+          // Cite the call this transcript belongs to. A channel call resolves to
+          // its thread; a note-taker recording has no channel, so it resolves to
+          // its /recordings page instead of silently emitting nothing.
           const channelId =
             (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
           const conversationId =
             (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
-          pushThreadCitation(citations, channelId, conversationId, chunkIndex, r.title || "Meeting");
+          const externalId =
+            (sc["externalId"] as string | undefined) ?? (meta["externalId"] as string | undefined);
+          const callType =
+            (sc["callType"] as string | undefined) ?? (meta["callType"] as string | undefined);
+          const cited = pushCallCitation(
+            citations,
+            {
+              id: callId ?? r.id,
+              ...(externalId ? { externalId } : {}),
+              ...(callType ? { callType } : {}),
+              ...(channelId ? { channelId } : {}),
+            },
+            conversationId,
+            chunkIndex,
+            plainLabel(r.title) ?? "Meeting",
+          );
 
-          return prefixChunk(chunkIndex, `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`, subLines);
+          const heading = `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`;
+          return cited
+            ? prefixChunk(chunkIndex, heading, subLines)
+            : [heading, ...subLines].join("\n");
         })
         .join("\n\n---\n\n");
 
