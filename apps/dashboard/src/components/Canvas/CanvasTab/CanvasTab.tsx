@@ -123,6 +123,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = useMemo(
+    () => (adminParticipations ?? []).some(participant => participant.channelId === channelId),
+    [adminParticipations, channelId],
+  );
   const [canvasList] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'channel',
@@ -179,6 +184,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
+      const metadata = targetCanvas.metadata as Record<string, unknown> | null | undefined;
+      if (
+        isChannelAdmin &&
+        metadata?.['surface'] === 'SDLC' &&
+        metadata['artifactKind'] === 'BASELINE'
+      ) {
+        return CanvasRole.EDITOR;
+      }
       const inheritedRoles = participants
         .filter(
           participant =>
@@ -190,7 +203,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       return getStrongestCanvasRole([targetCanvas.accessLevel, ...inheritedRoles]);
     },
-    [channelId, currentUserGroupIds, user?.id],
+    [channelId, currentUserGroupIds, isChannelAdmin, user?.id],
   );
 
   // Reset state when channelId changes

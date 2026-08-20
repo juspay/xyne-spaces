@@ -67,6 +67,10 @@ export const groupChannelsByScope = (
     statusByChannelId.set(status.channelId, status);
   }
   for (const channel of channelData) {
+    const metadata = channel.metadata as Record<string, unknown> | null | undefined;
+    if (metadata?.['surface'] === 'SDLC' && metadata['hiddenFromChat'] === true) {
+      continue;
+    }
     // EMAIL channels live in Xyne Desk, not in the chat directory.
     // TODO: filter this out at the source by excluding EMAIL-type channels in the
     // `visibleChannels` query itself, so the client never receives them here.
