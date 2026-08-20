@@ -1,5 +1,6 @@
 import { SavedConfigEntityName, TicketPriority } from '@xyne/shared';
 import type { TicketFilters } from '../components/Tickets/TicketFilters/types';
+import { buildShareableUrl } from './shareableUrl';
 
 type SavedConfigValueRow = {
   entityName: SavedConfigEntityName;
@@ -99,5 +100,5 @@ export function buildShareLink(view: ShareableView): string {
   const cfg = { name: view.name, filters, ...(groupBy ? { groupBy } : {}) };
   const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
   const base = window.location.pathname.split('/projects')[0];
-  return `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
+  return buildShareableUrl(`${base}/projects/views/new#cfg=${encoded}`);
 }

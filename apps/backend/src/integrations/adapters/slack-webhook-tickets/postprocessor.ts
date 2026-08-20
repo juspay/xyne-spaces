@@ -7,6 +7,7 @@ import { PostprocessContext } from '../../core/types';
 import { ConversationRepository } from '../../../database/repositories/conversationRepository';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { logger } from '../../../utils/logger';
+import { getFrontendUrl } from '../../../utils/publicUrls';
 import { decrypt } from '../../../services/encryptionService';
 import { botProcessor } from '../../../services/bots/botProcessor';
 
@@ -93,7 +94,8 @@ export class SlackPostprocessor extends BasePostprocessor {
         return;
       }
 
-      const xyneLink = `https://spaces.xyne.juspay.net/chat/${xyneChannelId}/${context.conversationId}`;
+      // Config-driven canonical base (env FRONTEND_URL) — never hardcode the domain.
+      const xyneLink = `${getFrontendUrl()}/chat/${xyneChannelId}/${context.conversationId}`;
 
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',

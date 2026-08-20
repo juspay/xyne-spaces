@@ -6,6 +6,7 @@ import {
   CREATE_TICKET_PARAM_KEYS,
   CREATE_TICKET_URL_FLAG,
 } from './constants';
+import { buildShareableUrl } from '../../../utils/shareableUrl';
 export const TAG_COLORS = [
   'bg-cyan-600',
   'bg-yellow-600',
@@ -313,5 +314,5 @@ export function buildCreateTicketShareLink(
   clearCreateTicketParams(params);
   params.set(CREATE_TICKET_URL_FLAG, '1');
   writeCreateTicketFields(params, prefill);
-  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+  return buildShareableUrl(`${window.location.pathname}?${params.toString()}`);
 }

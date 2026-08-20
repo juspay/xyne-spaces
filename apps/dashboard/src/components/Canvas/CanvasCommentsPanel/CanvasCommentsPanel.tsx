@@ -39,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import { buildShareableUrl } from '../../../utils/shareableUrl';
 
 type UserLite = {
   id: string;
@@ -607,7 +608,7 @@ export function CanvasCommentsPanel({
       const path = `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}&blockId=${encodeURIComponent(blockId)}${
         commentThreadId ? `&commentThreadId=${encodeURIComponent(commentThreadId)}` : ''
       }`;
-      const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
+      const slackUrl = buildShareableUrl(`/launch?path=${encodeURIComponent(path)}`);
 
       uniqueMentionedUserIds.forEach(mentionId => {
         apiInstance

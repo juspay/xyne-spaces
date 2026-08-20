@@ -198,6 +198,7 @@ import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { buildShareableUrl } from '../../utils/shareableUrl';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
 
@@ -1039,7 +1040,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const cfg = { name: initialName ?? '', filters, groupBy: groupByKey };
     const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
     const base = window.location.pathname.split('/projects')[0];
-    const link = `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
+    const link = buildShareableUrl(`${base}/projects/views/new#cfg=${encoded}`);
     void navigator.clipboard.writeText(link).then(
       () => toast.success('Share link copied to clipboard'),
       () => toast.error('Failed to copy link'),
