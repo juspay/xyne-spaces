@@ -317,7 +317,7 @@ export class App {
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(decryptRequestBodyMiddleware);
-    this.app.use(certificateRotationRoutes);
+    this.app.use('/api', certificateRotationRoutes);
     this.app.use(encryptResponseBodyMiddleware);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
