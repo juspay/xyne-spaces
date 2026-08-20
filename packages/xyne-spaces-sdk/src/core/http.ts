@@ -2,27 +2,9 @@
  * HTTP Client
  *
  * Handles HTTP requests with authentication, timeout, and error handling.
- * Supports mTLS (mutual TLS) for client certificate authentication using Undici.
  */
 
-import type { Agent, fetch as undiciFetchType } from 'undici';
 import { SdkError, AuthError, RateLimitError, NotFoundError } from './errors.js';
-import {
-  type MTLSConfig,
-  type UndiciRequestInit,
-  isNodeEnvironment,
-  createMTLSAgent,
-  MTLSError,
-} from './mtls.js';
-
-/** Normalized response data extracted from either fetch or undici response */
-interface ResponseData {
-  ok: boolean;
-  status: number;
-  statusText: string;
-  text: string;
-  headers: { get(name: string): string | null };
-}
 
 export interface HttpClientOptions {
   /** Base URL of the Spaces API */
@@ -31,68 +13,17 @@ export interface HttpClientOptions {
   token?: string;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
-  /**
-   * mTLS configuration for client certificate authentication.
-   * When provided, the client certificate will be sent with every request.
-   *
-   * @example
-   * ```typescript
-   * {
-   *   cert: fs.readFileSync('/path/to/client.crt', 'utf8'),
-   *   key: fs.readFileSync('/path/to/client.key', 'utf8'),
-   * }
-   * ```
-   */
-  mtls?: MTLSConfig;
 }
 
 export class HttpClient {
   private baseUrl: string;
   private token?: string;
   private timeout: number;
-  private mtlsConfig?: MTLSConfig;
-  private mtlsAgent?: Agent;
-  private mtlsAgentPromise?: Promise<Agent | undefined>;
-  /** Undici fetch function, loaded dynamically when mTLS is configured */
-  private undiciFetch?: typeof undiciFetchType;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.token = options.token;
     this.timeout = options.timeout ?? 30000;
-    this.mtlsConfig = options.mtls;
-
-    // Pre-create the mTLS agent if config is provided
-    if (this.mtlsConfig) {
-      this.mtlsAgentPromise = this.initMTLSAgent();
-    }
-  }
-
-  /**
-   * Initialize the mTLS agent asynchronously.
-   * This is done once and cached for all requests.
-   * In browser/Electron environments, returns undefined as mTLS is handled by the OS.
-   */
-  private async initMTLSAgent(): Promise<Agent | undefined> {
-    if (!this.mtlsConfig) return undefined;
-    this.mtlsAgent = await createMTLSAgent(this.mtlsConfig);
-
-    // Also load undici's fetch for mTLS requests (Node.js only)
-    if (this.mtlsAgent && isNodeEnvironment()) {
-      const undici = await import('undici');
-      this.undiciFetch = undici.fetch;
-    }
-
-    return this.mtlsAgent;
-  }
-
-  /**
-   * Get the mTLS agent, waiting for initialization if needed.
-   */
-  private async getMTLSAgent(): Promise<Agent | undefined> {
-    if (this.mtlsAgent) return this.mtlsAgent;
-    if (this.mtlsAgentPromise) return this.mtlsAgentPromise;
-    return undefined;
   }
 
   /**
@@ -177,60 +108,28 @@ export class HttpClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      // Build fetch options
-      const fetchOptions: UndiciRequestInit = {
+      const response = await fetch(url, {
         method,
         headers,
         body: requestBody,
         signal: controller.signal,
-      };
-
-      // Use undici's fetch with dispatcher for mTLS (Node.js only)
-      // Otherwise use global fetch
-      const useMtls = this.mtlsConfig && isNodeEnvironment();
-      const agent = useMtls ? await this.getMTLSAgent() : undefined;
-
-      let responseData: ResponseData;
-
-      if (agent && this.undiciFetch) {
-        // Use undici fetch with mTLS agent as dispatcher
-        fetchOptions.dispatcher = agent;
-        // Cast to unknown first to avoid type conflicts between global and undici types
-        const response = await this.undiciFetch(url, fetchOptions as unknown as Parameters<typeof undiciFetchType>[1]);
-        responseData = {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          text: await response.text(),
-          headers: response.headers,
-        };
-      } else {
-        // Use global fetch for non-mTLS requests or browser environments
-        const response = await fetch(url, fetchOptions as RequestInit);
-        responseData = {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          text: await response.text(),
-          headers: response.headers,
-        };
-      }
+      });
 
       clearTimeout(timeoutId);
 
-      if (!responseData.ok) {
-        this.handleError(responseData);
+      const text = await response.text();
+      if (!response.ok) {
+        this.handleError(response, text);
       }
 
       // Handle empty responses (e.g., 204 No Content)
-      if (!responseData.text) return undefined as T;
+      if (!text) return undefined as T;
 
-      return JSON.parse(responseData.text) as T;
+      return JSON.parse(text) as T;
     } catch (error) {
       clearTimeout(timeoutId);
 
-      // Re-throw SDK errors and mTLS errors as-is
-      if (error instanceof SdkError || error instanceof MTLSError) {
+      if (error instanceof SdkError) {
         throw error;
       }
 
@@ -238,32 +137,21 @@ export class HttpClient {
         throw new SdkError('timeout', 'Request timed out');
       }
 
-      // Detect TLS/certificate errors and provide better error messages
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (
-        errorMessage.includes('certificate') ||
-        errorMessage.includes('SSL') ||
-        errorMessage.includes('TLS') ||
-        errorMessage.includes('CERT_')
-      ) {
-        throw new MTLSError(`TLS/Certificate error: ${errorMessage}`);
-      }
-
       throw new SdkError(
         'network_error',
-        `Request failed: ${errorMessage}`
+        `Request failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
 
-  private handleError(response: ResponseData): never {
+  private handleError(response: Response, text: string): never {
     let body: {
       error?: string | { message?: string; code?: string };
       message?: string;
       code?: string;
     } = {};
     try {
-      body = JSON.parse(response.text) as typeof body;
+      body = JSON.parse(text) as typeof body;
     } catch {
       // Ignore JSON parse errors for error responses
     }
