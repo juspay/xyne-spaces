@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.6](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.5...v1.188.0-release-20260817.6) (2026-08-20)
+
+
+### Reverts
+
+* Revert "feat: reuse shared pending-message framework in dashboard channel sends (#281)" (#828) ([e78153a](https://github.com/juspay/xyne-spaces/commit/e78153a53d8c76c5e30a5b5b0cc4cb7414b199f8)), closes [#281](https://github.com/juspay/xyne-spaces/issues/281) [#828](https://github.com/juspay/xyne-spaces/issues/828)
+
 ## [1.188.0-release-20260817.5](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.4...v1.188.0-release-20260817.5) (2026-08-20)
 
 
