@@ -1,3 +1,60 @@
+## [1.201.0](https://github.com/juspay/xyne-spaces/compare/v1.200.1...v1.201.0) (2026-08-20)
+
+
+### Features
+
+* Create Google doc list for recordi ([#791](https://github.com/juspay/xyne-spaces/issues/791)) ([e411963](https://github.com/juspay/xyne-spaces/commit/e411963f6796dc2316310e40c08bba195445eb2d))
+
+## [1.200.1](https://github.com/juspay/xyne-spaces/compare/v1.200.0...v1.200.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* upgrade vitest version ([#804](https://github.com/juspay/xyne-spaces/issues/804)) ([d292aff](https://github.com/juspay/xyne-spaces/commit/d292aff701ab298552606ce9a57e6bffdcf95662))
+
+## [1.200.0](https://github.com/juspay/xyne-spaces/compare/v1.199.8...v1.200.0) (2026-08-20)
+
+
+### Features
+
+* implement SDLC ([#692](https://github.com/juspay/xyne-spaces/issues/692)) ([05f19e4](https://github.com/juspay/xyne-spaces/commit/05f19e4f4de84639695112be7caff5616628f8c6))
+
+## [1.199.8](https://github.com/juspay/xyne-spaces/compare/v1.199.7...v1.199.8) (2026-08-20)
+
+
+### Bug Fixes
+
+* don't offer to record a meeting while already recording ([#780](https://github.com/juspay/xyne-spaces/issues/780)) ([e1b1d1d](https://github.com/juspay/xyne-spaces/commit/e1b1d1db5cabb2adba43643286b575c481d2d4eb))
+
+## [1.199.7](https://github.com/juspay/xyne-spaces/compare/v1.199.6...v1.199.7) (2026-08-20)
+
+
+### Bug Fixes
+
+* remove hosted model config ([#782](https://github.com/juspay/xyne-spaces/issues/782)) ([c97508f](https://github.com/juspay/xyne-spaces/commit/c97508fdce5d3215a976f2318e9776727169d567))
+
+## [1.199.6](https://github.com/juspay/xyne-spaces/compare/v1.199.5...v1.199.6) (2026-08-20)
+
+
+### Reverts
+
+* Revert "test-local-machine (#730)" (#779) ([b64cb27](https://github.com/juspay/xyne-spaces/commit/b64cb273e4ffb001fae1821f14f8abc50cf2f1fe)), closes [#730](https://github.com/juspay/xyne-spaces/issues/730) [#779](https://github.com/juspay/xyne-spaces/issues/779)
+
+## [1.199.5](https://github.com/juspay/xyne-spaces/compare/v1.199.4...v1.199.5) (2026-08-20)
+
+
+### Bug Fixes
+
+* links in cmdK ([#629](https://github.com/juspay/xyne-spaces/issues/629)) ([4993367](https://github.com/juspay/xyne-spaces/commit/4993367d446ccfd43256473181462b1deb9fb9d2))
+* show a recording-specific placeholder in the notes editor ([#774](https://github.com/juspay/xyne-spaces/issues/774)) ([7e042a7](https://github.com/juspay/xyne-spaces/commit/7e042a7482ba7474b918b9af69d33ede7266db52))
+
+## [1.199.4](https://github.com/juspay/xyne-spaces/compare/v1.199.3...v1.199.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* removed email channel list query ([#709](https://github.com/juspay/xyne-spaces/issues/709)) ([aee222d](https://github.com/juspay/xyne-spaces/commit/aee222dfd2dd0364b26280d88c243e4c50b43b1e))
+
 ## [1.199.3](https://github.com/juspay/xyne-spaces/compare/v1.199.2...v1.199.3) (2026-08-19)
 
 
