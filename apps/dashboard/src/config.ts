@@ -25,9 +25,16 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
-export const API_BASE_URL = isElectronBundled
-  ? `${ELECTRON_BACKEND_URL}/api`
-  : `${protocol}://${hostname}${backendPort}/api`;
+// Replaces API_BASE_URL wholesale; the SDLC lane builds with '/sdlc-api'.
+// NOT named VITE_API_BASE_URL — that already means the backend origin with no
+// '/api' suffix, used as a vite proxy target.
+const apiBaseOverride = (import.meta.env['VITE_API_BASE_OVERRIDE'] as string | undefined) || '';
+
+export const API_BASE_URL =
+  apiBaseOverride ||
+  (isElectronBundled
+    ? `${ELECTRON_BACKEND_URL}/api`
+    : `${protocol}://${hostname}${backendPort}/api`);
 
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
@@ -37,9 +44,18 @@ export const APPS_PUBLIC_BASE_URL = isLocalhost
 
 // Zero Cache
 const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
-export const VITE_ZERO_SERVER = isElectronBundled
-  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+
+// Zero rejects a relative server URL, so resolve the lane's '/sdlc-zero' against
+// the current origin. Keeping it a path is what lets one build run behind any host.
+const resolveZeroServer = (value: string): string =>
+  value.startsWith('/') ? `${window.location.origin}${value}` : value;
+
+export const VITE_ZERO_SERVER = resolveZeroServer(
+  (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
+    (isElectronBundled
+      ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+      : `${protocol}://${hostname}${zeroCachePort}/zero`),
+);
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
@@ -85,3 +101,28 @@ export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
 // Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
 export const DEFAULT_WORKSPACE_ID: string =
   (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';
+
+// Deployment lane. The same source builds a second 'sdlc' bundle served at
+// '/sdlc-app/' with its own backend and zero-cache. Inert when VITE_XYNE_SURFACE
+// is unset. See docs/sdlc-fast-lane.md.
+
+export type XyneSurface = 'main' | 'sdlc';
+
+export const XYNE_SURFACE: XyneSurface =
+  (import.meta.env['VITE_XYNE_SURFACE'] as string) === 'sdlc' ? 'sdlc' : 'main';
+
+export const isSdlcSurface = XYNE_SURFACE === 'sdlc';
+
+// Router basename; vite.config.ts reads the same var for `base`. No trailing
+// slash, which is what react-router expects.
+export const APP_BASE_PATH: string = (
+  (import.meta.env['VITE_APP_BASE_PATH'] as string) || '/'
+).replace(/\/+$/, '');
+
+// Where the main bundle points its iframe.
+export const SDLC_APP_BASE_PATH: string =
+  (import.meta.env['VITE_SDLC_APP_BASE_PATH'] as string) || '/sdlc-app';
+
+// Gives this bundle its own Zero IndexedDB so two clients on one origin do not
+// share a store. Empty = single lane, unchanged behaviour.
+export const ZERO_STORAGE_KEY: string = (import.meta.env['VITE_ZERO_STORAGE_KEY'] as string) || '';

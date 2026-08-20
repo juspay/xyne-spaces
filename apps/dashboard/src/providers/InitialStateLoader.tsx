@@ -23,7 +23,7 @@ import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
@@ -203,8 +203,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
       });
 
-      // Clear Zero's local databases
-      void dropAllDatabases();
+      // Clear this lane's Zero local databases
+      void dropZeroDatabases();
 
       // Clear all cookies and auth tokens (handles Electron + Web)
       clearAuthTokens();
