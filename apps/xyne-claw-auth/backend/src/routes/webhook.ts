@@ -133,6 +133,7 @@ import {
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 
@@ -3397,6 +3398,33 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // Conversation mode (APP_MENTIONED / DIRECT_MESSAGE): a single run as the
     // sender — one call, sender is the target, no twin workspaceId. Behavior
     // unchanged from before the per-target refactor.
+    //
+    // Invocation whitelist: this is the "someone called the agent" path, so
+    // gate it on agent.config.privacy before dispatch. Denied callers get the
+    // same shape of notice as a disabled agent (per product decision), never a
+    // silent drop. Twin (USER_MENTIONED) runs above are a persona of the
+    // mentioned user, not an agent call, so they are intentionally not gated.
+    {
+      const invocRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined).catch(() => null);
+      if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, payload.userId)) {
+        log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${payload.userId} conv=${payload.conversationId}`);
+        if (payload.conversationId) {
+          await spacesAppFetch("/chat/postMessage", {
+            channelId: payload.channelId,
+            conversationId: payload.conversationId,
+            markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+            userId: agent.spacesAppUserId,
+            metadata: { contentFormat: "markdown" },
+          }, agent.appToken).catch((err) =>
+            log.warn("Failed to post invocation-denied notice", { error: err instanceof Error ? err.message : String(err) }),
+          );
+        }
+        if (QUEUE_ENABLED && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
+        }
+        return;
+      }
+    }
     await dispatchRunForTarget(payload.userId, undefined);
   } catch (err) {
     log.error("Error forwarding:", { error: err instanceof Error ? err.message : String(err) });
@@ -3782,6 +3810,14 @@ export async function handleAutomationWebhook(
   }
   if (!agent.enabled) {
     res.status(403).json({ success: false, error: `agent "${agentSlug}" is disabled` });
+    return;
+  }
+  // Invocation whitelist — automations run under `userId` (the run owner); gate
+  // them exactly like a human caller so "all surfaces" holds. Refused like
+  // disabled (403), which the automation callback surfaces to the trigger.
+  if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+    clog.warn(`[webhook/automation-run] invocation denied (not whitelisted) agent=${agentSlug} userId=${userId} sessionId=${sessionId}`);
+    res.status(403).json({ success: false, error: `agent "${agentSlug}" is restricted — you don't have access to it` });
     return;
   }
 

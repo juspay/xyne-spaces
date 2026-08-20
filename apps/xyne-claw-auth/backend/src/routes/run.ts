@@ -30,6 +30,7 @@ import {
   ClawSseParser,
   parseToolsConfig,
   stripPlatformConfigKeys,
+  isAgentInvocableBy,
 } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken, verifySessionToken } from "../lib/session-tokens.js";
@@ -933,6 +934,16 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       res.status(400).json({ success: false, error: agent.error });
+      return;
+    }
+
+    // Invocation whitelist — the universal chokepoint for CLI / service-token /
+    // external-API runs (they all enter here). Enforced on the RESOLVED caller
+    // (resolved.userId), in addition to any service-token scope gate. Refused
+    // like a disabled agent so every surface behaves consistently.
+    if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, resolved.userId)) {
+      log.warn(`[run] invocation denied (not whitelisted) agentSlug=${agentSlug} userId=${resolved.userId}`);
+      res.status(403).json({ success: false, error: `agent "${agentSlug}" is restricted — you don't have access to it` });
       return;
     }
 

@@ -52,6 +52,15 @@ export interface BehaviourDraft {
   outputTemplate: string;
   /** Comma/newline list of tool-name substrings required before submit. */
   outputRequireTools: string;
+  /**
+   * Who may INVOKE this agent (config.privacy). "everyone" (default) = anyone;
+   * "whitelist" = only the listed userIds, across every surface. The whitelist
+   * is the exact allowed set (owner/admins are NOT implicitly included).
+   * Enforced server-side by isAgentInvocableBy at every dispatch chokepoint.
+   */
+  privacyMode: 'everyone' | 'whitelist';
+  /** UserIds allowed to invoke when privacyMode === 'whitelist'. */
+  whitelist: string[];
 }
 
 type ConfigBag = Record<string, unknown> | undefined | null;
@@ -76,6 +85,7 @@ interface BehaviourConfigShape {
   citationReflection?: unknown;
   autoToolCitations?: unknown;
   outputFormat?: OutputFormat;
+  privacy?: { mode?: unknown; whitelist?: unknown };
 }
 
 /** Reads the behaviour draft out of an agent's config bag. */
@@ -106,6 +116,11 @@ export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
     outputRequireTools: Array.isArray(of?.requireToolsBeforeSubmit)
       ? of.requireToolsBeforeSubmit.join(', ')
       : '',
+    privacyMode: c.privacy?.mode === 'whitelist' ? 'whitelist' : 'everyone',
+    whitelist:
+      c.privacy?.mode === 'whitelist' && Array.isArray(c.privacy.whitelist)
+        ? c.privacy.whitelist.filter((u): u is string => typeof u === 'string' && u.length > 0)
+        : [],
   };
 }
 
@@ -162,6 +177,12 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
   setOrDelete('suggestGoal', draft.suggestGoal);
   setOrDelete('autoGoal', draft.autoGoal);
   setOrDelete('planMode', draft.planMode);
+  // Privacy: "everyone" is the absence of the key; "whitelist" stores the
+  // canonical { mode, whitelist } block (server re-normalizes on save).
+  setOrDelete('privacy', draft.privacyMode === 'whitelist', {
+    mode: 'whitelist',
+    whitelist: Array.from(new Set(draft.whitelist.filter((u) => typeof u === 'string' && u.length > 0))),
+  });
 
   // Only persist a CUSTOM plan-mode prompt. Empty, or unchanged from the default,
   // ⇒ delete the key so the runtime falls back to its built-in default. Gated on

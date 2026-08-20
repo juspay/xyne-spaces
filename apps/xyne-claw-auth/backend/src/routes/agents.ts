@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
@@ -725,6 +725,16 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     // OFF) a silent no-op, so disabled toggles snap back on. Any future
     // partial-PUT caller must spread the full existing config first.
     const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+
+    // Canonicalize the invocation-privacy block so a malformed/junk value can
+    // never be stored (which could silently lock or unlock the agent). A junk
+    // `privacy` is dropped → default "everyone"; a valid one is deduped/cleaned.
+    // See isAgentInvocableBy — enforced at every dispatch chokepoint.
+    if (normalizedConfig && "privacy" in normalizedConfig) {
+      const normalizedPrivacy = normalizeAgentPrivacy(normalizedConfig["privacy"]);
+      if (normalizedPrivacy) normalizedConfig["privacy"] = normalizedPrivacy;
+      else delete normalizedConfig["privacy"];
+    }
 
     const data: Prisma.AgentUpdateInput = {};
 
