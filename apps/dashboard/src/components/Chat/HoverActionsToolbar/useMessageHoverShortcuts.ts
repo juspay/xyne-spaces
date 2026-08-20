@@ -6,6 +6,7 @@ import {
   getMessageHoverActionsByMessageId,
   type MessageHoverToolbarActions,
 } from './messageHoverActionsRegistry';
+import { navigateMessageFocus } from './messageKeyboardNav';
 
 /**
  * Resolve the registry entry for the message currently under the pointer.
@@ -26,6 +27,26 @@ const resolveHoveredEntry = (): MessageHoverToolbarActions | undefined => {
  * is checked lazily in `when`, so it transfers on unmount without any
  * re-registration.
  */
+/**
+ * Arrow navigation must not hijack the caret while the user is actually typing,
+ * and must stay out of the command palette / dialogs / listboxes (which own
+ * their own arrow handling). It IS allowed when focus is on the message list /
+ * body, or in an EMPTY composer (Slack-style: ↑ from an empty field starts
+ * walking messages).
+ */
+const isMessageNavContext = (): boolean => {
+  const el = document.activeElement;
+  if (el instanceof HTMLElement) {
+    if (el.closest('[cmdk-root],[role="dialog"],[role="menu"],[role="listbox"]')) return false;
+    if (el.isContentEditable) return (el.textContent ?? '').trim() === '';
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') {
+      return ((el as HTMLInputElement).value ?? '').trim() === '';
+    }
+  }
+  return true;
+};
+
 const owners: symbol[] = [];
 
 /** One catalog shortcut driven by the hovered message's registry entry. */
@@ -63,7 +84,7 @@ const useHoverShortcut = (
  * entry in the hover-actions registry, checks the relevant capability flag and
  * invokes the entry's handler.
  */
-export const useMessageHoverShortcuts = (): void => {
+export const useMessageHoverShortcuts = (containerRef?: { current: HTMLElement | null }): void => {
   const instanceIdRef = useRef<symbol | null>(null);
   instanceIdRef.current ??= Symbol('messageHoverShortcuts');
 
@@ -78,6 +99,38 @@ export const useMessageHoverShortcuts = (): void => {
   }, []);
 
   const isOwner = (): boolean => owners[0] === instanceIdRef.current;
+
+  // Arrow-key roving focus across the message list. Routed to the list that
+  // actually holds the current selection; with no selection, only the primary
+  // (first-mounted) list handles it. Gated by `isMessageNavContext` so it never
+  // fires while typing or inside a dialog/command palette.
+  const ownsArrowNav = (): boolean => {
+    if (!isMessageNavContext()) return false;
+    const container = containerRef?.current;
+    const currentId = hoveredMessage.current?.messageId;
+    if (currentId && container) {
+      return container.querySelector(`[data-message-id="${CSS.escape(currentId)}"]`) !== null;
+    }
+    return !currentId && isOwner();
+  };
+
+  useShortcutById(
+    'message.focusPrev',
+    () => {
+      const container = containerRef?.current;
+      if (container) navigateMessageFocus(container, 'prev');
+    },
+    { when: ownsArrowNav },
+  );
+
+  useShortcutById(
+    'message.focusNext',
+    () => {
+      const container = containerRef?.current;
+      if (container) navigateMessageFocus(container, 'next');
+    },
+    { when: ownsArrowNav },
+  );
 
   useHoverShortcut(
     'message.edit',
