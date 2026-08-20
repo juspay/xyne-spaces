@@ -464,6 +464,90 @@ export function conformToZeroShape(node: unknown, format: ZeroResultFormat | und
   }
 }
 
+/** Which step of `runCatalogQuery` failed. Callers map this to a status code. */
+export type CatalogQueryPhase = 'unknown' | 'build' | 'execute';
+
+/**
+ * A catalog query that could not be run, tagged with the step that failed.
+ *
+ * The three cases mean different things to a caller — the operation does not
+ * exist, its arguments were rejected, or the database was unreachable — and an
+ * HTTP surface needs to tell them apart. Carrying the phase here keeps that
+ * distinction without this module knowing anything about status codes.
+ */
+export class CatalogQueryError extends Error {
+  constructor(
+    readonly phase: CatalogQueryPhase,
+    message: string,
+    readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'CatalogQueryError';
+  }
+}
+
+/**
+ * Build a query's AST and result format, or report why the arguments failed.
+ *
+ * Separate from `runCatalogQuery` so the compiled types survive: destructuring
+ * into pre-declared `unknown` variables to widen a try/catch loses the `AST` and
+ * `Format` that `executePostgresQuery` requires.
+ */
+function buildQueryInternals(
+  queryDef: AnyCustomQuery,
+  name: string,
+  args: unknown,
+  ctx: Context,
+) {
+  try {
+    const query = queryDef.fn({ args: args ?? {}, ctx });
+    // @ts-ignore - asQueryInternals works with any Query type at runtime
+    return asQueryInternals(query);
+  } catch (error) {
+    // Raised by the query body or its zod validator: the arguments were bad.
+    throw new CatalogQueryError(
+      'build',
+      error instanceof Error ? error.message : `Invalid arguments for "${name}".`,
+      error,
+    );
+  }
+}
+
+/**
+ * Run one catalog query against `provider` and return its rows.
+ *
+ * `queryDef.fn` is the same `defineQuery` wrapper the app uses, so the per-table
+ * read ACL is folded into the AST before any SQL is generated — there is no
+ * second authorization path. `provider` is the caller's to choose: the replica
+ * for ordinary reads, the primary when a read must not be stale.
+ */
+export async function runCatalogQuery(
+  name: string,
+  args: unknown,
+  ctx: Context,
+  provider: typeof dbProvider,
+): Promise<unknown> {
+  let queryDef: AnyCustomQuery;
+  try {
+    queryDef = mustGetBackendQuery(name);
+  } catch (error) {
+    throw new CatalogQueryError('unknown', `Unknown catalog query "${name}".`, error);
+  }
+
+  const { ast, format } = buildQueryInternals(queryDef, name, args, ctx);
+
+  try {
+    const serverSchema = await fetchServerSchema();
+    const data = await provider.transaction(async (tx) =>
+      executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema),
+    );
+    conformToZeroShape(data, format as ZeroResultFormat);
+    return data;
+  } catch (error) {
+    throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
+  }
+}
+
 export async function handleQueriesFallback(request: Request): Promise<any> {
   const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
@@ -480,42 +564,16 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
 
     logger.info(`Fallback executing ${queryRequests.length} queries from read replica pool`);
 
-    if (!replicaDbProvider) {
+    const provider = replicaDbProvider;
+    if (!provider) {
       throw new Error('Read replica pool not configured. Set DATABASE_READ_REPLICA_POOL_URL environment variable.');
     }
-
-    const serverSchema = await fetchServerSchema();
 
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetBackendQuery(req.name);
-          const query = queryDef.fn({
-            args: req.args || {},
-            ctx: context,
-          });
-
-          // @ts-ignore - asQueryInternals works with any Query type at runtime
-          const { ast, format } = asQueryInternals(query);
-
           logger.debug(`Executing fallback query: ${req.name}`);
-
-          const data = await replicaDbProvider.transaction(async (tx) => {
-            return await executePostgresQuery(
-              tx.dbTransaction,
-              ast,
-              format,
-              schema,
-              serverSchema
-            );
-          });
-
-          conformToZeroShape(data, format as ZeroResultFormat);
-
-          return {
-            name: req.name,
-            data,
-          };
+          return { name: req.name, data: await runCatalogQuery(req.name, req.args, context, provider) };
         } catch (error) {
           logger.error(`Fallback query ${req.name} failed:`, error);
           throw error;

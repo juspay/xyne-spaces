@@ -9,7 +9,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
 import { ApiError } from '../errors';
-import { callQuery } from '../engine/queries';
+import { callQuery } from '../query';
 import { callMutator } from '../engine/mutations';
 import { rateLimit } from '../middleware/rateLimit';
 
