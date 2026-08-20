@@ -55,11 +55,11 @@ const HEADING_CLASS: Record<DetailHeading, string> = {
   field: 'text-[14px] font-medium leading-[1.2] text-foreground',
 };
 
-/** Twin Configuration section titles — 18px semibold, same leading/tracking as `title`. */
+/** Twin Configuration section titles — 14px semibold, same leading/tracking as `title`. */
 const TWIN_TITLE_CLASS =
-  'text-[18px] font-semibold leading-[1.2] tracking-[-0.2px] text-foreground';
+  'text-[14px] font-semibold leading-[1.2] tracking-[-0.2px] text-foreground';
 
-/** Twin Configuration: subcategory-as-hint uses Tailwind 400, not design 450. */
+/** Twin nested group labels (Verification, …) and hints: 14px Inter normal. */
 const TWIN_SUBCATEGORY_CLASS = 'text-[14px] font-normal leading-[1.35] text-foreground/60';
 
 export const DETAIL_NESTED_TITLE_CLASS: Record<DetailTypeScale, string> = {
@@ -102,17 +102,23 @@ export function DetailSectionHeading({
   typeScale?: DetailTypeScale;
 }): ReactElement {
   const headingClass =
-    heading === 'title' && typeScale === 'twin' ? TWIN_TITLE_CLASS : HEADING_CLASS[heading];
+    typeScale === 'twin' && heading === 'title'
+      ? TWIN_TITLE_CLASS
+      : typeScale === 'twin' && heading === 'subcategory'
+        ? TWIN_SUBCATEGORY_CLASS
+        : HEADING_CLASS[heading];
   return (
     <div className='flex w-full items-center gap-1.5'>
-      <span className={headingClass}>{label}</span>
-      {info && (
-        <Tooltip side='top' content={info}>
-          <span className='inline-flex'>
-            <InformationCircle className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-          </span>
-        </Tooltip>
-      )}
+      <span className={cn('inline-flex items-center gap-1.5', headingClass)}>
+        {label}
+        {info && (
+          <Tooltip side='top' content={info}>
+            <span className='inline-flex'>
+              <InformationCircle className='size-4 shrink-0' aria-hidden />
+            </span>
+          </Tooltip>
+        )}
+      </span>
       {trailing && (
         <span className={cn('flex shrink-0 items-center', trailingAlign === 'end' && 'ml-auto')}>
           {trailing}
@@ -136,10 +142,10 @@ export function DetailCard({
   );
 }
 
-/** Grouped setting rows — Library keeps Figma #fafafa; Twin uses theme `bg-muted`. */
+/** Grouped setting rows — fill only (#fafafa), no stroke (library + twin). */
 export function DetailGroup({
   className,
-  typeScale = 'library',
+  typeScale: _typeScale = 'library',
   children,
 }: {
   className?: string;
@@ -147,13 +153,7 @@ export function DetailGroup({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div
-      className={cn(
-        'flex w-full flex-col gap-6 rounded-2xl p-4',
-        typeScale === 'twin' ? cn('bg-muted', TWIN_STROKE_CLASS) : 'bg-[#fafafa]',
-        className,
-      )}
-    >
+    <div className={cn('flex w-full flex-col gap-6 rounded-2xl bg-[#fafafa] p-4', className)}>
       {children}
     </div>
   );
