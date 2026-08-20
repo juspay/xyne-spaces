@@ -2,6 +2,7 @@ import { repositories } from '@/database/repositories';
 import { AccessType, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { conversationService } from '@/services/conversationService';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { config } from '@/config/env';
 import type { AutomationView } from '../types/workflow-adapter';
@@ -70,18 +71,20 @@ async function dmToUser(
   workspaceId: string,
   content: string,
 ): Promise<void> {
-  const channelId = await repositories.channels.findOrCreateDMChannel(
-    fromUserId,
-    [toUserId],
-    repositories.channelParticipants,
-    workspaceId,
-  );
-  await conversationService.createConversationWithMessage({
-    channelId,
-    userId: fromUserId,
-    content,
-    msgType: MessageType.BOT,
-    isBot: true,
+  await runAsServiceActor(fromUserId, workspaceId, async () => {
+    const channelId = await repositories.channels.findOrCreateDMChannel(
+      fromUserId,
+      [toUserId],
+      repositories.channelParticipants,
+      workspaceId,
+    );
+    await conversationService.createConversationWithMessage({
+      channelId,
+      userId: fromUserId,
+      content,
+      msgType: MessageType.BOT,
+      isBot: true,
+    });
   });
 }
 

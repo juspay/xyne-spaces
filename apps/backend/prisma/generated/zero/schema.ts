@@ -1276,6 +1276,19 @@ export const conversationLabelMappingTable = table("conversation_label_mappings"
   })
   .primaryKey("id");
 
+export const deskAutoLabelRuleReferenceTable = table("desk_auto_label_rule_references")
+  .columns({
+    id: string(),
+    workflowId: string(),
+    labelId: string(),
+    workspaceId: string(),
+    ownerId: string(),
+    channelId: string(),
+    filterFingerprint: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const ticketUserMailboxTable = table("ticket_user_mailbox")
   .columns({
     id: string(),
@@ -1498,25 +1511,6 @@ export const userExternalTokenTable = table("user_external_tokens")
     refreshToken: string().optional(),
     expiresAt: number().optional(),
     connectedAt: number(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const externalSourceTable = table("external_sources")
-  .columns({
-    id: string(),
-    name: string(),
-    sourceType: string(),
-    displayName: string(),
-    channelId: string().optional(),
-    externalIdentifier: string().optional(),
-    workspaceId: string(),
-    boardId: string().optional(),
-    ownerUserId: string().optional(),
-    credentials: string(),
-    isActive: boolean(),
-    lastSyncCursor: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1978,9 +1972,29 @@ export const repoTable = table("repos")
     id: string(),
     name: string(),
     url: string(),
+    canonicalUrl: string().optional(),
     baseBranch: json(),
     prefix: string(),
     createdBy: string(),
+    projectId: string().optional(),
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCapabilities: json().optional(),
+  })
+  .primaryKey("id");
+
+export const sdlcEntityLinkTable = table("sdlc_entity_links")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    repoId: string(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3138,6 +3152,11 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     sourceField: ["ticketId"],
     destField: ["id"],
     destSchema: ticketTable,
+  }),
+  deskAutoLabelRuleReferences: many({
+    sourceField: ["id"],
+    destField: ["workflowId"],
+    destSchema: deskAutoLabelRuleReferenceTable,
   })
 }));
 
@@ -3176,6 +3195,11 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     sourceField: ["id"],
     destField: ["workflowExecutionId"],
     destSchema: pullRequestsTable,
+  }),
+  sdlcRepo: one({
+    sourceField: ["id"],
+    destField: ["sdlcSetupExecutionId"],
+    destSchema: repoTable,
   })
 }));
 
@@ -3841,6 +3865,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ["id"],
     destField: ["projectId"],
     destSchema: canvasTable,
+  }),
+  repos: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: repoTable,
   })
 }));
 
@@ -3983,6 +4012,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: channelBoardMappingTable,
+  }),
+  sdlcRepos: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: repoTable,
   })
 }));
 
@@ -4084,6 +4118,27 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
     sourceField: ["channelId"],
     destField: ["id"],
     destSchema: channelTable,
+  })
+}));
+
+export const conversationLabelTableRelationships = relationships(conversationLabelTable, ({ many }) => ({
+  deskAutoLabelRuleReferences: many({
+    sourceField: ["id"],
+    destField: ["labelId"],
+    destSchema: deskAutoLabelRuleReferenceTable,
+  })
+}));
+
+export const deskAutoLabelRuleReferenceTableRelationships = relationships(deskAutoLabelRuleReferenceTable, ({ one }) => ({
+  workflow: one({
+    sourceField: ["workflowId"],
+    destField: ["id"],
+    destSchema: workflowTable,
+  }),
+  label: one({
+    sourceField: ["labelId"],
+    destField: ["id"],
+    destSchema: conversationLabelTable,
   })
 }));
 
@@ -4343,6 +4398,37 @@ export const canvasUserStatusTableRelationships = relationships(canvasUserStatus
     sourceField: ["userId"],
     destField: ["id"],
     destSchema: userTable,
+  })
+}));
+
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  setupExecution: one({
+    sourceField: ["sdlcSetupExecutionId"],
+    destField: ["id"],
+    destSchema: workflowExecutionTable,
+  }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["repoId"],
+    destSchema: sdlcEntityLinkTable,
+  })
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  repo: one({
+    sourceField: ["repoId"],
+    destField: ["id"],
+    destSchema: repoTable,
   })
 }));
 
@@ -4818,6 +4904,7 @@ export const schema = createSchema(
       emailReadTable,
       conversationLabelTable,
       conversationLabelMappingTable,
+      deskAutoLabelRuleReferenceTable,
       ticketUserMailboxTable,
       emailSignatureTable,
       emailChannelPreferenceTable,
@@ -4831,7 +4918,6 @@ export const schema = createSchema(
       customEmojiTable,
       activityTable,
       userExternalTokenTable,
-      externalSourceTable,
       externalMessageTable,
       proactiveNudgeTable,
       surfaceNudgeTable,
@@ -4858,6 +4944,7 @@ export const schema = createSchema(
       linkAccessTable,
       vespaInsertionLogsTable,
       repoTable,
+      sdlcEntityLinkTable,
       lookupValueTable,
       formTable,
       formContextMappingTable,
@@ -4975,6 +5062,8 @@ export const schema = createSchema(
       conversationTableRelationships,
       conversationParticipantTableRelationships,
       emailTableRelationships,
+      conversationLabelTableRelationships,
+      deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
@@ -4993,6 +5082,8 @@ export const schema = createSchema(
       canvasCommentTableRelationships,
       canvasParticipantTableRelationships,
       canvasUserStatusTableRelationships,
+      repoTableRelationships,
+      sdlcEntityLinkTableRelationships,
       formTableRelationships,
       globalFieldTableRelationships,
       formFieldsTableRelationships,
@@ -5106,6 +5197,7 @@ export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
+export type DeskAutoLabelRuleReference = Row<typeof schema.tables.desk_auto_label_rule_references>;
 export type TicketUserMailbox = Row<typeof schema.tables.ticket_user_mailbox>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
@@ -5119,7 +5211,6 @@ export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;
 export type Activity = Row<typeof schema.tables.activities>;
 export type UserExternalToken = Row<typeof schema.tables.user_external_tokens>;
-export type ExternalSource = Row<typeof schema.tables.external_sources>;
 export type ExternalMessage = Row<typeof schema.tables.external_messages>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
@@ -5146,6 +5237,7 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;

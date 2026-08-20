@@ -1,6 +1,8 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../ui/ShortcutHint';
+import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
@@ -22,7 +24,9 @@ import {
   InformationCircle,
   AlertCircle,
   TicketToken,
+  UserPlus,
 } from '@xyne/icons';
+import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -42,7 +46,14 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
+import {
+  RAIL_SHORTCUT_LIMIT,
+  railItemIndexFromEvent,
+  railShortcutsAvailable,
+} from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
@@ -53,6 +64,7 @@ import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
+import WorkspaceInviteDialog from './WorkspaceInviteDialog';
 
 const mobileNavigationItems = [
   {
@@ -153,6 +165,10 @@ const AppSidebar = (): ReactElement => {
   const { isMobile } = usePlatform();
   const visibleChannels = useAllVisibleChannels();
   const unreadCounts = useAllUnreadCount();
+  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
+    enabled: !!workspaceId,
+  });
+  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -193,6 +209,7 @@ const AppSidebar = (): ReactElement => {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
@@ -287,6 +304,19 @@ const AppSidebar = (): ReactElement => {
     mixpanelService.track(EVENTS.NAVIGATION, { item: label });
   };
 
+  const railShortcuts = railShortcutsAvailable();
+
+  useShortcutById(
+    'global.goToRailItem',
+    event => {
+      const item = toolbarItems[railItemIndexFromEvent(event)];
+      if (!item) return;
+      handleNavigationClick(item.label);
+      void navigate(prefixWs(item.path));
+    },
+    { enabled: railShortcuts && !isSupportContext },
+  );
+
   const handleMoreNavigate = (label: string): void => {
     setIsMoreOpen(false);
     handleNavigationClick(label);
@@ -363,7 +393,9 @@ const AppSidebar = (): ReactElement => {
                   </li>
                 )}
 
-                {toolbarItems.map(item => {
+                {toolbarItems.map((item, index) => {
+                  const shortcutIndex =
+                    railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
@@ -375,7 +407,20 @@ const AppSidebar = (): ReactElement => {
 
                   return (
                     <li key={item.path} className='relative'>
-                      <Tooltip content={item.label} side='right' delayDuration={0}>
+                      <Tooltip
+                        content={
+                          shortcutIndex ? (
+                            <span className='flex items-center gap-2'>
+                              {item.label}
+                              <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                            </span>
+                          ) : (
+                            item.label
+                          )
+                        }
+                        side='right'
+                        delayDuration={0}
+                      >
                         <Link
                           to={prefixWs(item.path)}
                           onClick={() => handleNavigationClick(item.label)}
@@ -467,6 +512,28 @@ const AppSidebar = (): ReactElement => {
           className={cn('flex flex-col items-center justify-center', !isElectronApp() && 'pb-4')}
         >
           <ZeroConnectionStatus className='mb-2' />
+
+          {isCommunityWorkspace && (
+            <Tooltip content='Invite people' side='right' delayDuration={0}>
+              <button
+                type='button'
+                aria-label='Invite people to workspace'
+                title='Invite people'
+                onClick={() => setIsInviteDialogOpen(true)}
+                data-testid='nav-invite-people'
+                data-track-category='App_Sidebar'
+                data-track-name='Sidebar_InvitePeople_Open'
+                className={cn(
+                  'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                  isInviteDialogOpen
+                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <UserPlus size={18} variant='Solid' className='text-black' />
+              </button>
+            </Tooltip>
+          )}
 
           <Popover
             open={isSupportOpen}
@@ -590,6 +657,12 @@ const AppSidebar = (): ReactElement => {
 
         {/* Error Report Modal — opened from the Support rail button */}
         <ErrorReportModal isOpen={isErrorReportOpen} onClose={() => setIsErrorReportOpen(false)} />
+
+        <WorkspaceInviteDialog
+          open={isInviteDialogOpen}
+          onOpenChange={setIsInviteDialogOpen}
+          workspaceId={workspaceId}
+        />
 
         {/* Status Update Modal */}
         <UpdateStatusModal
