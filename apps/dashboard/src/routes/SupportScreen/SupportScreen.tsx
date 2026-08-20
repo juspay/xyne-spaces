@@ -1419,8 +1419,9 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-sidebar-open', isSidebarOpen.toString());
   }, [isSidebarOpen]);
 
-  // Fetch EMAIL channels using hook (from state machine, already loaded)
-  const emailChannels = useEmailChannels(!ticketId);
+  // Derive EMAIL channels from already-loaded state (no extra Zero query).
+  // channelStats are fetched inside the hook and merged onto each channel.
+  const emailChannels = useEmailChannels();
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;

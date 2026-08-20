@@ -26,6 +26,7 @@ import {
   clearSummaryRequested,
   getSummaryProgress,
   getSummaryRequest,
+  getSummaryStage,
   markSummaryRequested,
   saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
@@ -683,7 +684,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recording, message, notesCanvasId]);
 
   const handleSummaryProgressPause = useCallback(
-    (progress: number): void => saveSummaryProgress(recordingId, progress),
+    (progress: number, stageIndex: number): void =>
+      saveSummaryProgress(recordingId, progress, stageIndex),
     [recordingId],
   );
 
@@ -718,6 +720,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return true;
     });
   }, [recordingId, transcriptText]);
+
+  // Seeds the summary-request record for the auto-detected pending state (server
+  // summarizing without an explicit "Generate summary" click), so its progress
+  // persists across unmounts the same way an explicit regenerate already does.
+  useEffect(() => {
+    if (!recordingId || recording?.externalId !== recordingId) return;
+    if (awaitingSummary || summaryFailed) return;
+    const hasDetailedSummaryNow =
+      !!recording?.detailedSummaryCanvasId && recording?.detailedSummaryReady !== false;
+    const hasTranscriptNow =
+      !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording?.hasTranscript;
+    if (hasDetailedSummaryNow || !hasTranscriptNow) return;
+    if (getSummaryRequest(recordingId)) return;
+    markSummaryRequested(recordingId);
+  }, [recordingId, recording, recordingRow, transcriptText, awaitingSummary, summaryFailed]);
 
   if (loading) {
     return <RecordingDetailV2Skeleton />;
@@ -873,6 +890,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   visibleTab={visibleTab}
                   secondTab={secondTab}
                   onSelect={handleTabSelect}
+                  hasSummary={hasDetailedSummary}
                   selectedTemplate={selectedSummaryTemplate}
                   {...(isLive || !isOwner
                     ? {}
@@ -1044,6 +1062,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
                   initialProgress={getSummaryProgress(recordingId)}
+                  initialStageIndex={getSummaryStage(recordingId)}
                   onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
@@ -1168,7 +1187,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       channelId={canvas.channelId || undefined}
       title={canvas.title}
       editable={true}
-      placeholder='Start typing your notes…'
+      placeholder='Add your notes here, you can view the transcript live in the transcript tab'
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2

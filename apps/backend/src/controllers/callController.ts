@@ -1200,7 +1200,7 @@ export class CallController {
         return {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
@@ -1362,7 +1362,7 @@ export class CallController {
         recording: {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,

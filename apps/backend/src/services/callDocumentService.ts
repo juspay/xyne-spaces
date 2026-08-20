@@ -453,18 +453,28 @@ MARKDOWN TEMPLATE:
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
 
-**CITATIONS (IMPORTANT):**
+**CITATIONS (ACCURACY IS CRITICAL):**
 - Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
-- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N], where N is that segment's number. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
-- Cite the MOST specific segment(s) that support the statement. You may place up to 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]".
-- Copy the number EXACTLY from the transcript. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript above; if a line has no bracketed number, do not cite it.
+- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N]. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
+- A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
+- BEFORE writing [clf-N], find line N in the TRANSCRIPT below and confirm its text actually states what you just wrote. If you cannot point to the specific words in that line, do NOT cite it.
+- Topic proximity is NOT support. A segment that merely discusses the same subject, or sits near the moment you have in mind, does not support the claim. Never cite "roughly where it was discussed".
+- Never estimate, guess, round, shift, or reconstruct a segment number from memory of where something appeared. Read the number off the line itself. If you are not certain of the number, leave the statement uncited.
+- Attribution must match: if the statement says who said, wanted, offered, agreed to, or committed to something, the cited segment must be that person's line, or a line that explicitly states their position.
+- Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
+- For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
+- An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
+- Copy the number EXACTLY. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript below; if a line has no bracketed number, do not cite it.
 - Write ONLY the bare token [clf-N] — never a link, URL, footnote, or a separate "Citations"/"Sources" section.
+- FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
 
 Only output valid Markdown.
 No extra text.
 
 TRANSCRIPT:
 {transcript}
+
+FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
 `;
 
 const EDIT_SUMMARY_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
@@ -482,6 +492,7 @@ HOW IT IS USED (so your edits stay valid):
   - Output language is forced to English.
   - Brand-name correction: speech-to-text mis-hearings of "Xyne" (Zain/Zine/Xine/Zyne) are auto-corrected.
   - Phase count scales with call length (short calls get fewer phases).
+  - Inline transcript citations: the generating LLM already appends [clf-N] tokens pointing at the transcript segments that support each claim, and is already told to verify them. Do NOT add, restate, or relax citation instructions, and do NOT add a "Citations"/"Sources" section to the template.
   - Name accuracy & mentions: in Action Items, people who attended the call are written as @ + their FULL NAME (e.g. @Mayank Bansal) so they become real user mentions in the channel; people NOT in the call are written plainly with "(not in channel)". Preserve this convention if the template references assignees/owners.
 
 RULES FOR YOUR EDIT:

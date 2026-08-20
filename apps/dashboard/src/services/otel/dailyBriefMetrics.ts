@@ -21,12 +21,15 @@ function getMeter(): Meter {
 
 let _dailyBriefSwitchedTotal: Counter | null = null;
 
-/** Counter: Switches to another brief from the history menu. */
+/** Which control the switch came from. Bounded to two values — never widen without checking cardinality. */
+export type BriefSwitchSource = 'history_menu' | 'date_picker';
+
+/** Counter: Switches to another brief, split by the control used. */
 const dailyBriefSwitchedTotal: Counter = new Proxy({} as Counter, {
   get(_target, prop) {
     if (!_dailyBriefSwitchedTotal) {
       _dailyBriefSwitchedTotal = getMeter().createCounter('daily_brief_switched_total', {
-        description: 'Total number of switches between briefs from the Daily Brief history menu',
+        description: 'Total number of switches between briefs, by the control used',
         unit: '1',
       });
     }
@@ -34,10 +37,11 @@ const dailyBriefSwitchedTotal: Counter = new Proxy({} as Counter, {
   },
 });
 
-/** Track a switch to another brief from the history menu. */
-export function trackDailyBriefSwitched(): void {
+/** Track a switch to another brief. Device-scoped: `instance` counts devices, not
+ *  users — the distinct-user figure comes from the server-side beacon instead. */
+export function trackDailyBriefSwitched(source: BriefSwitchSource): void {
   safeRecordMetric(() => {
-    dailyBriefSwitchedTotal.add(1);
+    dailyBriefSwitchedTotal.add(1, { source });
   });
 }
 
