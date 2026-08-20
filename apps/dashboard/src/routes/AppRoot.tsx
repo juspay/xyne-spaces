@@ -65,6 +65,7 @@ import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
 import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallModal';
+import { IncomingCallDevHarness } from '../components/Call/IncomingCall/IncomingCallCard.dev';
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
@@ -191,6 +192,7 @@ import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -315,7 +317,6 @@ const AppRoot = (): ReactElement => {
   const rightPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Create panel refs for XyneAI
-  const xyneAILeftPanelRef = useRef<PanelImperativeHandle>(null);
   const xyneAIRightPanelRef = useRef<PanelImperativeHandle>(null);
 
   const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
@@ -370,7 +371,7 @@ const AppRoot = (): ReactElement => {
       right: rightPanelRef,
     });
     setXyneAIPanelRefs({
-      left: xyneAILeftPanelRef,
+      left: browserPanelLeftRef,
       right: xyneAIRightPanelRef,
     });
     setBrowserPanelRefs({
@@ -382,7 +383,9 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     if (isXyneDebuggerOpen) return;
     const rafId = window.requestAnimationFrame(() => {
-      globalXyneAIPanelRefs.right.current?.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
+      const right = globalXyneAIPanelRefs.right.current;
+      if (!right) return;
+      right.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
       globalXyneAIPanelRefs.left.current?.resize(`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`);
     });
     return () => window.cancelAnimationFrame(rafId);
@@ -457,6 +460,9 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
+  const showXyneAIPanel = isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
+  const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
+
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
   // Enable swipe back gesture on mobile
@@ -599,87 +605,32 @@ const AppRoot = (): ReactElement => {
                         <EditWarningModal />
                         <Outlet />
                       </main>
-                    ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
-                      // XyneAI is open on desktop - show panel layout with XyneAI
-                      <div className='flex flex-col h-screen'>
-                        <ResizableGroup
-                          orientation='horizontal'
-                          className='flex-1 no-scrollbar overflow-auto'
-                          autoSaveId='app-root-xyneai'
-                        >
-                          <Panel
-                            id='app-root-content'
-                            panelRef={xyneAILeftPanelRef}
-                            defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                          >
-                            <div
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                            >
-                              <AppSidebar />
-                              <main className='flex-1 no-scrollbar overflow-auto'>
-                                <EditWarningModal />
-                                <Outlet />
-                              </main>
-                            </div>
-                          </Panel>
-                          <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                            <div
-                              id='panel-resize-divider'
-                              className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                            ></div>
-                          </Separator>
-                          <Panel
-                            id='app-root-xyneai'
-                            panelRef={xyneAIRightPanelRef}
-                            defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                            maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                            minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                          >
-                            <XyneAISidebarZIndexShell>
-                              <XyneAISidebar
-                                channelId={xyneAIChannelId}
-                                threadInfo={xyneAIThreadInfo}
-                                startFreshChat={xyneAIStartFreshChat}
-                                canvasInfo={xyneAICanvasInfo}
-                                initialContextSelections={xyneAIInitialContextSelections}
-                                contextOpenNonce={xyneAIContextOpenNonce}
-                                kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                kbChannelId={xyneAIKbChannelId ?? ''}
-                                kbDocId={xyneAIKbDocId ?? ''}
-                                kbDocName={xyneAIKbDocName ?? ''}
-                                kbOpenNonce={xyneAIKbOpenNonce}
-                                onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                              />
-                            </XyneAISidebarZIndexShell>
-                          </Panel>
-                        </ResizableGroup>
-                      </div>
-                    ) : browserPanelState === 'open' ||
+                    ) : showXyneAIPanel ||
+                      browserPanelState === 'open' ||
                       webviewState === 'closed' ||
                       webviewState === 'idle' ? (
-                      // Unified branch: browser panel open OR no side panel active.
-                      // Keeping both cases in one branch prevents the <Outlet /> from
-                      // remounting (and losing scroll position) when the browser panel
-                      // opens or closes.
                       <div className='flex flex-col h-screen'>
                         <ResizableGroup
                           orientation='horizontal'
                           className='flex-1 no-scrollbar overflow-auto'
                           autoSaveId='app-root-browser'
                           panelIds={
-                            browserPanelState === 'open' && !location.pathname.endsWith('/browser')
-                              ? ['app-root-left', 'app-root-browser']
-                              : ['app-root-left']
+                            showXyneAIPanel
+                              ? ['app-root-left', 'app-root-xyneai']
+                              : showBrowserPanel
+                                ? ['app-root-left', 'app-root-browser']
+                                : ['app-root-left']
                           }
                         >
                           <Panel
                             id='app-root-left'
                             panelRef={browserPanelLeftRef}
                             defaultSize={
-                              browserPanelState === 'open' &&
-                              !location.pathname.endsWith('/browser')
-                                ? '65%'
-                                : '100%'
+                              showXyneAIPanel
+                                ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
+                                : showBrowserPanel
+                                  ? '65%'
+                                  : '100%'
                             }
                           >
                             <div
@@ -692,8 +643,41 @@ const AppRoot = (): ReactElement => {
                               </main>
                             </div>
                           </Panel>
-                          {browserPanelState === 'open' &&
-                            !location.pathname.endsWith('/browser') && (
+                          {showXyneAIPanel ? (
+                            <>
+                              <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                <div
+                                  id='panel-resize-divider'
+                                  className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                ></div>
+                              </Separator>
+                              <Panel
+                                id='app-root-xyneai'
+                                panelRef={xyneAIRightPanelRef}
+                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
+                              >
+                                <XyneAISidebarZIndexShell>
+                                  <XyneAISidebar
+                                    channelId={xyneAIChannelId}
+                                    threadInfo={xyneAIThreadInfo}
+                                    startFreshChat={xyneAIStartFreshChat}
+                                    canvasInfo={xyneAICanvasInfo}
+                                    initialContextSelections={xyneAIInitialContextSelections}
+                                    contextOpenNonce={xyneAIContextOpenNonce}
+                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                    kbChannelId={xyneAIKbChannelId ?? ''}
+                                    kbDocId={xyneAIKbDocId ?? ''}
+                                    kbDocName={xyneAIKbDocName ?? ''}
+                                    kbOpenNonce={xyneAIKbOpenNonce}
+                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                  />
+                                </XyneAISidebarZIndexShell>
+                              </Panel>
+                            </>
+                          ) : (
+                            showBrowserPanel && (
                               <>
                                 <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                                   <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
@@ -709,7 +693,8 @@ const AppRoot = (): ReactElement => {
                                   </div>
                                 </Panel>
                               </>
-                            )}
+                            )
+                          )}
                         </ResizableGroup>
                       </div>
                     ) : (
@@ -748,6 +733,10 @@ const AppRoot = (): ReactElement => {
                     {!isInPanelWebview && (
                       <>
                         <IncomingCallModal />
+                        {import.meta.env.DEV &&
+                          new URLSearchParams(window.location.search).has('devIncomingCall') && (
+                            <IncomingCallDevHarness />
+                          )}
                         <GlobalCallOverlay />
                         {recordingVersion === 'v2' ? (
                           <NoteTakerOverlayHost />
@@ -1172,7 +1161,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'claw-agents',
-                element: <ClawAgentsScreen />,
+                element: (
+                  <GuestBlockedRoute>
+                    <ClawAgentsScreen />
+                  </GuestBlockedRoute>
+                ),
                 children: [
                   { index: true, element: <AgentsTab /> },
                   { path: 'create', element: <ClawAgentCreateScreen /> },
