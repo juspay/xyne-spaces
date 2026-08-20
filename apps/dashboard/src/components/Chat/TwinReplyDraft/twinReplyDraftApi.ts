@@ -22,6 +22,7 @@ export interface TwinReplyDraftView {
   destinationUserName?: string;
   destinationReason?: string;
   sourceMessageId?: string;
+  senderId?: string;
   senderName?: string;
   channelName?: string;
   agentSlug?: string;

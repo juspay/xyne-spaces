@@ -12,13 +12,16 @@ import {
   ArrowUp,
   ArrowLeft,
   Pencil,
-  MessageSquareX,
+  X,
 } from 'lucide-react';
 import { Button } from '../../ui/Button';
+import Avatar from '../../ui/Avatar/Avatar';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
+import { useUser } from '../../../hooks/useUsers';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
+import { TwinReasoningPopover } from './TwinReasoningPopover';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 import type { AssistTab } from './useThreadAssist';
 
@@ -37,9 +40,17 @@ const swap = {
 } as const;
 
 export interface TwinSourceInfo {
+  /** Id of the person being replied to — resolves the real profile picture. */
+  userId?: string;
   name?: string;
   text?: string;
   onJump?: () => void;
+}
+
+/** Sender chip for the collapsed bar: the name we show plus, when known, the id. */
+interface DraftSender {
+  name: string;
+  userId?: string;
 }
 
 interface ThreadAssistDockProps {
@@ -57,7 +68,10 @@ interface ThreadAssistDockProps {
     decline: (draftId: string) => Promise<void>;
   };
   onPosted: (target: PostedTarget | null) => void;
-  onOpenReasoning: (draft: TwinReplyDraftView) => void;
+  onReasoningOpenChange: (draft: TwinReplyDraftView, open: boolean) => void;
+  reasoningOpen?: boolean;
+  /** Conversation the reasoning popover's debug tab reads its session from. */
+  conversationId: string;
   resolveSource?: (draft: TwinReplyDraftView) => TwinSourceInfo;
   attached?: boolean;
   onBeginEdit?: (draft: TwinReplyDraftView) => void;
@@ -74,7 +88,9 @@ export function ThreadAssistDock({
   recap,
   reply,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen = false,
+  conversationId,
   resolveSource,
   attached = true,
   onBeginEdit,
@@ -93,17 +109,21 @@ export function ThreadAssistDock({
   const selectedDraft = tab === 'reply' && replyCount > 0 ? drafts[active] : undefined;
   const selectedSource = selectedDraft ? resolveSource?.(selectedDraft) : undefined;
 
-  const senderNames = useMemo(() => {
+  const senders = useMemo(() => {
     const seen = new Set<string>();
-    const names: string[] = [];
+    const list: DraftSender[] = [];
     for (const d of drafts) {
-      const name = (resolveSource?.(d)?.name ?? d.senderName ?? '').trim();
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        names.push(name);
+      const src = resolveSource?.(d);
+      const name = (src?.name ?? d.senderName ?? '').trim();
+      // Key on the id when we have one: two distinct users can share a display
+      // name, and collapsing them would show the first one's real photo for both.
+      const key = src?.userId ?? name;
+      if (name && !seen.has(key)) {
+        seen.add(key);
+        list.push({ name, ...(src?.userId && { userId: src.userId }) });
       }
     }
-    return names;
+    return list;
   }, [drafts, resolveSource]);
 
   const goTo = (index: number): void => {
@@ -128,71 +148,83 @@ export function ThreadAssistDock({
           attached ? 'rounded-t-2xl border-b-0' : 'rounded-2xl',
         )}
       >
-        {editing ? (
-          <EditHeader senderName={headerName} onBack={onEditBack} />
-        ) : collapsed ? (
-          <CollapsedBar
-            hasReply={hasReply}
-            replyCount={replyCount}
-            senderNames={senderNames}
-            recapLabel={hasRecap ? 'Thread recap' : 'Suggested reply'}
-            onExpand={onToggleCollapse}
-          />
-        ) : (
-          <ExpandedHeader
-            tab={tab}
-            hasRecap={hasRecap}
-            hasReply={hasReply}
-            replyCount={replyCount}
-            active={active}
-            senderName={headerName}
-            onGoTo={goTo}
-            onTabChange={onTabChange}
-            onCollapse={onToggleCollapse}
-          />
-        )}
-
-        <AnimatePresence initial={false}>
-          {bodyOpen && (
-            <motion.div
-              key='body'
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ height: bodySpring, opacity: { duration: 0.15 } }}
-              className='overflow-hidden'
-            >
-              <div className='px-3.5 pb-3 pt-2'>
-                {tab === 'recap' ? (
-                  <RecapPane content={recap.content} loading={recap.loading} />
-                ) : selectedDraft ? (
-                  <AnimatePresence mode='wait' initial={false}>
-                    <motion.div
-                      key={selectedDraft.id}
-                      variants={swap}
-                      initial='initial'
-                      animate='animate'
-                      exit='exit'
-                    >
-                      <ReplyCard
-                        draft={selectedDraft}
-                        source={selectedSource}
-                        loading={reply.pending.has(selectedDraft.id)}
-                        approve={edited => reply.approve(selectedDraft.id, edited)}
-                        decline={() => reply.decline(selectedDraft.id)}
-                        onPosted={onPosted}
-                        onOpenReasoning={() => onOpenReasoning(selectedDraft)}
-                        {...(onBeginEdit && { onBeginEdit: () => onBeginEdit(selectedDraft) })}
-                      />
-                    </motion.div>
-                  </AnimatePresence>
-                ) : (
-                  <div className='text-sm text-muted-foreground'>No reply draft.</div>
-                )}
-              </div>
-            </motion.div>
+        {/* One tint layer for every state. The collapsed bar used to carry
+            `bg-muted/60` itself, which made it read darker than the expanded
+            body sitting on bare `bg-card`; hoisting it here keeps collapsed and
+            expanded identical, and preserves the collapsed tone exactly (it is
+            still muted/60 composited over card). */}
+        <div className='bg-muted/60'>
+          {editing ? (
+            <EditHeader senderName={headerName} onBack={onEditBack} />
+          ) : collapsed ? (
+            <CollapsedBar
+              hasReply={hasReply}
+              replyCount={replyCount}
+              senders={senders}
+              recapLabel={hasRecap ? 'Thread recap' : 'Suggested reply'}
+              onExpand={onToggleCollapse}
+            />
+          ) : (
+            <ExpandedHeader
+              tab={tab}
+              hasRecap={hasRecap}
+              hasReply={hasReply}
+              replyCount={replyCount}
+              active={active}
+              senderName={headerName}
+              onGoTo={goTo}
+              onTabChange={onTabChange}
+              onCollapse={onToggleCollapse}
+            />
           )}
-        </AnimatePresence>
+
+          <AnimatePresence initial={false}>
+            {bodyOpen && (
+              <motion.div
+                key='body'
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ height: bodySpring, opacity: { duration: 0.15 } }}
+                className='overflow-hidden'
+              >
+                {/* When attached, the shell is pulled 12px into the composer (-mb-3),
+                  so pb-3 would leave the Send button sitting on the composer's top
+                  border. pb-5 buys back a real gap. */}
+                <div className={cn('px-3.5 pt-2', attached ? 'pb-5' : 'pb-3')}>
+                  {tab === 'recap' ? (
+                    <RecapPane content={recap.content} loading={recap.loading} />
+                  ) : selectedDraft ? (
+                    <AnimatePresence mode='wait' initial={false}>
+                      <motion.div
+                        key={selectedDraft.id}
+                        variants={swap}
+                        initial='initial'
+                        animate='animate'
+                        exit='exit'
+                      >
+                        <ReplyCard
+                          draft={selectedDraft}
+                          source={selectedSource}
+                          loading={reply.pending.has(selectedDraft.id)}
+                          approve={edited => reply.approve(selectedDraft.id, edited)}
+                          decline={() => reply.decline(selectedDraft.id)}
+                          onPosted={onPosted}
+                          onReasoningOpenChange={next => onReasoningOpenChange(selectedDraft, next)}
+                          reasoningOpen={reasoningOpen}
+                          conversationId={conversationId}
+                          {...(onBeginEdit && { onBeginEdit: () => onBeginEdit(selectedDraft) })}
+                        />
+                      </motion.div>
+                    </AnimatePresence>
+                  ) : (
+                    <div className='text-sm text-muted-foreground'>No reply draft.</div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </motion.div>
   );
@@ -236,13 +268,13 @@ function EditHeader({
 function CollapsedBar({
   hasReply,
   replyCount,
-  senderNames,
+  senders,
   recapLabel,
   onExpand,
 }: {
   hasReply: boolean;
   replyCount: number;
-  senderNames: string[];
+  senders: DraftSender[];
   recapLabel: string;
   onExpand: () => void;
 }): ReactElement {
@@ -253,7 +285,7 @@ function CollapsedBar({
         aria-label='Expand AI replies'
         data-track-category='twin-dock'
         data-track-name='expand'
-        className='flex h-[42px] w-full select-none items-center gap-2 bg-muted/60 px-3 pb-3 text-left transition-colors hover:bg-muted'
+        className='flex h-[42px] w-full select-none items-center gap-2 px-3 pb-3 text-left transition-colors hover:bg-muted'
       >
         <span className='flex shrink-0'>
           <XyneAIStar size={14} />
@@ -261,11 +293,11 @@ function CollapsedBar({
         <span className='shrink-0 text-[13px] font-semibold text-foreground'>
           {replyCount === 1 ? '1 AI reply ready' : `${replyCount} AI replies ready`}
         </span>
-        {senderNames.length > 0 && (
+        {senders.length > 0 && (
           <>
-            <AvatarCluster names={senderNames} />
+            <AvatarCluster senders={senders} />
             <span className='min-w-0 truncate text-[13px] text-muted-foreground'>
-              {senderNames.join(', ')}
+              {senders.map(s => s.name).join(', ')}
             </span>
           </>
         )}
@@ -279,7 +311,7 @@ function CollapsedBar({
       aria-label='Expand'
       data-track-category='twin-dock'
       data-track-name='expand'
-      className='flex h-[42px] w-full select-none items-center gap-2.5 bg-muted/60 px-3 pb-3 text-left transition-colors hover:bg-muted'
+      className='flex h-[42px] w-full select-none items-center gap-2.5 px-3 pb-3 text-left transition-colors hover:bg-muted'
     >
       <span className='text-xs font-semibold text-foreground'>{recapLabel}</span>
       <ChevronUp size={15} className='ml-auto text-muted-foreground' />
@@ -310,7 +342,7 @@ function ExpandedHeader({
 }): ReactElement {
   const showToggle = hasRecap && hasReply;
   return (
-    <div className='relative flex h-9 select-none items-center gap-2 border-b border-border/60 px-3'>
+    <div className='relative flex h-9 select-none items-center gap-2 border-b border-border px-3'>
       <button
         type='button'
         onClick={onCollapse}
@@ -383,11 +415,15 @@ function HeaderTab({
   );
 }
 
-function AvatarCluster({ names }: { names: string[] }): ReactElement {
+function AvatarCluster({ senders }: { senders: DraftSender[] }): ReactElement {
   return (
     <div className='flex shrink-0 -space-x-1.5'>
-      {names.slice(0, 3).map((n, i) => (
-        <SourceAvatar key={`${n}-${i}`} name={n} size={16} />
+      {senders.slice(0, 3).map((s, i) => (
+        <SourceAvatar
+          key={`${s.name}-${i}`}
+          name={s.name}
+          {...(s.userId && { userId: s.userId })}
+        />
       ))}
     </div>
   );
@@ -435,41 +471,27 @@ function Pager({
   );
 }
 
-const AVATAR_COLORS = [
-  '#e11d48',
-  '#7c3aed',
-  '#0891b2',
-  '#d97706',
-  '#059669',
-  '#2563eb',
-  '#db2777',
-  '#4f46e5',
-];
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
-}
-
+/**
+ * The sender being replied to, rendered with the shared `Avatar` primitive so the
+ * profile picture and the identity colour agree with the rest of the app. `useUser`
+ * only resolves against the loaded workspace roster, so an unknown id would render
+ * `Avatar`'s blank-initials-over-a-hashed-colour state — we fall back to a neutral
+ * initial instead, keeping the identity colour either correct or absent, never wrong.
+ */
 function SourceAvatar({
+  userId,
   name,
-  size = 16,
 }: {
+  userId?: string | undefined;
   name?: string | undefined;
-  size?: number;
 }): ReactElement {
-  const label = (name ?? '').trim();
-  const initial = (label[0] ?? '?').toUpperCase();
+  const user = useUser(userId ?? '');
+  if (userId && user) {
+    return <Avatar userId={userId} size='xs' rounded showActiveStatus={false} />;
+  }
+  const initial = ((name ?? '').trim()[0] ?? '?').toUpperCase();
   return (
-    <span
-      className='inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase leading-none text-white'
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.52),
-        backgroundColor: avatarColor(label),
-      }}
-    >
+    <span className='inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-semibold uppercase leading-none text-muted-foreground'>
       {initial}
     </span>
   );
@@ -604,13 +626,16 @@ function SourcePreview({ source }: { source: TwinSourceInfo }): ReactElement | n
       data-track-category='twin-dock'
       data-track-name='jump-to-source'
       className={cn(
-        'group flex w-full min-w-0 items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground/60',
+        'group mt-2 flex w-full min-w-0 items-center gap-1.5 border-l-2 border-border py-0.5 pl-2 text-[11px] leading-4 text-muted-foreground/80',
         clickable && 'cursor-pointer',
       )}
     >
-      <SourceAvatar name={source.name} size={14} />
+      <SourceAvatar
+        {...(source.userId && { userId: source.userId })}
+        {...(source.name && { name: source.name })}
+      />
       {source.name && (
-        <span className='max-w-[45%] shrink-0 truncate font-medium text-muted-foreground/80'>
+        <span className='max-w-[45%] shrink-0 truncate font-medium text-foreground/70'>
           {source.name}
         </span>
       )}
@@ -628,7 +653,9 @@ function ReplyCard({
   approve,
   decline,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen,
+  conversationId,
   onBeginEdit,
 }: {
   draft: TwinReplyDraftView;
@@ -637,7 +664,9 @@ function ReplyCard({
   approve: (edited?: string) => Promise<PostedTarget | null>;
   decline: () => Promise<void>;
   onPosted: (t: PostedTarget | null) => void;
-  onOpenReasoning: () => void;
+  onReasoningOpenChange: (open: boolean) => void;
+  reasoningOpen: boolean;
+  conversationId: string;
   onBeginEdit?: () => void;
 }): ReactElement {
   const [editing, setEditing] = useState(false);
@@ -681,78 +710,113 @@ function ReplyCard({
   };
 
   return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex items-center gap-1.5 text-[11px] text-muted-foreground/60'>
-        {hasReply && dest.icon}
-        <span>{intent}</span>
-        <span className='ml-auto shrink-0'>Only you can see this</span>
+    <div className='flex flex-col'>
+      {/* what will happen — the quietest tier */}
+      <div className='flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground/70'>
+        {hasReply && <span className='flex shrink-0'>{dest.icon}</span>}
+        <span className='min-w-0 truncate'>{intent}</span>
       </div>
 
-      <div className='flex min-h-[22px] items-center'>
-        {source ? <SourcePreview source={source} /> : null}
-      </div>
+      {/* the message being replied to */}
+      {source ? <SourcePreview source={source} /> : null}
 
-      <div className='mt-0.5 h-[76px] overflow-y-auto rounded-md border border-dashed border-border bg-muted/30 px-3 py-2'>
-        {hasReact && !hasReply ? (
-          <div className='flex h-full items-center gap-2.5'>
-            <span className='flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-xl'>
-              {draft.emoji}
-            </span>
-            <span className='text-xs text-muted-foreground'>
-              Adds this reaction to the triggering message
-            </span>
+      {/* the draft itself — same 14px a posted message renders at, so it previews
+          as the message it will become. No fill, no border: hierarchy is carried
+          by the type/colour ladder above and the hairline below. */}
+      {hasReact && !hasReply ? (
+        <div className='mt-2.5 flex h-[104px] items-center gap-2.5'>
+          <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-transparent text-xl'>
+            {draft.emoji}
+          </span>
+          <span className='text-[13px] leading-[1.5] text-muted-foreground'>
+            Adds this reaction to the triggering message
+          </span>
+        </div>
+      ) : editing ? (
+        <textarea
+          ref={textRef}
+          value={editText}
+          onChange={e => setEditText(e.target.value)}
+          data-track-category='twin-dock'
+          data-track-name='edit-draft'
+          className='mt-2.5 block h-[104px] w-full resize-none rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm leading-[1.6] text-foreground outline-none transition-colors focus:border-foreground/30'
+        />
+      ) : (
+        // Same height as the edit textarea and the reaction row, so the dock never
+        // resizes when you enter edit mode or page between drafts of different
+        // lengths — it just scrolls.
+        <div className='mt-2.5 h-[104px] overflow-y-auto overscroll-contain pr-1'>
+          <div className='whitespace-pre-wrap text-sm leading-[1.6] text-foreground'>
+            {draft.message}
           </div>
-        ) : editing ? (
-          <textarea
-            ref={textRef}
-            value={editText}
-            onChange={e => setEditText(e.target.value)}
-            data-track-category='twin-dock'
-            data-track-name='edit-draft'
-            className='h-full w-full resize-none rounded bg-background px-2 py-1.5 text-sm text-foreground outline-none ring-1 ring-border focus:ring-foreground/40'
-          />
-        ) : (
-          <div className='whitespace-pre-wrap text-sm text-foreground'>{draft.message}</div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className='flex items-center gap-1'>
+      {/* No rule above this row: the composer's own top border sits just below the
+          dock, and a second hairline here read as one nesting level too many. */}
+      <div className='mt-3 flex items-center gap-1'>
         {draft.reasoning && (
-          <button
-            onClick={onOpenReasoning}
-            aria-label='Why this reply'
-            data-track-category='twin-dock'
-            data-track-name='open-reasoning'
-            className='flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-          >
-            Why?
-          </button>
+          <TwinReasoningPopover
+            open={reasoningOpen}
+            onOpenChange={onReasoningOpenChange}
+            draft={draft}
+            conversationId={conversationId}
+            trigger={
+              <button
+                aria-label='Why this reply'
+                aria-haspopup='dialog'
+                aria-expanded={reasoningOpen}
+                data-track-category='twin-dock'
+                data-track-name='open-reasoning'
+                className={cn(
+                  'flex items-center gap-1.5 rounded p-1.5 text-[11px] font-medium transition-all duration-200 ease-in-out',
+                  reasoningOpen
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
+              >
+                Why?
+              </button>
+            }
+          />
         )}
+        {/* Same shape as the composer's own toolbar buttons (paperclip, emoji, @):
+            `p-1.5 rounded hover:bg-accent` around a 16px icon. */}
         <div className='ml-auto flex items-center gap-1'>
-          <Button
-            size='iconSm'
-            variant='ghost'
+          <button
+            type='button'
             onClick={() => void decline()}
             disabled={loading}
             aria-label='Reject'
-            className='text-muted-foreground hover:text-foreground'
+            data-track-category='twin-dock'
+            data-track-name='decline-draft'
+            className='rounded p-1.5 transition-all duration-200 ease-in-out hover:bg-accent disabled:pointer-events-none disabled:opacity-50'
           >
-            <MessageSquareX size={17} />
-          </Button>
+            <X className='h-4 w-4 text-muted-foreground' />
+          </button>
           {hasReply && (
-            <Button
-              size='iconSm'
-              variant='ghost'
+            <button
+              type='button'
               onClick={editing ? () => setEditing(false) : beginEdit}
               disabled={loading}
               aria-label={editing ? 'Cancel edit' : 'Edit'}
-              className='text-muted-foreground hover:text-foreground'
+              data-track-category='twin-dock'
+              data-track-name={editing ? 'cancel-edit' : 'begin-edit'}
+              className='rounded p-1.5 transition-all duration-200 ease-in-out hover:bg-accent disabled:pointer-events-none disabled:opacity-50'
             >
-              <Pencil size={16} />
-            </Button>
+              <Pencil className='h-4 w-4 text-muted-foreground' />
+            </button>
           )}
-          <Button size='sm' onClick={() => void send()} disabled={loading} loading={loading}>
-            {!loading && <ArrowUp size={15} />}
+          {/* h-7 so the whole row — Why?, reject, edit, Send — is one 28px band,
+              matching the composer toolbar directly below it. */}
+          <Button
+            size='sm'
+            onClick={() => void send()}
+            disabled={loading}
+            loading={loading}
+            className='h-7 gap-1.5 px-2.5 text-xs'
+          >
+            {!loading && <ArrowUp className='h-4 w-4' />}
             {hasReact && !hasReply ? 'Send reaction' : editing ? 'Send edited' : 'Send'}
           </Button>
         </div>
