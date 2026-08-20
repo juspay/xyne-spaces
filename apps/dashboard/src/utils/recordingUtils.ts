@@ -3,6 +3,7 @@
  * Common time formatting and display helpers for recording screens
  */
 
+import { normalizeTagName, TAG_FORMAT_REGEX } from '@xyne/shared';
 import { logger, Event } from './logger';
 
 /**
@@ -92,9 +93,6 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
-/** How long after the call ends a title still counts as on its way. */
-export const TITLE_SHIMMER_WINDOW_MS = 90 * 1000;
-
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
 
@@ -125,7 +123,7 @@ export const getRecordingTitleState = (
 
   const sinceEndedMs = now - endedAtMs;
 
-  if (recording.hasTranscript && !recording.hasSummary && sinceEndedMs < TITLE_SHIMMER_WINDOW_MS) {
+  if (recording.hasTranscript && !recording.hasSummary) {
     return { kind: 'generating' };
   }
   if (!recording.hasTranscript && sinceEndedMs >= NO_TRANSCRIPT_AFTER_MS) {
@@ -201,6 +199,14 @@ export const getRecordingTagDotColor = (tag: string): (typeof TAG_DOT_COLORS)[nu
  */
 export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
+};
+
+/** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
+export const slugifyRecordingLabel = (raw: string): string | null => {
+  const slug = normalizeTagName(raw);
+  if (!slug) return null;
+  const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
+  return TAG_FORMAT_REGEX.test(safe) ? safe : null;
 };
 
 /**

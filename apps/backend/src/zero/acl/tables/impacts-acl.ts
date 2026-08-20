@@ -42,6 +42,13 @@ export class ImpactsACL extends BaseACL<'impacts'> {
       throw new MutationACLError('Impact update failed: impact does not exist', 'impacts');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'impacts');
+    // Gate on the stored row's ticket channel — a workspace member who is not a
+    // participant of the ticket's private channel must not tamper with the impact.
+    await this.verifyTicketAccess(row.ticketId, tx);
+    // ticketId can be repointed on update — re-verify access to the new ticket too.
+    if (args.ticketId !== undefined) {
+      await this.verifyTicketAccess(args.ticketId, tx);
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'impacts'>>, tx: Transaction<Schema>): Promise<void> {
@@ -50,6 +57,7 @@ export class ImpactsACL extends BaseACL<'impacts'> {
       throw new MutationACLError('Impact delete failed: impact does not exist', 'impacts');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'impacts');
+    await this.verifyTicketAccess(row.ticketId, tx);
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'impacts'>>, _tx: Transaction<Schema>): Promise<void> {
