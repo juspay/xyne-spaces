@@ -27,6 +27,7 @@ export type { SpacesClientOptions } from './client.js';
 
 // ----- mTLS (Mutual TLS) -----
 export type { MTLSConfig } from './core/mtls.js';
+export { MTLSError } from './core/mtls.js';
 
 // ----- Claw (remote agents; separate login from Spaces) -----
 export { ClawResource } from './resources/claw.js';
