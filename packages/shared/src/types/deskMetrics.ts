@@ -102,3 +102,70 @@ export interface DeskMetricsAggregateResponse extends DeskMetricsResponse {
 }
 
 export const DESK_METRICS_MAX_AGGREGATE_DESKS = 20;
+// Agent-facing API — GET /api/desk-metrics/desks and
+// POST /api/desk-metrics/claw/query, behind the spaces-desk-metrics MCP tool.
+export const DESK_METRIC_KEYS = [
+  'frt',
+  'rt',
+  'csat',
+  'counts',
+  'priority',
+  'trend',
+  'agents',
+  'tags',
+  'customFields',
+  'tickets',
+] as const;
+export type DeskMetricKey = (typeof DESK_METRIC_KEYS)[number];
+
+/** A metrics run with only the requested slices populated. */
+export interface DeskMetricsPartial {
+  range: { from: string; to: string };
+  frt?: DeskMetricsResponse['frt'];
+  rt?: DeskMetricsResponse['rt'];
+  csat?: DeskMetricsResponse['csat'];
+  counts?: DeskMetricsResponse['counts'];
+  priority?: DeskMetricsResponse['priority'];
+  trend?: DeskMetricsResponse['trend'];
+  agents?: DeskMetricsAgentRow[];
+  tagCategories?: DeskMetricsResponse['tagCategories'];
+  tagBreakdown?: DeskMetricsResponse['tagBreakdown'];
+  customFields?: DeskMetricsCustomFieldSummary[];
+  customFieldBreakdown?: DeskMetricsCustomFieldBreakdown[];
+  tickets?: DeskMetricsTicketRow[];
+  ticketsTruncated?: boolean;
+}
+
+
+export interface DeskMetricsCustomFieldSummary {
+  field: string;
+  multiValue: boolean;
+  ticketsWithValue: number;
+  distinctValues: number;
+}
+
+/** Value distribution for one custom field across the cohort. */
+export interface DeskMetricsCustomFieldBreakdown {
+  field: string;
+  multiValue: boolean;
+  values: Array<{ value: string; tickets: number }>;
+}
+
+/** One desk the caller can read metrics for. */
+export interface DeskMetricsDeskSummary {
+  channelId: string;
+  channelName: string | null;
+  deskType: string;
+  metricsEnabled: boolean;
+}
+
+export interface DeskMetricsDeskListResponse {
+  desks: DeskMetricsDeskSummary[];
+}
+
+export interface DeskMetricsQueryResponse extends DeskMetricsPartial {
+  desks: DeskMetricsDeskSummary[];
+  skipped: DeskMetricsSkippedDesk[];
+  perDesk?: DeskMetricsPerDeskRow[];
+  notes: string[];
+}
