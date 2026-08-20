@@ -57,6 +57,7 @@ import { customerioOAuthRouter, customerioCallbackRouter } from "./routes/custom
 import { oauthTokenRouter } from "./routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "./routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "./routes/scheduled-jobs.js";
+import { agentAutomationsRouter, agentAutomationsHooksRouter, agentAutomationsInternalRouter } from "./routes/agent-automations.js";
 import { dailyBriefRouter } from "./routes/daily-brief.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
 import { ttsRouter } from "./routes/tts.js";
@@ -286,6 +287,11 @@ app.use(`${BASE}/webhook`, webhookRouter);
 // Spaces signed — an S2S key alone is no longer enough to forge identity.
 app.use(`${BASE}/flow`, requireStrictS2S, flowActionRouter);
 app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJobsRouter);
+// agent-automations: public webhook ingress (auth = URL secret) MUST register
+// before the authed management mount so it matches /agent-automations/hooks/* first.
+app.use(`${BASE}/agent-automations/hooks`, agentAutomationsHooksRouter);
+app.use(`${BASE}/agent-automations`, requireAuth, requireNoAccessToken, agentAutomationsRouter);
+app.use(`${BASE}/internal/agent-automations`, requireStrictS2S, agentAutomationsInternalRouter); // run-result callback from xyne-claw (S2S only)
 // Strict S2S: the ask-question tool stores questions here with the S2S key;
 // flow-action consumes them through the module's atomic Redis helper.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);

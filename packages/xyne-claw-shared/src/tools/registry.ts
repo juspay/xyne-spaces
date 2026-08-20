@@ -33,6 +33,7 @@ import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
 import * as recordSkill from "./record-skill/index.js";
 import * as agentTools from "./agent-tools/index.js";
+import * as agentAutomations from "./agent-automations/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -49,6 +50,7 @@ register(codeArtifacts.postCodeBlock);
 register(codeArtifacts.postDiff);
 register(codeArtifacts.postChart);
 register(addCitations.addCitationsTool);
+register(agentAutomations.proposeAutomation);
 
 // Register google tools
 register(google.googleGmailSearch);
