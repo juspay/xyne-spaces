@@ -569,7 +569,7 @@ export class InvitationController {
       });
 
       // Sync all hardcoded bots into the newly provisioned workspace
-      await unifiedBotUserService.syncAllBotUsers(workspace.id);
+      await runAsSystem(() => unifiedBotUserService.syncAllBotUsers(workspace.id));
 
       // Create invitation outside the transaction (sends email — non-DB side-effect)
       // Run as system because the new org/workspace is not the caller's own —
