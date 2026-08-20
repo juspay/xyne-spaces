@@ -81,15 +81,15 @@ export const KbIngestionActivity = ({
   let summary: string;
   if (failed === 0) {
     statusLabel = 'Complete';
-    statusColor = 'text-green-600';
+    statusColor = 'text-status-success';
     summary = `${String(succeeded)} file${succeeded === 1 ? '' : 's'} added, no failures`;
   } else if (succeeded === 0) {
     statusLabel = 'Failed';
-    statusColor = 'text-red-600';
+    statusColor = 'text-status-failure';
     summary = `none of the ${String(total)} file${total === 1 ? '' : 's'} could be added`;
   } else {
     statusLabel = 'Needs attention';
-    statusColor = 'text-amber-600';
+    statusColor = 'text-status-pending';
     summary = `${String(succeeded)} of ${String(total)} files added, ${String(failed)} failed`;
   }
 

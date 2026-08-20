@@ -33,20 +33,20 @@ export const CollectionStatusBadgeV2: React.FC<CollectionStatusBadgeV2Props> = (
 
   if (status === IngestionStatus.PROCESSING) {
     const current = Math.min(ingested + 1, total);
-    icon = <Loader2 className='h-3.5 w-3.5 animate-spin text-amber-500' strokeWidth={2} />;
+    icon = <Loader2 className='h-3.5 w-3.5 animate-spin text-status-pending' strokeWidth={2} />;
     tooltip = `Currently processing ${String(current)} of ${String(total)} files…`;
   } else if (status === IngestionStatus.PENDING) {
     // No file is actively processing yet, so everything not-done is queued.
     const queued = Math.max(total - ingested - failed, 0);
-    icon = <Loader2 className='h-3.5 w-3.5 animate-spin text-gray-400' strokeWidth={2} />;
+    icon = <Loader2 className='h-3.5 w-3.5 animate-spin text-status-new' strokeWidth={2} />;
     tooltip = `${String(queued)} file${queued === 1 ? '' : 's'} waiting to be processed`;
   } else if (status === IngestionStatus.FAILED) {
-    icon = <AlertCircle className='h-3.5 w-3.5 text-red-500' strokeWidth={2} />;
+    icon = <AlertCircle className='h-3.5 w-3.5 text-status-failure' strokeWidth={2} />;
     tooltip =
       `${String(ingested)} file${ingested === 1 ? '' : 's'} ready · ` +
       `${String(failed)} file${failed === 1 ? '' : 's'} failed to read`;
   } else {
-    icon = <CheckCircle2 className='h-3.5 w-3.5 text-green-600' strokeWidth={2} />;
+    icon = <CheckCircle2 className='h-3.5 w-3.5 text-status-success' strokeWidth={2} />;
     tooltip = `All ${String(total)} file${total === 1 ? '' : 's'} ready to search`;
   }
 

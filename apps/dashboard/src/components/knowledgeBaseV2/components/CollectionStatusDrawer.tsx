@@ -34,11 +34,20 @@ function stateOf(status: string | null | undefined): FileState {
   return 'ready';
 }
 
+// Status-pill palettes built from the theme-aware `status-*` tokens (defined in
+// global.css, exposed via tailwind). Neutral chip surface + token-colored text and
+// ring, so it reads correctly in light and dark without hardcoded hex/palette values.
+// Shared by the per-file pills and the header pill so both stay consistent.
+const PILL_GREEN = 'bg-muted text-status-success ring-status-success';
+const PILL_AMBER = 'bg-muted text-status-pending ring-status-pending';
+const PILL_GRAY = 'bg-muted text-status-new ring-border';
+const PILL_RED = 'bg-muted text-status-failure ring-status-failure';
+
 const PILL: Record<FileState, { label: string; className: string }> = {
-  ready: { label: 'Ready', className: 'bg-green-50 text-green-700 ring-green-200' },
-  processing: { label: 'Processing', className: 'bg-amber-50 text-amber-700 ring-amber-200' },
-  queued: { label: 'Queued', className: 'bg-gray-100 text-gray-600 ring-gray-200' },
-  failed: { label: 'Upload failed', className: 'bg-red-50 text-red-700 ring-red-200' },
+  ready: { label: 'Ready', className: PILL_GREEN },
+  processing: { label: 'Processing', className: PILL_AMBER },
+  queued: { label: 'Queued', className: PILL_GRAY },
+  failed: { label: 'Upload failed', className: PILL_RED },
 };
 
 function extOf(name: string): string {
@@ -97,12 +106,12 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
   // work, then queued, else all-ready.
   const headerPill =
     failed > 0
-      ? { label: 'Needs attention', className: 'bg-red-50 text-red-600 ring-red-200' }
+      ? { label: 'Needs attention', className: PILL_RED }
       : processing > 0
-        ? { label: 'Processing', className: 'bg-amber-50 text-amber-700 ring-amber-200' }
+        ? { label: 'Processing', className: PILL_AMBER }
         : queued > 0
-          ? { label: 'Queued', className: 'bg-gray-100 text-gray-600 ring-gray-200' }
-          : { label: 'Ready', className: 'bg-green-50 text-green-700 ring-green-200' };
+          ? { label: 'Queued', className: PILL_GRAY }
+          : { label: 'Ready', className: PILL_GREEN };
 
   const summary = [
     ready > 0 ? `${String(ready)} file${ready === 1 ? '' : 's'} ready` : null,
@@ -188,7 +197,9 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                     key={row.id}
                     className={cn(
                       'rounded-xl border px-3 py-2.5',
-                      row.state === 'failed' ? 'border-red-200 bg-red-50/40' : 'border-border',
+                      row.state === 'failed'
+                        ? 'border-destructive/40 bg-destructive/5'
+                        : 'border-border',
                     )}
                   >
                     <div className='flex items-center gap-3'>
@@ -213,7 +224,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                       </span>
                     </div>
                     {row.state === 'failed' ? (
-                      <div className='mt-2 pl-1 text-[11.5px] text-red-500'>
+                      <div className='mt-2 pl-1 text-[11.5px] text-status-failure'>
                         This file couldn&apos;t be processed.
                       </div>
                     ) : null}
