@@ -154,16 +154,36 @@ export const agentRepository = {
   /**
    * Clone an agent into a NEW personal agent owned by `newOwnerId`.
    *
-   * Deliberately narrow copy scope (product decision): only the three fields
-   * that define the agent's *behaviour* are carried over —
-   *   1. systemPrompt (also seeded as prompt version v1)
-   *   2. tools        (AgentTool rows, including each tool's `permission`)
-   *   3. skills       (AgentSkill junction links)
-   * Everything else resets to defaults: no description, default color,
-   * empty modelId/config, COLLECTIONS kbScope with NO KB grants, no Spaces
-   * app identity / signing secret, no shares, no provider credentials, no MCP
-   * connections. This is an allow-list copy — we NEVER spread the source row,
-   * so a future secret-bearing column can't silently leak into clones.
+   * The clone is meant to be a WORKING replica, so everything that defines
+   * what the agent is and does comes across —
+   *   1. systemPrompt   (also seeded as prompt version v1)
+   *   2. description / color / modelId / delegationTier / enabled
+   *   3. config          — the ENTIRE json blob. This is the one that matters:
+   *                        `config.tools` is the real tool palette every read
+   *                        path uses (mcp.ts parseToolsConfig, the agent-config
+   *                        editor), so a clone without it runs tool-less.
+   *                        Carries subagents, skillTriggers, planMode,
+   *                        promptInjection, sandbox repos, outputFormat, …
+   *   4. tools           — AgentTool rows, including each tool's `permission`
+   *   5. skills          — AgentSkill junction links
+   *   6. knowledge base  — kbScope + every AgentCollection grant
+   *   7. MCP connections — including the encrypted credential blobs
+   *
+   * Everything past that point stays OUT, each for its own reason:
+   *   • Spaces app identity (`spacesAppId` is @unique, plus `spacesAppToken` /
+   *     `signingSecret`) and SurfaceAgent registrations — these are WHO the
+   *     agent is on an external surface. A copy would receive the source's
+   *     webhooks and sign as it.
+   *   • `scope` / `isDefault` / `ownerUserId` / `orgId` — the clone is a
+   *     PERSONAL agent belonging to the caller; inheriting `scope: "global"`
+   *     would publish it org-wide on creation.
+   *   • AgentShare rows — the source's ACL. Copying would hand third parties
+   *     access to someone else's brand-new private agent.
+   *   • Provider credentials, A2A delegation grants, prompt-version history and
+   *     per-user agent config — left to the clone's owner to (re)establish.
+   *
+   * Still an explicit allow-list — we never spread the source row, so a future
+   * secret-bearing column can't silently leak into clones.
    *
    * Returns the fully-hydrated clone (tools + skills + collections), or null
    * if the source agent no longer exists.
@@ -175,7 +195,12 @@ export const agentRepository = {
   ) => {
     const source = await prisma.agent.findUnique({
       where: { id: sourceId },
-      include: { tools: true, skills: true },
+      include: {
+        tools: true,
+        skills: true,
+        collections: true,
+        mcpConnections: true,
+      },
     });
     if (!source) return null;
 
@@ -196,6 +221,13 @@ export const agentRepository = {
           slug,
           name,
           systemPrompt,
+          description: source.description,
+          color: source.color,
+          modelId: source.modelId,
+          delegationTier: source.delegationTier,
+          enabled: source.enabled,
+          kbScope: source.kbScope,
+          config: source.config as Prisma.InputJsonValue,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
           ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),
@@ -218,8 +250,43 @@ export const agentRepository = {
         });
       }
 
+      // KB grants. Safe to copy verbatim: stored grants are only ever an
+      // ALLOW-LIST, intersected at runtime with the tree spaces returns for the
+      // CALLING user (kb-handlers.ts fileAllowed/collectionAllowed), so a grant
+      // can never widen what the clone's owner may read — only narrow it.
+      if (source.collections.length > 0) {
+        await tx.agentCollection.createMany({
+          data: source.collections.map((c) => ({
+            agentId: clone.id,
+            collectionId: c.collectionId,
+            fileId: c.fileId,
+          })),
+        });
+      }
+
+      // MCP instances, credential blobs included. Ciphertext is copied as-is:
+      // same deployment, same CONFIG.encryptionKey, so no re-encryption is
+      // needed. `createdByUserId` keeps pointing at whoever actually pasted the
+      // secret — that is what the audit trail is for.
+      if (source.mcpConnections.length > 0) {
+        await tx.agentMcpConnection.createMany({
+          data: source.mcpConnections.map((c) => ({
+            agentId: clone.id,
+            mcpServerId: c.mcpServerId,
+            slug: c.slug,
+            displayName: c.displayName,
+            encryptedCreds: c.encryptedCreds,
+            iv: c.iv,
+            authTag: c.authTag,
+            createdByUserId: c.createdByUserId,
+          })),
+        });
+      }
+
       // Seed prompt history so the clone's version list isn't empty and the
-      // denormalized active-pointer fields are consistent with a real row.
+      // denormalized active-pointer fields are consistent with a real row. The
+      // source's own history stays with the source — the clone's lineage starts
+      // here, and the note records where it came from.
       const pv = await tx.agentPromptVersion.create({
         data: {
           agentId: clone.id,

@@ -1,10 +1,11 @@
 /**
  * CloneAgentDialog — prompts for the new agent's name before cloning.
  *
- * A clone copies only the system prompt, tools, and skills into a new personal
- * agent. Owners/contributors/admins get an instant copy; everyone else raises
- * an approval request (the chosen name is carried through and applied when the
- * owner approves). The parent owns the actual clone call + navigation.
+ * A clone is a full copy — prompt, tools, skills, knowledge base and
+ * integrations — into a new personal agent. Owners/contributors/admins get an
+ * instant copy; everyone else raises an approval request (the chosen name is
+ * carried through and applied when the owner approves). The parent owns the
+ * actual clone call + navigation.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -98,7 +99,7 @@ export function CloneAgentDialog({
       description={
         needsApproval
           ? "You'll send a request to this agent's owner. Your chosen name is used when they approve."
-          : "Creates your own copy — the system prompt, tools, and skills. Credentials and knowledge-base grants are not copied."
+          : "Creates your own copy — prompt, tools, skills, knowledge base and integrations all come across. Its Spaces identity, sharing and provider keys do not."
       }
       maxWidth={520}
       footer={

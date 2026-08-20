@@ -323,7 +323,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
 
   useEffect(() => {
     getAvailableTools().then(setAvailableTools).catch(() => {});
-    listSkills().then(setAvailableSkills).catch(() => {});
+    // Pass userId: without it the API falls back to scope='global' only, so a
+    // personal skill attached to this agent renders as nothing at all — and a
+    // cloned agent looks like its skills were never copied.
+    listSkills(userId).then(setAvailableSkills).catch(() => {});
     listProviderCredentials(userId).then(setProviderCredentials).catch(() => {});
     listSandboxRepos().then(setSandboxRepoOptions).catch(() => {});
     listSbxGitRepos().then(setSbxGitRepoOptions).catch(() => {});
@@ -860,8 +863,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   /**
    * Clone the current agent. Owners/contributors/admins get an instant copy
    * (server returns cloned=true) and we navigate to the new agent so they can
-   * pick a model before first run — the clone intentionally carries no model.
-   * Everyone else raises an approval request routed to the owner (cloned=false).
+   * pick a model before first run — provider/model is per-user config and does
+   * not travel with the clone. Everyone else raises an approval request routed
+   * to the owner (cloned=false).
    */
   const doClone = useCallback(async (name: string) => {
     if (!agent || cloning) return;
@@ -1098,6 +1102,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       <SkillPickerDialog
         open={skillPickerOpen}
         onOpenChange={setSkillPickerOpen}
+        userId={userId}
         selectedIds={draftSkillIds}
         onApply={(ids) => setDraftSkillIds(ids)}
       />

@@ -8,13 +8,16 @@ import { listSkills, type Skill } from "../../lib/api";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Viewer's id — without it the listing is global-scope only and the viewer's
+   *  own personal skills are invisible here. */
+  userId?: string;
   /** Currently-selected skill IDs (controlled). */
   selectedIds: string[];
   /** Called with the full new selection when the user clicks Apply. */
   onApply: (nextIds: string[]) => void;
 }
 
-export function SkillPickerDialog({ open, onOpenChange, selectedIds, onApply }: Props) {
+export function SkillPickerDialog({ open, onOpenChange, userId, selectedIds, onApply }: Props) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -27,11 +30,11 @@ export function SkillPickerDialog({ open, onOpenChange, selectedIds, onApply }: 
   useEffect(() => {
     if (!open || skills.length > 0) return;
     setLoading(true);
-    listSkills()
+    listSkills(userId)
       .then(setSkills)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [open, skills.length]);
+  }, [open, skills.length, userId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
