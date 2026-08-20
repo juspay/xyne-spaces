@@ -839,25 +839,23 @@ export class UserService {
         throw new Error('Workspace not found');
       }
 
-      // Check if user is invited to this workspace
+      // A live, unconsumed invitation for this workspace. Revoking sets the expiry to the
+      // moment of revocation, so one comparison covers both a lapsed invitation and a
+      // withdrawn one. An already-accepted invitation is not a second entry: whoever used it
+      // holds an account in the workspace and is resolved before this point.
       const invitation = await this.prisma.invitation.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email
-        }
-      });
-
-      // Find if there's an existing user with this email in the org
-      const existingOrgUsers = await this.prisma.user.findMany({
-        where: {
           email: userData.email,
-          workspace: {
-            orgId: workspace.orgId
-          }
+          acceptedAt: null,
+          expiredAt: { gt: new Date() }
         }
       });
 
-      const hasAccess = invitation || existingOrgUsers.length > 0;
+      // Entry to a workspace comes from an invitation to that workspace, or an approved join
+      // request for it. Holding an account in another workspace of the same organisation is
+      // not itself entry to this one.
+      const hasAccess = !!invitation;
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
