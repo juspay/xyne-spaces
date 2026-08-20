@@ -1,3 +1,10 @@
+## [1.205.1](https://github.com/juspay/xyne-spaces/compare/v1.205.0...v1.205.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* restore cmd+K on every back, and give the results page a back arrow ([#835](https://github.com/juspay/xyne-spaces/issues/835)) ([14698a8](https://github.com/juspay/xyne-spaces/commit/14698a80d54445234cb8dc9d725da15d3d1bfb97))
+
 ## [1.205.0](https://github.com/juspay/xyne-spaces/compare/v1.204.0...v1.205.0) (2026-08-20)
 
 
