@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.6...v1.188.0-release-20260817.7) (2026-08-20)
+
+
+### Features
+
+* deploy the SDLC surface as an independent lane ([#787](https://github.com/juspay/xyne-spaces/issues/787)) ([37fec01](https://github.com/juspay/xyne-spaces/commit/37fec01a5b4aef52d39bcfd75023817db26fc3f4)), closes [#836](https://github.com/juspay/xyne-spaces/issues/836)
+
 ## [1.188.0-release-20260817.6](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.5...v1.188.0-release-20260817.6) (2026-08-20)
 
 
