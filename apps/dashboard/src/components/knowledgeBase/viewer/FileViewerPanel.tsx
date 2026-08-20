@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Database, Download, X } from 'lucide-react';
+import { ArrowLeft, Database, Download, Share2, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { XyneAIStar } from '../../icons/xyne-ai';
@@ -11,6 +11,7 @@ import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
 import { KbPdfViewer } from './KbPdfViewer';
 import { VespaDocView } from './VespaDocView';
+import { ShareLinkModal } from '../../knowledgeBaseV2/components/ShareLinkModal';
 
 // KB-local override map. Substitutes the shared viewers with the thin
 // wrappers under `./Kb*Viewer.tsx`, which supply the full-size shell the KB
@@ -66,6 +67,7 @@ export const FileViewerPanel: React.FC<{
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
   const [highlightQuery, setHighlightQuery] = useState<string | undefined>(undefined);
   const [vespaInspectorOpen, setVespaInspectorOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileIdRef = useRef<string | undefined>(fileId);
   fileIdRef.current = fileId;
@@ -374,6 +376,19 @@ export const FileViewerPanel: React.FC<{
           </button>
         </Tooltip>
 
+        <Tooltip content='Share' side='bottom'>
+          <button
+            type='button'
+            onClick={() => setShareOpen(true)}
+            aria-label='Share'
+            data-track-category='knowledge-base'
+            data-track-name='file-viewer-share'
+            className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary'
+          >
+            <Share2 className='h-4 w-4' strokeWidth={1.75} />
+          </button>
+        </Tooltip>
+
         <button
           type='button'
           onClick={() => {
@@ -419,6 +434,15 @@ export const FileViewerPanel: React.FC<{
           </aside>
         )}
       </div>
+
+      {shareOpen && (
+        <ShareLinkModal
+          isOpen
+          onClose={() => setShareOpen(false)}
+          title={file.name}
+          link={`${window.location.origin}${window.location.pathname}`}
+        />
+      )}
     </div>
   );
 };
