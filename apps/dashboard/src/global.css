@@ -491,6 +491,25 @@
     filter: brightness(0) invert(1);
     opacity: 0.85;
   }
+
+  /* Text selection — app-wide, themed.
+     Without a rule here the browser falls back to the OS highlight colour, so
+     the selection changed with each user's macOS accent and looked different
+     from page to page. A light blue reads as selection without competing with
+     summer_breeze's coral --primary.
+     Rich-text and code surfaces (BlockNote, CodeMirror) keep their own selection
+     styling on purpose — they need range semantics this flat fill can't express. */
+  ::selection {
+    background-color: hsl(211 100% 86%);
+    color: hsl(var(--foreground));
+  }
+
+  /* Same hue, but light-on-dark: an 86%-lightness fill would blow out against
+     midnight's surfaces and swallow the text. */
+  [data-theme="midnight"] ::selection {
+    background-color: hsl(211 90% 58% / 0.4);
+    color: hsl(var(--foreground));
+  }
 }
 
 * {
