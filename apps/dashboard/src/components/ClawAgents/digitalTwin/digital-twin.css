@@ -60,9 +60,9 @@
   max-width: none;
 }
 
-/* The origin pill stays in document flow. After send, a separate session
-   overlay docks to the viewport bottom; height grows up from that bar so the
-   ask footer does not translate down the page. The top origin pill remains. */
+/* Ask composer is always a bottom-docked overlay (idle pill, compact session,
+   expanded thread). It is out of document flow so Overview/Configuration stay
+   visible; height grows up from the ask bar. */
 .digital-twin-ledger .dt-ask-origin {
   position: relative;
   padding-top: 1rem;
@@ -135,7 +135,7 @@
 .digital-twin-ledger .dt-chat-overlay-panel.is-docked {
   position: fixed;
   bottom: 1.5rem;
-  left: var(--dt-ask-dock-center);
+  left: var(--dt-ask-dock-center, 50%);
   z-index: 60;
 }
 

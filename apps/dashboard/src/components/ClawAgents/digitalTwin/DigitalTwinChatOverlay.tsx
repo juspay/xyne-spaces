@@ -48,7 +48,6 @@ const findScrollPort = (start: HTMLElement | null): HTMLElement | null => {
 const isInsideChatOverlay = (target: EventTarget | null, host: HTMLElement | null): boolean => {
   if (!(target instanceof Element)) return false;
   if (host?.contains(target)) return true;
-  if (target.closest('.dt-ask-composer-origin')) return true;
   return Boolean(
     target.closest(
       '[data-radix-popper-content-wrapper], [data-radix-dropdown-menu-content], [data-radix-menu-content], [data-radix-dialog-content], [data-radix-dialog-overlay], [role="dialog"], .dt-menu-content, .dt-filter-menu-content, .dt-composer-plus-menu',
@@ -195,8 +194,12 @@ export const DigitalTwinChatOverlay = ({
   }, [showSessionChrome, closing, docked, composerHeight]);
 
   useLayoutEffect(() => {
-    if (!docked || variant === 'session') {
-      setDockSlideOpen(variant === 'session');
+    if (!docked) {
+      setDockSlideOpen(false);
+      return;
+    }
+    if (variant === 'session') {
+      setDockSlideOpen(true);
       return;
     }
     const frame = window.requestAnimationFrame(() => setDockSlideOpen(true));
@@ -255,11 +258,7 @@ export const DigitalTwinChatOverlay = ({
       className='dt-chat-overlay-host'
       style={
         {
-          ...(showSessionChrome
-            ? { height: 0 }
-            : outOfFlow && composerHeight > 0
-              ? { height: composerHeight }
-              : {}),
+          height: 0,
           ...(docked ? { '--dt-ask-dock-center': `${dockRect.left + dockRect.width / 2}px` } : {}),
         } as CSSProperties
       }
@@ -282,7 +281,8 @@ export const DigitalTwinChatOverlay = ({
         transition={overlayTween}
         style={{ overflow: 'visible' }}
         className={cn(
-          'dt-chat-overlay-frame relative flex w-full flex-col justify-end overflow-visible',
+          'dt-chat-overlay-frame flex w-full flex-col justify-end overflow-visible',
+          !outOfFlow && 'relative',
           sessionCard ? 'bg-background' : 'bg-transparent',
           outOfFlow && 'dt-chat-overlay-panel',
           sessionCard && 'dt-chat-overlay dt-has-underlay',
