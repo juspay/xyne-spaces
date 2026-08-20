@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Variable } from 'lucide-react';
 import type { Editor } from '@tiptap/react';
 import { cn } from '../../../../utils/classNames';
@@ -29,9 +29,32 @@ export function AutomationRichTextField({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [varOpen, setVarOpen] = useState(false);
 
+  // Tracks the last HTML the underlying editor emitted through onChange.
+  // Used to distinguish the editor's own echoed value from a genuinely
+  // external value (initial load / programmatic update).
+  const lastEmittedRef = useRef<string | null>(null);
+
   const labelFor = useMemo(() => buildVariableLabelResolver(variableSources), [variableSources]);
 
-  const editorValue = useMemo(() => wrapVariableRefsForLoad(value), [value]);
+  // Only wrap `{{ref}}` tokens for a genuinely external value. When `value` is
+  // the editor's own emitted HTML (echoed back to us via onChange), pass it
+  // through untouched: re-wrapping the echo produces HTML that never equals the
+  // editor's serialized output, so EmailEditor's value-sync effect would keep
+  // re-emitting it — an infinite render loop ("Maximum update depth exceeded").
+  // Passing the echo through unchanged lets that effect see value === its last
+  // emitted value and bail, so the field converges after one load normalization.
+  const editorValue = useMemo(
+    () => (value === lastEmittedRef.current ? value : wrapVariableRefsForLoad(value)),
+    [value],
+  );
+
+  const handleEditorChange = useCallback(
+    (next: string) => {
+      lastEmittedRef.current = next;
+      onChange(next);
+    },
+    [onChange],
+  );
 
   const variableButton = (
     <Popover
@@ -77,7 +100,7 @@ export function AutomationRichTextField({
       <div className='flex flex-col rounded-md border border-border bg-background min-h-[160px]'>
         <EmailEditor
           value={editorValue}
-          onChange={onChange}
+          onChange={handleEditorChange}
           onEditorReady={setEditor}
           placeholder={placeholder ?? 'Type your message…'}
           toolbarRightSlot={variableButton}
