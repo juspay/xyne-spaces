@@ -5383,9 +5383,7 @@ const EmailThreadItem = ({
     </button>
   ) : null;
 
-  // "Debug automations" affordance for this mail (gated by the
-  // debugAutomations preference). Rendered per-email — every reply gets its
-  // own button, keyed on that email's own id.
+  // Rendered per-email — every reply gets its own button, keyed on that email's id.
   const debugAutomationsButton = debugAutomationsEnabled ? (
     <button
       onClick={e => {
