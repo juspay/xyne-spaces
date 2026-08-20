@@ -6,6 +6,60 @@ import { AppError } from './errorHandler';
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
+/**
+ * File types refused at upload: Windows executables and server-side scripts, which are
+ * delivered to other people in a channel rather than rendered by the app. Documents and
+ * markup are deliberately allowed — every serving path types them as an opaque download
+ * (see setSafeDownloadHeaders), and images render under a script-blocking policy (see
+ * setSafeInlineImageHeaders).
+ *
+ * Mobile build artifacts (.apk, .ipa) and shell scripts (.sh, .bash) are NOT listed:
+ * sharing builds and ops scripts in a channel is an established workflow here, and
+ * refusing them would break it. `.com` is likewise absent — it matches the content-id
+ * filenames Outlook gives inline images far more often than any real executable.
+ *
+ * Keyed on extension: file.mimetype is supplied by the client, and a large share of real
+ * uploads arrive as application/octet-stream because the client could not determine a type.
+ * The MIME set below is a second pass for the cases where a type is declared.
+ */
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  '.exe', '.dll', '.msi', '.scr', '.bat', '.cmd', '.ps1',
+  '.php', '.phtml',
+]);
+
+const BLOCKED_UPLOAD_MIME_TYPES = new Set([
+  'application/x-msdownload',
+  'application/x-msdos-program',
+  'application/x-httpd-php',
+]);
+
+export function isBlockedUpload(mimetype?: string, originalName?: string): boolean {
+  const mime = (mimetype ?? '').split(';')[0].trim().toLowerCase();
+  if (BLOCKED_UPLOAD_MIME_TYPES.has(mime)) return true;
+
+  const name = (originalName ?? '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return false;
+  return BLOCKED_UPLOAD_EXTENSIONS.has(name.slice(dot));
+}
+
+/**
+ * Skips a refused file rather than failing the request: returning an error to multer
+ * discards every file in the same multipart upload, which on the inbound-email path would
+ * drop the message entirely. Callers see the file missing from req.files.
+ */
+const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  if (isBlockedUpload(file.mimetype, file.originalname)) {
+    logger.warn('[UPLOAD] Rejected file type', {
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+    });
+    cb(null, false);
+    return;
+  }
+  cb(null, true);
+};
+
 // Generic streaming storage engine for message attachments.
 // Streams directly to object storage without buffering in memory.
 const streamingStorage: multer.StorageEngine = {
@@ -96,6 +150,7 @@ const streamingStorage: multer.StorageEngine = {
 // Common multer configuration for file uploads
 export const uploadConfig = multer({
   storage: multer.memoryStorage(),
+  fileFilter: uploadFileFilter,
   limits: {
     fileSize: MAX_FILE_SIZE_BYTES,
     files: 10 // Max 10 files per request
@@ -143,17 +198,20 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
 
 export const collectionUpload = multer({
   storage: makeCollectionStreamingStorage('collectionId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024, files: 50 },
 });
 
 export const versionUpload = multer({
   storage: makeCollectionStreamingStorage('itemId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
   multer({
     storage: streamingStorage,
+    fileFilter: uploadFileFilter,
     limits: {
       fileSize: fileSizeBytes,
       files: maxFiles,
