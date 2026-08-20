@@ -40,7 +40,7 @@ import {
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
-import { DEFAULT_RECORDING_TITLE } from '@/utils/recordingUtils';
+import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
@@ -249,13 +249,45 @@ const RecordingsV2Screen = (): ReactElement => {
   }, []);
 
   const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
+    // Attach each recording's documents alongside the recording itself, the same
+    // way the detail screen does — otherwise Ask AI opened from the list gets only
+    // the call and has to rediscover the summary and the user's notes. Each canvas
+    // carries its role, because from the row alone the machine-written summary and
+    // the human's notes are indistinguishable.
+    const canvases = selected.flatMap(recording => {
+      const title = recording.title || DEFAULT_RECORDING_TITLE;
+      const { summaryCanvasId, notesCanvasId } = readRecordingCanvasIds(recording.metadata);
+      return [
+        ...(summaryCanvasId
+          ? [
+              {
+                id: summaryCanvasId,
+                canvasId: summaryCanvasId,
+                title: `${title} summary`,
+                canvasRole: 'call-summary' as const,
+              },
+            ]
+          : []),
+        ...(notesCanvasId && notesCanvasId !== summaryCanvasId
+          ? [
+              {
+                id: notesCanvasId,
+                canvasId: notesCanvasId,
+                title: `${title} notes`,
+                canvasRole: 'call-notes' as const,
+              },
+            ]
+          : []),
+      ];
+    });
+
     xyneAIActor.send({
       type: 'OPEN',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
       initialContextSelections: {
-        canvases: [],
+        canvases,
         recordings: selected.map(recording => ({
           id: recording.id,
           title: recording.title || DEFAULT_RECORDING_TITLE,

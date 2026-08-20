@@ -10,9 +10,18 @@ export interface SelectedChannel {
   isPrivate: boolean;
 }
 
+/**
+ * What a canvas IS, for screens that attach one on the user's behalf.
+ * `call-notes` = the human's own notes taken during the call; `call-summary` =
+ * the AI-generated summary of it. The two are easy to confuse from the row
+ * alone but carry very different authority, so the role travels with the item.
+ */
+export type CanvasRole = 'call-notes' | 'call-summary';
+
 export interface SelectedCanvas {
   id: string;
   title: string;
+  canvasRole?: CanvasRole;
 }
 
 export interface SelectedTicket {
