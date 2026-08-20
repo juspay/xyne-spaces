@@ -1,4 +1,4 @@
-import { ReactElement, useRef } from 'react';
+import { ReactElement, useMemo, useRef } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -7,6 +7,9 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
 import ThreadMessages from '../../Chat/ThreadPannel';
 import { ChevronLeft, X } from 'lucide-react';
+import { useDocumentTitleContribution } from '../../../hooks/useDocumentTitleContribution';
+import { DOCUMENT_TITLE_PRIORITIES } from '../../../machines/documentTitleMachine';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 
 const TicketView = (): ReactElement => {
   const ticketViewContainerRef = useRef<HTMLDivElement>(null);
@@ -22,6 +25,22 @@ const TicketView = (): ReactElement => {
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
     enabled: !!ticketId,
   });
+
+  const ticketTitleLabel = useMemo(() => {
+    if (!ticket) return '';
+    const title = htmlToPlainText(ticket.title ?? '').trim();
+    return [ticket.xyneId, title].filter(Boolean).join(' ');
+  }, [ticket]);
+
+  useDocumentTitleContribution(
+    ticketTitleLabel
+      ? {
+          id: 'ticket.active-detail',
+          priority: DOCUMENT_TITLE_PRIORITIES.detail,
+          entity: { type: 'ticket', label: ticketTitleLabel },
+        }
+      : null,
+  );
 
   const bounds = useMeasure({ ref: ticketViewContainerRef, observeResize: true });
   const shouldStack = bounds.width < 700;

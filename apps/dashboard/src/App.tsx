@@ -16,6 +16,7 @@ import {
   XYNE_THEME_COMPONENT_TOKENS_DARK,
 } from './themes/componentTokens';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { DocumentTitleSync } from './components/DocumentTitleSync';
 import { useTheme } from './hooks/useTheme';
 import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
@@ -90,6 +91,7 @@ const App = (): ReactElement => {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <KeyboardProvider>
+          <DocumentTitleSync />
           <AuthProvider>
             <AnalyticsProvider>
               <ThemeProvider

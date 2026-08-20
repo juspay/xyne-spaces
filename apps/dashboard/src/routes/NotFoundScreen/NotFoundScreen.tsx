@@ -1,18 +1,18 @@
-import { useEffect, type ReactElement } from 'react';
+import { type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
+import { useDocumentTitleContribution } from '../../hooks/useDocumentTitleContribution';
+import { DOCUMENT_TITLE_PRIORITIES } from '../../machines/documentTitleMachine';
 
 const NotFoundScreen = (): ReactElement => {
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const previous = document.title;
-    document.title = 'Page not found';
-    return (): void => {
-      document.title = previous;
-    };
-  }, []);
+  useDocumentTitleContribution({
+    id: 'page.not-found',
+    priority: DOCUMENT_TITLE_PRIORITIES.blocking,
+    entity: { type: 'page', label: 'Page not found' },
+  });
 
   // `window.history.length` counts entries from before the app loaded (other sites
   // visited in the same tab), so it can't tell us whether there is anywhere in-app to
