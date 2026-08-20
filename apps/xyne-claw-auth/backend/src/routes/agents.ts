@@ -30,6 +30,7 @@ import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig } from "../lib/agent-config-validation.js";
+import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
@@ -837,9 +838,25 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
 
-    // Audit general agent edits. Tools/config changes are already captured by
-    // AGENT_CONFIG_UPDATED at the agentRepository.update choke point, so `config`
-    // is deliberately excluded here to avoid a duplicate/overlapping trail.
+    // Model-settings audit — which model actually serves this agent's runs.
+    // Written only when config.modelSettings really changed, so the
+    // high-frequency config writes that don't touch it (tools, memory status,
+    // scope flips) don't spam the audit table.
+    if (normalizedConfig !== undefined) {
+      await auditModelSettingsChange({
+        agentId: existing.id,
+        agentName: existing.name,
+        agentSlug: existing.slug,
+        orgId: existing.orgId,
+        actorUserId: requesterId ?? undefined,
+        beforeConfig: existing.config,
+        afterConfig: normalizedConfig,
+      });
+    }
+
+    // Audit general agent edits. `config` is deliberately excluded here to
+    // avoid a duplicate/overlapping trail — model settings get their own
+    // AGENT_CONFIG_UPDATED row above.
     const changedFields: string[] = [];
     if (data.slug && data.slug !== existing.slug) changedFields.push("slug");
     if (name !== undefined && name.trim() !== existing.name) changedFields.push("name");
