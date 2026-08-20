@@ -442,12 +442,27 @@ export function isQuotaExhaustedError(err: unknown): boolean {
  * for hours.)
  */
 export class ProviderStallError extends Error {
+  readonly toolsUsed: string[];
+  readonly toolInvocations: ToolInvocation[];
+  readonly tokenUsage: TokenUsage;
+  readonly partialText: string;
+
   constructor(
     public readonly provider: string,
     public readonly idleMs: number,
+    progress?: {
+      toolsUsed: string[];
+      toolInvocations: ToolInvocation[];
+      tokenUsage: TokenUsage;
+      partialText: string;
+    },
   ) {
     super(`Provider ${provider} stalled: no stream activity for ${idleMs}ms`);
     this.name = "ProviderStallError";
+    this.toolsUsed = [...(progress?.toolsUsed ?? [])];
+    this.toolInvocations = [...(progress?.toolInvocations ?? [])];
+    this.tokenUsage = { ...(progress?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) };
+    this.partialText = progress?.partialText ?? "";
   }
 }
 
@@ -1760,6 +1775,13 @@ export interface RunTaskOptions {
 
 const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
 
+const LOCAL_FILE_TOOL_NAMES = ["read", "write", "grep", "find", "ls"] as const;
+
+/** Pi's global tool allowlist for the path-scoped local Claw workspace. */
+export function localFileToolNames(): string[] {
+  return [...LOCAL_FILE_TOOL_NAMES];
+}
+
 function latestFastModeActiveToolSet(sessionManager: SessionManager): string[] {
   const entries = sessionManager.getEntries() as SessionEntry[];
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -2144,7 +2166,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // include every customTool name. We enumerate them right before building
   // the options.
   // (Ref: pi-coding-agent/dist/core/sdk.js:157 — `allowedToolNames = options.tools`)
-  const builtinAllow = ["read", "write", "grep", "find", "ls"];
+  const builtinAllow = localFileToolNames();
   const customToolNames = (customTools ?? []).map((t) => t.name);
   // Proof that the mandatory twin_deliver tool is actually in the pi payload
   // (allowlist + registered customTools) — logged for the Twin mention flow so a
@@ -2417,9 +2439,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
   };
 
-  // Incremental debug snapshot — written at each assistant turn boundary (NOT
-  // per token), so the debugger can serve a PARTIAL bundle mid-run instead of
-  // 404ing until completion. Writes only debug-session.json + debug-events.json
+  // Incremental debug snapshot — written at assistant turn boundaries and tool
+  // lifecycle boundaries (NOT per token), so the debugger can serve a PARTIAL
+  // bundle mid-run and does not leave a completed tool displayed as running.
+  // Writes only debug-session.json + debug-events.json
   // (never the immutable debug-run-*.json). `messages` is intentionally omitted
   // (kept only in the final snapshot) to avoid O(turns) PVC growth — the drawer
   // renders off `events`/`toolInvocations`. Skipped once the completion write
@@ -2487,6 +2510,21 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     } finally {
       partialDebugFlushing = false;
     }
+  };
+
+  // Serialize partial snapshots. A plain `void flushDebugPartial()` can lose a
+  // tool-end update when a turn-boundary write is already in flight because
+  // flushDebugPartial deliberately skips concurrent writes. Chaining preserves
+  // every requested boundary and gives the final writer one promise to await.
+  const queueDebugPartialFlush = (): void => {
+    const previous = partialFlushPromise ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => flushDebugPartial());
+    partialFlushPromise = next;
+    void next.finally(() => {
+      if (partialFlushPromise === next) partialFlushPromise = null;
+    });
   };
 
   const pushLiveStreamRate = (streamsPerSec: number, active: boolean): void => {
@@ -2676,6 +2714,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         status: "running",
         toolCallId: event.toolCallId,
       } satisfies ToolInvocation);
+      queueDebugPartialFlush();
     }
     if (event.type === "tool_execution_end") {
       toolsUsed.push(event.toolName);
@@ -2749,6 +2788,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...((event as { subagentName?: string }).subagentName ? { subagentName: (event as { subagentName?: string }).subagentName } : {}),
           ...((event as { parentToolCallId?: string }).parentToolCallId ? { parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId } : {}),
         });
+        queueDebugPartialFlush();
 
         // First time a sandbox-* tool succeeds, the kata session is live.
         // Emit the noVNC preview URL once so claw-auth can drop a clickable
@@ -2871,7 +2911,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           // Refresh the incremental debug snapshot so the debugger shows this
           // turn's trace mid-run (piggybacks the per-turn checkpoint cadence).
           // Tracked so the completion writer can await it (avoids a torn write).
-          partialFlushPromise = flushDebugPartial();
+          queueDebugPartialFlush();
         }
         if (stopReason !== "tool_use" && stopReason !== "aborted" && stopReason !== "error") {
           recordHandoffBoundary(latency.llmTurns);
@@ -2984,6 +3024,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     tokenUsage: { ...tokenUsage },
     partialText: streamedText,
   });
+  const buildProviderStallError = (): ProviderStallError => new ProviderStallError(
+    provider ?? "spaces",
+    Date.now() - lastActivityAt,
+    {
+      toolsUsed: [...toolsUsed],
+      toolInvocations: [...toolInvocations],
+      tokenUsage: { ...tokenUsage },
+      partialText: streamedText,
+    },
+  );
 
   // On cancel we must call session.abort() — it stops the agent loop and
   // in-flight tools. dispose() alone only disconnects event listeners, leaving
@@ -3049,7 +3099,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       emitCancelDebugOnce("signal-already-aborted");
       throw buildCancelledError();
     }
-    if (stallSig.aborted) { stopSession(); throw new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt); }
+    if (stallSig.aborted) { stopSession(); throw buildProviderStallError(); }
 
     return await new Promise<T>((resolve, reject) => {
       const cleanup = () => {
@@ -3066,7 +3116,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         emitCancelDebugOnce("user-cancel");
         reject(buildCancelledError());
       };
-      const onStallAbort = () => { cleanup(); stopSession(); reject(new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt)); };
+      const onStallAbort = () => { cleanup(); stopSession(); reject(buildProviderStallError()); };
       userSig?.addEventListener("abort", onUserAbort, { once: true });
       stallSig.addEventListener("abort", onStallAbort, { once: true });
       promise.then(

@@ -7,6 +7,7 @@ import {
 } from './activitySkipMarkAsRead';
 import { Activity, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
+import { resolveSdlcActivityTarget } from './sdlcActivityNavigation';
 
 /** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
 const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
@@ -119,13 +120,18 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
-    const path = isDeskChannel
+    const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
+    const path = resolveSdlcActivityTarget({
+      activity,
+      channelMetadata: channel?.metadata,
+      fallbackPath: defaultPath,
+    });
 
     if (path) {
       const pathWithActivityId =
-        focusThread && !isDeskChannel
+        focusThread && !isDeskChannel && !path.startsWith('/sdlc/')
           ? appendFocusThread(appendSelectedActivity(path))
           : appendSelectedActivity(path);
       const state = {
