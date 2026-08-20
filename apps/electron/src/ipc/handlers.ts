@@ -28,6 +28,7 @@ import {
   resumeRecordingFromOutside,
   setOverlayMinimized,
   setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -620,6 +621,7 @@ export function setupIpcHandlers(): void {
       event,
       state: {
         active: boolean;
+        starting?: boolean;
         startTime?: number;
         paused?: boolean;
         pauseStartedAt?: number | null;
@@ -628,6 +630,7 @@ export function setupIpcHandlers(): void {
     ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
+      setRecordingStarting(!!state?.starting);
       syncRecordingState(!!state?.active, state?.startTime, {
         paused: !!state?.paused,
         pauseStartedAt: state?.pauseStartedAt ?? null,
