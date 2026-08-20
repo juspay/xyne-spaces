@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   Check,
@@ -31,7 +31,6 @@ import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
-import { Tooltip } from '../../ui/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import { useCanvasCommentRail } from '../useCanvasCommentRail';
 
 type UserLite = {
   id: string;
@@ -91,9 +91,16 @@ interface CanvasCommentsPanelProps {
   activeBlockId: string | null;
   activeThreadId?: string | null | undefined;
   activeAnchor?: CanvasCommentAnchor | null | undefined;
+  /**
+   * Thread ids whose anchor mark is still in the document, or null while that is unknown.
+   * A thread whose commented text was deleted drops off the list until an undo restores it.
+   */
+  anchoredThreadIds?: Set<string> | null | undefined;
   editable: boolean;
+  /** Canvas editor container, used to align each thread with the text it annotates. */
+  anchorContainerRef?: React.RefObject<HTMLDivElement | null> | undefined;
   onClose: () => void;
-  onSelectBlock: (blockId: string) => void;
+  onSelectBlock: (blockId: string, threadId?: string) => void;
   onBeforeCreateThread?: ((threadId: string, anchor: CanvasCommentAnchor) => boolean) | undefined;
   onCreateThreadCreated?: (() => void) | undefined;
   onCreateThreadFailed?: ((anchor: CanvasCommentAnchor) => void) | undefined;
@@ -112,14 +119,24 @@ interface CanvasCommentComposerProps {
   onSubmit: (payload: { body: string; mentionedUserIds: string[] }) => void;
 }
 
+interface CanvasCommentBodyProps {
+  body: string;
+  mentionedUserIds: string[];
+  users: UserLite[];
+  isDeleted: boolean;
+  containerClassName?: string | undefined;
+  className?: string | undefined;
+}
+
 interface CanvasCommentThreadSectionProps {
   thread: CanvasCommentThread;
+  isActive: boolean;
   editable: boolean;
   channelId?: string | undefined;
   currentUserId?: string | undefined;
   allUsers: UserLite[];
   editingCommentId: string | null;
-  onSelectBlock: (blockId: string) => void;
+  onSelectBlock: (blockId: string, threadId?: string) => void;
   onSetThreadStatus: (threadId: string, status: CanvasCommentThreadStatus) => void;
   onSetEditingCommentId: (commentId: string | null) => void;
   onDeleteComment: (commentId: string) => void;
@@ -129,6 +146,9 @@ interface CanvasCommentThreadSectionProps {
     payload: { body: string; mentionedUserIds: string[] },
   ) => void;
 }
+
+// Written out in full so Tailwind's class scanner can see it.
+const COLLAPSED_COMMENT_CLAMP_CLASS = 'overflow-hidden line-clamp-4';
 
 const getDisplayName = (user?: UserLite | null): string =>
   user?.displayName || user?.name || user?.email || 'Unknown';
@@ -217,6 +237,62 @@ const renderCommentBody = (
 
   return nodes.length > 0 ? nodes : [body];
 };
+
+function CanvasCommentBody({
+  body,
+  mentionedUserIds,
+  users,
+  isDeleted,
+  containerClassName,
+  className,
+}: CanvasCommentBodyProps): React.JSX.Element {
+  const bodyRef = useRef<HTMLParagraphElement | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+
+  useLayoutEffect(() => {
+    const node = bodyRef.current;
+    // While expanded the clamp is off, so overflow can no longer be measured —
+    // keep the last collapsed measurement so "Show less" stays available.
+    if (!node || isExpanded) return;
+
+    const measure = (): void => {
+      setIsClamped(node.scrollHeight - node.clientHeight > 1);
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return (): void => observer.disconnect();
+  }, [body, isDeleted, isExpanded]);
+
+  return (
+    <div className={cn('flex flex-col items-start', containerClassName)}>
+      <p
+        ref={bodyRef}
+        className={cn(
+          'w-full whitespace-pre-wrap break-words [text-wrap:pretty]',
+          !isExpanded && COLLAPSED_COMMENT_CLAMP_CLASS,
+          className,
+        )}
+      >
+        {isDeleted ? 'Comment deleted' : renderCommentBody(body, mentionedUserIds, users)}
+      </p>
+      {!isDeleted && isClamped && (
+        <button
+          type='button'
+          onClick={() => setIsExpanded(previous => !previous)}
+          className='py-1 text-[12px] font-bold text-foreground'
+          data-track-category='CANVAS'
+          data-track-name='comment_body_toggle_expand'
+        >
+          {isExpanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function CanvasCommentComposer({
   id,
@@ -337,6 +413,7 @@ function CanvasCommentComposer({
 
 function CanvasCommentThreadSection({
   thread,
+  isActive,
   editable,
   channelId,
   currentUserId,
@@ -370,8 +447,12 @@ function CanvasCommentThreadSection({
   return (
     <section
       className={cn(
-        'flex flex-col gap-2 rounded-xl border border-border p-3 transition-colors',
-        isResolved ? 'bg-muted/40' : 'bg-background',
+        'group flex flex-col gap-2 rounded-md border border-border p-2 transition-colors',
+        isActive
+          ? 'border-emerald-300/70 bg-emerald-50 dark:border-emerald-500/35 dark:bg-emerald-500/10'
+          : isResolved
+            ? 'bg-muted/40 hover:bg-accent'
+            : 'bg-background hover:bg-accent',
       )}
     >
       {expandedComments.map((comment, index) => {
@@ -467,7 +548,7 @@ function CanvasCommentThreadSection({
             {isInitialComment && thread.anchorText && (
               <div className='flex min-w-0 gap-2'>
                 <span className='w-[2px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
-                <span className='min-w-0 flex-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.5] text-muted-foreground'>
+                <span className='line-clamp-3 min-w-0 flex-1 overflow-hidden whitespace-pre-wrap break-words text-[12.5px] leading-[1.5] text-muted-foreground'>
                   {thread.anchorText}
                 </span>
               </div>
@@ -496,23 +577,19 @@ function CanvasCommentThreadSection({
                 }
               />
             ) : (
-              <p
+              <CanvasCommentBody
+                body={comment.body}
+                mentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
+                users={allUsers}
+                isDeleted={isDeleted}
+                containerClassName={isReply ? 'pl-7' : undefined}
                 className={cn(
-                  'whitespace-pre-wrap break-words [text-wrap:pretty]',
                   isReply
-                    ? 'pl-7 text-[13px] leading-[1.55] text-muted-foreground'
+                    ? 'text-[13px] leading-[1.55] text-muted-foreground'
                     : 'text-[13.5px] leading-[1.6] text-foreground',
                   isDeleted && 'italic text-muted-foreground',
                 )}
-              >
-                {isDeleted
-                  ? 'Comment deleted'
-                  : renderCommentBody(
-                      comment.body,
-                      parseMentionedUserIds(comment.mentionedUserIds),
-                      allUsers,
-                    )}
-              </p>
+              />
             )}
           </div>
         );
@@ -522,7 +599,7 @@ function CanvasCommentThreadSection({
         <Button
           variant='outline'
           size='sm'
-          onClick={() => onSelectBlock(thread.blockId)}
+          onClick={() => onSelectBlock(thread.blockId, thread.id)}
           data-track-category='CANVAS'
           data-track-name='go_to_comment_anchor'
           className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium'
@@ -567,8 +644,11 @@ export function CanvasCommentsPanel({
   canvasTitle,
   channelId,
   activeBlockId,
+  activeThreadId,
   activeAnchor,
+  anchoredThreadIds,
   editable,
+  anchorContainerRef,
   onClose,
   onSelectBlock,
   onBeforeCreateThread,
@@ -584,12 +664,20 @@ export function CanvasCommentsPanel({
     enabled: Boolean(canvasId),
   }) as unknown as [CanvasCommentThread[]];
 
+  // A thread lives as long as the text it annotates: the editor drops its id from this set when
+  // the anchor is deleted and puts it back on undo.
+  const anchoredThreads = useMemo(
+    () =>
+      anchoredThreadIds ? threads.filter(thread => anchoredThreadIds.has(thread.id)) : threads,
+    [anchoredThreadIds, threads],
+  );
+
   const orderedThreads = useMemo(() => {
-    return [...threads].sort((a, b) => {
+    return [...anchoredThreads].sort((a, b) => {
       if (a.status !== b.status) return a.status === CanvasCommentThreadStatus.OPEN ? -1 : 1;
       return b.createdAt - a.createdAt;
     });
-  }, [threads]);
+  }, [anchoredThreads]);
 
   const visibleThreads = useMemo(
     () =>
@@ -606,10 +694,15 @@ export function CanvasCommentsPanel({
     thread => thread.status === CanvasCommentThreadStatus.RESOLVED,
   ).length;
 
-  const threadCountLabel =
-    orderedThreads.length === 0
-      ? 'No comments on this canvas yet'
-      : `${openCount} open · ${resolvedCount} resolved`;
+  const railScrollRef = useRef<HTMLDivElement | null>(null);
+  const railTrackRef = useRef<HTMLDivElement | null>(null);
+  const rail = useCanvasCommentRail({
+    anchorContainerRef,
+    railScrollRef,
+    railTrackRef,
+    threads: visibleThreads,
+    enabled: Boolean(anchorContainerRef),
+  });
 
   const filterTabs: { value: CanvasCommentThreadFilter; label: string; count: number }[] = [
     { value: 'ALL', label: 'All', count: orderedThreads.length },
@@ -761,45 +854,30 @@ export function CanvasCommentsPanel({
 
   return (
     <motion.aside
-      className='relative z-40 flex h-full w-[390px] max-w-[86%] shrink-0 flex-col rounded-tl-[18px] border-l border-t border-input bg-background shadow-[-16px_0_44px_hsl(var(--foreground)/0.09)]'
+      className='absolute inset-y-0 right-0 z-20 flex w-full shrink-0 flex-col border-l border-border bg-background shadow-xl md:relative md:z-auto md:w-80 md:shadow-none'
       initial={{ x: 14, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 12, opacity: 0, transition: { duration: 0.15, ease: 'easeIn' } }}
       transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
     >
-      <motion.div
-        className='flex items-start justify-between gap-2 px-4 pb-3 pt-4'
-        initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-        transition={{ duration: 0.3, delay: 0.05, ease: [0.4, 0, 0.2, 1] }}
-      >
-        <div className='min-w-0 flex-1'>
-          <h2 className='truncate text-[14.5px] font-bold leading-5 text-foreground'>
-            Comment activity
-          </h2>
-          <p className='mt-1 text-xs text-muted-foreground'>{threadCountLabel}</p>
+      <div className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4'>
+        <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
+          <MessageSquare size={16} />
+          Comments
         </div>
-        <Tooltip content='Close comments'>
-          <Button
-            variant='ghost'
-            size='iconSm'
-            onClick={onClose}
-            data-track-category='CANVAS'
-            data-track-name='close_comments_panel'
-            aria-label='Close comments'
-            className='size-7 shrink-0 text-muted-foreground'
-          >
-            <X className='size-4' />
-          </Button>
-        </Tooltip>
-      </motion.div>
+        <Button
+          variant='ghost'
+          size='iconSm'
+          onClick={onClose}
+          data-track-category='CANVAS'
+          data-track-name='close_comments_panel'
+          aria-label='Close comments'
+        >
+          <X size={16} />
+        </Button>
+      </div>
 
-      <motion.div
-        className='flex items-center gap-1 px-4 pb-3'
-        initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-        transition={{ duration: 0.3, delay: 0.11, ease: [0.4, 0, 0.2, 1] }}
-      >
+      <div className='flex shrink-0 items-center gap-1 border-b border-border px-3 py-2'>
         {filterTabs.map(tab => (
           <button
             key={tab.value}
@@ -818,16 +896,23 @@ export function CanvasCommentsPanel({
             {tab.label} {tab.count}
           </button>
         ))}
-      </motion.div>
+      </div>
 
-      <motion.div
-        className='thin-scrollbar flex-1 overflow-y-auto px-4 pb-5'
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.17, ease: [0.4, 0, 0.2, 1] }}
+      <div
+        ref={railScrollRef}
+        className={cn(
+          'thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pt-3',
+          rail.isAligned ? 'relative' : 'pb-6',
+        )}
       >
         {editable && selectedTextAnchor && (
-          <div className='mb-3 rounded-xl border border-border bg-background p-3'>
+          <div
+            className={cn(
+              'rounded-md border border-border bg-background p-2',
+              // Overlaid while aligned so the composer cannot push the rail off its anchors.
+              rail.isAligned ? 'absolute inset-x-3 top-3 z-10 shadow-sm' : 'mb-2',
+            )}
+          >
             <p className='mb-2 truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
               New comment on selected text
             </p>
@@ -849,44 +934,49 @@ export function CanvasCommentsPanel({
         )}
 
         {visibleThreads.length === 0 ? (
-          <div className='flex flex-col items-center justify-center gap-2 px-3 py-10 text-center'>
-            <MessageSquare className='size-[26px] stroke-[1.5] text-muted-foreground/50' />
-            <p className='text-[13px] font-medium text-foreground'>
-              {threadStatusFilter === 'ALL'
-                ? 'No comments'
-                : threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
-                  ? 'No resolved comments'
-                  : 'No open comments'}
-            </p>
-            <p className='text-xs text-muted-foreground'>
-              {threadStatusFilter === 'ALL'
-                ? 'Select text and start a thread.'
-                : threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
-                  ? 'Resolved threads will appear here.'
-                  : 'Select text and start a thread.'}
-            </p>
+          <div className='flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground'>
+            {threadStatusFilter === 'ALL'
+              ? 'No comments yet'
+              : threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
+                ? 'No resolved comments'
+                : 'No open comments'}
           </div>
         ) : (
-          <div className='space-y-2'>
+          <div
+            ref={railTrackRef}
+            className={rail.isAligned ? 'relative' : 'space-y-2'}
+            style={rail.isAligned ? { height: rail.trackHeight } : undefined}
+          >
             {visibleThreads.map(thread => (
-              <CanvasCommentThreadSection
+              <div
                 key={thread.id}
-                thread={thread}
-                editable={editable}
-                channelId={channelId}
-                currentUserId={user?.id}
-                allUsers={allUsers}
-                editingCommentId={editingCommentId}
-                onSelectBlock={onSelectBlock}
-                onSetThreadStatus={setThreadStatus}
-                onSetEditingCommentId={setEditingCommentId}
-                onDeleteComment={deleteComment}
-                onUpdateComment={updateComment}
-              />
+                ref={
+                  rail.isAligned
+                    ? (element): void => rail.registerCard(thread.id, element)
+                    : undefined
+                }
+                className={rail.isAligned ? 'absolute inset-x-0' : undefined}
+                style={rail.isAligned ? { top: rail.cardTops[thread.id] ?? 0 } : undefined}
+              >
+                <CanvasCommentThreadSection
+                  thread={thread}
+                  isActive={activeThreadId === thread.id}
+                  editable={editable}
+                  channelId={channelId}
+                  currentUserId={user?.id}
+                  allUsers={allUsers}
+                  editingCommentId={editingCommentId}
+                  onSelectBlock={onSelectBlock}
+                  onSetThreadStatus={setThreadStatus}
+                  onSetEditingCommentId={setEditingCommentId}
+                  onDeleteComment={deleteComment}
+                  onUpdateComment={updateComment}
+                />
+              </div>
             ))}
           </div>
         )}
-      </motion.div>
+      </div>
     </motion.aside>
   );
 }
