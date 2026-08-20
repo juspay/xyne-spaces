@@ -1,3 +1,24 @@
+## [1.205.0](https://github.com/juspay/xyne-spaces/compare/v1.204.0...v1.205.0) (2026-08-20)
+
+
+### Features
+
+* add calendar view component to support screen ([#772](https://github.com/juspay/xyne-spaces/issues/772)) ([10bdad5](https://github.com/juspay/xyne-spaces/commit/10bdad562edec2ee03577c5fcbee4013bffe68a9))
+
+## [1.204.0](https://github.com/juspay/xyne-spaces/compare/v1.203.4...v1.204.0) (2026-08-20)
+
+
+### Features
+
+* add nix setup CI check and fix db-setup backend path ([#453](https://github.com/juspay/xyne-spaces/issues/453)) ([0047187](https://github.com/juspay/xyne-spaces/commit/0047187113a72eb12e63d5570981aa7faf706c20)), closes [#21](https://github.com/juspay/xyne-spaces/issues/21)
+
+## [1.203.4](https://github.com/juspay/xyne-spaces/compare/v1.203.3...v1.203.4) (2026-08-20)
+
+
+### Bug Fixes
+
+* updating catch block to provide actual error ([#813](https://github.com/juspay/xyne-spaces/issues/813)) ([68701d3](https://github.com/juspay/xyne-spaces/commit/68701d397ef43dee78e3f1f7430af224d4b66e5a))
+
 ## [1.203.3](https://github.com/juspay/xyne-spaces/compare/v1.203.2...v1.203.3) (2026-08-20)
 
 
