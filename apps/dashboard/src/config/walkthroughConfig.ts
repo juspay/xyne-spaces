@@ -11,25 +11,21 @@ export const walkthroughConfig: Record<WalkthroughFeature, DriveStep[]> = {
       },
     },
     {
-      element: '[data-testid="open-dms-button"]',
+      element: '[data-testid="search-messages-input"]',
       popover: {
-        title: 'Dedicated DMs View',
-        description: 'Click this button to open the full-screen Direct Messages workspace.',
-        side: 'right',
+        title: 'Find a Conversation',
+        description: 'Search across all your direct messages to quickly jump to any chat.',
+        side: 'bottom',
+        align: 'start',
       },
     },
     {
-      element: '#sidebar-add-dm-btn',
+      element: '[data-testid="create-new-message-btn"]',
       popover: {
-        title: 'Quick Add DM',
-        description: 'You can also instantly start a new conversation right here from the sidebar!',
-        side: 'right',
-      },
-      onHighlightStarted: (element?: Element) => {
-        if (element) (element as HTMLElement).style.opacity = '1';
-      },
-      onDeselected: (element?: Element) => {
-        if (element) (element as HTMLElement).style.opacity = '';
+        title: 'Start a New Message',
+        description: 'Click here to start a new direct message with anyone on your team.',
+        side: 'bottom',
+        align: 'end',
       },
     },
   ],
