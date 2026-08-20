@@ -11,6 +11,7 @@ import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
+import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
@@ -22,6 +23,7 @@ function createCanvasSchema() {
     blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs, {
       diagram: createReactDiagramBlockSpec(),
       mathBlock: createReactMathBlockSpec(),
+      codeBlock: canvasCodeBlockSpec,
     }),
   } as Parameters<typeof BlockNoteSchema.create>[0]).extend({
     inlineContentSpecs: {

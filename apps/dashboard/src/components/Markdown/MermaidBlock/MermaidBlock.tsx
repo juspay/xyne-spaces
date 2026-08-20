@@ -10,6 +10,23 @@ import {
   isValidMermaidSyntax,
 } from './MermaidBlock.utils';
 
+function useIsDarkTheme(): boolean {
+  const [isDark, setIsDark] = useState<boolean>(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.getAttribute('data-theme') === 'midnight',
+  );
+  useEffect(() => {
+    const root = document.documentElement;
+    const update = (): void => setIsDark(root.getAttribute('data-theme') === 'midnight');
+    update();
+    const observer = new MutationObserver((): void => update());
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
 // Initialize Mermaid once.
 // securityLevel MUST NOT be 'loose': under 'loose' mermaid skips its internal
 // DOMPurify pass entirely, so raw HTML in diagram labels (e.g. `A["<img src=x
@@ -40,7 +57,12 @@ mermaid.initialize({
  * Uses IndexedDB caching for improved performance
  * Memoized to prevent re-renders when parent re-renders (e.g., typing in input)
  */
-const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactElement => {
+const MermaidBlockComponent = ({
+  chart,
+  messageId,
+  controlsOnHover = false,
+}: MermaidBlockProps): ReactElement => {
+  const isDark = useIsDarkTheme();
   const elementRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -66,10 +88,11 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
       void renderMermaidDiagram({
         chart,
         messageId,
+        isDark,
         lastRenderedChart: lastRenderedChartRef.current,
         onSuccess: (renderedSvg, renderedChart) => {
           setSvg(renderedSvg);
-          lastRenderedChartRef.current = renderedChart;
+          lastRenderedChartRef.current = `${isDark ? 'dark' : 'light'}:${renderedChart}`;
         },
         onError: setError,
         onLoading: setIsRendering,
@@ -81,7 +104,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
         clearTimeout(renderTimeoutRef.current);
       }
     };
-  }, [chart, messageId]);
+  }, [chart, messageId, isDark]);
 
   const handleCopyCode = async (): Promise<void> => {
     const success = await copyToClipboard(chart);
@@ -116,9 +139,15 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
   // If we have SVG, show it
   if (svg) {
     return (
-      <div className='relative my-4'>
+      <div className='group/mermaid relative my-4'>
         {/* View Mode Toggle & Actions */}
-        <div className='absolute top-2 right-2 z-10'>
+        <div
+          className={`absolute right-2 top-2 z-10 transition-opacity ${
+            controlsOnHover
+              ? 'opacity-0 focus-within:opacity-100 group-hover/mermaid:opacity-100'
+              : 'opacity-100'
+          }`}
+        >
           <div className='flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-lg shadow-sm border border-border p-1'>
             <button
               onClick={() => setViewMode('diagram')}
@@ -192,7 +221,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           <>
             <div
               ref={elementRef}
-              className='mermaid-diagram flex justify-center p-4 bg-white border border-border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors'
+              className='mermaid-diagram flex justify-center rounded-lg border border-border bg-background p-4 transition-colors hover:bg-muted/30 cursor-pointer'
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}
               onClick={() => setShowPreview(true)}
@@ -246,7 +275,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           {/* Preview Content */}
           <div className='h-full w-full flex items-center justify-center p-4 overflow-auto rounded-lg'>
             <div
-              className='mermaid-diagram flex justify-center w-[90vw] h-[85vh] bg-white rounded-lg m-10'
+              className='mermaid-diagram m-10 flex h-[85vh] w-[90vw] justify-center rounded-lg bg-background'
               style={{ maxWidth: '90vw', maxHeight: '85vh' }}
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}
@@ -277,7 +306,11 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
  * Memoized MermaidBlock to prevent re-renders when chart hasn't changed
  * This prevents flickering when user types in input box
  */
-export const MermaidBlock = memo(MermaidBlockComponent, (prevProps, nextProps) => {
+export const MermaidBlock = memo(MermaidBlockComponent, (prevProps, nextProps): boolean => {
   // Only re-render if chart or messageId actually changed
-  return prevProps.chart === nextProps.chart && prevProps.messageId === nextProps.messageId;
+  return (
+    prevProps.chart === nextProps.chart &&
+    prevProps.messageId === nextProps.messageId &&
+    prevProps.controlsOnHover === nextProps.controlsOnHover
+  );
 });
