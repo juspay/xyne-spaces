@@ -203,7 +203,7 @@ export class AnalyticsRepository {
   private getCallWorkspaceFilter(workspaceId: string, userIds: string[]): Prisma.CallWhereInput {
     return {
       OR: [
-        { channel: { workspaceId } },
+        { workspaceId, channelId: { not: null } },
         { channelId: null, createdByUserId: { in: userIds } }
       ]
     };
@@ -412,9 +412,7 @@ export class AnalyticsRepository {
     const userPresenceStats = await this.prisma.userPresence.groupBy({
       by: ['status'],
       where: {
-        user: {
-          workspaceId: scopedWorkspaceId
-        }
+        workspaceId: scopedWorkspaceId
       },
       _count: {
         status: true,
@@ -424,9 +422,7 @@ export class AnalyticsRepository {
     // Get total user count
     const totalUsers = await this.prisma.userPresence.count({
       where: {
-        user: {
-          workspaceId: scopedWorkspaceId
-        }
+        workspaceId: scopedWorkspaceId
       }
     });
 
@@ -701,7 +697,8 @@ export class AnalyticsRepository {
         UNION ALL
         SELECT cv."createdBy", ${bucketOf(Prisma.sql`cv."createdAt"`)}
         FROM "public"."canvases" cv
-        WHERE cv."createdBy" IN (${workspaceUsers})
+        WHERE cv."workspaceId" = ${workspaceId}
+          AND cv."createdBy" IN (${workspaceUsers})
           ${this.dateBoundsSql(Prisma.sql`cv."createdAt"`, gte, lte)}
 
         UNION ALL
@@ -781,9 +778,7 @@ export class AnalyticsRepository {
     const usersOnboardedCount = await this.prisma.userPresence.count({
       where: {
         createdAt: dateCondition,
-        user: {
-          workspaceId
-        }
+        workspaceId
       }
     });
 
@@ -805,7 +800,7 @@ export class AnalyticsRepository {
 
     // Get user presence records
     const userPresenceRecords = await this.prisma.userPresence.findMany({
-      where: { createdAt: dateCondition, user: { workspaceId } },
+      where: { createdAt: dateCondition, workspaceId },
       select: { createdAt: true },
     });
 
