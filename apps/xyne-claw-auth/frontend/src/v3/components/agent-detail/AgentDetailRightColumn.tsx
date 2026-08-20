@@ -72,6 +72,9 @@ interface Props {
   permissions: AgentPermissions;
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  /** Sync an updated agent back to the parent (used by the Privacy panel's
+   *  immediate save so config stays current). */
+  onAgentUpdated?: (agent: Agent) => void;
   scheduledJobs: ScheduledJob[];
   onJobsChange: (jobs: ScheduledJob[]) => void;
   agentStats: DashboardAgentRow | null;
@@ -102,6 +105,7 @@ export function AgentDetailRightColumn({
   permissions,
   activeTab,
   onTabChange,
+  onAgentUpdated,
   scheduledJobs,
   onJobsChange,
   agentStats,
@@ -401,7 +405,12 @@ export function AgentDetailRightColumn({
           )}
           {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
           {activeTab === "privacy" && (
-            <PrivacyTab agent={agent} userId={userId} canEdit={permissions.canEdit} />
+            <PrivacyTab
+              agent={agent}
+              userId={userId}
+              canEdit={permissions.canEdit}
+              onAgentUpdated={onAgentUpdated}
+            />
           )}
           {activeTab === "scheduled-jobs" && (
             <ScheduledJobsTab jobs={scheduledJobs} onJobsChange={onJobsChange} />

@@ -1112,6 +1112,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             permissions={permissions}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onAgentUpdated={setAgent}
             scheduledJobs={scheduledJobs}
             onJobsChange={handleJobsChange}
             agentStats={agentStats}
