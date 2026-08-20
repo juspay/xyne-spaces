@@ -90,19 +90,24 @@ export async function searchCollectionItems(
   collectionId: string,
   query: string,
 ): Promise<CollectionChild[]> {
+  // The backend's search response shape doesn't match CollectionChild's field
+  // names — it sends `itemType: 'folder' | 'file'` (lowercase, not `type`)
+  // and `collectionId` (the item's containing folder, same field name Zero's
+  // synced schema uses everywhere else — see CollectionTreeDataSync's
+  // filesByFolder map) rather than `parentId`. Mapped explicitly below
+  // instead of trusting a response type that never matched reality.
   const response = await apiInstance.get<{
     success: boolean;
     items: Array<{
       id: string;
       name: string;
-      type: NodeType;
+      itemType: 'folder' | 'file';
       createdAt: string;
       updatedAt: string;
-      uploadedByEmail: string;
       ingestionStatus: IngestionStatus;
-      fileSize: string;
-      mimeType: string;
-      parentId: string | null;
+      fileSize: string | null;
+      mimeType: string | null;
+      collectionId: string;
     }>;
     query: string;
   }>(`/collections/${collectionId}/search`, {
@@ -112,12 +117,15 @@ export async function searchCollectionItems(
   return response.data.items.map(item => ({
     id: item.id,
     name: item.name,
-    type: item.type,
+    type: item.itemType === 'folder' ? 'FOLDER' : ('FILE' as NodeType),
     updatedAt: item.updatedAt,
     ingestionStatus: item.ingestionStatus,
     size: item.fileSize ? parseInt(item.fileSize, 10) || 0 : 0,
-    mimeType: item.mimeType,
-    parentId: item.parentId ?? null,
+    mimeType: item.mimeType ?? '',
+    // Root-level items' collectionId equals the collection being searched —
+    // normalize that to null to match CollectionChild.parentId's
+    // "root has no parent" convention used everywhere else.
+    parentId: item.collectionId === collectionId ? null : item.collectionId,
   }));
 }
 

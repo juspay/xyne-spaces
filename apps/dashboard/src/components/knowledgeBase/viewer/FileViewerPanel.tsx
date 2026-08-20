@@ -319,7 +319,7 @@ export const FileViewerPanel: React.FC<{
     <div className='h-full w-full flex flex-col bg-background' ref={contentRef}>
       {/* Slim toolbar — back / filename · meta / download. Mirrors
           xyne-search's PdfViewer top bar; no gradient, no Ask-AI. */}
-      <div className='flex h-12 flex-shrink-0 items-center gap-3 border-b border-border bg-background px-3'>
+      <div className='flex flex-shrink-0 items-center gap-3 border-b border-border bg-background px-5 py-2.5'>
         <button
           type='button'
           onClick={handleBackNavigation}
@@ -346,12 +346,12 @@ export const FileViewerPanel: React.FC<{
             <button
               type='button'
               onClick={() => onOpenChat(file.fileId, file.name)}
+              aria-label='Ask AI'
               data-track-category='knowledge-base'
               data-track-name='file-viewer-open-ai-chat'
-              className='inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
             >
-              <XyneAIStar size={14} />
-              <span>Ask AI</span>
+              <XyneAIStar size={22} />
             </button>
           </Tooltip>
         )}
