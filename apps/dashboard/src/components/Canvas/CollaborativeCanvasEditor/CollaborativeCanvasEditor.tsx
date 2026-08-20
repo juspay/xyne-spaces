@@ -117,6 +117,8 @@ interface CollaborativeCanvasEditorProps {
   initialCommentThreadId?: string | undefined;
   /** Emits the number of open comment threads already loaded by the editor highlight query. */
   onOpenCommentCountChange?: (count: number) => void;
+  /** Mirrors the comments panel open state so the host header can mark its button as active. */
+  onCommentsOpenChange?: (open: boolean) => void;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
@@ -147,6 +149,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       initialBlockIdToFocus,
       initialCommentThreadId,
       onOpenCommentCountChange,
+      onCommentsOpenChange,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -534,6 +537,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
+      anchoredCommentThreadIds,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
       focusCommentBlock,
@@ -550,6 +554,11 @@ export const CollaborativeCanvasEditor = forwardRef<
       onOpenCommentCountChange,
       ready: isEditorReady,
     });
+
+    // The panel lives in here, so the header above has no other way to tell that it is open.
+    useEffect(() => {
+      onCommentsOpenChange?.(isCommentsOpen);
+    }, [isCommentsOpen, onCommentsOpenChange]);
 
     // Expose presentation and comment drawer methods via ref
     useImperativeHandle(
@@ -746,7 +755,9 @@ export const CollaborativeCanvasEditor = forwardRef<
                 activeBlockId={activeCommentBlockId}
                 activeThreadId={activeCommentThreadId}
                 activeAnchor={activeCommentAnchor}
+                anchoredThreadIds={anchoredCommentThreadIds}
                 editable={editable && !isReadOnly}
+                anchorContainerRef={containerRef}
                 onClose={() => setIsCommentsOpen(false)}
                 onSelectBlock={focusCommentBlock}
                 onBeforeCreateThread={applyCommentAnchorStyle}
