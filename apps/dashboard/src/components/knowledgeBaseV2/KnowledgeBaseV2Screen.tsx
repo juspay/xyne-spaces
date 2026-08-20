@@ -279,7 +279,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // lazily per folder, so it alone can't roll up an unopened subfolder.)
   const [allCollectionFiles] = useCachedQuery(
     queries.collectionFilesByRoot({ rootCollectionId: collectionId ?? '' }),
-    !isAtRoot && !!collectionId,
+    // Only inside a collection — never register this on the KB root. Object form
+    // is required; a bare boolean is ignored by useCachedQuery (always enabled).
+    { enabled: !isAtRoot && !!collectionId },
   );
 
   // folderId → rolled-up counts of every file anywhere beneath it (recursive).

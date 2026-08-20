@@ -31,11 +31,13 @@ export const KbIngestionActivity = ({
 
   const [collections] = useCachedQuery(
     queries.collectionById({ id: collectionId }),
-    !!collectionId,
+    // Object form required — a bare boolean is ignored by useCachedQuery.
+    { enabled: !!collectionId },
   );
   const [files] = useCachedQuery(
     queries.collectionFilesByRoot({ rootCollectionId: collectionId }),
-    !hasSnap && !!collectionId,
+    // Fallback rollup only — skip entirely when a frozen count snapshot exists.
+    { enabled: !hasSnap && !!collectionId },
   );
 
   if (!actor) return null;

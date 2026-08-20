@@ -52,7 +52,8 @@ const ChannelCollectionsLoader: React.FC<ChannelCollectionsLoaderProps> = React.
     const enabled = !!user && !!channelId;
     const [zeroCollections, { type: queryType }] = useCachedQuery(
       queries.scopedCollectionsWithItems({ scopeType: 'CHANNEL', scopeId: channelId }),
-      enabled,
+      // Object form required — a bare boolean is ignored by useCachedQuery.
+      { enabled },
     );
 
     const loading = enabled && queryType !== 'complete';

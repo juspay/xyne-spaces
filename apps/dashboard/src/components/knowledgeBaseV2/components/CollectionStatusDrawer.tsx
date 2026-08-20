@@ -67,7 +67,9 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
 
   const [files] = useCachedQuery(
     queries.collectionFilesByRoot({ rootCollectionId: collection?.rootCollectionId ?? '' }),
-    open,
+    // On-demand: only register the query while the drawer is open (a badge was clicked).
+    // Must be the object form — a bare boolean is ignored by useCachedQuery.
+    { enabled: open },
   );
 
   const { rows, ready, processing, queued, failed } = useMemo(() => {
