@@ -74,9 +74,8 @@ const MAX_CONVERSATIONS = Number(process.env["TWIN_ASM_MAX_CONVERSATIONS"] ?? 10
 /** Cap on how many of those get a FULL thread fetch. */
 const MAX_THREAD_FETCHES = Number(process.env["TWIN_ASM_MAX_THREADS"] ?? 1000);
 /** Max messages FETCHED per thread from Vespa (the whole thread, so behaviour
- *  derivation + smart-select see everything). 400 = Vespa's per-query hit ceiling.
- *  One conv per query (VESPA_THREAD_CHUNK=1) so a hot thread can't starve others
- *  sharing a chunk's budget — full coverage over fewer round-trips. */
+ *  derivation + smart-select see everything). 400 = Vespa's per-query hit ceiling,
+ *  so a thread given a query to itself can never be starved by a neighbour. */
 const THREAD_FETCH_CAP = 400;
 /** Above this many messages a thread is SMART-SELECTED for rendering (first N +
  *  last N + a ±window around each of the user's own turns) instead of rendered in
@@ -87,9 +86,10 @@ const THREAD_RENDER_CAP = 80;
 const THREAD_SELECT_HEAD = 20;
 const THREAD_SELECT_TAIL = 20;
 const THREAD_SELECT_USER_WINDOW = 5;
-/** Conversations per direct-Vespa thread-fetch query. chunk × THREAD_FETCH_CAP
- *  MUST stay ≤ Vespa's hard per-query hit ceiling of 400 (1 × 400 = 400). */
-const VESPA_THREAD_CHUNK = 1;
+/** Vespa's per-query hit ceiling — a thread-fetch chunk packs up to this. */
+const VESPA_MAX_HITS = 400;
+/** Headroom per conversation so small `replyCount` drift doesn't force a refetch. */
+const THREAD_SIZE_SLACK = 4;
 /** Parallelism for per-thread fetches (keep gentle on Spaces). */
 const THREAD_FETCH_CONCURRENCY = Number(process.env["TWIN_ASM_THREAD_CONCURRENCY"] ?? 6);
 
@@ -542,48 +542,107 @@ async function fetchMessagesByIds(auth: SpacesAuthContext, ids: string[]): Promi
  *  (they render lightweight), never throws. Returns cid → messages (asc, capped).
  *  Vespa is eventually-consistent — fine here since backfill/daily read past
  *  windows, not the live edge. */
+/**
+ * Pack conversations into chunks that each fit one Vespa query.
+ *
+ * The limit is a HIT budget and the query sorts by recency across the whole
+ * chunk, so an overflowing chunk starves its oldest conversation. `replyCount`
+ * (already fetched) tells us each thread's size, so small threads can share a
+ * query while a big one gets its own. Unknown size → charged the full cap, which
+ * is the old one-per-query behaviour.
+ */
+export function packThreadChunks(convIds: string[], sizeOf: (cid: string) => number): string[][] {
+  const chunks: string[][] = [];
+  let cur: string[] = [];
+  let curHits = 0;
+  for (const cid of convIds) {
+    const size = Math.min(THREAD_FETCH_CAP, Math.max(1, sizeOf(cid)));
+    if (cur.length > 0 && curHits + size > VESPA_MAX_HITS) {
+      chunks.push(cur);
+      cur = [];
+      curHits = 0;
+    }
+    cur.push(cid);
+    curHits += size;
+  }
+  if (cur.length > 0) chunks.push(cur);
+  return chunks;
+}
+
 async function fetchThreadsBatch(
   userId: string,
   workspaceId: string,
   convIds: string[],
+  /** Expected message count per conversation. */
+  sizeOf: (cid: string) => number,
 ): Promise<Map<string, MsgRow[]>> {
   const byConv = new Map<string, MsgRow[]>();
-  const chunks: string[][] = [];
-  for (let i = 0; i < convIds.length; i += VESPA_THREAD_CHUNK) {
-    chunks.push(convIds.slice(i, i + VESPA_THREAD_CHUNK));
-  }
+
+  /** One Vespa read. False = the result filled the budget, so it may be trimmed. */
+  const fetchChunk = async (chunk: string[], hits: number): Promise<boolean> => {
+    const built = buildYqlFromParams(
+      {
+        searchArea: "message",
+        filters: { conversationId: { in: chunk } },
+        sort: { by: "createdDate", dir: "desc" },
+        hits,
+      },
+      userId,
+      workspaceId,
+    );
+    const resp = (await queryDirect(
+      built.yql,
+      built.query,
+      userId,
+      hits,
+      0,
+      CONFIG.vespaQueryEndpoint,
+      built.rankProfile,
+      undefined,
+      workspaceId,
+      true, // includeRawFields — we read the raw chat_message doc
+    )) as unknown as { data?: { results?: Array<Record<string, unknown>> } };
+    const results = resp?.data?.results ?? [];
+    for (const r of results) {
+      const row = vespaHitToMsgRow(r);
+      if (!row || row.isDeleted) continue;
+      const list = byConv.get(row.conversationId);
+      if (list) list.push(row);
+      else byConv.set(row.conversationId, [row]);
+    }
+    return results.length < hits;
+  };
+
+  const chunks = packThreadChunks(convIds, sizeOf);
+  logger.info("[assembler] thread-fetch packed", {
+    userId,
+    conversations: convIds.length,
+    queries: chunks.length,
+  });
 
   await mapPool(chunks, THREAD_FETCH_CONCURRENCY, async (chunk) => {
+    const hits = Math.min(
+      VESPA_MAX_HITS,
+      chunk.reduce((n, cid) => n + Math.min(THREAD_FETCH_CAP, Math.max(1, sizeOf(cid))), 0),
+    );
     try {
-      const hits = chunk.length * THREAD_FETCH_CAP;
-      const built = buildYqlFromParams(
-        {
-          searchArea: "message",
-          filters: { conversationId: { in: chunk } },
-          sort: { by: "createdDate", dir: "desc" },
-          hits,
-        },
-        userId,
-        workspaceId,
-      );
-      const resp = (await queryDirect(
-        built.yql,
-        built.query,
-        userId,
-        hits,
-        0,
-        CONFIG.vespaQueryEndpoint,
-        built.rankProfile,
-        undefined,
-        workspaceId,
-        true, // includeRawFields — we read the raw chat_message doc
-      )) as unknown as { data?: { results?: Array<Record<string, unknown>> } };
-      for (const r of resp?.data?.results ?? []) {
-        const row = vespaHitToMsgRow(r);
-        if (!row || row.isDeleted) continue;
-        const list = byConv.get(row.conversationId);
-        if (list) list.push(row);
-        else byConv.set(row.conversationId, [row]);
+      const complete = await fetchChunk(chunk, hits);
+      // `replyCount` can lag reality. If the read came back full we can't tell
+      // what was trimmed, so redo those conversations one at a time — where a
+      // full cap each makes trimming impossible.
+      if (!complete && chunk.length > 1) {
+        logger.info("[assembler] thread-fetch chunk hit the hit budget — refetching singly", {
+          userId,
+          size: chunk.length,
+        });
+        for (const cid of chunk) byConv.delete(cid);
+        await mapPool(chunk, THREAD_FETCH_CONCURRENCY, async (cid) => {
+          try {
+            await fetchChunk([cid], THREAD_FETCH_CAP);
+          } catch (e) {
+            logger.info("[assembler] vespa thread-refetch failed", { cid, err: String(e) });
+          }
+        });
       }
     } catch (e) {
       logger.info("[assembler] vespa thread-fetch chunk failed", { size: chunk.length, err: String(e) });
@@ -723,8 +782,17 @@ export async function assembleConversationUnits(
   // source-of-truth psql — see fetchThreadsBatch. workspaceId (resolved above)
   // gates the tenant scope; without it we skip thread-fetch (convs render
   // lightweight) rather than run unscoped.
+  //    Expected size per conversation so the fetch can batch small threads.
+  //    replyCount counts replies, so +1 for the root; unknown → full cap.
+  const expectedThreadSize = (cid: string): number => {
+    const replies = convById.get(cid)?.replyCount;
+    return typeof replies === "number" && replies >= 0
+      ? replies + 1 + THREAD_SIZE_SLACK
+      : THREAD_FETCH_CAP;
+  };
+
   const threadByConv = workspaceId
-    ? await fetchThreadsBatch(userId, workspaceId, interestingIds)
+    ? await fetchThreadsBatch(userId, workspaceId, interestingIds, expectedThreadSize)
     : new Map<string, MsgRow[]>();
   if (!workspaceId) {
     logger.warn("[assembler] no workspaceId — skipping Vespa thread-fetch (lightweight units)", { userId });

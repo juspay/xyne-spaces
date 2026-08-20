@@ -17,7 +17,7 @@ import { redisService } from "../redis.js";
 import { createLogger, createTraceId } from "../logger.js";
 import {
   fetchUserMessages,
-  fetchUserHostedCalls,
+  fetchUserCalls,
   fetchUserCanvases,
 } from "../services/userMemoryFetcher.js";
 import { assembleConversationUnits, isContextAssemblerEnabled } from "../services/contextAssembler.js";
@@ -87,7 +87,7 @@ async function fetchForSource(
       ? assembleConversationUnits(userId, window)
       : fetchUserMessages(userId, window);
   }
-  if (source === "calls") return fetchUserHostedCalls(userId, window);
+  if (source === "calls") return fetchUserCalls(userId, window);
   return fetchUserCanvases(userId, window);
 }
 
