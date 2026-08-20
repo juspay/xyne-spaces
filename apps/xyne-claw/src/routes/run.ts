@@ -143,6 +143,12 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import {
+  buildPrefetchBlock,
+  prefetchEnabled,
+  startPrefetchExtraction,
+  type ExecutableTool,
+} from "../prefetch.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1449,6 +1455,14 @@ async function processTask(
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
+  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
+  // the run so the fast-model extractor overlaps the expensive setup that
+  // follows — session restore and the MCP tool listing — instead of adding its
+  // latency in front of the first turn. It is awaited far below, once the tool
+  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+    ? startPrefetchExtraction(task)
+    : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
   // workspaces are deleted whole in the finally, but a persistent cwd survives
@@ -3560,6 +3574,33 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${idLines.join("\n")}`
         : idLines.join("\n");
+    }
+
+    // Resolve the prefetch spec now that the tool palette is final: the
+    // resolvers ARE the agent's own Spaces tools, invoked through the same
+    // `execute` closure the model would use, so ACL and permissions come along
+    // for free and there is no second auth path to keep in sync.
+    if (prefetchSpecPromise) {
+      const prefetchStartedAt = Date.now();
+      try {
+        const block = await buildPrefetchBlock({
+          spec: await prefetchSpecPromise,
+          tools: allTools as unknown as ExecutableTool[],
+          identity: {
+            userId,
+            ...(userName ? { userName } : {}),
+            ...(userEmail ? { userEmail } : {}),
+          },
+        });
+        if (block) {
+          fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+          log(`[prefetch] attached ${block.length} chars in ${Date.now() - prefetchStartedAt}ms`);
+        }
+      } catch (err) {
+        // Belt-and-braces: prefetch.ts already swallows everything, but a
+        // prefetch failure must never be the reason a run does not happen.
+        log(`[prefetch] skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Key sessions by user + conversationId + agentSlug so each caller gets an isolated sandbox per thread.

@@ -4488,8 +4488,9 @@ const spacesScheduleCall: ToolDef = {
 const spacesWhoami: ToolDef = {
   name: "spaces-whoami",
   description:
-    "Returns the current user's Spaces profile — userId, name, email and workspaceId of the User " +
-    "Call this first to get the userId needed for filtering other tools (e.g. assignedTo, from, createdBy).",
+    "Returns the current user's Spaces profile — userId, name, email and workspaceId. " +
+    "If the userId and name are ALREADY in your system prompt, so do not call this just to read them; " +
+    "use it only when you need the workspaceId or want to confirm the profile.",
   inputSchema: { type: "object", properties: {} },
   async handler(_args, ctx) {
     try {
@@ -6769,6 +6770,33 @@ const spacesVespaSchema: ToolDef = {
   },
 };
 
+/**
+ * Entity ids for the DIRECT-VESPA tools only.
+ *
+ * A `channel` / `project` lookup returns a NAME, but every follow-up query
+ * needs the ID — and `formatSearchResult` prints one only for people hits
+ * (`userId:`). Project rows are also non-routable, so they carry no citation
+ * chip either: the model got a name it could not turn into a filter, and had to
+ * re-resolve it through another tool.
+ *
+ * Deliberately NOT inside `formatSearchResult`: that renderer is shared with
+ * spaces-search / spaces-search-v2, and this is only wanted on the structured
+ * Vespa path where the ids feed straight back into `filters`.
+ *
+ * Ids come from searchContext (vespa-direct's transformHit); a project doc is
+ * keyed by its own id, so `r.id` is the fallback there.
+ */
+function directEntityIdLines(r: SearchResult): string {
+  const sc = r.searchContext ?? {};
+  const lines: string[] = [];
+  if (sc["channelId"] && (r.type === "chat_container" || r.type === "channel")) {
+    lines.push(`  channelId: ${sc["channelId"]}`);
+  }
+  if (sc["projectId"]) lines.push(`  projectId: ${sc["projectId"]}`);
+  else if (r.type === "project" && r.id) lines.push(`  projectId: ${r.id}`);
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
 // Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
 // spaces-vespa-search structured). Builds a routable Citation per result row —
 // mirrors spaces-search's harvest() so hits render as CLICKABLE chips instead of
@@ -6947,7 +6975,7 @@ async function renderDirectResult(
       for (const r of group.results) {
         chunkIndex += 1;
         const cited = harvest(r, chunkIndex);
-        parts.push(formatSearchResult(r, cited ? chunkIndex : null));
+        parts.push(formatSearchResult(r, cited ? chunkIndex : null) + directEntityIdLines(r));
       }
       parts.push("");
     }
@@ -6959,7 +6987,7 @@ async function renderDirectResult(
   const rendered = results
     .map((r, idx) => {
       const cited = harvest(r, idx + 1);
-      return formatSearchResult(r, cited ? idx + 1 : null);
+      return formatSearchResult(r, cited ? idx + 1 : null) + directEntityIdLines(r);
     })
     .join("\n\n");
   return finalize(
@@ -7084,7 +7112,7 @@ const spacesVespaQuery: ToolDef = {
           ? (args["rankInputs"] as Record<string, unknown>)
           : undefined;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) {
         log.error(
           `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
@@ -7095,7 +7123,7 @@ const spacesVespaQuery: ToolDef = {
       const data = await queryDirect(
         yql,
         query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -7109,6 +7137,43 @@ const spacesVespaQuery: ToolDef = {
     }
   },
 };
+
+/**
+ * Caller identity for the DIRECT-VESPA tools, with a LOCAL-ONLY override.
+ *
+ * These tools do not go through the MCP credentials path: they read
+ * `ctx.userId` (the Spaces user id on the claw session) and resolve the tenant
+ * with `getWorkspaceIdForUser`, a lookup against the local Spaces DB. Locally
+ * that pins every query to whichever seeded user your Spaces instance
+ * authenticates as, so a query cannot be aimed at another tenant — which is
+ * exactly what you need when the Vespa endpoint is port-forwarded to a
+ * different environment and the local ids match nothing in that index.
+ *
+ * Scope is deliberately narrow: ONLY the ACL + workspace guards of the direct
+ * Vespa tools. The gateway-backed tools keep the real session identity, so
+ * they continue to work against local data instead of failing on an identity
+ * that has no local Spaces session.
+ *
+ * HARD-GATED on `!CONFIG.isProduction` — an override here would otherwise run
+ * one user's queries under another user's ACL.
+ */
+async function directVespaIdentity(
+  ctxUserId: string,
+): Promise<{ userId: string; workspaceId: string | null }> {
+  const devUser = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_USER_ID"] ?? "").trim();
+  const devWorkspace = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_WORKSPACE_ID"] ?? "").trim();
+  const userId = devUser || ctxUserId;
+  // Skip the Spaces-DB lookup when the workspace is pinned: an overridden user
+  // id generally has no row in the LOCAL Spaces DB, so the lookup would return
+  // null and the tool would refuse the query.
+  const workspaceId = devWorkspace || (await getWorkspaceIdForUser(userId));
+  if (devUser || devWorkspace) {
+    log.warn(
+      `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
+    );
+  }
+  return { userId, workspaceId };
+}
 
 // ── spaces-vespa-search ──────────────────────────────────────────────────────
 
@@ -7270,7 +7335,7 @@ const spacesVespaSearch: ToolDef = {
       // Tenant scope — every direct-Vespa query is confined to the caller's
       // workspace, resolved from the user record (public.users). Refuse to run
       // unscoped rather than risk crossing tenants.
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped search.");
 
@@ -7291,14 +7356,14 @@ const spacesVespaSearch: ToolDef = {
           ...(rankProfile ? { rankProfile } : {}),
           hits,
         },
-        ctx.userId,
+        aclUserId,
         workspaceId,
       );
 
       const data = await queryDirect(
         built.yql,
         built.query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -7897,7 +7962,7 @@ const spacesCorpusScan: ToolDef = {
         bucket,
       });
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
 
@@ -7914,7 +7979,7 @@ const spacesCorpusScan: ToolDef = {
         const res = await queryDirect(
           yql,
           query,
-          ctx.userId,
+          aclUserId,
           0,
           0,
           CONFIG.vespaQueryEndpoint,
@@ -8058,7 +8123,7 @@ const spacesEvidencePack: ToolDef = {
       });
       const { scan, topic, perBucket } = validated;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped extraction.");
 
       const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
@@ -8068,7 +8133,7 @@ const spacesEvidencePack: ToolDef = {
       // finite and the coverage note honest.
       const censusYql = buildCorpusScanYql(scan, { withTerm: true });
       const termBucketCounts = await Promise.all(scan.terms.map(async term => {
-        const res = await queryDirect(censusYql, termToQuery(term), ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const res = await queryDirect(censusYql, termToQuery(term), aclUserId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack census: "${term}"`, yql: executed?.yql ?? censusYql, vespaParams: executed?.vespaParams ?? {} });
         const buckets: Record<number, number> = {};
@@ -8097,7 +8162,7 @@ const spacesEvidencePack: ToolDef = {
 
       const rowsNested = await Promise.all(fetchList.map(async ({ term, bucketKey }) => {
         const yql = buildPackFetchYql(scan, bucketRange(bucketKey, scan.bucket));
-        const res = await queryDirect(yql, termToQuery(term), ctx.userId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
+        const res = await queryDirect(yql, termToQuery(term), aclUserId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack fetch: "${term}" @ ${bucketKey}`, yql: executed?.yql ?? yql, vespaParams: executed?.vespaParams ?? {} });
         const results = (!res.data.grouped ? res.data.results : []) ?? [];
