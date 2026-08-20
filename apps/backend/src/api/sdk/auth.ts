@@ -65,6 +65,8 @@ export interface SdkAuth {
   readonly authData: AuthData;
   readonly ctx: Context;
   readonly keyId: string;
+  /** When the presented key stops working, so a caller can rotate before it does. */
+  readonly keyExpiresAt: Date;
 }
 
 declare global {
@@ -218,6 +220,7 @@ export async function apiKeyAuth(
         memberId: authData.memberId,
       } as Context,
       keyId: row.id,
+      keyExpiresAt: row.expiresAt,
     };
 
     next();

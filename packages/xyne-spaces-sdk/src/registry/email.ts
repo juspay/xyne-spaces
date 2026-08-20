@@ -361,9 +361,4 @@ export const emailOperations = {
     'conversationLabel.removeLabel'
   ),
 
-  /**
-   * Delete a label everywhere it is used.
-   * Maps to: Zero mutator 'conversationLabel.deleteLabel'
-   */
-  deleteLabel: mutator<{ labelId: string }, void>('conversationLabel.deleteLabel'),
 } as const;

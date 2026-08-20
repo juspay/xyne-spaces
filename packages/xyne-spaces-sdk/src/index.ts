@@ -8,7 +8,7 @@
  * import { createClient } from '@xyne/spaces-sdk';
  *
  * const sdk = createClient({
- *   token: process.env.XYNE_SPACES_TOKEN,
+ *   apiKey: process.env.XYNE_SPACES_API_KEY,
  * });
  *
  * // List users
@@ -30,9 +30,6 @@ export { ClawResource } from './resources/claw.js';
 export type { ClawRunAndWaitInput } from './resources/claw.js';
 
 // ----- Error Types -----
-export { decodeAccessToken, isTokenExpired } from './core/token.js';
-export type { CurrentUser } from './core/token.js';
-
 export {
   SdkError,
   AuthError,
@@ -53,6 +50,7 @@ export type {
   ChannelType,
   DeskType,
   // Users
+  CurrentUser,
   User,
   UserProfile,
   UserPresence,

@@ -68,6 +68,14 @@ export const userGroupsOperations = {
   ),
 
   /**
+   * Assignment states for several groups at once.
+   * Maps to: Zero query 'getUserAssignmentStatesByGroupIds'
+   */
+  listAssignmentStatesForGroups: query<{ userGroupIds: string[] }, unknown[]>(
+    'getUserAssignmentStatesByGroupIds'
+  ),
+
+  /**
    * Per-member workload weightings for a group.
    * Maps to: Zero query 'getUserWorkloadMappings'
    *

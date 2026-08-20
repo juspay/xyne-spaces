@@ -113,6 +113,16 @@ export class UserGroupsResource extends Resource {
   listAssignmentStates(userGroupId: string): Promise<unknown[]> {
     return this.call(userGroupsOperations.listAssignmentStates, { userGroupId });
   }
+  /**
+   * Assignment states for several groups at once.
+   *
+   * The batch form of {@link listAssignmentStates}; one round trip instead of one
+   * per group when rendering a roster.
+   */
+  listAssignmentStatesForGroups(userGroupIds: string[]): Promise<unknown[]> {
+    return this.call(userGroupsOperations.listAssignmentStatesForGroups, { userGroupIds });
+  }
+
 
   /**
    * List per-member workload weightings for a group.

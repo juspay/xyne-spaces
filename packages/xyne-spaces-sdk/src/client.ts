@@ -40,10 +40,12 @@ export interface SpacesClientOptions {
   baseUrl?: string;
 
   /**
-   * Access token for authentication.
-   * Can be set later via `setToken()`.
+   * API key for authentication, minted from the Apps page in Spaces.
+   *
+   * A key acts as the user who created it, in that user's workspace, and is
+   * valid for a fixed period. Can be set later via `setApiKey()`.
    */
-  token?: string;
+  apiKey?: string;
 
   /**
    * Request timeout in milliseconds.
@@ -64,7 +66,7 @@ export interface SpacesClientOptions {
  * import { SpacesClient } from '@xyne/spaces-sdk';
  *
  * const client = new SpacesClient({
- *   token: process.env.XYNE_SPACES_TOKEN,
+ *   apiKey: process.env.XYNE_SPACES_API_KEY,
  * });
  *
  * // List users
@@ -159,7 +161,7 @@ export class SpacesClient {
 
     this.http = new HttpClient({
       baseUrl,
-      token: options.token,
+      token: options.apiKey,
       timeout: options.timeout,
     });
 
@@ -193,24 +195,18 @@ export class SpacesClient {
     this.claw = new ClawResource(this.transport);
   }
 
-  /**
-   * Set the access token. Useful for token refresh scenarios.
-   */
-  setToken(token: string): void {
-    this.http.setToken(token);
+  /** Set the API key, e.g. after rotating one. */
+  setApiKey(apiKey: string): void {
+    this.http.setToken(apiKey);
   }
 
-  /**
-   * Clear the access token.
-   */
-  clearToken(): void {
+  /** Clear the API key. Subsequent calls fail with `AuthError`. */
+  clearApiKey(): void {
     this.http.clearToken();
   }
 
-  /**
-   * Check if the client has an access token set.
-   */
-  hasToken(): boolean {
+  /** Whether an API key is set. Says nothing about whether it is still valid. */
+  hasApiKey(): boolean {
     return this.http.getToken() !== undefined;
   }
 
@@ -227,7 +223,7 @@ export class SpacesClient {
  * import { createClient } from '@xyne/spaces-sdk';
  *
  * const sdk = createClient({
- *   token: process.env.XYNE_SPACES_TOKEN,
+ *   apiKey: process.env.XYNE_SPACES_API_KEY,
  * });
  *
  * const users = await sdk.users.list();

@@ -290,8 +290,4 @@ export class EmailResource extends Resource {
     return this.call(emailOperations.removeLabel, { conversationId, labelId });
   }
 
-  /** Delete a label everywhere it is used. */
-  deleteLabel(labelId: string): Promise<void> {
-    return this.call(emailOperations.deleteLabel, { labelId });
-  }
 }
