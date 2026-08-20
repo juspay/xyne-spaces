@@ -55,8 +55,10 @@ const electronAPI = {
     pickDirectory: (): Promise<{ granted: boolean }> =>
       ipcRenderer.invoke('recording-fs:pick-directory'),
     hasDirectory: (): Promise<boolean> => ipcRenderer.invoke('recording-fs:has-directory'),
-    createCapture: (captureId: string): Promise<void> =>
-      ipcRenderer.invoke('recording-fs:create-capture', { captureId }),
+    getDirectory: (): Promise<{ path: string | null }> =>
+      ipcRenderer.invoke('recording-fs:get-directory'),
+    createCapture: (captureId: string, dirName?: string): Promise<void> =>
+      ipcRenderer.invoke('recording-fs:create-capture', { captureId, dirName }),
     appendFragment: (
       captureId: string,
       bytes: ArrayBuffer,

@@ -6,7 +6,6 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
-import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { TicketController } from './ticketController';
@@ -67,9 +66,6 @@ class TranscriptionAgentController {
       // NOTE_TAKER (HEADLESS / "Xyne Oats") calls never have a channel or message —
       // route straight to their own pipeline, skipping the message lookup entirely.
       if (call.callType === CallType.HEADLESS) {
-        // The agent sends this only after closing and uploading its transcript.
-        // Persist that commit point before any local repair worker can merge.
-        await recordingRepairStateService.markLiveTranscriptFinalized(callId);
         await noteTakerTranscriptService.processTranscript(call, hasTranscript ?? true);
         res.json({ success: true, message: 'Note taker call processed' });
         return;

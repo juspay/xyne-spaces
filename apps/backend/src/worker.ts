@@ -202,12 +202,6 @@ class WorkerService {
         stitchWorker.start();
       }
 
-      if (appConfig.enableRecordingRepairWorker) {
-        logger.info('Starting recording repair worker...');
-        const { recordingRepairWorker } = await import('@/workers/recordingRepairWorker');
-        recordingRepairWorker.start();
-      }
-
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
         await notificationService.initialize();

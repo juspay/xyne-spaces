@@ -21,8 +21,6 @@ export {
   MANIFEST_FILE,
   RECORDING_FILE,
   createManifest,
-  computeManifestHash,
-  sha256Hex,
+  recordingDirName,
   manifestByteLength,
-  lastDurableEndedAtMs,
 } from './clientManifest';

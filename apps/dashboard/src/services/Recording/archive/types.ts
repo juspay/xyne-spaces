@@ -15,6 +15,17 @@ export interface RecordingArchiveInit {
   quotaBypassed: boolean;
 }
 
+/** Where the local recording archive is written, for display in Preferences. */
+export interface RecordingLocationInfo {
+  kind: RecordingArchiveKind;
+  /** True once a concrete destination the user picked is remembered. */
+  configured: boolean;
+  /** Human-readable location (folder name, or full path on Electron); null when unknown. */
+  label: string | null;
+  /** Whether this backend lets the user choose a folder (OPFS is browser-managed). */
+  selectable: boolean;
+}
+
 export interface RecordingCaptureCreate {
   callId: string;
   captureId: string;
@@ -22,6 +33,13 @@ export interface RecordingCaptureCreate {
   audioBitsPerSecond: number;
   startedAt: number;
   offlineAtStart: boolean;
+  /**
+   * Human-friendly on-disk folder name for this capture (e.g. `recording_2026-08-18_14-30-05_a1b2`).
+   * The captureId stays the logical identity (it must remain a UUID for the backend);
+   * this only renames the user-visible folder. Omitted for OPFS (not user-visible), where
+   * the folder falls back to the captureId so cleanup-by-captureId keeps working.
+   */
+  dirName?: string;
 }
 
 /** An open capture being actively recorded into. */
@@ -65,4 +83,12 @@ export interface RecordingArchiveStore {
   deleteCapture(captureId: string): Promise<void>;
   /** Best-effort free space at the destination; null when unknowable. */
   freeSpace(): Promise<{ availableBytes: number | null }>;
+  /** Describe the current destination without prompting (for Preferences display). */
+  describeLocation(): Promise<RecordingLocationInfo>;
+  /**
+   * Prompt the user to choose (or change) the destination and remember it. MUST be
+   * called from a user gesture. Choosing ahead of a call means the recorder starts
+   * with no picker mid-call, so the first seconds are never lost.
+   */
+  chooseLocation(): Promise<RecordingLocationInfo>;
 }

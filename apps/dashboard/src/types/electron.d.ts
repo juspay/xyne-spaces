@@ -28,8 +28,10 @@ export interface RecordingFsApi {
   pickDirectory: () => Promise<{ granted: boolean }>;
   /** Whether a recording root directory is already configured (no prompt). */
   hasDirectory: () => Promise<boolean>;
+  /** The configured recording root path (null when none is set), for display. */
+  getDirectory: () => Promise<{ path: string | null }>;
   /** Create the capture folder + empty recording.webm under the root. */
-  createCapture: (captureId: string) => Promise<void>;
+  createCapture: (captureId: string, dirName?: string) => Promise<void>;
   /** Durably append one fragment to recording.webm; returns its byte range. */
   appendFragment: (
     captureId: string,

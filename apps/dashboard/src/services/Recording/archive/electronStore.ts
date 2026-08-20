@@ -6,6 +6,7 @@ import type {
   RecordingArchiveInit,
   RecordingArchiveStore,
   RecordingCaptureCreate,
+  RecordingLocationInfo,
   StoredArchiveCapture,
 } from './types';
 
@@ -83,7 +84,7 @@ class ElectronArchiveStore implements RecordingArchiveStore {
       const { granted } = await this.api.pickDirectory();
       if (!granted) throw new Error('No recording directory was granted');
     }
-    await this.api.createCapture(meta.captureId);
+    await this.api.createCapture(meta.captureId, meta.dirName);
     const open = new ElectronOpenCapture(meta.captureId, this.api);
     await open.writeManifest(createManifest(meta));
     return open;
@@ -112,6 +113,17 @@ class ElectronArchiveStore implements RecordingArchiveStore {
 
   async freeSpace(): Promise<{ availableBytes: number | null }> {
     return this.api.freeSpace();
+  }
+
+  async describeLocation(): Promise<RecordingLocationInfo> {
+    const { path } = await this.api.getDirectory();
+    return { kind: 'electron', configured: !!path, label: path, selectable: true };
+  }
+
+  async chooseLocation(): Promise<RecordingLocationInfo> {
+    const { granted } = await this.api.pickDirectory();
+    if (!granted) return this.describeLocation(); // user cancelled — keep current
+    return this.describeLocation();
   }
 }
 

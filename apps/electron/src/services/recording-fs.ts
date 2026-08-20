@@ -5,8 +5,11 @@ import * as path from 'path';
 // Native filesystem backend for the offline-first note-taker recorder (main
 // process). The renderer only passes captureIds; this module owns the user's
 // chosen root directory and does all file I/O there. Layout:
-//   {root}/Xyne Recordings/{captureId}/recording.webm
-//                                     /chunk_manifest.json
+//   {root}/Xyne Recordings/{folderName}/recording.webm
+//                                       /chunk_manifest.json
+// folderName is the friendly `recording_<date>_<time>` name; the captureId (a UUID)
+// stays the logical identity in the manifest, so captureId → folder is resolved via
+// the manifest (cached in captureFolders).
 
 const RECORDINGS_SUBDIR = 'Xyne Recordings';
 const RECORDING_FILE = 'recording.webm';
@@ -15,6 +18,9 @@ const MANIFEST_FILE = 'chunk_manifest.json';
 let rootDir: string | null = null;
 let rootLoaded = false;
 const appendQueues = new Map<string, Promise<unknown>>();
+// captureId → on-disk folder name. Populated on createCapture and listPending;
+// resolveFolderName rebuilds it by scanning manifests when a cold lookup misses.
+const captureFolders = new Map<string, string>();
 
 function configPath(): string {
   return path.join(app.getPath('userData'), 'recording-fs.json');
@@ -29,6 +35,10 @@ async function loadRoot(): Promise<void> {
   } catch {
     rootDir = null;
   }
+  // Default to the OS Documents folder so recordings are saved automatically
+  // without ever prompting. The user can still change it in Preferences, which
+  // persists over this default. Not written to config — this stays a live default.
+  if (!rootDir) rootDir = app.getPath('documents');
 }
 
 async function saveRoot(root: string): Promise<void> {
@@ -37,9 +47,9 @@ async function saveRoot(root: string): Promise<void> {
   await fs.writeFile(configPath(), JSON.stringify({ root }), 'utf8');
 }
 
-function safeCaptureId(captureId: string): string {
-  if (!/^[a-zA-Z0-9_-]+$/.test(captureId)) throw new Error('Invalid capture id');
-  return captureId;
+function safeSegment(segment: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(segment)) throw new Error('Invalid recording path segment');
+  return segment;
 }
 
 async function recordingsDir(): Promise<string | null> {
@@ -50,15 +60,44 @@ async function recordingsDir(): Promise<string | null> {
   return dir;
 }
 
-async function captureDir(captureId: string, create: boolean): Promise<string | null> {
+async function folderDir(folderName: string, create: boolean): Promise<string | null> {
   const base = await recordingsDir();
   if (!base) return null;
-  const dir = path.join(base, safeCaptureId(captureId));
+  const dir = path.join(base, safeSegment(folderName));
   if (dir !== path.join(base, path.basename(dir)) || !dir.startsWith(base + path.sep)) {
     throw new Error('Invalid capture path');
   }
   if (create) await fs.mkdir(dir, { recursive: true });
   return dir;
+}
+
+/** Map a captureId to its on-disk folder, scanning manifests when the cache misses. */
+async function resolveFolderName(captureId: string): Promise<string> {
+  safeSegment(captureId);
+  const cached = captureFolders.get(captureId);
+  if (cached) return cached;
+  const base = await recordingsDir();
+  if (base) {
+    const entries = await fs.readdir(base, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const raw = await fs.readFile(path.join(base, entry.name, MANIFEST_FILE), 'utf8');
+        const parsed = JSON.parse(raw) as { captureId?: unknown };
+        if (typeof parsed.captureId === 'string') captureFolders.set(parsed.captureId, entry.name);
+      } catch {
+        // Skip a folder with no/corrupt manifest; the others still resolve.
+      }
+    }
+    const found = captureFolders.get(captureId);
+    if (found) return found;
+  }
+  // Legacy fallback: pre-rename captures whose folder is the captureId itself.
+  return captureId;
+}
+
+async function captureDir(captureId: string, create: boolean): Promise<string | null> {
+  return folderDir(await resolveFolderName(captureId), create);
 }
 
 export async function pickDirectory(): Promise<{ granted: boolean }> {
@@ -82,8 +121,18 @@ export async function hasDirectory(): Promise<boolean> {
   }
 }
 
-export async function createCapture(captureId: string): Promise<void> {
-  const dir = await captureDir(captureId, true);
+export async function getDirectory(): Promise<{ path: string | null }> {
+  await loadRoot();
+  // Report the actual recordings folder (root/Xyne Recordings) so Preferences shows
+  // exactly where files land, not just the parent root.
+  return { path: rootDir ? path.join(rootDir, RECORDINGS_SUBDIR) : null };
+}
+
+export async function createCapture(captureId: string, dirName?: string): Promise<void> {
+  safeSegment(captureId);
+  const folderName = dirName ? safeSegment(dirName) : captureId;
+  captureFolders.set(captureId, folderName);
+  const dir = await folderDir(folderName, true);
   if (!dir) throw new Error('No recording directory configured');
   await fs.writeFile(path.join(dir, RECORDING_FILE), Buffer.alloc(0), { flag: 'w' });
 }
@@ -168,7 +217,12 @@ export async function listPending(): Promise<Array<{ captureId: string; manifest
     if (!entry.isDirectory()) continue;
     try {
       const manifestJson = await fs.readFile(path.join(base, entry.name, MANIFEST_FILE), 'utf8');
-      out.push({ captureId: entry.name, manifestJson });
+      const parsed = JSON.parse(manifestJson) as { captureId?: unknown };
+      if (typeof parsed.captureId !== 'string') continue;
+      // Cache the identity → folder mapping so later readRange/writeManifest by
+      // captureId resolve without re-scanning.
+      captureFolders.set(parsed.captureId, entry.name);
+      out.push({ captureId: parsed.captureId, manifestJson });
     } catch {
       // Skip a capture with no/corrupt manifest; the others still recover.
     }

@@ -11,6 +11,7 @@ import type {
   RecordingArchiveKind,
   RecordingArchiveStore,
   RecordingCaptureCreate,
+  RecordingLocationInfo,
   StoredArchiveCapture,
 } from './types';
 
@@ -28,9 +29,9 @@ function directoryEntries(
   return (directory as IterableDirectoryHandle).entries();
 }
 
-function safeCaptureId(captureId: string): string {
-  if (!/^[a-zA-Z0-9_-]+$/.test(captureId)) throw new Error('Invalid local capture id');
-  return captureId;
+function safeSegment(segment: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(segment)) throw new Error('Invalid local recording path segment');
+  return segment;
 }
 
 function isNotFoundError(error: unknown): boolean {
@@ -156,17 +157,23 @@ export class DirectoryArchiveStore implements RecordingArchiveStore {
   private readonly resolveAppDir: (prompt: boolean) => Promise<FileSystemDirectoryHandle | null>;
   private readonly initFn: () => Promise<RecordingArchiveInit>;
   private readonly freeSpaceFn: () => Promise<{ availableBytes: number | null }>;
+  private readonly describeFn: () => Promise<RecordingLocationInfo>;
+  private readonly chooseFn: () => Promise<RecordingLocationInfo>;
 
   constructor(
     kind: RecordingArchiveKind,
     resolveAppDir: (prompt: boolean) => Promise<FileSystemDirectoryHandle | null>,
     initFn: () => Promise<RecordingArchiveInit>,
     freeSpaceFn: () => Promise<{ availableBytes: number | null }>,
+    describeFn: () => Promise<RecordingLocationInfo>,
+    chooseFn: () => Promise<RecordingLocationInfo>,
   ) {
     this.kind = kind;
     this.resolveAppDir = resolveAppDir;
     this.initFn = initFn;
     this.freeSpaceFn = freeSpaceFn;
+    this.describeFn = describeFn;
+    this.chooseFn = chooseFn;
   }
 
   init(): Promise<RecordingArchiveInit> {
@@ -177,12 +184,26 @@ export class DirectoryArchiveStore implements RecordingArchiveStore {
     return this.freeSpaceFn();
   }
 
+  describeLocation(): Promise<RecordingLocationInfo> {
+    return this.describeFn();
+  }
+
+  chooseLocation(): Promise<RecordingLocationInfo> {
+    return this.chooseFn();
+  }
+
   async createCapture(meta: RecordingCaptureCreate): Promise<OpenArchiveCapture> {
     const appDir = await this.resolveAppDir(true);
     if (!appDir) throw new Error('No recording directory was granted');
-    const captureDir = await appDir.getDirectoryHandle(safeCaptureId(meta.captureId), {
-      create: true,
-    });
+    // Folder gets the friendly `recording_<date>_<time>` name when provided; the
+    // captureId (still the manifest's identity) is the fallback so OPFS — whose
+    // cleanup removes by captureId — keeps folder name and captureId aligned.
+    const captureDir = await appDir.getDirectoryHandle(
+      safeSegment(meta.dirName || meta.captureId),
+      {
+        create: true,
+      },
+    );
     const recording = await captureDir.getFileHandle(RECORDING_FILE, { create: true });
     const open = new DirectoryOpenCapture(meta.captureId, captureDir, recording, 0);
     await open.writeManifest(createManifest(meta));
@@ -193,12 +214,14 @@ export class DirectoryArchiveStore implements RecordingArchiveStore {
     const appDir = await this.resolveAppDir(false);
     if (!appDir) return [];
     const captures: StoredArchiveCapture[] = [];
-    for await (const [name, handle] of directoryEntries(appDir)) {
+    for await (const [, handle] of directoryEntries(appDir)) {
       if (handle.kind !== 'directory') continue;
       const captureDir = handle as FileSystemDirectoryHandle;
       const manifest = await readManifest(captureDir);
-      // One corrupt/incomplete capture must not block recovery of the others.
-      if (!manifest || manifest.captureId !== name || !manifest.callId) continue;
+      // One corrupt/incomplete capture must not block recovery of the others. The
+      // folder name may be the friendly `recording_<date>_<time>` label rather than
+      // the captureId, so identity comes from the manifest, not the directory name.
+      if (!manifest || !manifest.captureId || !manifest.callId) continue;
       captures.push(new DirectoryStoredCapture(manifest.captureId, manifest, captureDir));
     }
     return captures;
@@ -207,7 +230,7 @@ export class DirectoryArchiveStore implements RecordingArchiveStore {
   async deleteCapture(captureId: string): Promise<void> {
     const appDir = await this.resolveAppDir(false);
     if (!appDir) return;
-    await appDir.removeEntry(safeCaptureId(captureId), { recursive: true }).catch(error => {
+    await appDir.removeEntry(safeSegment(captureId), { recursive: true }).catch(error => {
       if (!isNotFoundError(error)) throw error;
     });
   }

@@ -1,5 +1,5 @@
 import { DirectoryArchiveStore } from './directoryArchive';
-import type { RecordingArchiveInit } from './types';
+import type { RecordingArchiveInit, RecordingLocationInfo } from './types';
 
 // OPFS fallback. Real files, but inside the browser's origin-private area and
 // subject to origin quota (persistence only protects against eviction, not the
@@ -30,6 +30,15 @@ async function opfsFreeSpace(): Promise<{ availableBytes: number | null }> {
   return { availableBytes: Math.max(0, quota - usage) };
 }
 
+// OPFS lives inside the browser's origin-private storage; the user cannot pick a
+// folder, so the location is fixed and not selectable.
+const OPFS_LOCATION: RecordingLocationInfo = {
+  kind: 'opfs',
+  configured: true,
+  label: null,
+  selectable: false,
+};
+
 export function createOpfsStore(): DirectoryArchiveStore | null {
   if (!opfsAvailable()) return null;
   return new DirectoryArchiveStore(
@@ -41,5 +50,7 @@ export function createOpfsStore(): DirectoryArchiveStore | null {
       return { persistent, quotaBypassed: false };
     },
     opfsFreeSpace,
+    () => Promise.resolve(OPFS_LOCATION),
+    () => Promise.resolve(OPFS_LOCATION),
   );
 }

@@ -1,18 +1,17 @@
 import type { RecordingCaptureManifest } from '@xyne/shared';
 
 // Seam between the recorder and the upload path. The recorder only knows "this
-// capture needs its outage audio repaired"; the concrete uploader streams the
-// outage byte ranges + the manifest through the backend (which writes them to
-// GCS) and calls finalize. Registered at app init via setRecordingRepairUploader.
+// capture hit an outage and needs a server-side redo"; the concrete uploader
+// streams the whole recording.webm through the backend (which writes it to GCS)
+// and calls finalize to kick off the redo. Registered at app init via
+// setRecordingRepairUploader.
 
 export interface RecordingUploadInput {
   callId: string;
   captureId: string;
   manifest: RecordingCaptureManifest;
-  /** Read a byte range of the capture's recording.webm. */
+  /** Read a byte range of the capture's recording.webm (used to read the whole file). */
   readRange: (byteOffset: number, byteLength: number) => Promise<Blob>;
-  /** Persist manifest mutations the uploader makes (e.g. uploadedSequences). */
-  persistManifest: (manifest: RecordingCaptureManifest) => Promise<void>;
 }
 
 export interface RecordingRepairUploader {

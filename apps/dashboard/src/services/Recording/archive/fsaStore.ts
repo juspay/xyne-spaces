@@ -1,6 +1,6 @@
 import { DirectoryArchiveStore } from './directoryArchive';
 import { getSavedDirectoryHandle, saveDirectoryHandle } from './directoryHandleStore';
-import type { RecordingArchiveInit } from './types';
+import type { RecordingArchiveInit, RecordingLocationInfo } from './types';
 
 // Web File System Access store: the user picks a real directory (once) and we
 // write recording.webm + chunk_manifest.json straight into it, escaping origin
@@ -42,6 +42,24 @@ async function resolveAppDir(prompt: boolean): Promise<FileSystemDirectoryHandle
   return root.getDirectoryHandle(FSA_APP_DIR, { create: true });
 }
 
+async function describeLocation(): Promise<RecordingLocationInfo> {
+  const saved = await getSavedDirectoryHandle();
+  return { kind: 'fsa', configured: !!saved, label: saved?.name ?? null, selectable: true };
+}
+
+async function chooseLocation(): Promise<RecordingLocationInfo> {
+  try {
+    const picked = await window.showDirectoryPicker({ id: 'xyne-recordings', mode: 'readwrite' });
+    // Grant write access now (within this gesture) so the recorder can start at the
+    // very first second of a later call without re-prompting mid-recording.
+    await ensurePermission(picked, true);
+    await saveDirectoryHandle(picked);
+    return { kind: 'fsa', configured: true, label: picked.name, selectable: true };
+  } catch {
+    return describeLocation(); // user cancelled — keep the current selection
+  }
+}
+
 export function createFsaStore(): DirectoryArchiveStore | null {
   if (!fsaAvailable()) return null;
   return new DirectoryArchiveStore(
@@ -49,5 +67,7 @@ export function createFsaStore(): DirectoryArchiveStore | null {
     resolveAppDir,
     (): Promise<RecordingArchiveInit> => Promise.resolve({ persistent: true, quotaBypassed: true }),
     () => Promise.resolve({ availableBytes: null }),
+    describeLocation,
+    chooseLocation,
   );
 }

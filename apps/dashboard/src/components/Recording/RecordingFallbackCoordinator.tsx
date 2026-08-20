@@ -50,15 +50,14 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
         'We are facing trouble connecting you to LiveKit due to internet issues. Your audio is getting captured locally. Your transcript will be generated eventually.',
       duration: Infinity,
       closeButton: true,
+      // Dark title/description colors live in sonner-overrides.css keyed off this
+      // class — the global Toaster's !text-card-foreground would otherwise render
+      // the text near-white and invisible on this pale-yellow background.
+      className: 'recording-connection-warning',
       style: {
         background: '#fef3c7',
         border: '1px solid #f59e0b',
         color: '#78350f',
-      },
-      classNames: {
-        title: '!text-amber-950',
-        description: '!text-amber-900',
-        closeButton: '!text-amber-950',
       },
     });
   }, [externalId]);
@@ -191,9 +190,13 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
         checkAgent();
         return;
       }
-      // Reconnecting and browser-offline states keep only the in-memory rolling
-      // buffer. Warn and persist only after LiveKit declares a terminal disconnect.
-      if (state === ConnectionState.Disconnected) {
+      // Audio stops reaching the server the moment LiveKit leaves Connected, so the
+      // whole Reconnecting→Disconnected span is a transcript gap — open the outage
+      // now rather than waiting for a terminal disconnect (the default reconnect
+      // policy can take 1–2 min to declare one, or never if it recovers). The full
+      // call is always on disk; the outage only marks the range to repair, and the
+      // window closes again when the room returns to Connected.
+      if (state === ConnectionState.Reconnecting || state === ConnectionState.Disconnected) {
         showConnectionWarning();
         const currentStatus = getRecordingStatus();
         const isActive = currentStatus === 'recording' || currentStatus === 'paused';
@@ -211,6 +214,26 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
       room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
     };
   }, [externalId, room, setReason, showConnectionWarning]);
+
+  // A dropped local uplink (Wi-Fi off) stops audio reaching the server even while
+  // LiveKit is only "Reconnecting" and may never declare a terminal disconnect, so
+  // track browser connectivity directly. setReason no-ops when no capture is active,
+  // and merges with any concurrent livekit_disconnected into one outage window.
+  useEffect(() => {
+    const handleOffline = (): void => {
+      const currentStatus = getRecordingStatus();
+      if (currentStatus !== 'recording' && currentStatus !== 'paused') return;
+      showConnectionWarning();
+      setReason('browser_offline', true);
+    };
+    const handleOnline = (): void => setReason('browser_offline', false);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return (): void => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [setReason, showConnectionWarning]);
 
   useEffect(() => {
     const handleMerged = (event: Event): void => {

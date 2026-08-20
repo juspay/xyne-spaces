@@ -184,6 +184,17 @@ class NoteTakerWebhookController {
       }
 
       await this.emitCallEndedAutomation(result.call, now);
+
+      // Same fallback as room_finished: a note-taker call can end here (creator
+      // left) without a room_finished following, so schedule reconcile from this
+      // path too. It's the commit signal that unblocks local recording repair —
+      // without it, a fully-offline call (whose agent never produced a transcript)
+      // would defer forever. Idempotent + lock-guarded, so double-firing is safe.
+      setTimeout(() => {
+        noteTakerTranscriptService.reconcileTranscript(roomName).catch((err) => {
+          logger.error(`[NoteTaker Webhook] Deferred reconcile failed for ${roomName}:`, err);
+        });
+      }, RECONCILE_GRACE_MS);
     }
   }
 

@@ -5,12 +5,7 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type {
-  DefaultOutlet,
-  GrantableEntityUserAccess,
-  RecordingCaptureManifest,
-  RecordingType,
-} from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
 import { CallType } from '@xyne/shared';
 
 export interface RecordingSession {
@@ -148,9 +143,8 @@ export type RecordingRepairReason =
   | 'stt_failed';
 
 export interface RecordingRepairStatus {
-  status: 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
-  processingError: string | null;
-  retryable: boolean;
+  /** True once the server-side whole-file redo has overwritten the transcript. */
+  done: boolean;
 }
 
 export const RECORDING_REPAIR_MERGED_EVENT = 'xyne-recording-repair-merged';
@@ -410,14 +404,9 @@ class RecordingService {
     });
   }
 
-  async finalizeRecordingRepair(
-    callId: string,
-    captureId: string,
-    manifest: RecordingCaptureManifest,
-  ): Promise<void> {
-    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {
-      manifest,
-    });
+  /** Trigger the server-side whole-file redo for a capture that hit an outage. */
+  async finalizeRecordingRepair(callId: string, captureId: string): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {});
   }
 
   async getRecordingRepairStatus(

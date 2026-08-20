@@ -1,30 +1,23 @@
-import {
-  RECORDING_REPAIR_MANIFEST_VERSION,
-  serializeManifestForHash,
-  type RecordingCaptureManifest,
-} from '@xyne/shared';
+import { RECORDING_REPAIR_MANIFEST_VERSION, type RecordingCaptureManifest } from '@xyne/shared';
 import type { RecordingCaptureCreate } from './types';
 
 export const MANIFEST_FILE = 'chunk_manifest.json';
 export const RECORDING_FILE = 'recording.webm';
 
-function toHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/** Lowercase hex SHA-256 of a fragment/blob, computed in the browser via WebCrypto. */
-export async function sha256Hex(data: Blob | ArrayBuffer): Promise<string> {
-  const buffer = data instanceof Blob ? await data.arrayBuffer() : data;
-  return toHex(await crypto.subtle.digest('SHA-256', buffer));
-}
-
 /**
- * SHA-256 over the immutable recorded content (the exact pre-image the worker
- * re-hashes at finalize). Uses the shared serializer so client and server agree.
+ * Human-friendly folder name for a capture: `recording_YYYY-MM-DD_HH-MM-SS_<4hex>`
+ * in the user's local time. The short captureId-derived suffix keeps two recordings
+ * started in the same second from colliding on one folder. Only `[A-Za-z0-9_-]` so it
+ * passes the store path-segment guards on every backend.
  */
-export async function computeManifestHash(manifest: RecordingCaptureManifest): Promise<string> {
-  const bytes = new TextEncoder().encode(serializeManifestForHash(manifest));
-  return toHex(await crypto.subtle.digest('SHA-256', bytes));
+export function recordingDirName(startedAtMs: number, captureId: string): string {
+  const date = new Date(startedAtMs);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  const stamp =
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+  const suffix = captureId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4) || '0000';
+  return `recording_${stamp}_${suffix}`;
 }
 
 export function createManifest(meta: RecordingCaptureCreate): RecordingCaptureManifest {
@@ -37,23 +30,13 @@ export function createManifest(meta: RecordingCaptureCreate): RecordingCaptureMa
     mimeType: meta.mimeType,
     audioBitsPerSecond: meta.audioBitsPerSecond,
     offlineAtStart: meta.offlineAtStart,
-    chunks: [],
-    outages: [],
-    markedMoments: [],
-    uploadedSequences: [],
+    hadOutage: false,
+    byteLength: 0,
     completed: false,
-    manifestHash: null,
   };
 }
 
-/** Total durably-recorded bytes (end of the last chunk); also the next byteOffset. */
+/** Total durably-recorded bytes; the length of the whole-file upload. */
 export function manifestByteLength(manifest: RecordingCaptureManifest): number {
-  const last = manifest.chunks[manifest.chunks.length - 1];
-  return last ? last.byteOffset + last.byteLength : 0;
-}
-
-/** Wall-clock epoch ms at the end of the last durably-recorded fragment. */
-export function lastDurableEndedAtMs(manifest: RecordingCaptureManifest): number {
-  const last = manifest.chunks[manifest.chunks.length - 1];
-  return last ? last.endedAtMs : manifest.startedAt;
+  return manifest.byteLength;
 }

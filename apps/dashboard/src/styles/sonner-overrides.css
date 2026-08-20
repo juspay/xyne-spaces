@@ -14,3 +14,18 @@
   outline: none !important;
   background-color: transparent !important;
 }
+
+/* Connection-issue warning toast (pale-yellow background).
+ * The global Toaster forces every toast's title/description to text-card-foreground
+ * (near-white in dark mode), which is invisible on this light background. These
+ * scoped rules have higher specificity than that single-class utility, so they win
+ * even against its !important and keep the text a readable dark amber. */
+[data-sonner-toast].recording-connection-warning [data-title] {
+  color: #451a03 !important;
+}
+[data-sonner-toast].recording-connection-warning [data-description] {
+  color: #78350f !important;
+}
+[data-sonner-toast].recording-connection-warning [data-close-button] {
+  color: #78350f !important;
+}

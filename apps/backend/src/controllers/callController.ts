@@ -1566,7 +1566,13 @@ export class CallController {
         return;
       }
 
-      const mimetype = latest.recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
+      // Derive Content-Type from the file extension: the offline-recorder redo serves
+      // a raw .webm, while egress serves .mp4 (audio or video by recording type).
+      const mimetype = recording.filename.endsWith('.webm')
+        ? 'audio/webm'
+        : latest.recordingType === RecordingType.AUDIO_ONLY
+          ? 'audio/mp4'
+          : 'video/mp4';
       res.setHeader('Content-Type', mimetype);
       res.setHeader('Content-Disposition', `attachment; filename="${recording.filename}"`);
       recording.stream.pipe(res);
@@ -2557,7 +2563,13 @@ export class CallController {
         return;
       }
 
-      const mimetype = recording.recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
+      // Derive Content-Type from the file extension: the offline-recorder redo serves
+      // a raw .webm, while egress serves .mp4 (audio or video by recording type).
+      const mimetype = file.filename.endsWith('.webm')
+        ? 'audio/webm'
+        : recording.recordingType === RecordingType.AUDIO_ONLY
+          ? 'audio/mp4'
+          : 'video/mp4';
       res.setHeader('Content-Type', mimetype);
       res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
       file.stream.pipe(res);

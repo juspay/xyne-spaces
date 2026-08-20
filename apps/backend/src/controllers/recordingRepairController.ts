@@ -1,16 +1,8 @@
-import { createHash } from 'crypto';
 import type { Request, Response } from 'express';
 import { CallType } from '@xyne/shared';
-import {
-  neededChunkSequences,
-  serializeManifestForHash,
-  validateManifestStructure,
-  type RecordingCaptureManifest,
-} from '@xyne/shared';
 import { validate as isUuid } from 'uuid';
 import { repositories } from '@/database/repositories';
-import { recordingRepairQueue } from '@/queues/recordingRepairQueue';
-import { recordingRepairStateService } from '@/services/recordingRepairStateService';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
 import { logger } from '@/utils/logger';
 
@@ -18,10 +10,6 @@ import { logger } from '@/utils/logger';
 // so the body is piped straight to storage (never buffered); this bound only
 // rejects absurd Content-Lengths up front.
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024;
-
-function manifestContentHash(manifest: Parameters<typeof serializeManifestForHash>[0]): string {
-  return createHash('sha256').update(serializeManifestForHash(manifest)).digest('hex');
-}
 
 class RecordingRepairController {
   private async getOwnedHeadlessCall(req: Request, callId: string) {
@@ -43,10 +31,17 @@ class RecordingRepairController {
     });
   }
 
+  private isRedone(call: { metadata: unknown }): boolean {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    return typeof metadata.localRedoneAt === 'number';
+  }
+
   // Stream the whole capture (one recording.webm) through the backend to GCS. The
   // request body is piped straight to storage — never buffered — so long calls do
-  // not sit in memory. No direct-to-GCS PUT, no bucket CORS. Authorized by the
-  // caller's session + call ownership.
+  // not sit in memory. Overwriting is fine: a client retry re-uploads the same file.
   uploadAudio = async (req: Request, res: Response): Promise<void> => {
     const { callId, captureId } = req.params;
     if (!req.user?.id) {
@@ -66,12 +61,6 @@ class RecordingRepairController {
       const authorized = await this.getOwnedHeadlessCall(req, callId);
       if (authorized.error) return this.sendAuthError(res, authorized.error);
 
-      const existing = await recordingRepairStateService.get(callId, captureId);
-      if (existing) {
-        res.status(409).json({ success: false, error: 'Recording repair capture is already finalized' });
-        return;
-      }
-
       await recordingRepairStorageService.writeAudioStream(callId, captureId, req);
       res.json({ success: true });
     } catch (error) {
@@ -80,72 +69,41 @@ class RecordingRepairController {
     }
   };
 
-  // Commit the capture: the client sends the full manifest, which the backend
-  // writes to GCS (the commit marker), then verifies the recording.webm landed
-  // before publishing the repair job.
+  // Trigger the whole-file redo: re-transcribe the uploaded recording.webm, overwrite
+  // the canonical transcript, reprocess, and serve the local audio. The redo runs off
+  // the request (it does slow STT + LLM work); the client polls getStatus until the
+  // Call's completion marker lands. Re-running is idempotent, so a client retry after
+  // a crashed redo simply completes it.
   finalize = async (req: Request, res: Response): Promise<void> => {
     const { callId, captureId } = req.params;
     if (!req.user?.id) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    const manifest = (req.body as { manifest?: unknown }).manifest as RecordingCaptureManifest | undefined;
-    if (
-      !isUuid(captureId) ||
-      !manifest ||
-      typeof manifest !== 'object' ||
-      manifest.callId !== callId ||
-      manifest.captureId !== captureId ||
-      !Array.isArray(manifest.chunks) ||
-      !Array.isArray(manifest.outages) ||
-      !Array.isArray(manifest.markedMoments)
-    ) {
+    if (!isUuid(captureId)) {
       res.status(400).json({ success: false, error: 'Invalid finalize request' });
       return;
     }
-    const structureError = validateManifestStructure(manifest);
-    if (structureError) {
-      res.status(400).json({ success: false, error: structureError });
-      return;
-    }
-    const needed = neededChunkSequences(manifest);
-    if (needed.length === 0) {
-      res.status(400).json({ success: false, error: 'Manifest has no outage windows to repair' });
-      return;
-    }
-    const manifestHash = manifestContentHash(manifest);
     try {
       const authorized = await this.getOwnedHeadlessCall(req, callId);
       if (authorized.error) return this.sendAuthError(res, authorized.error);
+      const call = authorized.call;
 
-      const existing = await recordingRepairStateService.get(callId, captureId);
-      if (existing) {
-        if (existing.manifestHash !== manifestHash) {
-          res.status(409).json({ success: false, error: 'Capture was finalized with a different manifest' });
-          return;
-        }
-        if (existing.status === 'FINALIZED' || (existing.status === 'FAILED' && existing.retryable)) {
-          await recordingRepairQueue.enqueue(callId, captureId, existing.finalizedAt);
-        }
-        res.json({ success: true, idempotent: true, status: existing.status });
+      if (this.isRedone(call)) {
+        res.json({ success: true, done: true });
         return;
       }
-
-      // Persist the manifest (commit marker), then confirm the audio landed.
-      await recordingRepairStorageService.writeManifest(callId, captureId, manifest);
       if (!(await recordingRepairStorageService.audioExists(callId, captureId))) {
         res.status(400).json({ success: false, error: 'Recording audio was not uploaded' });
         return;
       }
 
-      const manifestPath = recordingRepairStorageService.manifestPath(callId, captureId);
-      const capture = await recordingRepairStateService.finalize(callId, captureId, manifestPath, manifestHash);
-      if (capture.manifestHash !== manifestHash) {
-        res.status(409).json({ success: false, error: 'Capture was finalized with a different manifest' });
-        return;
-      }
-      await recordingRepairQueue.enqueue(callId, captureId, capture.finalizedAt);
-      res.json({ success: true, status: capture.status });
+      // Fire-and-forget: the redo can take minutes (whole-file STT + summary), far
+      // longer than an HTTP request should be held open. The client polls getStatus.
+      void noteTakerTranscriptService.redoTranscriptFromLocalAudio(call, captureId).catch((error) => {
+        logger.error('[RecordingRepairController] Redo failed', { callId, captureId, error });
+      });
+      res.json({ success: true, done: false });
     } catch (error) {
       logger.error('[RecordingRepairController] Finalize failed', { callId, captureId, error });
       res.status(500).json({ success: false, error: 'Failed to finalize recording repair' });
@@ -164,19 +122,7 @@ class RecordingRepairController {
     }
     const authorized = await this.getOwnedHeadlessCall(req, callId);
     if (authorized.error) return this.sendAuthError(res, authorized.error);
-    const capture = await recordingRepairStateService.get(callId, captureId);
-    if (!capture) {
-      res.status(404).json({ success: false, error: 'Recording repair capture not found' });
-      return;
-    }
-    res.json({
-      success: true,
-      capture: {
-        status: capture.status,
-        processingError: capture.processingError,
-        retryable: capture.retryable,
-      },
-    });
+    res.json({ success: true, capture: { done: this.isRedone(authorized.call) } });
   };
 }
 

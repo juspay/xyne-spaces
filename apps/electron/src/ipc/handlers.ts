@@ -183,10 +183,17 @@ export function setupIpcHandlers(): void {
     assertRecordingFsSender(event);
     return recordingFs.hasDirectory();
   });
-  ipcMain.handle('recording-fs:create-capture', (event, { captureId }: { captureId: string }) => {
+  ipcMain.handle('recording-fs:get-directory', (event) => {
     assertRecordingFsSender(event);
-    return recordingFs.createCapture(captureId);
+    return recordingFs.getDirectory();
   });
+  ipcMain.handle(
+    'recording-fs:create-capture',
+    (event, { captureId, dirName }: { captureId: string; dirName?: string }) => {
+      assertRecordingFsSender(event);
+      return recordingFs.createCapture(captureId, dirName);
+    },
+  );
   ipcMain.handle(
     'recording-fs:append',
     (event, { captureId, bytes }: { captureId: string; bytes: ArrayBuffer }) => {

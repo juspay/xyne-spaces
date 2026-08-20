@@ -1,25 +1,22 @@
 import { toast } from 'sonner';
-import type { RecordingCaptureManifest } from '@xyne/shared';
+import { captureNeedsRedo, type RecordingCaptureManifest } from '@xyne/shared';
 import {
   RECORDING_REPAIR_MERGED_EVENT,
   recordingService,
   type RecordingRepairMergedEventDetail,
   type RecordingRepairReason,
 } from './recordingService';
-import {
-  selectRecordingArchiveStore,
-  createManifest,
-  sha256Hex,
-  lastDurableEndedAtMs,
-} from './archive';
+import { selectRecordingArchiveStore, createManifest, recordingDirName } from './archive';
 import type { OpenArchiveCapture, RecordingArchiveStore } from './archive/types';
 import { getRecordingRepairUploader } from './archive/uploader';
 import { isCaptureSettled, markCaptureSettled } from './archive/settledCaptures';
 
 // Offline-first note-taker recorder. One long-lived MediaRecorder records the WHOLE
 // call into a single continuous recording.webm on the user's disk (Electron native FS
-// / File System Access / OPFS fallback). Outages only decide which byte ranges get
-// uploaded to GCS for transcript repair — the local archive is always the full call.
+// / File System Access / OPFS fallback). The local archive is always the full call.
+// If any outage fires during the call, the whole file is uploaded to GCS and
+// re-transcribed server-side (a "redo") — there is no windowing; `hadOutage` is a
+// sticky boolean and the outage's timing does not matter.
 
 export const RECORDING_STORAGE_EXHAUSTED_EVENT = 'xyne-recording-storage-exhausted';
 
@@ -43,9 +40,6 @@ interface ActiveCapture {
   source: MediaStreamAudioSourceNode;
   recorder: MediaRecorder;
   trackId: string;
-  lastFragmentEndedAt: number;
-  activeReasons: Set<RecordingRepairReason>;
-  activeOutageIndex: number | null;
   mutationTail: Promise<void>;
   stopping: boolean;
 }
@@ -59,10 +53,6 @@ function pickMimeType(): string | null {
   if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
   if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
   return null;
-}
-
-function needsRepair(manifest: RecordingCaptureManifest): boolean {
-  return manifest.offlineAtStart || manifest.outages.length > 0;
 }
 
 class OfflineRecordingService {
@@ -138,6 +128,9 @@ class OfflineRecordingService {
     const captureId = crypto.randomUUID();
     const startedAt = Date.now();
     const offlineAtStart = options?.offlineAtStart ?? !navigator.onLine;
+    // A friendly folder name for the user-visible backends; OPFS is browser-private
+    // and cleaned up by captureId, so it keeps the captureId as its folder name.
+    const dirName = store.kind === 'opfs' ? undefined : recordingDirName(startedAt, captureId);
 
     const open = await store.createCapture({
       callId,
@@ -146,6 +139,7 @@ class OfflineRecordingService {
       audioBitsPerSecond: FALLBACK_AUDIO_BITS_PER_SECOND,
       startedAt,
       offlineAtStart,
+      ...(dirName ? { dirName } : {}),
     });
     const manifest = createManifest({
       callId,
@@ -171,9 +165,6 @@ class OfflineRecordingService {
       source,
       recorder,
       trackId: track.id,
-      lastFragmentEndedAt: startedAt,
-      activeReasons: new Set(),
-      activeOutageIndex: null,
       mutationTail: Promise.resolve(),
       stopping: false,
     };
@@ -189,65 +180,23 @@ class OfflineRecordingService {
 
   private onFragment(capture: ActiveCapture, bytes: Blob): void {
     if (!bytes.size) return;
-    const startedAtMs = capture.lastFragmentEndedAt;
-    const endedAtMs = Date.now();
-    capture.lastFragmentEndedAt = endedAtMs;
     this.enqueue(capture, async () => {
-      const sha256 = await sha256Hex(bytes);
       const { byteOffset, byteLength } = await capture.open.appendFragment(bytes);
-      capture.manifest.chunks.push({
-        sequence: capture.manifest.chunks.length,
-        byteOffset,
-        byteLength,
-        startedAtMs,
-        endedAtMs,
-        sha256,
-      });
-      // Keep the currently-open outage's end fresh so a crash mid-outage still
-      // repairs up to the last durably stored fragment.
-      if (capture.activeOutageIndex !== null) {
-        const outage = capture.manifest.outages[capture.activeOutageIndex];
-        if (outage) outage.endedAtMs = Math.max(outage.endedAtMs, endedAtMs);
-      }
+      capture.manifest.byteLength = byteOffset + byteLength;
       await capture.open.writeManifest(capture.manifest);
     });
     void this.monitorStorage(capture);
   }
 
-  setReason(reason: RecordingRepairReason, active: boolean, occurredAt = Date.now()): void {
+  /**
+   * Mark that an outage occurred. Sticky: any outage at any time flips the capture
+   * to "needs redo", which uploads the whole recording.webm on stop. `active=false`
+   * and the outage's timing are ignored — there are no windows to close.
+   */
+  setReason(_reason: RecordingRepairReason, active: boolean, _occurredAt?: number): void {
     const capture = this.capture;
-    if (!capture) return;
-    if (active) {
-      capture.activeReasons.add(reason);
-      if (capture.activeOutageIndex === null) {
-        const startedAtMs = occurredAt;
-        const endedAtMs = Math.max(startedAtMs + 1, lastDurableEndedAtMs(capture.manifest));
-        capture.manifest.outages.push({ startedAtMs, endedAtMs, reasons: [reason] });
-        capture.activeOutageIndex = capture.manifest.outages.length - 1;
-      } else {
-        const outage = capture.manifest.outages[capture.activeOutageIndex];
-        if (outage && !outage.reasons.includes(reason)) outage.reasons.push(reason);
-      }
-    } else {
-      capture.activeReasons.delete(reason);
-      if (capture.activeReasons.size === 0 && capture.activeOutageIndex !== null) {
-        const outage = capture.manifest.outages[capture.activeOutageIndex];
-        if (outage) outage.endedAtMs = Math.max(outage.endedAtMs, occurredAt);
-        capture.activeOutageIndex = null;
-      }
-    }
-    this.persistManifest(capture);
-  }
-
-  addMarkedMoment(text: string, occurredAt = Date.now()): void {
-    const capture = this.capture;
-    if (!capture || !text.trim()) return;
-    capture.manifest.markedMoments.push({
-      id: crypto.randomUUID(),
-      timestampSeconds: Math.max(0, (occurredAt - capture.manifest.startedAt) / 1000),
-      text: text.trim(),
-      serverAcknowledged: false,
-    });
+    if (!capture || !active || capture.manifest.hadOutage) return;
+    capture.manifest.hadOutage = true;
     this.persistManifest(capture);
   }
 
@@ -283,12 +232,6 @@ class OfflineRecordingService {
     await this.stopRecorder(capture);
     await capture.mutationTail.catch(() => undefined);
 
-    if (capture.activeOutageIndex !== null) {
-      const outage = capture.manifest.outages[capture.activeOutageIndex];
-      if (outage)
-        outage.endedAtMs = Math.max(outage.endedAtMs, lastDurableEndedAtMs(capture.manifest));
-      capture.activeOutageIndex = null;
-    }
     capture.manifest.completed = true;
     capture.manifest.endedAt = Date.now();
     await capture.open.writeManifest(capture.manifest).catch(() => undefined);
@@ -301,7 +244,6 @@ class OfflineRecordingService {
       capture.captureId,
       capture.manifest,
       (offset, length) => capture.open.readRange(offset, length),
-      manifest => capture.open.writeManifest(manifest),
     );
     await capture.open.close().catch(() => undefined);
   }
@@ -414,12 +356,8 @@ class OfflineRecordingService {
       if (stored.captureId === this.capture?.captureId) continue;
       let manifest = stored.manifest;
       if (!manifest.completed) {
-        // Crashed mid-recording: close the archive at the last durable fragment.
-        manifest = {
-          ...manifest,
-          completed: true,
-          endedAt: manifest.endedAt ?? lastDurableEndedAtMs(manifest),
-        };
+        // Crashed mid-recording: close the archive at whatever landed durably.
+        manifest = { ...manifest, completed: true, endedAt: manifest.endedAt ?? Date.now() };
         await stored.writeManifest(manifest).catch(() => undefined);
       }
       await this.processCapture(
@@ -428,7 +366,6 @@ class OfflineRecordingService {
         stored.captureId,
         manifest,
         (offset, length) => stored.readRange(offset, length),
-        next => stored.writeManifest(next),
       );
     }
   }
@@ -439,15 +376,14 @@ class OfflineRecordingService {
     captureId: string,
     manifest: RecordingCaptureManifest,
     readRange: (byteOffset: number, byteLength: number) => Promise<Blob>,
-    persistManifest: (manifest: RecordingCaptureManifest) => Promise<void>,
   ): Promise<void> {
     if (isCaptureSettled(captureId)) {
       if (store.kind === 'opfs') await store.deleteCapture(captureId).catch(() => undefined);
       return;
     }
-    // A fully-online call needs no server repair; the local recording.webm remains
+    // A fully-online call needs no server redo; the local recording.webm remains
     // the user's archive. Settle so recovery stops re-scanning it.
-    if (!needsRepair(manifest)) {
+    if (!captureNeedsRedo(manifest)) {
       markCaptureSettled(captureId);
       if (store.kind === 'opfs') await store.deleteCapture(captureId).catch(() => undefined);
       return;
@@ -455,7 +391,7 @@ class OfflineRecordingService {
     const uploader = getRecordingRepairUploader();
     if (!uploader) return; // upload path not yet registered; retry on next init/online
     try {
-      await uploader.uploadCapture({ callId, captureId, manifest, readRange, persistManifest });
+      await uploader.uploadCapture({ callId, captureId, manifest, readRange });
     } catch {
       return; // preserve local data; retry on next init/online
     }
@@ -475,16 +411,11 @@ class OfflineRecordingService {
           delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.5));
           continue;
         }
-        if (status.status === 'MERGED') {
+        if (status.done) {
           const detail: RecordingRepairMergedEventDetail = { callId, captureId };
           window.dispatchEvent(new CustomEvent(RECORDING_REPAIR_MERGED_EVENT, { detail }));
           markCaptureSettled(captureId);
           if (store.kind === 'opfs') await store.deleteCapture(captureId).catch(() => undefined);
-          return;
-        }
-        if (status.status === 'FAILED' && !status.retryable) {
-          markCaptureSettled(captureId);
-          toast.warning('A recording gap could not be repaired automatically');
           return;
         }
         await sleep(delay);
