@@ -32,20 +32,20 @@ export interface HistoryScopeOption {
   requiresDate?: boolean;
 }
 
+export interface PreviewAttachment {
+  readonly id: string;
+  readonly originalFilename?: string | null | undefined;
+}
+
 export interface PreviewMessage {
   readonly conversationId: string;
   readonly createdAt: number;
+  readonly attachments?: readonly PreviewAttachment[] | undefined;
   readonly initialMessage?:
     | {
         readonly senderId?: string | null | undefined;
         readonly content?: string | null | undefined;
-        readonly sender?:
-          | {
-              readonly displayName?: string | null | undefined;
-              readonly name?: string | null | undefined;
-            }
-          | null
-          | undefined;
+        readonly senderName?: string | null | undefined;
       }
     | null
     | undefined;

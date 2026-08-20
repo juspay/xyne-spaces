@@ -1,5 +1,6 @@
 import React from 'react';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
+import { Paperclip } from 'lucide-react';
 import type { HistoryScopeMode } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
@@ -117,9 +118,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                         <div className='min-w-0 flex-1'>
                           <div className='flex items-baseline gap-2'>
                             <span className='text-sm font-semibold text-foreground'>
-                              {conversation.initialMessage?.sender?.displayName ||
-                                conversation.initialMessage?.sender?.name ||
-                                'Unknown'}
+                              {conversation.initialMessage?.senderName || 'Unknown'}
                             </span>
                             <span className='text-xs text-muted-foreground'>
                               {formatMessageTime(conversation.createdAt)}
@@ -128,6 +127,18 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                           <p className='whitespace-pre-wrap break-words text-sm text-foreground/80'>
                             {toPreviewText(conversation.initialMessage?.content)}
                           </p>
+
+                          {(conversation.attachments ?? []).map(attachment => (
+                            <div
+                              key={attachment.id}
+                              className='mt-1 flex items-center gap-1.5 text-xs text-muted-foreground'
+                            >
+                              <Paperclip className='size-3 shrink-0' aria-hidden />
+                              <span className='truncate'>
+                                {attachment.originalFilename ?? 'Attachment'}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

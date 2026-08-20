@@ -30,6 +30,8 @@ router.get('/:id', userManagementController.getUserById); // Get user by ID
 
 // DM Routes
 router.post('/me/dms', channelController.createNewDM); // Create new DM (1-on-1 or group)
+router.get('/me/dms/:channelId/existing-group', channelController.findExistingGroupDm); // Find a group DM that already has these people
+router.get('/me/dms/:channelId/history-preview', channelController.getDmHistoryPreview); // Preview history that would be shared
 router.post('/me/dms/:channelId/add', validateZod(AddGroupDmParticipantsSchema), channelController.addGroupDmParticipants); // Add participants to DM/GROUP_DM
 
 export default router;

@@ -23,6 +23,17 @@ export interface AddGroupDmParticipantsParams {
   historyScope: HistoryScope;
 }
 
+export interface HistoryPreviewEntry {
+  conversationId: string;
+  createdAt: number;
+  initialMessage: {
+    senderId: string;
+    content: string;
+    senderName: string;
+  } | null;
+  attachments: Array<{ id: string; originalFilename: string }>;
+}
+
 export interface AddedParticipant {
   userId: string;
   userName: string;
@@ -162,6 +173,66 @@ export class GroupDmParticipantService {
           ? `New group DM created with ${conversationsCopied} conversation(s) carried over`
           : 'New group DM created',
     };
+  }
+
+  async findExistingGroupDm(params: {
+    channelId: string;
+    currentUserId: string;
+    userIds: string[];
+  }): Promise<string | null> {
+    const { channelId, currentUserId, userIds } = params;
+
+    const participants =
+      await this.channelParticipantRepository.getChannelParticipants(channelId);
+    if (!participants.some(p => p.userId === currentUserId)) {
+      throw new AppError('You must be a participant of this conversation', 403);
+    }
+
+    const allParticipantIds = [
+      ...new Set([...participants.map(p => p.userId), ...userIds]),
+    ].sort();
+    const existing = await this.channelRepository.getGroupChannelByMembers(allParticipantIds);
+    return existing?.id ?? null;
+  }
+
+  async getHistoryPreview(params: {
+    channelId: string;
+    currentUserId: string;
+    since: Date | null;
+    limit: number;
+  }): Promise<HistoryPreviewEntry[]> {
+    const { channelId, currentUserId, since, limit } = params;
+
+    const participants =
+      await this.channelParticipantRepository.getChannelParticipants(channelId);
+    if (!participants.some(p => p.userId === currentUserId)) {
+      throw new AppError('You must be a participant to preview this conversation', 403);
+    }
+
+    const rows = await this.conversationRepository.getHistoryPreview(channelId, since, limit);
+    const senderIds = [
+      ...new Set(rows.map(r => r.initialMessage?.senderId).filter((id): id is string => !!id)),
+    ];
+    const senders = senderIds.length
+      ? await this.userRepository.findMany({ where: { id: { in: senderIds } } })
+      : [];
+    const senderById = new Map(senders.map(user => [user.id, user]));
+
+    return rows.map(row => {
+      const sender = row.initialMessage ? senderById.get(row.initialMessage.senderId) : undefined;
+      return {
+        conversationId: row.conversationId,
+        createdAt: row.createdAt.getTime(),
+        initialMessage: row.initialMessage
+          ? {
+              senderId: row.initialMessage.senderId,
+              content: row.initialMessage.content,
+              senderName: sender?.displayName || sender?.name || 'Unknown',
+            }
+          : null,
+        attachments: row.attachments,
+      };
+    });
   }
 
   private async loadActiveUsers(userIds: string[]): Promise<User[]> {

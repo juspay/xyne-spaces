@@ -279,6 +279,68 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
+  async getHistoryPreview(
+    channelId: string,
+    createdAfter: Date | null,
+    limit: number
+  ): Promise<
+    Array<{
+      conversationId: string;
+      createdAt: Date;
+      initialMessage: { senderId: string; content: string } | null;
+      attachments: Array<{ id: string; originalFilename: string }>;
+    }>
+  > {
+    const conversations = await this.db.conversation.findMany({
+      where: {
+        channelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limit
+    });
+
+    if (conversations.length === 0) {
+      return [];
+    }
+
+    const initialMessages = await this.db.message.findMany({
+      where: {
+        messageId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { messageId: true, senderId: true, content: true }
+    });
+    const byId = new Map(initialMessages.map(m => [m.messageId, m]));
+
+    const attachments = await this.db.messageAttachment.findMany({
+      where: {
+        entityId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { id: true, entityId: true, originalFilename: true }
+    });
+    const attachmentsByMessage = new Map<string, Array<{ id: string; originalFilename: string }>>();
+    for (const attachment of attachments) {
+      const bucket = attachmentsByMessage.get(attachment.entityId) ?? [];
+      bucket.push({ id: attachment.id, originalFilename: attachment.originalFilename });
+      attachmentsByMessage.set(attachment.entityId, bucket);
+    }
+
+    return conversations.map(conversation => {
+      const initial = byId.get(conversation.initialMessageId);
+      return {
+        conversationId: conversation.conversationId,
+        createdAt: conversation.createdAt,
+        initialMessage: initial
+          ? { senderId: initial.senderId, content: initial.content }
+          : null,
+        attachments: attachmentsByMessage.get(conversation.initialMessageId) ?? []
+      };
+    });
+  }
+
   async copyConversationsToChannel(
     sourceChannelId: string,
     targetChannelId: string,

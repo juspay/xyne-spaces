@@ -86,6 +86,21 @@ export interface CreateDmResponse {
 
 export type { AddGroupDmParticipantsRequest, AddGroupDmParticipantsResponse } from '@xyne/shared';
 
+export interface HistoryPreviewEntry {
+  conversationId: string;
+  createdAt: number;
+  initialMessage: {
+    senderId: string;
+    content: string;
+    senderName: string;
+  } | null;
+  attachments: Array<{ id: string; originalFilename: string }>;
+}
+
+export interface HistoryPreviewResponse {
+  conversations: HistoryPreviewEntry[];
+}
+
 export interface PromoteGroupDmRequest {
   name: string;
   description?: string;
@@ -153,6 +168,28 @@ export class ChannelService {
 
   async createDm(data: CreateDmRequest): Promise<CreateDmResponse> {
     const response = await apiInstance.post<CreateDmResponse>('/users/me/dms', data);
+    return response.data;
+  }
+
+  async findExistingGroupDm(
+    channelId: string,
+    userIds: string[],
+  ): Promise<{ channelId: string | null }> {
+    const response = await apiInstance.get<{ channelId: string | null }>(
+      `/users/me/dms/${channelId}/existing-group`,
+      { params: { userIds: userIds.join(',') } },
+    );
+    return response.data;
+  }
+
+  async getDmHistoryPreview(
+    channelId: string,
+    params: { since: number | null; limit?: number },
+  ): Promise<HistoryPreviewResponse> {
+    const response = await apiInstance.get<HistoryPreviewResponse>(
+      `/users/me/dms/${channelId}/history-preview`,
+      { params: { ...(params.since !== null && { since: params.since }), limit: params.limit } },
+    );
     return response.data;
   }
 

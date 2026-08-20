@@ -2445,6 +2445,63 @@ export class ChannelController {
   };
 
   // POST /api/users/me/dms/:channelId/add - Add participants to GROUP_DM
+  findExistingGroupDm = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { channelId } = req.params;
+      const raw = typeof req.query.userIds === 'string' ? req.query.userIds : '';
+      const userIds = raw.split(',').map(id => id.trim()).filter(Boolean);
+
+      if (userIds.length === 0) {
+        res.status(200).json({ channelId: null });
+        return;
+      }
+
+      const existingChannelId = await groupDmParticipantService.findExistingGroupDm({
+        channelId,
+        currentUserId,
+        userIds,
+      });
+
+      res.status(200).json({ channelId: existingChannelId });
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error looking up existing group DM:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getDmHistoryPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { channelId } = req.params;
+      const sinceParam = typeof req.query.since === 'string' ? Number(req.query.since) : NaN;
+      const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : NaN;
+
+      const since = Number.isFinite(sinceParam) ? new Date(sinceParam) : null;
+      const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 20;
+
+      const conversations = await groupDmParticipantService.getHistoryPreview({
+        channelId,
+        currentUserId,
+        since,
+        limit,
+      });
+
+      res.status(200).json({ conversations });
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error building DM history preview:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   addGroupDmParticipants = async (req: Request, res: Response): Promise<void> => {
     try {
       const currentUserId = req.user!.id;

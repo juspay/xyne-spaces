@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { mutators } from '../../../zero/mutators';
 import { useChannel } from '../../../hooks/useChannels';
 import { channelService } from '../../../services/Chat/channelService';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -60,32 +60,31 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
     [scopeMode, customDate],
   );
 
-  const memberKey = useMemo(
-    () => [...new Set([...existingUserIds, ...selectedUsers.map(u => u.id)])].sort().join(','),
-    [existingUserIds, selectedUsers],
-  );
+  const selectedUserIds = useMemo(() => selectedUsers.map(u => u.id), [selectedUsers]);
 
-  const [existingGroupDms] = useCachedQuery(queries.groupDmByMemberKey({ memberKey }), {
-    enabled: step === 'history' && selectedUsers.length > 0,
+  const { data: existingGroupDm } = useQuery({
+    queryKey: ['existing-group-dm', channelId, selectedUserIds],
+    queryFn: () => channelService.findExistingGroupDm(channelId, selectedUserIds),
+    enabled: step === 'history' && selectedUserIds.length > 0,
+    staleTime: 30_000,
   });
-  const joinsExistingConversation = (existingGroupDms?.length ?? 0) > 0;
+  const joinsExistingConversation = Boolean(existingGroupDm?.channelId);
 
   const cutoffChosen = hasChosenCutoff(scopeMode, customDate);
   const previewEnabled = step === 'history' && scopeMode !== 'none' && cutoffChosen;
 
-  const [previewConversations] = useCachedQuery(
-    queries.channelConversationsSince({
-      channelId,
-      isMember: true,
-      since: previewLowerBound(scope),
-      limit: 20,
-    }),
-    { enabled: previewEnabled },
-  );
+  const previewSince = previewLowerBound(scope);
+  const { data: previewData } = useQuery({
+    queryKey: ['dm-history-preview', channelId, previewSince],
+    queryFn: () =>
+      channelService.getDmHistoryPreview(channelId, { since: previewSince, limit: 20 }),
+    enabled: previewEnabled,
+    staleTime: 30_000,
+  });
 
   const previewGroups = useMemo(
-    () => (previewEnabled ? groupByDay(previewConversations ?? []) : []),
-    [previewEnabled, previewConversations],
+    () => (previewEnabled ? groupByDay(previewData?.conversations ?? []) : []),
+    [previewEnabled, previewData],
   );
 
   useEffect(() => {
