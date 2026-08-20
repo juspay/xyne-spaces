@@ -215,6 +215,8 @@ export interface VespaChatContainerDocument extends VespaDocument {
 export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   text: string;
   chunks: string[];
+  links?: string[];
+  hasLinks: boolean;
   userId: string;
   username: string;
   userEmail: string;
