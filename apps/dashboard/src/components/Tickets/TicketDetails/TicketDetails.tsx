@@ -3189,34 +3189,33 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Hidden only on machine-owned boards. A ticket that is itself a sub-ticket can still
   // take sub-tickets of its own — trees nest; the server rejects anything that would
   // close a loop.
-  const addSubTicketPicker =
-    !canManageSubTicketLinks ? null : (
-      <div
-        className={cn(
-          'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
-          isLinkingSubTicket ? 'opacity-60 pointer-events-none' : undefined,
-        )}
-        data-testid='add-sub-ticket-picker'
-      >
-        <EntitySelector
-          options={subTicketPickerOptions}
-          selectedValue={null}
-          onSelect={value => handleLinkSubTicket(value)}
-          placeholder='+ Add existing sub-ticket'
-          searchPlaceholder='Search by ticket ID or name'
-          isOpen={isAddSubTicketMenuOpen}
-          onOpenChange={handleAddSubTicketMenuOpenChange}
-          onSearchChange={subTicketSearch.handleSearchChange}
-          onScrollEnd={subTicketSearch.handleScrollEnd}
-          hasMore={subTicketSearch.hasMore}
-          isLoading={subTicketSearch.isLoading}
-          disableClientFiltering={true}
-          width='100%'
-          noBorder
-          testId='add-sub-ticket-selector'
-        />
-      </div>
-    );
+  const addSubTicketPicker = !canManageSubTicketLinks ? null : (
+    <div
+      className={cn(
+        'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
+        isLinkingSubTicket ? 'opacity-60 pointer-events-none' : undefined,
+      )}
+      data-testid='add-sub-ticket-picker'
+    >
+      <EntitySelector
+        options={subTicketPickerOptions}
+        selectedValue={null}
+        onSelect={value => handleLinkSubTicket(value)}
+        placeholder='+ Add existing sub-ticket'
+        searchPlaceholder='Search by ticket ID or name'
+        isOpen={isAddSubTicketMenuOpen}
+        onOpenChange={handleAddSubTicketMenuOpenChange}
+        onSearchChange={subTicketSearch.handleSearchChange}
+        onScrollEnd={subTicketSearch.handleScrollEnd}
+        hasMore={subTicketSearch.hasMore}
+        isLoading={subTicketSearch.isLoading}
+        disableClientFiltering={true}
+        width='100%'
+        noBorder
+        testId='add-sub-ticket-selector'
+      />
+    </div>
+  );
 
   const createSubTicketButton =
     boardData?.boardType === BoardType.FLOW ? null : (
