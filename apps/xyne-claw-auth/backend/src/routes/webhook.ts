@@ -67,6 +67,7 @@ import {
 import { createTraceId, createLogger } from "../logger.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
+import { attachKbGrantsToConfig } from "../lib/spaces-kb.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
@@ -2898,6 +2899,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
     const fastModeEnabled = await resolveFastMode(payload.conversationId, runAgentSlug, agentRow?.config);
 
+    // KB curators need their collection grants on the wire — see
+    // attachKbGrantsToConfig. No-op for every other agent.
+    const mentionAgentConfig = agentRow?.config
+      ? await attachKbGrantsToConfig(agentRow.config as Record<string, unknown>, agentRow.id, prisma)
+      : undefined;
+
     // (The global twin concurrency limiter — the fleet-wide LiteLLM cap — is
     // acquired further down, AFTER the new per-user FIFO gate, so a queued
     // follow-up tag never burns a fleet-wide slot. See globalTwinSlotToken.)
@@ -2971,7 +2978,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
       // and custom-tool config values (PPT_API_KEY etc). Without this,
       // those features silently default to "off"/"allow" on Spaces mentions.
-      ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+      ...(mentionAgentConfig ? { agentConfig: mentionAgentConfig } : {}),
       fastMode: fastModeEnabled,
       // `/compact` — force a one-shot compaction of the resumed session
       // before this turn so the thread continues with a smaller context.
@@ -4034,6 +4041,15 @@ export async function handleAutomationWebhook(
         ttlSeconds: 3600,
       })
     : undefined;
+  // KB curators need their collection grants on the wire — see
+  // attachKbGrantsToConfig. Covers both the dispatch below and the recovery
+  // replay payload, which must carry the same config or the retried run comes
+  // back with no KB. No-op for every other agent.
+  const forwardedAgentConfigWithKb = await attachKbGrantsToConfig(
+    forwardedAgentConfig,
+    agent.id,
+    prisma,
+  );
   const fastModeEnabled = await resolveFastMode(payload.conversationId, agentSlug, forwardedAgentConfig);
 
   // Resolve the agent's configured provider so an automation run uses the same
@@ -4095,7 +4111,7 @@ export async function handleAutomationWebhook(
         ...(sdlcProfile ? { detached: true } : {}),
         callbackUrl: clawCallbackUrl,
         ...(resultToken ? { sessionToken: resultToken } : {}),
-        ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
+        ...(forwardedAgentConfigWithKb ? { agentConfig: forwardedAgentConfigWithKb } : {}),
         fastMode: fastModeEnabled,
         // Primary provider — the pod keys its model off `provider` (defaults to
         // "spaces"/kimi when unset), so without this every automation ran on
@@ -4177,7 +4193,7 @@ export async function handleAutomationWebhook(
       channelId: payload.channelId ?? "",
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
       ...(resultToken ? { sessionToken: resultToken } : {}),
-      ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
+      ...(forwardedAgentConfigWithKb ? { agentConfig: forwardedAgentConfigWithKb } : {}),
       fastMode: fastModeEnabled,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(providerOrder.length > 1 ? { providerOrder } : {}),

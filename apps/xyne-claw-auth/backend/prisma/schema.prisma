@@ -2358,3 +2358,149 @@ model EntityExtractionRun {
   @@index([workspaceId, status])
   @@map("entity_extraction_runs")
 }
+
+/// People-KB extraction — which projects are opted in, and where their KB lives.
+///
+/// Turning a team's conversations into a shared knowledge base is a deliberate
+/// act, so it is recorded rather than inferred: no row means no extraction.
+/// `enabledBy` / `enabledAt` are the consent trail.
+model KbProject {
+  /// Spaces project id. Projects live in the Spaces DB, so this is the local
+  /// projection of one — the row that carries the flag.
+  projectId    String  @id
+  /// Short stable code (e.g. "XYNE"). Used as the KB path segment, so it must
+  /// not change: pages cannot be moved once written.
+  ///
+  /// Unique because it is the routing key: the GCS findings partition, the KB
+  /// path segment and every by-code lookup in the pipeline. Two rows sharing a
+  /// code made `findFirst` pick one arbitrarily, so extraction, merge and
+  /// reconcile could each read a different project's collection under one name.
+  projectCode  String  @unique
+  projectName  String
+  workspaceId  String
+  /// Collection this project's KB pages are written into.
+  collectionId String
+
+  /// Which agent extracts findings for this project. Null falls back to the
+  /// KB_EXTRACT_AGENT_SLUG env default, so existing rows keep working.
+  extractAgentSlug String?
+  /// Which agent merges findings into pages. Null falls back to
+  /// KB_MERGE_AGENT_SLUG.
+  mergeAgentSlug   String?
+  /// Which agent reconciles the written pages. Null falls back to
+  /// KB_RECONCILE_AGENT_SLUG.
+  reconcileAgentSlug String?
+
+  enabled   Boolean   @default(false)
+  enabledBy String?
+  enabledAt DateTime?
+
+  channels KbChannel[]
+
+  @@index([enabled])
+  @@map("kb_projects")
+}
+
+/// One row per channel considered for extraction, carrying its progress.
+///
+/// Progress is a WATERMARK (`extractedThrough`) rather than a per-day record:
+/// backfill and nightly incremental then share one code path, a failed window
+/// simply is not advanced past, and "is this channel caught up?" is a column
+/// rather than something inferred from logs.
+model KbChannel {
+  channelId String @id
+  /// Denormalized tenant key, copied from the owning KbProject on insert. A
+  /// channel belongs to exactly one project and a project to one workspace, so
+  /// this never diverges — it is here so every query can be tenant-scoped
+  /// without joining back through kb_projects.
+  workspaceId String
+  projectId String
+  project   KbProject @relation(fields: [projectId], references: [projectId], onDelete: Cascade)
+
+  /// Snapshot of the channel when it was added, so an operator can see what
+  /// they included without joining back to Spaces.
+  name       String
+  visibility String
+  scopeType  String
+
+  /// Private channels are excluded by default and opt in HERE. Nothing in the
+  /// stack can delete a KB page, so a wrongly-included private channel cannot
+  /// be retracted — which is why the default is off and the actor is recorded.
+  included   Boolean   @default(false)
+  includedBy String?
+  includedAt DateTime?
+
+  /// Everything up to this instant has been extracted. Advances only when a
+  /// window COMPLETES, including empty ones — otherwise a quiet channel would
+  /// rescan the same range forever.
+  extractedThrough DateTime?
+  /// How far back to walk. Null means "from when it was included".
+  backfillFrom     DateTime?
+
+  lastRunAt DateTime?
+  lastError String?
+
+  @@index([projectId, included])
+  @@index([workspaceId, included])
+  @@map("kb_channels")
+}
+
+/// One row per job attempt across the whole People-KB pipeline.
+///
+/// Extraction, merge and reconcile are three stages of ONE pipeline, and the
+/// question actually asked of them is "what happened to XYNE last night?" —
+/// which three separate tables answer only by running three queries and
+/// interleaving the results by hand. They also carried the same eight columns
+/// each, so a fourth stage meant a fourth near-identical table.
+///
+/// Deliberately NOT related to KbChannel. The relation it replaced cascaded on
+/// delete, so removing a channel from the KB erased the record of everything
+/// ever extracted from it — exactly the history someone would go looking for
+/// afterwards. A run record outlives its subject.
+model KbRun {
+  id String @id @default(cuid())
+
+  /// EXTRACT | MERGE | RECONCILE
+  kind String
+
+  /// Denormalized tenant key, copied from the project this run is for.
+  /// Deliberately a plain column, not a relation: a run record outlives its
+  /// subject (see the note above about the removed KbChannel cascade), so it
+  /// must stay tenant-scopable even after the project row is gone.
+  workspaceId String
+
+  projectId   String
+  projectCode String
+
+  /// What this run covered, in its own stage's terms: a channel name, a
+  /// findings day, an entity path. Displayed as-is, and the merge RESUMES from
+  /// it — the days it has already completed are the days it will not redo.
+  subject String
+
+  /// Extraction only: which channel, and the window walked. Real columns rather
+  /// than metrics, because the watermark logic orders and compares them.
+  channelId  String?
+  windowFrom DateTime?
+  windowTo   DateTime?
+
+  /// Per-stage counters — threads/batches for extraction, findings/files for
+  /// the merge. Json because they are read by humans, never queried: a column
+  /// per stage is how three tables happened in the first place.
+  metrics Json?
+
+  /// The agent's closing report, where a stage produces one. Reconcile rewrites
+  /// pages, so what it changed cannot be reconstructed from anywhere else.
+  summary String? @db.Text
+
+  /// RUNNING | COMPLETED | FAILED | NOTHING_TO_MERGE
+  status     String    @default("RUNNING")
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([projectCode, kind, startedAt])
+  @@index([kind, status])
+  @@index([channelId, startedAt])
+  @@index([workspaceId, kind, startedAt])
+  @@map("kb_runs")
+}

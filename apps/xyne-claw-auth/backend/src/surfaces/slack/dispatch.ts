@@ -6,6 +6,8 @@
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
 import { setSession } from "../../lib/session-context.js";
+import { attachKbGrantsToConfig } from "../../lib/spaces-kb.js";
+import { prisma } from "../../db.js";
 import { fetch as httpFetch } from "undici";
 
 export interface BoundSlackSurfaceAgent {
@@ -83,7 +85,15 @@ export async function dispatchSlackRun(input: {
     id: input.agent.id,
     config: input.agent.config,
   });
-  const effectiveAgentConfig = withSlackSubagentInjected(input.agent.config);
+  // KB curators need their collection grants on the wire — see
+  // attachKbGrantsToConfig. Without it a curator mentioned in Slack arrives
+  // with kbAccess="files" and no knowledgeBase, and falls back to filesystem
+  // tools on an empty workspace — the KB reads as empty, not misconfigured.
+  const effectiveAgentConfig = await attachKbGrantsToConfig(
+    withSlackSubagentInjected(input.agent.config) as Record<string, unknown> | undefined,
+    input.agent.id,
+    prisma,
+  );
   const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
     headers: {
