@@ -1,3 +1,10 @@
+## [1.199.7](https://github.com/juspay/xyne-spaces/compare/v1.199.6...v1.199.7) (2026-08-20)
+
+
+### Bug Fixes
+
+* remove hosted model config ([#782](https://github.com/juspay/xyne-spaces/issues/782)) ([c97508f](https://github.com/juspay/xyne-spaces/commit/c97508fdce5d3215a976f2318e9776727169d567))
+
 ## [1.199.6](https://github.com/juspay/xyne-spaces/compare/v1.199.5...v1.199.6) (2026-08-20)
 
 
