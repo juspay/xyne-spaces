@@ -118,7 +118,7 @@ export interface StoredMessage {
  */
 export interface ClawCitation {
   label?: string;
-  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item';
+  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item' | 'recording';
   channelId?: string;
   conversationId?: string;
   messageId?: string;
@@ -126,6 +126,9 @@ export interface ClawCitation {
   channelType?: string;
   channelKind?: string;
   canvasId?: string;
+  /** For kind="recording": the call's externalId — the `/recordings/:id` segment.
+   *  Note-taker recordings have no channel or thread, so this is their only link. */
+  recordingId?: string;
   ticketId?: string;
   xyneId?: string;
   mailId?: string;
