@@ -4545,6 +4545,112 @@ const spacesReadCanvas: ToolDef = {
 
 // ── spaces-edit-canvas ───────────────────────────────────────────────
 
+// ── spaces-export-channel-canvases ───────────────────────────────────
+// Bulk-export a channel's canvases (folder placement + markdown) in one
+// paginated, view-gated call, so callers can reconstruct the channel's
+// folder structure without one read per canvas.
+const spacesExportChannelCanvases: ToolDef = {
+  name: "spaces-export-channel-canvases",
+  description:
+    "Bulk-export the canvases in a channel together with their FOLDER placement, for archiving or KB import. " +
+    "Returns each canvas the caller can VIEW as { id, title, folderName, visibility, markdown } so the channel's " +
+    "folder structure can be reconstructed in one pass (no per-canvas reads). Filter with visibility (e.g. PUBLIC). " +
+    "Content reads are heavy, so results are PAGINATED — use limit/offset to page large channels, and set " +
+    "includeContent=false for a fast structure-only listing (folders + titles, no bodies). " +
+    "Canvases the caller cannot view are silently omitted.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: {
+        type: "string",
+        description: "Channel ID to export canvases from.",
+      },
+      visibility: {
+        type: "string",
+        enum: ["PUBLIC", "PRIVATE"],
+        description: "Only export canvases with this visibility. Omit to include everything the caller can view.",
+      },
+      includeContent: {
+        type: "boolean",
+        description: "Include full markdown body per canvas (default true). Set false for a fast id/title/folder-only listing.",
+      },
+      limit: {
+        type: "number",
+        description: "Max canvases per page (default 25, max 100).",
+      },
+      offset: {
+        type: "number",
+        description: "Pagination offset (default 0). Increase to page through a large channel.",
+      },
+    },
+    required: ["channelId"],
+  },
+  async handler(params, ctx) {
+    try {
+      const channelId = String(params["channelId"] ?? "").trim();
+      if (!channelId) return err("channelId is required");
+
+      const qs = new URLSearchParams();
+      if (params["visibility"]) qs.set("visibility", String(params["visibility"]));
+      if (params["includeContent"] === false) qs.set("includeContent", "false");
+      if (params["limit"] != null) qs.set("limit", String(params["limit"]));
+      if (params["offset"] != null) qs.set("offset", String(params["offset"]));
+
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const result = (await spacesFetch(
+        `/api/internal/canvas/channel/${encodeURIComponent(channelId)}/export?${qs.toString()}`,
+        {
+          method: "GET",
+          headers: { "x-user-id": ctx.userId },
+        },
+        { s2sKey },
+      )) as {
+        error?: string;
+        totalMatching?: number;
+        returned?: number;
+        offset?: number;
+        limit?: number;
+        hasMore?: boolean;
+        canvases?: Array<{
+          id: string;
+          title: string;
+          folderName: string | null;
+          visibility: string;
+          markdown?: string;
+          url?: string;
+        }>;
+      };
+
+      if (result.error) return err(result.error);
+      const canvases = result.canvases ?? [];
+      if (canvases.length === 0) {
+        return ok("No viewable canvases found for that channel/filter.");
+      }
+
+      const chunks = canvases.map((c, idx) => {
+        const folder = c.folderName ? c.folderName : "(root)";
+        const lines = [
+          `Folder: ${folder}`,
+          `Visibility: ${c.visibility}`,
+          c.url ? `URL: ${c.url}` : "",
+          "",
+          c.markdown ?? "(content not included)",
+        ];
+        return prefixChunk(idx + 1, `# ${c.title}`, lines);
+      });
+
+      const footer =
+        `\n\n(${result.returned ?? canvases.length} of ${result.totalMatching ?? "?"} canvases` +
+        `; offset ${result.offset ?? 0}` +
+        (result.hasMore ? " — more available, increase offset to page)" : ")");
+
+      return ok(`${chunks.join("\n\n")}${footer}`);
+    } catch (e) {
+      return err(`Export channel canvases error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 const spacesEditCanvas: ToolDef = {
   name: "spaces-edit-canvas",
   description:
@@ -8095,6 +8201,7 @@ export const tools: ToolDef[] = [
   spacesUpdateTicket,
   spacesScheduleCall,
   spacesReadCanvas,
+  spacesExportChannelCanvases,
   spacesEditCanvas,
   spacesTriggerAgent,
   spacesCreateCanvas,
