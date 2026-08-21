@@ -91,27 +91,12 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       .whereExists('mappedTicket', (ticket) => {
         return ticket.whereExists('conversation', (conversation) => {
           return conversation.whereExists('channel', (channel) => {
-            return channel.where(({ cmp, or, exists, and }) => {
+            return channel.where(({ cmp, or, exists }) => {
               return or(
-                and(
-                  cmp('visibility', ChannelVisibility.PRIVATE),
-                  exists('participants', (participants) => {
-                    return participants.where('userId', this.ctx.userID);
-                  })
-                ),
-                and(
-                  cmp('visibility', ChannelVisibility.PUBLIC),
-                  // Participation via ANY channel, matching TicketACl.canUpdate —
-                  // otherwise this is stricter than the ACL on the ticket it mirrors.
-                  exists('project', (project) => {
-                    return project.whereExists('channels', (channelQuery) => {
-                      return channelQuery
-                        .whereExists('participants', (participants) => {
-                          return participants.where('userId', this.ctx.userID);
-                        });
-                    });
-                  })
-                )
+                cmp('visibility', ChannelVisibility.PUBLIC),
+                exists('participants', (participants) => {
+                  return participants.where('userId', this.ctx.userID);
+                })
               );
             });
           });

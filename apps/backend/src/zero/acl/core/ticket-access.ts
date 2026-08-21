@@ -2,8 +2,9 @@ import { ChannelVisibility } from '@xyne/shared';
 import { zql } from '../../queries';
 
 /**
- * "Can this user see this ticket" as a ZQL predicate: the channel is PRIVATE with the
- * user as participant, or PUBLIC in a project the user has a public channel in.
+ * "Can this user see this ticket" as a ZQL predicate: the channel is PUBLIC, or the user
+ * is a participant of it. Same ticket-channel access idiom as TicketAssignmentsACL and
+ * RCAsACL — a PUBLIC channel needs no participation.
  *
  * Shared out of SubTicketsACL.canUpdate because reads inside a Zero mutator are NOT
  * filtered by the read ACLs, so mutators must apply it themselves.
@@ -17,26 +18,12 @@ export function accessibleTicketQuery(
     .where('workspaceId', actor.workspaceId)
     .whereExists('conversation', conversation => {
       return conversation.whereExists('channel', channel => {
-        return channel.where(({ cmp, or, exists, and }) => {
+        return channel.where(({ cmp, or, exists }) => {
           return or(
-            and(
-              cmp('visibility', ChannelVisibility.PRIVATE),
-              exists('participants', participants => {
-                return participants.where('userId', actor.sub);
-              }),
-            ),
-            and(
-              cmp('visibility', ChannelVisibility.PUBLIC),
-              exists('project', project => {
-                return project.whereExists('channels', channelQuery => {
-                  return channelQuery
-                    .where('visibility', ChannelVisibility.PUBLIC)
-                    .whereExists('participants', participants => {
-                      return participants.where('userId', actor.sub);
-                    });
-                });
-              }),
-            ),
+            cmp('visibility', ChannelVisibility.PUBLIC),
+            exists('participants', participants => {
+              return participants.where('userId', actor.sub);
+            }),
           );
         });
       });
