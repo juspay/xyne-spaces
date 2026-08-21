@@ -115,6 +115,7 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -142,6 +143,12 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import {
+  buildPrefetchBlock,
+  prefetchEnabled,
+  startPrefetchExtraction,
+  type ExecutableTool,
+} from "../prefetch.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1448,6 +1455,14 @@ async function processTask(
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
+  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
+  // the run so the fast-model extractor overlaps the expensive setup that
+  // follows — session restore and the MCP tool listing — instead of adding its
+  // latency in front of the first turn. It is awaited far below, once the tool
+  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+    ? startPrefetchExtraction(task)
+    : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
   // workspaces are deleted whole in the finally, but a persistent cwd survives
@@ -2639,6 +2654,19 @@ async function processTask(
       `Tools: ${subagentTools.length} subagents, ${directTools.length} direct, ${customToolDefs.length} custom, ${parentHoistedTools.length} parent-hoisted, ${kbHoistedTools.length} kb-hoisted${fastModeEnabled ? `, [fast] catalogCandidates=${fastCatalogCandidateItems.length}` : ""}`,
     );
 
+    // Presentation tools (post-code-block / post-diff / post-chart / visualize)
+    // render as cards in the Spaces thread, so a thread run gets them in the
+    // CATALOG regardless of the agent's tools.custom selection. Framework
+    // default, not per-agent config — same rationale as the plan tools below,
+    // but lazy (one index line each) instead of always-active. See
+    // ../presentation-catalog.ts for why these three conditions and no others.
+    const presentationDefaultOn = presentationCatalogDefaultOn({
+      channelId,
+      eventType,
+      conversationId,
+      isScheduledOrAutomationRun,
+    });
+
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
     if (toolsConfigEarly) {
@@ -2691,6 +2719,11 @@ async function processTask(
           // Slash-command contracts own their minimum palette. Keep these
           // per-run tools even when the stored Agent.config did not select them.
           if (forcedTaskCommandTools.has(t.name)) return true;
+          // Thread runs get the presentation tools for free. Surviving this
+          // gate is exactly what lets them reach fastCatalogItems below —
+          // they still can't become always-active, because both catalog
+          // builders keep them out of fastAlwaysActiveToolNames.
+          if (isFreePresentationTool(t as { source?: string }, presentationDefaultOn)) return true;
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
           const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
           if (isAllowedCustom) return true;
@@ -3131,7 +3164,7 @@ async function processTask(
         )
       : undefined;
     if (catalogActive) {
-      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled}`);
+      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled} presentationDefault=${presentationDefaultOn}`);
     }
 
     const tools = allTools.length > 0 ? allTools : undefined;
@@ -3539,6 +3572,33 @@ async function processTask(
         : idLines.join("\n");
     }
 
+    // Resolve the prefetch spec now that the tool palette is final: the
+    // resolvers ARE the agent's own Spaces tools, invoked through the same
+    // `execute` closure the model would use, so ACL and permissions come along
+    // for free and there is no second auth path to keep in sync.
+    if (prefetchSpecPromise) {
+      const prefetchStartedAt = Date.now();
+      try {
+        const block = await buildPrefetchBlock({
+          spec: await prefetchSpecPromise,
+          tools: allTools as unknown as ExecutableTool[],
+          identity: {
+            userId,
+            ...(userName ? { userName } : {}),
+            ...(userEmail ? { userEmail } : {}),
+          },
+        });
+        if (block) {
+          fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+          log(`[prefetch] attached ${block.length} chars in ${Date.now() - prefetchStartedAt}ms`);
+        }
+      } catch (err) {
+        // Belt-and-braces: prefetch.ts already swallows everything, but a
+        // prefetch failure must never be the reason a run does not happen.
+        log(`[prefetch] skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // Key sessions by user + conversationId + agentSlug so each caller gets an isolated sandbox per thread.
     // Branching: when claw-auth has cloned the source session to a sibling
     // `piSessionConversationId`, use THAT as the storage key — the DB
@@ -3655,6 +3715,19 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${fastModeCatalogPrompt}`
         : fastModeCatalogPrompt;
+    }
+    // Reads as an addendum to the catalog index above: WHY this run has the
+    // presentation catalog (the surface, not the agent's tool config) and HOW
+    // to answer on a chat surface. Empty unless presentation entries actually
+    // survived into this run's catalog.
+    const presentationPrimer = presentationDefaultOn
+      ? buildPresentationPrimer(fastCatalogItems.map((item) => item.entry))
+      : "";
+    if (presentationPrimer) {
+      fullContext = fullContext
+        ? `${fullContext}\n\n${presentationPrimer}`
+        : presentationPrimer;
+      log(`[catalog] presentation primer injected (${presentationPrimer.length} chars)`);
     }
     const fastModeSubagentSkills =
       fastModeEnabled && customSubagents && customSubagents.length > 0

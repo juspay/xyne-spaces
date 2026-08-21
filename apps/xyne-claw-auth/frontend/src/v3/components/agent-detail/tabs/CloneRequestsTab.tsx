@@ -77,7 +77,7 @@ export function CloneRequestsTab({
                     onClick={() => onResolve(req, "approve")}
                     disabled={busyId !== null}
                     className="inline-flex items-center gap-1 rounded-md bg-xyne-accent px-2.5 py-1 text-[12px] font-medium text-white disabled:opacity-50"
-                    title="Approve — creates a copy for the requester"
+                    title="Approve — gives the requester a personal copy with this agent's prompt, tools, skills, behaviour and knowledge-base grants. Your integration credentials are not shared."
                   >
                     <CheckIcon size={14} weight="bold" />
                     Approve

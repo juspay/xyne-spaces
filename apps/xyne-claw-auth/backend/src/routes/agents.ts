@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
@@ -30,6 +30,7 @@ import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig } from "../lib/agent-config-validation.js";
+import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
@@ -725,6 +726,16 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     // partial-PUT caller must spread the full existing config first.
     const normalizedConfig = await normalizeGatewayServicesInConfig(config);
 
+    // Canonicalize the invocation-privacy block so a malformed/junk value can
+    // never be stored (which could silently lock or unlock the agent). A junk
+    // `privacy` is dropped → default "everyone"; a valid one is deduped/cleaned.
+    // See isAgentInvocableBy — enforced at every dispatch chokepoint.
+    if (normalizedConfig && "privacy" in normalizedConfig) {
+      const normalizedPrivacy = normalizeAgentPrivacy(normalizedConfig["privacy"]);
+      if (normalizedPrivacy) normalizedConfig["privacy"] = normalizedPrivacy;
+      else delete normalizedConfig["privacy"];
+    }
+
     const data: Prisma.AgentUpdateInput = {};
 
     // Slug rename — owner/admin-only on the route ACL above. Validate
@@ -837,9 +848,25 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
 
-    // Audit general agent edits. Tools/config changes are already captured by
-    // AGENT_CONFIG_UPDATED at the agentRepository.update choke point, so `config`
-    // is deliberately excluded here to avoid a duplicate/overlapping trail.
+    // Model-settings audit — which model actually serves this agent's runs.
+    // Written only when config.modelSettings really changed, so the
+    // high-frequency config writes that don't touch it (tools, memory status,
+    // scope flips) don't spam the audit table.
+    if (normalizedConfig !== undefined) {
+      await auditModelSettingsChange({
+        agentId: existing.id,
+        agentName: existing.name,
+        agentSlug: existing.slug,
+        orgId: existing.orgId,
+        actorUserId: requesterId ?? undefined,
+        beforeConfig: existing.config,
+        afterConfig: normalizedConfig,
+      });
+    }
+
+    // Audit general agent edits. `config` is deliberately excluded here to
+    // avoid a duplicate/overlapping trail — model settings get their own
+    // AGENT_CONFIG_UPDATED row above.
     const changedFields: string[] = [];
     if (data.slug && data.slug !== existing.slug) changedFields.push("slug");
     if (name !== undefined && name.trim() !== existing.name) changedFields.push("name");
@@ -1645,8 +1672,10 @@ router.post("/requests/:requestId/reject", requireClawAdmin, async (req: Request
 });
 
 // ── Agent cloning ─────────────────────────────────────────────────────────────
-// Clone copies ONLY the source agent's system prompt, tools, and skills into a
-// new personal agent owned by the caller (see agentRepository.cloneAgentForUser).
+// Clone copies the source agent's prompt, config (tools/subagents/behaviour),
+// tools, skills, KB grants and MCP connections into a new PERSONAL agent owned
+// by the caller. Spaces app identity, shares, provider credentials, delegation
+// grants and prompt history stay behind (see agentRepository.cloneAgentForUser).
 // Owners / contributors / admins clone instantly; everyone else raises a
 // "clone" AgentRequest that the SOURCE agent's owner reviews — surfaced both on
 // this frontend (GET /clone-requests/incoming) and, best-effort, as an

@@ -1,4 +1,5 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -972,6 +973,13 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     if (!agent) {
       log.warn(`[agent-chat/chat] agent org-scoped miss slug=${slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    // Invocation whitelist — dashboard chat surface. Same rule as every other
+    // entry point; refused like a disabled/absent agent.
+    if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+      log.warn(`[agent-chat/chat] invocation denied (not whitelisted) slug=${slug} userId=${userId}`);
+      res.status(403).json({ success: false, error: `agent "${slug}" is restricted — you don't have access to it` });
       return;
     }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;

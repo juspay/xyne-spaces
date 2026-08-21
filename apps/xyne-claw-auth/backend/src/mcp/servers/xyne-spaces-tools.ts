@@ -475,6 +475,36 @@ async function resolveCanvasViewIds(canvasDocIds: string[]): Promise<Map<string,
   return out;
 }
 
+/**
+ * Batch Vespa file docId (= collectionItem.fileId, a stable UUID shared
+ * across all versions of the file) → collectionItem.id (the Postgres cuid
+ * the FE's KB file-viewer route, downloads, and picker all key on). The two
+ * ids are NOT interchangeable — see the identical translation map built in
+ * claw-auth's kb-handlers.ts (`vespaDocIdToItemId`) for the same reason.
+ * Without this, a COLLECTIONS citation's `collectionItemId`/url would carry
+ * the Vespa docId straight through and 404 (or resolve to nothing) on the FE.
+ */
+async function resolveCollectionItemIds(fileDocIds: string[]): Promise<Map<string, string>> {
+  // Sliced for the same gateway take-ceiling reason as resolveMailLinks.
+  const ids = [...new Set(fileDocIds.filter(Boolean))].slice(0, GATEWAY_MAX_TAKE);
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  try {
+    const rows = (await interact({
+      model: "collectionItem",
+      operation: "findMany",
+      where: { fileId: { in: ids } },
+      take: ids.length,
+    })) as Array<{ id: string; fileId: string }>;
+    for (const c of rows) {
+      out.set(c.fileId, c.id);
+    }
+  } catch {
+    // Non-fatal — COLLECTIONS rows degrade to a channel-level thread chip.
+  }
+  return out;
+}
+
 function applyChannelInfo(
   citations: Citation[],
   info: Map<string, { name?: string; scopeType?: string; type?: string }>,
@@ -4446,8 +4476,9 @@ const spacesScheduleCall: ToolDef = {
 const spacesWhoami: ToolDef = {
   name: "spaces-whoami",
   description:
-    "Returns the current user's Spaces profile — userId, name, email and workspaceId of the User " +
-    "Call this first to get the userId needed for filtering other tools (e.g. assignedTo, from, createdBy).",
+    "Returns the current user's Spaces profile — userId, name, email and workspaceId. " +
+    "If the userId and name are ALREADY in your system prompt, so do not call this just to read them; " +
+    "use it only when you need the workspaceId or want to confirm the profile.",
   inputSchema: { type: "object", properties: {} },
   async handler(_args, ctx) {
     try {
@@ -6438,6 +6469,33 @@ const spacesVespaSchema: ToolDef = {
   },
 };
 
+/**
+ * Entity ids for the DIRECT-VESPA tools only.
+ *
+ * A `channel` / `project` lookup returns a NAME, but every follow-up query
+ * needs the ID — and `formatSearchResult` prints one only for people hits
+ * (`userId:`). Project rows are also non-routable, so they carry no citation
+ * chip either: the model got a name it could not turn into a filter, and had to
+ * re-resolve it through another tool.
+ *
+ * Deliberately NOT inside `formatSearchResult`: that renderer is shared with
+ * spaces-search / spaces-search-v2, and this is only wanted on the structured
+ * Vespa path where the ids feed straight back into `filters`.
+ *
+ * Ids come from searchContext (vespa-direct's transformHit); a project doc is
+ * keyed by its own id, so `r.id` is the fallback there.
+ */
+function directEntityIdLines(r: SearchResult): string {
+  const sc = r.searchContext ?? {};
+  const lines: string[] = [];
+  if (sc["channelId"] && (r.type === "chat_container" || r.type === "channel")) {
+    lines.push(`  channelId: ${sc["channelId"]}`);
+  }
+  if (sc["projectId"]) lines.push(`  projectId: ${sc["projectId"]}`);
+  else if (r.type === "project" && r.id) lines.push(`  projectId: ${r.id}`);
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
 // Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
 // spaces-vespa-search structured). Builds a routable Citation per result row —
 // mirrors spaces-search's harvest() so hits render as CLICKABLE chips instead of
@@ -6456,6 +6514,7 @@ async function renderDirectResult(
   data: DirectSearchResponse,
   hits: number,
   offset: number,
+  workspaceId?: string,
 ): Promise<ToolResult> {
   const citations: Citation[] = [];
 
@@ -6470,13 +6529,16 @@ async function renderDirectResult(
     (scOf(r)["subApp"] as string | undefined)?.toUpperCase();
   const isFile = (r: SearchResult): boolean => r.type.toLowerCase() === "file";
 
-  const [mailLinks, ticketLinks, canvasViewIds] = await Promise.all([
+  const [mailLinks, ticketLinks, canvasViewIds, collectionItemIds] = await Promise.all([
     resolveMailLinks(allRows.filter((r) => r.type.toLowerCase() === "mail").map((r) => r.id)),
     resolveTicketLinks(allRows.filter(isFile).map((r) => scOf(r)["ticketId"] as string | undefined)),
     resolveCanvasViewIds(
       allRows
         .filter((r) => isFile(r) && subAppOf(r) === "CANVAS" && !scOf(r)["viewAccessId"])
         .map((r) => r.id),
+    ),
+    resolveCollectionItemIds(
+      allRows.filter((r) => isFile(r) && subAppOf(r) === "COLLECTIONS").map((r) => r.id),
     ),
   ]);
 
@@ -6514,23 +6576,30 @@ async function renderDirectResult(
       return citations.length > before;
     }
     // KB collection file → deep-link to the knowledge-base file viewer
-    // (/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<docId>).
-    // All ids are denormalized on the file doc at ingest (mapper.ts mapFile) and
-    // surfaced by transformHit, so NO collection lookup is needed. The FE forwards
-    // this url verbatim (clawCitationUrl.ts collection-item branch). Channel-scoped
-    // collections carry projectId + channelId + collectionId; workspace-scoped ones
-    // don't, so degrade to the channel-level thread chip rather than route to the
-    // wrong channel or emit an uncited row.
+    // (/<workspaceId>/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<itemId>).
+    // projectId/channelId/collectionId(=clId, the ROOT collection)/folderId(=clFd)
+    // are denormalized on the file doc at ingest (mapper.ts mapFile) and surfaced
+    // by transformHit, so no collection lookup is needed for those. `r.id` itself
+    // is the Vespa docId (= collectionItem.fileId, a stable UUID) though — NOT the
+    // collectionItem.id the FE route/download/picker key on — so it's translated
+    // via resolveCollectionItemIds before landing in the citation. The dashboard
+    // mounts every route under /:workspaceId/... (see AppRoot.tsx), so a missing
+    // workspaceId is just as fatal to the link as a missing collection id.
+    // Channel-scoped collections carry projectId + channelId + collectionId;
+    // workspace-scoped ones don't (nor do untranslatable/deleted items), so
+    // degrade to the channel-level thread chip rather than route to the wrong
+    // channel or emit a citation whose link 404s.
     if (type === "file" && subApp === "COLLECTIONS") {
       const projectId = sc["projectId"] as string | undefined;
       const collectionId = sc["collectionId"] as string | undefined;
       const folderId = sc["folderId"] as string | undefined;
-      if (projectId && channelId && collectionId) {
+      const itemId = collectionItemIds.get(r.id);
+      if (workspaceId && projectId && channelId && collectionId && itemId) {
         citations.push({
           kind: "collection-item",
-          url: `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${r.id}`,
+          url: `/${workspaceId}/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${itemId}`,
           collectionId,
-          collectionItemId: r.id,
+          collectionItemId: itemId,
           fileName: label,
           chunkIndex,
           label,
@@ -6616,7 +6685,7 @@ async function renderDirectResult(
       for (const r of group.results) {
         chunkIndex += 1;
         const cited = harvest(r, chunkIndex);
-        parts.push(formatSearchResult(r, cited ? chunkIndex : null));
+        parts.push(formatSearchResult(r, cited ? chunkIndex : null) + directEntityIdLines(r));
       }
       parts.push("");
     }
@@ -6628,7 +6697,7 @@ async function renderDirectResult(
   const rendered = results
     .map((r, idx) => {
       const cited = harvest(r, idx + 1);
-      return formatSearchResult(r, cited ? idx + 1 : null);
+      return formatSearchResult(r, cited ? idx + 1 : null) + directEntityIdLines(r);
     })
     .join("\n\n");
   return finalize(
@@ -6753,7 +6822,7 @@ const spacesVespaQuery: ToolDef = {
           ? (args["rankInputs"] as Record<string, unknown>)
           : undefined;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) {
         log.error(
           `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
@@ -6764,7 +6833,7 @@ const spacesVespaQuery: ToolDef = {
       const data = await queryDirect(
         yql,
         query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -6772,12 +6841,49 @@ const spacesVespaQuery: ToolDef = {
         rankInputs,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-query error", e);
     }
   },
 };
+
+/**
+ * Caller identity for the DIRECT-VESPA tools, with a LOCAL-ONLY override.
+ *
+ * These tools do not go through the MCP credentials path: they read
+ * `ctx.userId` (the Spaces user id on the claw session) and resolve the tenant
+ * with `getWorkspaceIdForUser`, a lookup against the local Spaces DB. Locally
+ * that pins every query to whichever seeded user your Spaces instance
+ * authenticates as, so a query cannot be aimed at another tenant — which is
+ * exactly what you need when the Vespa endpoint is port-forwarded to a
+ * different environment and the local ids match nothing in that index.
+ *
+ * Scope is deliberately narrow: ONLY the ACL + workspace guards of the direct
+ * Vespa tools. The gateway-backed tools keep the real session identity, so
+ * they continue to work against local data instead of failing on an identity
+ * that has no local Spaces session.
+ *
+ * HARD-GATED on `!CONFIG.isProduction` — an override here would otherwise run
+ * one user's queries under another user's ACL.
+ */
+async function directVespaIdentity(
+  ctxUserId: string,
+): Promise<{ userId: string; workspaceId: string | null }> {
+  const devUser = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_USER_ID"] ?? "").trim();
+  const devWorkspace = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_WORKSPACE_ID"] ?? "").trim();
+  const userId = devUser || ctxUserId;
+  // Skip the Spaces-DB lookup when the workspace is pinned: an overridden user
+  // id generally has no row in the LOCAL Spaces DB, so the lookup would return
+  // null and the tool would refuse the query.
+  const workspaceId = devWorkspace || (await getWorkspaceIdForUser(userId));
+  if (devUser || devWorkspace) {
+    log.warn(
+      `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
+    );
+  }
+  return { userId, workspaceId };
+}
 
 // ── spaces-vespa-search ──────────────────────────────────────────────────────
 
@@ -6939,7 +7045,7 @@ const spacesVespaSearch: ToolDef = {
       // Tenant scope — every direct-Vespa query is confined to the caller's
       // workspace, resolved from the user record (public.users). Refuse to run
       // unscoped rather than risk crossing tenants.
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped search.");
 
@@ -6960,14 +7066,14 @@ const spacesVespaSearch: ToolDef = {
           ...(rankProfile ? { rankProfile } : {}),
           hits,
         },
-        ctx.userId,
+        aclUserId,
         workspaceId,
       );
 
       const data = await queryDirect(
         built.yql,
         built.query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -6975,7 +7081,7 @@ const spacesVespaSearch: ToolDef = {
         undefined,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-search error", e);
     }
@@ -7566,7 +7672,7 @@ const spacesCorpusScan: ToolDef = {
         bucket,
       });
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
 
@@ -7583,7 +7689,7 @@ const spacesCorpusScan: ToolDef = {
         const res = await queryDirect(
           yql,
           query,
-          ctx.userId,
+          aclUserId,
           0,
           0,
           CONFIG.vespaQueryEndpoint,
@@ -7727,7 +7833,7 @@ const spacesEvidencePack: ToolDef = {
       });
       const { scan, topic, perBucket } = validated;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped extraction.");
 
       const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
@@ -7737,7 +7843,7 @@ const spacesEvidencePack: ToolDef = {
       // finite and the coverage note honest.
       const censusYql = buildCorpusScanYql(scan, { withTerm: true });
       const termBucketCounts = await Promise.all(scan.terms.map(async term => {
-        const res = await queryDirect(censusYql, termToQuery(term), ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const res = await queryDirect(censusYql, termToQuery(term), aclUserId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack census: "${term}"`, yql: executed?.yql ?? censusYql, vespaParams: executed?.vespaParams ?? {} });
         const buckets: Record<number, number> = {};
@@ -7766,7 +7872,7 @@ const spacesEvidencePack: ToolDef = {
 
       const rowsNested = await Promise.all(fetchList.map(async ({ term, bucketKey }) => {
         const yql = buildPackFetchYql(scan, bucketRange(bucketKey, scan.bucket));
-        const res = await queryDirect(yql, termToQuery(term), ctx.userId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
+        const res = await queryDirect(yql, termToQuery(term), aclUserId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack fetch: "${term}" @ ${bucketKey}`, yql: executed?.yql ?? yql, vespaParams: executed?.vespaParams ?? {} });
         const results = (!res.data.grouped ? res.data.results : []) ?? [];
@@ -7829,6 +7935,292 @@ const spacesEvidencePack: ToolDef = {
   },
 };
 
+// ── spaces-desk-metrics ───────────────────────────────────────────────
+
+const DESK_METRIC_KEYS = [
+  "frt",
+  "rt",
+  "csat",
+  "counts",
+  "priority",
+  "trend",
+  "agents",
+  "tags",
+  "customFields",
+  "tickets",
+] as const;
+
+interface DeskSummary {
+  channelId: string;
+  channelName: string | null;
+  deskType: string;
+}
+
+/** Resolve the desks a request targets, or explain why it could not. */
+type DeskResolution =
+  | { ok: true; channelIds: string[] }
+  | { ok: false; text: string };
+
+async function listMetricsDesks(): Promise<DeskSummary[]> {
+  const data = (await spacesFetch("/api/desk-metrics/claw/desks")) as {
+    desks?: DeskSummary[];
+  };
+  return data.desks ?? [];
+}
+
+function describeDesks(desks: DeskSummary[]): string {
+  return desks
+    .map((d) => `- ${d.channelName ?? "(unnamed)"} [${d.deskType}] channelId=${d.channelId}`)
+    .join("\n");
+}
+
+async function resolveDesks(args: Record<string, unknown>): Promise<DeskResolution> {
+  const explicitIds = Array.isArray(args["channelIds"])
+    ? (args["channelIds"] as unknown[]).filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+  if (explicitIds.length > 0) return { ok: true, channelIds: explicitIds };
+
+  const desks = await listMetricsDesks();
+  if (desks.length === 0) {
+    return {
+      ok: false,
+      text:
+        "This user is not a member of any support desk, so there is nothing to report on. Desk " +
+        "metrics cover Xyne Desk channels only, and only ones the user belongs to.",
+    };
+  }
+
+  if (args["allDesks"] === true) {
+    return { ok: true, channelIds: desks.map((d) => d.channelId) };
+  }
+
+  const deskName = typeof args["deskName"] === "string" ? args["deskName"].trim() : "";
+  if (!deskName) {
+    return {
+      ok: false,
+      text:
+        `Specify which desk. Pass deskName, or channelIds, or allDesks=true to cover all ` +
+        `${desks.length}. Desks available to this user:\n${describeDesks(desks)}`,
+    };
+  }
+
+  const needle = deskName.toLowerCase();
+  // Tier 1: case-insensitive exact.
+  let matches = desks.filter((d) => (d.channelName ?? "").toLowerCase() === needle);
+  // Tier 2: case-insensitive contains — catches the casing/wording drift that
+  // makes a plain equality check fail on names the user typed from memory.
+  if (matches.length === 0) {
+    matches = desks.filter((d) => (d.channelName ?? "").toLowerCase().includes(needle));
+  }
+  // Tier 3: no match — surface real candidates rather than a dead end.
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      text:
+        `No desk matched "${deskName}". Re-call with one of these exact names, or its channelId:\n` +
+        describeDesks(desks),
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      text:
+        `"${deskName}" matched ${matches.length} desks. Re-call with one exact name or channelId, ` +
+        `or allDesks=true to merge them:\n${describeDesks(matches)}`,
+    };
+  }
+  return { ok: true, channelIds: [matches[0]!.channelId] };
+}
+
+const spacesDeskMetrics: ToolDef = {
+  name: "spaces-desk-metrics",
+  description:
+    "Support-desk analytics for Xyne Desk channels: first-response time (FRT), resolution time (RT), " +
+    "CSAT, tickets opened, email replies sent, per-stage and per-priority breakdowns, per-agent " +
+    "performance, tag breakdowns, and a daily opened-vs-closed trend. This is the SAME data the Desk " +
+    "Metrics dashboard shows. " +
+    "Use when the user asks how a support desk is performing — 'what's our average response time', " +
+    "'CSAT last month', 'who resolved the most tickets', 'how many tickets did we get last week', " +
+    "'which tags are spiking'. " +
+    "Identify the desk by `deskName` (partial, case-insensitive; the tool returns real candidates if " +
+    "nothing matches), by `channelIds`, or set `allDesks=true` to merge every desk the " +
+    "user can see. Call with no desk argument to list the available desks. " +
+    "ASK FOR ONLY THE METRICS YOU NEED via `metrics` — each key is a separate database query, and the " +
+    "default runs all of them. " +
+    "For custom (form) field questions: run metrics:[\"customFields\"] to discover which fields the desk " +
+    "carries, then pass `customFieldBreakdown` with the exact names to get a value distribution, or " +
+    "`customFieldFilter` to scope any other metric to tickets matching a field value. " +
+    "IMPORTANT semantics, also restated in the response's `notes`: (1) frt/rt/counts/priority/agents/" +
+    "tags/tickets are COHORT-scoped — they describe tickets CREATED in the range, so a ticket created " +
+    "earlier and resolved during the range is NOT counted; (2) csat and counts.emailRepliesInRange are " +
+    "ACTIVITY-scoped — events that happened in the range whatever their ticket's age; (3) rt excludes " +
+    "still-open tickets, so a low average over few resolvedTickets is survivorship bias; (4) agents[] " +
+    "attributes tickets to the CURRENT assignee; (5) data is forward-only and does not extend before " +
+    "desk metrics was deployed — old ranges are partial, not empty. " +
+    "Durations are SECONDS. Report them in human units (minutes/hours) rather than reading the raw number aloud.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      deskName: {
+        type: "string",
+        description:
+          "Desk (channel) name, case-insensitive partial match. If nothing matches, or the match is " +
+          "ambiguous, the tool returns the real desk names — re-call with one of those.",
+      },
+      channelIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Explicit desk channel ids. Takes precedence over deskName/allDesks. Max 20; more than one " +
+          "merges them with denominator-weighted averages and adds a perDesk split.",
+      },
+      allDesks: {
+        type: "boolean",
+        description:
+          "Merge every desk the user can see. Use for org-wide questions ('how is support doing " +
+          "overall'). Ignored when channelIds is set.",
+      },
+      lastDays: {
+        type: "number",
+        minimum: 1,
+        maximum: 90,
+        description: "Window length in days ending now (1-90). Defaults to 7. Mutually exclusive with timeRange.",
+      },
+      timeRange: {
+        type: "string",
+        description:
+          "Absolute window as 'startMs_endMs' (epoch milliseconds), e.g. '1735689600000_1738368000000'. " +
+          "Use for a specific calendar period; otherwise prefer lastDays. Max span 90 days.",
+      },
+      metrics: {
+        type: "array",
+        items: { type: "string", enum: [...DESK_METRIC_KEYS] },
+        description:
+          "Which metrics to compute; defaults to all. Each key costs a separate query, so pass only what " +
+          "the question needs. 'counts' covers ticketsOpened + emailReplies + per-stage counts; 'tags' " +
+          "covers both the category and per-tag breakdowns; 'tickets' additionally needs includeTickets.",
+      },
+      includeTickets: {
+        type: "number",
+        minimum: 0,
+        maximum: 50,
+        description:
+          "Return this many individual ticket rows (newest first), each with title, priority, stage, " +
+          "assignee, FRT/RT seconds, CSAT and custom fields. Defaults to 0. Rows are heavy — ask for them " +
+          "only when the user wants examples or a drill-down, not to compute aggregates yourself.",
+      },
+      assigneeIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently assigned to these user ids (from spaces-users).",
+      },
+      stageNames: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently in these stages.",
+      },
+      priorities: {
+        type: "array",
+        items: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        description: "Restrict to these ticket priorities.",
+      },
+      userGroupIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets owned by these user groups.",
+      },
+      tagValues: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to tickets carrying these desk-email tags, each as 'category:tag' (e.g. " +
+          "'issue_type:refund'). Get the real values from a tags-enabled run first.",
+      },
+      customFieldBreakdown: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Custom (form) field NAMES to break down by value, e.g. [\"Primary Issue\"]. Max 5. Names must " +
+          "match exactly — run with metrics:[\"customFields\"] first to discover what this desk has. " +
+          "Multi-select fields count a ticket once per value, so their counts do not sum to the ticket " +
+          "total; the response's notes say which fields those are.",
+      },
+      customFieldFilter: {
+        type: "object",
+        description:
+          "Restrict the cohort by custom field. `keys` alone means 'the field is set at all'; add " +
+          "perKeyFilters to match values. Discover field names with metrics:[\"customFields\"] first.",
+        properties: {
+          keys: {
+            type: "array",
+            items: { type: "string" },
+            description: "Field names to require, e.g. [\"Primary Issue\"].",
+          },
+          perKeyFilters: {
+            type: "object",
+            description:
+              "Per field name: { values: [exact matches] } or { textTerms: [substrings] }. Use values " +
+              "for dropdowns/multi-selects, textTerms for free-text fields.",
+          },
+        },
+        required: ["keys"],
+      },
+    },
+  },
+  async handler(args) {
+    try {
+      if (args["lastDays"] !== undefined && typeof args["timeRange"] === "string") {
+        return err("Pass either lastDays or timeRange, not both.");
+      }
+
+      const resolution = await resolveDesks(args);
+      if (!resolution.ok) return ok(resolution.text);
+
+      const body: Record<string, unknown> = { channelIds: resolution.channelIds };
+      if (typeof args["timeRange"] === "string") body["timeRange"] = args["timeRange"];
+      else body["lastDays"] = typeof args["lastDays"] === "number" ? args["lastDays"] : 7;
+
+      const metrics = Array.isArray(args["metrics"])
+        ? (args["metrics"] as unknown[]).filter(
+            (m): m is string => typeof m === "string" && (DESK_METRIC_KEYS as readonly string[]).includes(m),
+          )
+        : [];
+      if (metrics.length > 0) body["metrics"] = metrics;
+
+      const includeTickets = typeof args["includeTickets"] === "number" ? args["includeTickets"] : 0;
+      if (includeTickets > 0) {
+        body["includeTickets"] = includeTickets;
+        // Asking for rows without the 'tickets' key would silently return none.
+        if (metrics.length > 0 && !metrics.includes("tickets")) {
+          body["metrics"] = [...metrics, "tickets"];
+        }
+      }
+
+      for (const key of ["assigneeIds", "stageNames", "priorities", "userGroupIds", "tagValues"]) {
+        const value = args[key];
+        if (Array.isArray(value) && value.length > 0) body[key] = value;
+      }
+
+      const breakdown = args["customFieldBreakdown"];
+      if (Array.isArray(breakdown) && breakdown.length > 0) body["customFieldBreakdown"] = breakdown;
+
+      const cff = args["customFieldFilter"];
+      if (cff && typeof cff === "object" && Array.isArray((cff as { keys?: unknown }).keys)) {
+        body["customFieldFilter"] = cff;
+      }
+
+      const data = (await spacesFetch("/api/desk-metrics/claw/query", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as Record<string, unknown>;
+
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(`desk-metrics error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
@@ -7837,6 +8229,7 @@ export const tools: ToolDef[] = [
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,
+  spacesDeskMetrics,
   userSendMessage,
   spacesMeetingInsights,
   spacesTickets,

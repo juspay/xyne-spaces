@@ -119,6 +119,20 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [availableModels, setAvailableModels] = useState<ClaudeModelInfo[]>([]);
   const [availableTools, setAvailableTools] = useState<AvailableTools | null>(null);
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
+  // Skills the agent already has, hydrated by the agent payload itself. Kept
+  // separately because listSkills() only ever returns global skills plus the
+  // VIEWER's own — a personal skill belonging to someone else (which is exactly
+  // what a cloned agent carries) is absent from that list, and the skill pills
+  // render off the palette, so without this the attached skill shows as nothing.
+  const [attachedSkills, setAttachedSkills] = useState<Skill[]>([]);
+  /** Skill palette for the Knowledge card: everything the viewer may pick from,
+   *  plus any already-attached skill the listing doesn't include. */
+  const skillPalette = useMemo(() => {
+    const byId = new Map(availableSkills.map((sk) => [sk.id, sk]));
+    for (const sk of attachedSkills) if (!byId.has(sk.id)) byId.set(sk.id, sk);
+    return [...byId.values()];
+  }, [availableSkills, attachedSkills]);
+
   /** User's per-provider credentials. Used to gray-out unconfigured providers
       in the Provider dropdown — Spaces is always available, every other
       provider is enabled only when the user has set up credentials. */
@@ -157,6 +171,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // "Run autonomously" button (the `pendingGoalSuggestion` payload). Default
   // false so existing agents are unchanged.
   const [draftSuggestGoal, setDraftSuggestGoal] = useState(false);
+  // Query prefetch opt-in (agent.config.prefetchContext). When on, xyne-claw
+  // resolves the entities named in the question (channels, projects, people)
+  // BEFORE the first model turn and attaches the ids to the prompt, so the
+  // agent does not spend turns looking them up.
+  const [draftPrefetchContext, setDraftPrefetchContext] = useState(false);
   // Per-agent opt-OUT: post the live plan/TODO card (from the todo-write tool)
   // into the Spaces thread. Default true (post) so existing agents are
   // unchanged; turning it off sets agent.config.postTodos=false, which
@@ -276,6 +295,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setPrompt(agentData.systemPrompt ?? agentData.description ?? "");
         setDraftTools(extractToolsFromConfig(agentData.config));
         setDraftSkillIds((agentData.skills ?? []).map((s) => s.skillId));
+        setAttachedSkills(
+          (agentData.skills ?? []).map((s) => ({ id: s.skillId, ...s.skill }) as Skill),
+        );
         setDraftKbResources((agentData.collections ?? []).map((c) => ({ collectionId: c.collectionId, fileId: c.fileId })));
         setDraftKbScope(agentData.kbScope === "USER" ? "USER" : "COLLECTIONS");
         setDraftProvider(provider);
@@ -288,6 +310,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
         setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
+        setDraftPrefetchContext((agentData.config as { prefetchContext?: boolean }).prefetchContext === true);
         setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
@@ -323,7 +346,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
 
   useEffect(() => {
     getAvailableTools().then(setAvailableTools).catch(() => {});
-    listSkills().then(setAvailableSkills).catch(() => {});
+    // Pass userId: without it the API falls back to scope='global' only, so a
+    // personal skill attached to this agent renders as nothing at all — and a
+    // cloned agent looks like its skills were never copied.
+    listSkills(userId).then(setAvailableSkills).catch(() => {});
     listProviderCredentials(userId).then(setProviderCredentials).catch(() => {});
     listSandboxRepos().then(setSandboxRepoOptions).catch(() => {});
     listSbxGitRepos().then(setSbxGitRepoOptions).catch(() => {});
@@ -391,6 +417,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
     const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
+    const basePrefetchContext = (agent.config as { prefetchContext?: boolean }).prefetchContext === true;
     const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
@@ -433,6 +460,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
       draftSuggestGoal !== baseSuggestGoal ||
+      draftPrefetchContext !== basePrefetchContext ||
       draftPostTodos !== basePostTodos ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
@@ -450,7 +478,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -518,6 +546,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       nextConfig.repository_id = draftResearchAgentRepositoryId || null;
       delete nextConfig.RESEARCH_AGENT_PRODUCT_ID;
       delete nextConfig.RESEARCH_AGENT_REPOSITORY_ID;
+      if (draftPrefetchContext) {
+        nextConfig.prefetchContext = true;
+      } else {
+        delete nextConfig.prefetchContext;
+      }
       if (draftSuggestGoal) {
         nextConfig.suggestGoal = true;
       } else {
@@ -658,7 +691,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -860,8 +893,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   /**
    * Clone the current agent. Owners/contributors/admins get an instant copy
    * (server returns cloned=true) and we navigate to the new agent so they can
-   * pick a model before first run — the clone intentionally carries no model.
-   * Everyone else raises an approval request routed to the owner (cloned=false).
+   * pick a model before first run — provider/model is per-user config and does
+   * not travel with the clone. Everyone else raises an approval request routed
+   * to the owner (cloned=false).
    */
   const doClone = useCallback(async (name: string) => {
     if (!agent || cloning) return;
@@ -1015,7 +1049,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onRemoveDelegationConfigEntry={handleRemoveDelegationConfigEntry}
             draftSkillIds={draftSkillIds}
             onToggleSkill={toggleSkill}
-            availableSkills={availableSkills}
+            availableSkills={skillPalette}
             draftKbResources={draftKbResources}
             onDraftKbResourcesChange={setDraftKbResources}
             draftKbScope={draftKbScope}
@@ -1040,6 +1074,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             researchAgentRepositoryOptions={researchAgentRepositoryOptions}
             draftSuggestGoal={draftSuggestGoal}
             onDraftSuggestGoalChange={setDraftSuggestGoal}
+            draftPrefetchContext={draftPrefetchContext}
+            onDraftPrefetchContextChange={setDraftPrefetchContext}
             draftPostTodos={draftPostTodos}
             onDraftPostTodosChange={setDraftPostTodos}
             draftVerifyResponses={draftVerifyResponses}
@@ -1076,6 +1112,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             permissions={permissions}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onAgentUpdated={setAgent}
             scheduledJobs={scheduledJobs}
             onJobsChange={handleJobsChange}
             agentStats={agentStats}
@@ -1098,6 +1135,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       <SkillPickerDialog
         open={skillPickerOpen}
         onOpenChange={setSkillPickerOpen}
+        userId={userId}
         selectedIds={draftSkillIds}
         onApply={(ids) => setDraftSkillIds(ids)}
       />
@@ -1170,6 +1208,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
         needsApproval={!permissions?.canEdit}
+        isOwnAgent={agent.ownerUserId === userId}
+        sourceEnabled={agent.enabled}
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}
       />

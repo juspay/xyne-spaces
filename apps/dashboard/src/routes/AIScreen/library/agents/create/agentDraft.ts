@@ -51,7 +51,6 @@ export function wizardStateFromAgent(agent: Agent): WizardState {
     researchAgentProductId: typeof shape.product_id === 'string' ? shape.product_id : '',
     researchAgentRepositoryId: typeof shape.repository_id === 'string' ? shape.repository_id : '',
     selectedSkillIds: (agent.skills ?? []).map(entry => entry.skillId),
-    selectedKbScope: agent.kbScope === 'USER' ? 'USER' : 'COLLECTIONS',
     selectedKbResources: knowledge,
   };
 }

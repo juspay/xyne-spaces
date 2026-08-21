@@ -287,10 +287,16 @@ export async function resolveAgentProviderConfigs(
   }
 
   // always-on: the agent's provider wins. Resolve the parent, then the order.
+  // When an order exists but nothing in it has creds, fall back to its FIRST
+  // entry (`primaryParent` maps a credential-less name like `spaces` to the
+  // platform default) — never to a key the user saved but didn't select.
+  // Mirrors agent-chat.ts. Bare-credential fallback: only when no order is set.
   let parent: string | undefined;
-  if (agentProviderOrder.length > 0) parent = agentProviderOrder.find((p) => providerConfigs[p]);
+  if (agentProviderOrder.length > 0) {
+    parent = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+  }
   if (!parent && agentLevelProvider && providerConfigs[agentLevelProvider]) parent = agentLevelProvider;
-  if (!parent) parent = Object.keys(providerConfigs)[0];
+  if (!parent && agentProviderOrder.length === 0) parent = Object.keys(providerConfigs)[0];
 
   const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
   log.info(`Provider resolution (headless): agent=${agent.id} mode=always-on parent=${parent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${providerOrder.join(",")}]`);
