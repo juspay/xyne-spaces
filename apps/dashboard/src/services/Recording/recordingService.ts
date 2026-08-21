@@ -367,6 +367,14 @@ class RecordingService {
     return response.data;
   }
 
+  async manageRecordingParticipant(
+    callId: string,
+    action: 'add' | 'remove',
+    userId: string,
+  ): Promise<void> {
+    await apiInstance.post(`/calls/recordings/${callId}/participants`, { action, userId });
+  }
+
   async revokeRecordingAccess(
     callId: string,
     targets: RecordingShareTarget[],

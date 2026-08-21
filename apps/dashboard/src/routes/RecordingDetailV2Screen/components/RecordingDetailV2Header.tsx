@@ -20,6 +20,7 @@ import {
 } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
+import { RecordingParticipants } from './RecordingParticipants';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
@@ -310,6 +311,10 @@ export const RecordingDetailV2Header = ({
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
           )}
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+          />
           <RecordingLabelPicker
             labels={recording.labels ?? []}
             canEdit={recording.createdByUserId === currentUser?.id}

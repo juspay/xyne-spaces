@@ -201,6 +201,15 @@ export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
 };
 
+export const getRecordingParticipantIds = (
+  createdByUserId: string | undefined,
+  stored: readonly string[] | null | undefined,
+): string[] => {
+  const ids = stored ?? [];
+  if (createdByUserId && !ids.includes(createdByUserId)) return [createdByUserId, ...ids];
+  return [...ids];
+};
+
 /** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
 export const slugifyRecordingLabel = (raw: string): string | null => {
   const slug = normalizeTagName(raw);

@@ -1179,6 +1179,7 @@ export const callTable = table('calls')
     instanceDate: number().optional(),
     recordingEnabled: boolean(),
     recordingUrl: string().optional(),
+    recordingParticipants: json<string[]>(),
     transcript: string().optional(),
     aiSummary: string().optional(),
     startedAt: number(),
