@@ -113,12 +113,10 @@ export function RecordingLabelPicker({
   const resolvable = useMemo(() => [...labels, ...suggestions], [labels, suggestions]);
   const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(resolvable);
 
-  // Unconfirmed AI suggestions render as standalone pills after the add button —
-  // ticking one flips it to `manual` (see handleConfirmSuggestion) so it then falls
-  // into confirmedLabels and appears as a normal pill on the next render.
+  // Confirmed labels eg: TagMethod === MANUAL are distinguish b/w the LLM tags and shared public viewable
   const confirmedLabels = useMemo(
-    () => (canEdit ? labels.filter(id => resolveMethod(id) !== TagMethod.LLM) : labels),
-    [labels, canEdit, resolveMethod],
+    () => labels.filter(id => resolveMethod(id) !== TagMethod.LLM),
+    [labels, resolveMethod],
   );
   const suggestedLabels = useMemo(
     () => (canEdit ? labels.filter(id => resolveMethod(id) === TagMethod.LLM) : []),
