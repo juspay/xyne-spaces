@@ -1,3 +1,10 @@
+## [1.207.0](https://github.com/juspay/xyne-spaces/compare/v1.206.1...v1.207.0) (2026-08-21)
+
+
+### Features
+
+* added slack adapter api to fetch user conversation ([#675](https://github.com/juspay/xyne-spaces/issues/675)) ([2d818ba](https://github.com/juspay/xyne-spaces/commit/2d818baeb2a80abe50107978f0518f29eec8e41f))
+
 ## [1.206.1](https://github.com/juspay/xyne-spaces/compare/v1.206.0...v1.206.1) (2026-08-21)
 
 
