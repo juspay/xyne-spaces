@@ -55,6 +55,9 @@ export interface ElectronAPI {
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
+  // Optional for the same reason: call links opened outside the renderer are
+  // routed back into the app so the user joins without a trip through the lobby.
+  onOpenCallLink?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
   onOpenXyneAIWithContext: (
     callback: (data: {

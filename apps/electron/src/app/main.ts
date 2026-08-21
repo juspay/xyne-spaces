@@ -26,6 +26,7 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
+import { isCallInviteUrl } from '../utils/callLink';
 import Store from 'electron-store';
 
 const store = new Store();
@@ -279,7 +280,10 @@ app.on('web-contents-created', (_event, webContents) => {
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
           const mainWindow = getMainWindow();
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('open-in-browser-panel', url);
+            // A call link followed from the browser panel belongs in the app,
+            // not in another panel tab that would run the guest lobby.
+            const channel = isCallInviteUrl(url) ? 'open-call-link' : 'open-in-browser-panel';
+            mainWindow.webContents.send(channel, url);
           }
         }
       } catch (e) {

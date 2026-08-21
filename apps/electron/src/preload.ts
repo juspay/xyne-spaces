@@ -150,6 +150,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
 
+  onOpenCallLink: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
+    ipcRenderer.on('open-call-link', listener);
+    return () => ipcRenderer.removeListener('open-call-link', listener);
+  },
+
   onLinkOpenedExternal: (callback: (url: string) => void) => {
     const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('link-opened-external', listener);
