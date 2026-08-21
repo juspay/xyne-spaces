@@ -34,7 +34,7 @@ interface ActivityItemCardProps {
   actorName: string;
   isExpanded?: boolean;
   channelId: string | undefined;
-  badgeIcon: ReactNode;
+  badgeIcon?: ReactNode;
   badgeColorClass?: string;
   titlePrefix?: ReactNode;
   description: ReactNode;
@@ -263,14 +263,16 @@ export const ActivityItemCard = ({
             data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
           >
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
-            <div
-              className={cn(
-                'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
-                badgeColorClass,
-              )}
-            >
-              {badgeIcon}
-            </div>
+            {badgeIcon ? (
+              <div
+                className={cn(
+                  'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
+                  badgeColorClass,
+                )}
+              >
+                {badgeIcon}
+              </div>
+            ) : null}
           </button>
         </UserHoverWrapper>
       </div>
