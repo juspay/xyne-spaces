@@ -119,12 +119,10 @@ export function isInternalCallbackOrigin(
   return false;
 }
 
-/** Validate the SSRF policy for external result delivery. When allowPrivateHosts is true, private/link-local hosts are allowed. */
-export function isAllowedExternalCallbackUrl(callbackUrl: string, allowPrivateHosts: boolean = CONFIG.allowPrivateCallbackHosts): boolean {
+/** Validate the deliberately narrow SSRF policy for external result delivery. */
+export function isAllowedExternalCallbackUrl(callbackUrl: string): boolean {
   const parsed = parseUrl(callbackUrl);
   if (!parsed || !ALLOWED_PROTOCOLS.has(parsed.protocol)) return false;
-
-  if (allowPrivateHosts) return true;
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (BLOCKED_HOSTNAMES.has(hostname)) return false;

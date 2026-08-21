@@ -91,10 +91,6 @@ export const CONFIG = {
     (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
-  /** SSRF bypass for outbound result-callback delivery to in-cluster URLs. */
-  allowPrivateCallbackHosts: ["1", "true", "on", "yes"].includes(
-    (process.env["ALLOW_PRIVATE_CALLBACK_HOSTS"] ?? "").trim().toLowerCase(),
-  ),
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
   // calls (auth/me on every authenticated request, chat/postMessage on every
