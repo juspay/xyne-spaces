@@ -8,7 +8,7 @@ import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 
-type FilterTab = 'all' | 'created_by_me' | 'shared';
+type FilterTab = 'all' | 'created_by_me';
 
 const channelCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Channel_Grouped',
@@ -75,12 +75,13 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
 
   const displayedFolders = useMemo(() => {
     if (searchQuery.trim()) return [];
-    return folders;
-  }, [folders, searchQuery]);
+    return activeFilter === 'created_by_me' && currentUserId
+      ? folders.filter(folder => folder.createdBy === currentUserId)
+      : folders;
+  }, [activeFilter, currentUserId, folders, searchQuery]);
 
   const { folderGroups, rootCanvases } = useMemo(() => {
     const groups = new Map<string, FolderGroup>();
-    const hasContentFilter = activeFilter !== 'all' || showStarredOnly;
 
     for (const folder of displayedFolders) {
       groups.set(folder.id, { folder, canvases: [] });
@@ -101,7 +102,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
           ...group,
           canvases: sortByName(group.canvases, canvas => canvas.title || 'Untitled'),
         }))
-        .filter(group => !hasContentFilter || group.canvases.length > 0),
+        .filter(group => !showStarredOnly || group.canvases.length > 0),
       rootCanvases: sortByName(root, canvas => canvas.title || 'Untitled'),
     };
   }, [activeFilter, displayedCanvases, displayedFolders, showStarredOnly]);
@@ -152,19 +153,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 data-track-name='Filter_Channel_Canvases_Created_By_Me'
               >
                 Created by me
-              </button>
-              <button
-                onClick={() => onFilterChange('shared')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
-                  activeFilter === 'shared'
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-shared'
-                data-track-category='CANVAS'
-                data-track-name='Filter_Channel_Canvases_Shared'
-              >
-                Shared
               </button>
             </div>
 
