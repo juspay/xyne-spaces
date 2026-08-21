@@ -3,24 +3,7 @@ import Joi from 'joi';
 
 dotenv.config();
 
-/** Parse INTERNAL_APP_HOST_MAP (stringified JSON) into { externalHost -> internalBaseUrl }. */
-function parseInternalAppHostMap(raw: string): Record<string, string> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const out: Record<string, string> = {};
-    for (const [host, base] of Object.entries(parsed)) {
-      if (typeof host === 'string' && typeof base === 'string' && host && base) {
-        out[host.toLowerCase()] = base.replace(/\/+$/, '');
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
+import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
