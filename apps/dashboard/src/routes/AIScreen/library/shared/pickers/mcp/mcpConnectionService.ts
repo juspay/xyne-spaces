@@ -1,5 +1,6 @@
 import { clawApiRequest } from '@/services/claw/clawRequest';
 import type { CredentialField, McpServer, UserConnection } from '@/services/claw/clawMcpTypes';
+import { openOAuthConsent } from './openOAuthConsent';
 
 export function getCredentialFields(): Promise<Record<string, CredentialField[]>> {
   return clawApiRequest<Record<string, CredentialField[]>>('/servers/credential-fields');
@@ -38,7 +39,7 @@ export async function connectMcpServer(
 ): Promise<{ redirected: boolean }> {
   if (connectStrategyFor(server) === 'oauth') {
     const { authUrl } = await startOAuth(userId, server.type);
-    window.location.href = authUrl;
+    openOAuthConsent(authUrl);
     return { redirected: true };
   }
   await createMcpConnection(userId, { mcpServerId: server.id, credentials });
