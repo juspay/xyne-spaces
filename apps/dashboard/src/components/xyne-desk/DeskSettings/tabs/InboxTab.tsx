@@ -292,8 +292,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             <div className='text-desk-label'>Send replies to app webhook</div>
             <div className='text-desk-helper w-full max-w-[500px]'>
               Forward every reply to the app webhook, and accept the reply only once the webhook
-              responds with 200. Turn this off if the app does not consume replies — replies are
-              then stored on the ticket only.
+              responds with 200. Turn this off if the app does not consume replies.
             </div>
           </div>
           <Switch

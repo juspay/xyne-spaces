@@ -67,10 +67,15 @@ class AppDeskService {
       where: { channelId: conversation.channelId },
       select: { appWebhookDeliveryEnabled: true },
     });
-    const webhookDeliveryEnabled = preference?.appWebhookDeliveryEnabled ?? true;
-    const outboundConfigured =
-      webhookDeliveryEnabled &&
-      Boolean(installedApp.webhookUrl?.trim() && installedApp.app?.signingSecret);
+    const outboundConfigured = preference?.appWebhookDeliveryEnabled ?? true;
+    const webhookConfigured = Boolean(
+      installedApp.webhookUrl?.trim() && installedApp.app?.signingSecret,
+    );
+    if (outboundConfigured && !webhookConfigured) {
+      throw new Error(
+        'This desk delivers replies to the app webhook, but the app has no webhook URL configured. Add one, or turn off "Send replies to app webhook" in Desk Settings.',
+      );
+    }
     const signingSecret = installedApp.app?.signingSecret ?? null;
 
     const replier = await this.prisma.user.findUnique({
@@ -118,11 +123,7 @@ class AppDeskService {
       timestamp: new Date().toISOString(),
     };
 
-    const skipReason = !webhookDeliveryEnabled
-      ? 'webhook delivery disabled for channel'
-      : 'no outbound webhook';
-
-    logger.info(`${TAG} ${outboundConfigured ? 'delivering' : `recording (${skipReason})`} DESK_REPLY`, {
+    logger.info(`${TAG} ${outboundConfigured ? 'delivering' : 'recording (webhook delivery disabled)'} DESK_REPLY`, {
       conversationId,
       channelId: conversation.channelId,
       threadId,
@@ -130,7 +131,7 @@ class AppDeskService {
       installedAppId,
       webhookUrl: installedApp?.webhookUrl ?? null,
       outboundConfigured,
-      webhookDeliveryEnabled,
+      webhookConfigured,
       ticketId: ticket?.id,
       replierUserId: userId,
       replierName,
@@ -239,7 +240,7 @@ class AppDeskService {
     }
 
     logger.info(
-      `${TAG} ${outboundConfigured ? 'Reply delivered to app webhook' : `Reply recorded on ticket (${skipReason})`}`,
+      `${TAG} ${outboundConfigured ? 'Reply delivered to app webhook' : 'Reply recorded on ticket (webhook delivery disabled)'}`,
       { conversationId, threadId, externalId: ackExternalId, emailId: email.id },
     );
 
