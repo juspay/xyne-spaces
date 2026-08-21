@@ -144,7 +144,7 @@ Rules:
 - List ONLY the names the question actually mentions. Never infer, expand, or add related things.
 - Do NOT try to say whether a name is a channel, a project, or a person. You have not seen this workspace and cannot know — the platform looks each one up. Just report the name.
 - Strip a leading '#'.
-- If the question mentions nothing and needs no data (a greeting, a thank-you, a question about you), use intent "conversational" with an empty list.
+- Intent "conversational" is ONLY for a question that names NOTHING in the workspace: a greeting, a thank-you, or a question about you. If the question mentions ANY name, product, team, project, channel, person or topic, it is NEVER conversational — even if it is very short, has no verb, or is only two or three words. "why namma cloud", "euler status", "billing?" are all lookups.
 - Classify intent by the ask, not the topic: "what all X" / "list every X" is sweep; "how many" is count; finding specific items is lookup.
 
 Call record_query_entities exactly once.`;
@@ -425,9 +425,14 @@ export async function buildPrefetchBlock(opts: {
   ].join("");
   sections.push(who);
 
-  // Conversational questions need no lookups; doing them anyway spends latency
-  // and invites the model to anchor on irrelevant rows.
-  if (spec && spec.intent !== "conversational") {
+  // Gate on ENTITIES, not on intent. Intent is a label the extractor guesses and
+  // gets wrong on terse questions — "why namma cloud" came back
+  // `{intent: "conversational", entities: []}`, which silently skipped every
+  // resolver and shipped an identity-only block. Entities is the thing the
+  // resolvers actually consume: empty means there is nothing to look up (so a
+  // real greeting still costs no calls), non-empty means resolve regardless of
+  // what the extractor called it.
+  if (spec && spec.entities.length > 0) {
     // ONE budget for every round, so adding the hop below can never push the
     // first turn out. Each round races the time that is actually left.
     const deadline = Date.now() + RESOLVE_TIMEOUT_MS;
@@ -455,7 +460,18 @@ export async function buildPrefetchBlock(opts: {
       filters: (name: string) => Record<string, unknown>;
       label: (n: string) => string;
     }> = [
-      { kind: "channels", area: "channel", filters: (n) => ({ channelName: { contains: n } }), label: (n) => `Channels matching "${n}"` },
+      // `mine: true` narrows the channel guard from the area default —
+      // `(permissions contains <me> or isPrivate contains "false")` — down to
+      // `permissions contains <me>`, i.e. the SAME guard the `message` area
+      // applies. Without it prefetch resolves public channels the caller never
+      // joined: the channel row passes on the isPrivate branch, but every
+      // message inside fails the strict message ACL. Measured locally on the
+      // namma-cloud project: the 5 channels `mine` drops held 0 readable
+      // messages each, while the 2 it keeps held 7621 and 3590. Handing the
+      // model a dead id is worse than omitting it — it scopes a search there,
+      // gets nothing, and reads that as "nothing was discussed" rather than
+      // "no access".
+      { kind: "channels", area: "channel", filters: (n) => ({ channelName: { contains: n }, mine: { eq: true } }), label: (n) => `Channels matching "${n}"` },
       { kind: "projects", area: "project", filters: (n) => ({ name: { contains: n } }), label: (n) => `Projects matching "${n}"` },
       { kind: "people", area: "user", filters: (n) => ({ name: { contains: n } }), label: (n) => `People matching "${n}"` },
     ];
@@ -516,7 +532,8 @@ export async function buildPrefetchBlock(opts: {
           vespa,
           {
             searchArea: "channel",
-            filters: { projectId: { contains: projectId } },
+            // Same membership narrowing as the name resolver above.
+            filters: { projectId: { contains: projectId }, mine: { eq: true } },
             hits: RESOLVER_LIMIT,
             sort: { by: "lastActiveDate", dir: "desc" },
           },

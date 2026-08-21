@@ -1541,6 +1541,12 @@ interface Props {
   // discipline — only the Spaces render is hidden.
   draftPostTodos: boolean;
   onDraftPostTodosChange: (v: boolean) => void;
+  // Plan tracking opt-OUT (agent.config.planTracking). Default ON. Unlike
+  // postTodos (which only hides the card), turning this OFF removes the
+  // todo-write/todo-read tools AND the primer that mandates them, so the agent
+  // spends no turns on plan bookkeeping.
+  draftPlanTracking: boolean;
+  onDraftPlanTrackingChange: (v: boolean) => void;
   // Verify-responses opt-in (agent.config.verifyResponses). When on, the agent
   // delivers its final answer via the submit-response tool, which checks the
   // draft's factual claims against gathered tool evidence before it's posted.
@@ -1725,6 +1731,8 @@ export function AgentDetailLeftColumn({
   onDraftPrefetchContextChange,
   draftPostTodos,
   onDraftPostTodosChange,
+  draftPlanTracking,
+  onDraftPlanTrackingChange,
   draftVerifyResponses,
   draftVerifyResponseCriteria,
   onDraftVerifyResponseCriteriaChange,
@@ -2776,6 +2784,40 @@ export function AgentDetailLeftColumn({
                 aria-label="Enable Prefetch Context"
               />
               <span className="text-[12px] text-xyne-fg-primary">{draftPrefetchContext ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Plan tracking — opt-OUT switch (agent.config.planTracking). Default ON.
+          Distinct from "Post TODOs", which only hides the rendered card: this
+          removes the todo-write/todo-read tools AND the primer that requires
+          them. Worth turning off for agents that answer in one message —
+          `todo-write` ends the assistant turn like any tool call, and the primer
+          mandates a todo-only turn at BOTH ends of a run (before the first tool
+          call, and again immediately before the final answer). On a slow model
+          that measured ~50% of wall-clock on ask-ai runs, for zero data. */}
+      {(canEdit || !draftPlanTracking) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Plan Tracking</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Give this agent the <code className="text-xyne-fg-tertiary">todo-write</code> checklist tools and require a plan before it starts work.
+                {" "}
+                <span className="text-xyne-fg-tertiary">On by default. Turn it off for agents that answer in a single message &mdash; each plan update costs a full model round trip, and the checklist card adds little when there is nothing to track.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftPlanTracking}
+                onChange={(e) => onDraftPlanTrackingChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Plan Tracking"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftPlanTracking ? "On" : "Off"}</span>
             </label>
           </div>
         </div>
