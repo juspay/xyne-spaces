@@ -1,8 +1,9 @@
 /**
  * Desk Metrics Controller
  * Hardcoded per-desk-channel metrics (FRT, RT, CSAT, counts, priority,
- * activity), computed from ticket_activities. Gated on the per-desk
- * metricsEnabled preference so desks that never opted in cost nothing.
+ * activity), computed from ticket_activities. The dashboard endpoints are
+ * gated on the per-desk metricsEnabled preference so desks that never opted in
+ * cost nothing; the agent-facing query endpoint is not (see queryMetrics).
  */
 
 import { Request, Response } from 'express';
@@ -15,6 +16,7 @@ import {
   aggregateDeskMetrics,
   fillDeskMetrics,
   mergeCustomFieldSlices,
+  prunePerDesk,
   type DeskMetricsContribution,
 } from '../services/deskMetricsAggregator.js';
 import { logger } from '../utils/logger.js';
@@ -354,6 +356,11 @@ export class DeskMetricsController {
             continue;
           }
 
+          // Deliberately no metricsEnabled gate here — that flag gates the
+          // dashboard tab, not access to the numbers, and membership above is
+          // the real boundary. Consequence: this path never emits the
+          // 'metrics_disabled' skip reason; unconfigured desks are computed and
+          // called out in `notes` instead. The dashboard endpoints still gate.
           const preference = await this.preferenceRepo.findByChannelId(channelId);
           if (!preference) {
             skipped.push({ channelId, reason: 'not_found' });
@@ -429,7 +436,7 @@ export class DeskMetricsController {
         ...result,
         desks,
         skipped,
-        ...(contributions.length > 1 ? { perDesk: merged.perDesk } : {}),
+        ...(contributions.length > 1 ? { perDesk: prunePerDesk(merged.perDesk, wanted) } : {}),
         notes: this.buildNotes(
           wanted,
           contributions.length,
