@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.13](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.12...v1.188.0-release-20260817.13) (2026-08-21)
+
+
+### Bug Fixes
+
+* guest user acl fix ([#891](https://github.com/juspay/xyne-spaces/issues/891)) ([d96c602](https://github.com/juspay/xyne-spaces/commit/d96c6029ba2ecd8d8cb8c01f9a5a8360d4a64a10))
+
 ## [1.188.0-release-20260817.12](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.11...v1.188.0-release-20260817.12) (2026-08-21)
 
 
