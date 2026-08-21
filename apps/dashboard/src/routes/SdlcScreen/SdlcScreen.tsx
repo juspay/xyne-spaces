@@ -548,7 +548,6 @@ export default function SdlcScreen(): ReactElement {
       item => item.capability === capability && states.includes(item.state || ''),
     );
   const readReady = capabilityReady('READ_REPOSITORY', ['PROVEN']);
-  const artifactsUnlocked = readReady && approvedCount === SDLC_BASELINE_COUNT;
   const writeReady =
     capabilityReady('PUSH_BRANCH', ['PROVEN', 'INFERRED']) &&
     capabilityReady('CREATE_PULL_REQUEST', ['PROVEN', 'INFERRED']);
@@ -1063,12 +1062,6 @@ export default function SdlcScreen(): ReactElement {
     const list = kind === 'PRD' ? prds : techDocs;
     return (
       <section>
-        {!artifactsUnlocked && (
-          <div className='mb-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground'>
-            Locked until repository read access is verified and all {SDLC_BASELINE_COUNT} Repo
-            Knowledge documents are approved.
-          </div>
-        )}
         <SectionHeader
           title={kind === 'PRD' ? 'PRDs' : 'Tech Docs'}
           description={
@@ -1077,15 +1070,7 @@ export default function SdlcScreen(): ReactElement {
               : 'Technical design tied to one PRD.'
           }
           action={
-            <Button
-              disabled={!artifactsUnlocked}
-              title={
-                !artifactsUnlocked
-                  ? `Approve all ${SDLC_BASELINE_COUNT} Repo Knowledge documents first`
-                  : undefined
-              }
-              onClick={() => setArtifactDialog(kind)}
-            >
+            <Button onClick={() => setArtifactDialog(kind)}>
               <Plus />
               New {kind === 'PRD' ? 'PRD' : 'Tech Doc'}
             </Button>
@@ -1115,7 +1100,6 @@ export default function SdlcScreen(): ReactElement {
                 eyebrow={kind === 'PRD' ? 'PRD' : 'Tech Doc'}
                 onOpen={() => openCanvas(canvas.id)}
                 actionLabel={cta.label}
-                actionDisabled={cta.action.startsWith('CREATE_') && !artifactsUnlocked}
                 {...(kind === 'PRD' &&
                   artifactTickets.length > 0 && {
                     onStartWork: (): void =>
@@ -1209,24 +1193,15 @@ export default function SdlcScreen(): ReactElement {
         <nav className='shrink-0 p-2'>
           {SECTIONS.map(item => {
             const Icon = item.icon;
-            const sectionLocked =
-              ['prds', 'tech-docs', 'tickets'].includes(item.id) && !artifactsUnlocked;
             return (
               <div key={item.id} className='mb-1'>
                 <button
-                  disabled={sectionLocked}
-                  title={
-                    sectionLocked
-                      ? `Approve all ${SDLC_BASELINE_COUNT} Repo Knowledge documents first`
-                      : undefined
-                  }
                   onClick={() => navigateWithinSdlc(`/sdlc/${repo.id}/${item.id}`)}
                   className={cn(
                     'flex h-10 w-full items-center gap-3 rounded-[10px] border px-3 text-sm transition-colors',
                     section === item.id
                       ? 'border-transparent bg-sidebar-accent/70 font-medium text-sidebar-accent-foreground'
                       : 'border-transparent text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
-                    sectionLocked && 'cursor-not-allowed opacity-50',
                   )}
                   data-track-category='SdlcHub'
                   data-track-name='SectionChanged'
@@ -2131,7 +2106,6 @@ function ArtifactCard({
   onAction,
   onStartWork,
   actionLabel,
-  actionDisabled,
 }: {
   title: string;
   eyebrow: string;
@@ -2139,7 +2113,6 @@ function ArtifactCard({
   onAction: () => void;
   onStartWork?: () => void;
   actionLabel: string;
-  actionDisabled: boolean;
 }): ReactElement {
   return (
     <div
@@ -2182,7 +2155,6 @@ function ArtifactCard({
           )}
           <Button
             size='sm'
-            disabled={actionDisabled}
             onKeyDown={event => event.stopPropagation()}
             onClick={event => {
               event.stopPropagation();

@@ -8,7 +8,6 @@ import {
   ChannelScopeType,
   ChannelType,
   ChannelVisibility,
-  SDLC_BASELINE_COUNT,
   WorkspaceRole,
   normalizeChannelName,
   validateChannelName,
@@ -45,11 +44,7 @@ import {
 } from './sdlcBaselineDraft';
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
-import {
-  allBaselinesApproved,
-  ARTIFACT_CAPABILITIES,
-  BASELINE_CAPABILITIES,
-} from './sdlcProgressiveGate';
+import { allBaselinesApproved, BASELINE_CAPABILITIES } from './sdlcProgressiveGate';
 import type {
   ApprovedSdlcBaseline,
   SdlcActor,
@@ -638,8 +633,6 @@ export class SdlcHubService implements SdlcHub {
     }
     if (input.kind === 'BASELINE') {
       await sdlcVcs.requireCapabilities(actor, input.repoId, [...BASELINE_CAPABILITIES]);
-    } else {
-      await this.requireArtifactCreationGate(actor, input.repoId, repo.channelId);
     }
 
     const folderName =
@@ -1166,7 +1159,6 @@ export class SdlcHubService implements SdlcHub {
   ): Promise<SdlcArtifact> {
     const repo = await this.requireRepositoryRole(actor, input.repoId, false);
     if (!repo.channelId || !repo.projectId) throw new AppError('SDLC repository not found', 404);
-    await this.requireArtifactCreationGate(actor, repo.id, repo.channelId);
     const existing = await this.prisma.canvas.findFirst({
       where: {
         id: input.canvasId,
@@ -1493,24 +1485,6 @@ export class SdlcHubService implements SdlcHub {
         commitSha: input.generationCommit,
       })),
     };
-  }
-
-  private async requireArtifactCreationGate(
-    actor: SdlcActor,
-    repoId: string,
-    channelId: string
-  ): Promise<void> {
-    await sdlcVcs.requireCapabilities(actor, repoId, [...ARTIFACT_CAPABILITIES]);
-    const baselines = await this.prisma.canvas.findMany({
-      where: { channelId },
-      select: { metadata: true, lastEditedAt: true },
-    });
-    if (!allBaselinesApproved(baselines)) {
-      throw new AppError(
-        `Approve all ${SDLC_BASELINE_COUNT} baseline documents before creating SDLC artifacts`,
-        409
-      );
-    }
   }
 
   private async requireRepositoryRole(actor: SdlcActor, repoId: string, requireAdmin: boolean) {
