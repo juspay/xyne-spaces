@@ -388,7 +388,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     return map;
   }, [isAtRoot, collectionId, allCollectionFiles, nodes]);
 
-
   // ── Build entries ────────────────────────────────────────────────────
   const entries: CollectionChild[] = useMemo(() => {
     if (isAtRoot) {

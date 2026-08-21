@@ -208,7 +208,10 @@ const CreateCollectionModal = ({
             onChange={value => setIsPrivate(value === 'private')}
             disabled={isCreating}
           >
-            <Radio value='public' subtext='Anyone in the workspace can view — editing requires an invite'>
+            <Radio
+              value='public'
+              subtext='Anyone in the workspace can view — editing requires an invite'
+            >
               Public
             </Radio>
             <Radio value='private' subtext='Invite only'>
