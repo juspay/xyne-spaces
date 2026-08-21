@@ -1,3 +1,10 @@
+## [1.206.0](https://github.com/juspay/xyne-spaces/compare/v1.205.3...v1.206.0) (2026-08-21)
+
+
+### Features
+
+* digital twin response ui ([#844](https://github.com/juspay/xyne-spaces/issues/844)) ([dadd153](https://github.com/juspay/xyne-spaces/commit/dadd1536f2b4eee5e2901f23eddf0e3208af8621))
+
 ## [1.205.3](https://github.com/juspay/xyne-spaces/compare/v1.205.2...v1.205.3) (2026-08-21)
 
 ## [1.205.2](https://github.com/juspay/xyne-spaces/compare/v1.205.1...v1.205.2) (2026-08-21)
