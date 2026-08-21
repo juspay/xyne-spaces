@@ -484,6 +484,8 @@ export const useKanbanTicketsPage = (
       : 'complete'
     : pageDetails.type;
 
+  const preserveRelevanceOrder = shouldUseDirectVespaRows && hasSearchTerm;
+
   useEffect(() => {
     setTicketsState(prev =>
       prev.queryKey === queryKey && prev.tickets.length === 0 ? prev : { queryKey, tickets: [] },
@@ -502,7 +504,9 @@ export const useKanbanTicketsPage = (
     const visiblePageRows = options.excludeFlowSteps
       ? rawPageRows.filter(ticket => !isMaterializedFlowStep(ticket))
       : rawPageRows;
-    const pageRows = sortByKanbanPosition(visiblePageRows);
+    const pageRows = preserveRelevanceOrder
+      ? visiblePageRows
+      : sortByKanbanPosition(visiblePageRows);
     if (typeof window !== 'undefined') {
       const debugDynamicFieldIds = new Set<string>();
       if (options.filters?.dynamicFields) {
@@ -563,6 +567,7 @@ export const useKanbanTicketsPage = (
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,
+    preserveRelevanceOrder,
   ]);
 
   const loadMore = useCallback(() => {

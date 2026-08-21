@@ -496,17 +496,29 @@ export class SearchService {
        // Filter by nativerank if enabled
        // Skip nativeRank filtering for filter-only searches (no query text)
        // nativeRank is based on text matching - meaningless without a query
+      let textMatchRescuedIds = new Set<string>();
        if (nativeRankThreshold > 0 && searchQuery?.trim()) {
-        response = filterByNativeRank(response, nativeRankThreshold , this.logger);
+        const filtered = filterByNativeRank(response, nativeRankThreshold , this.logger, {
+          query: searchQuery,
+        });
+        response = filtered.response;
+        textMatchRescuedIds = filtered.rescuedIds;
       }
 
       const exactResultCount = response.root?.children?.length || 0;
       const expectedCount = limit - offset;
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
-      
+
+      // Hits kept only by the ticket text-match rescue scored below the nativeRank threshold,
+      // so they are not evidence that the exact pass did well. Counting them would push
+      // exactResultCount over expectedCount and silently skip the 3-gram fuzzy fallback that
+      // recovers typo and prefix queries. Clamped because root.children are group nodes when
+      // grouping is on, while rescued ids are collected from the hits nested inside them.
+      const strongExactResultCount = Math.max(0, exactResultCount - textMatchRescuedIds.size);
+
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
       const isFileSearch = app.some(a => a.toLowerCase() === 'file');
-      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
+      const oldFallback = strongExactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
@@ -518,8 +530,13 @@ export class SearchService {
         5,
         {}
       );
+      // Same reasoning as strongExactResultCount: a rescued hit can carry a passable
+      // relevance from the vector half of the profile despite a zero nativeRank, so it must
+      // not count toward "we already have enough good results".
       const goodResults = response.root?.children?.filter(
-        child => (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
+        child =>
+          !textMatchRescuedIds.has(String(child.id ?? '')) &&
+          (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
       ) ?? [];
 
       const newFallback =
