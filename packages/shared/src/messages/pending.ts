@@ -164,6 +164,14 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
   });
 
   let childConversationId: string | undefined = entry.childConversationId;
+  // Replay is hermetic: a queued or retried send carries its own attachment set
+  // on the pending entry, so pass attachmentIds explicitly here (even when empty).
+  // This forces the server mutator down its explicit branch, which links exactly
+  // these ids and leaves any other draft attachments untouched. Do NOT omit it on
+  // the empty case the way sendMessage does on first fire: an omitted attachmentIds
+  // drops the mutator into the legacy draft-scan fallback, which would promote
+  // whatever is in the channel draft *now* (a concurrent, unrelated compose) onto
+  // this replayed message and delete that draft.
   const attachmentIds = entry.attachments?.map(a => a.attachmentId) ?? [];
   let mutation;
   if (entry.kind === 'channel') {
