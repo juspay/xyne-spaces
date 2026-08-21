@@ -42,6 +42,8 @@ export interface IngestConversationSlackInput {
    * Leave false/undefined for the regular channel flow (unchanged behaviour).
    */
   skipChannelMigratedUpdate?: boolean;
+  /** Pause (ms) between messages to cap DB/Vespa-queue rate (self-serve migration); 0/undefined = unpaced. */
+  interMessageDelayMs?: number;
 }
 
 export interface IngestConversationSlackResult {
@@ -303,7 +305,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, interMessageDelayMs = 0 } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -360,12 +362,14 @@ export async function ingestConversationSlack(
       }
 
       try {
-        const externalAttachments: ExternalAttachment[] = slackFiles.map((file) => ({
-          fileName: file.name,
-          fileUrl: file.url_private,
-          mimeType: file.mimetype,
-          size: file.size,
-        }));
+        const externalAttachments: ExternalAttachment[] = slackFiles
+          // Offline migration (no userToken): only prefetched files are attachable; skip rest to avoid 403 on url_private.
+          .filter((file) => file.prefetchedStoragePath || userToken)
+          .map((file) =>
+            file.prefetchedStoragePath
+              ? { fileName: file.name, mimeType: file.mimetype, size: file.size, storageSourcePath: file.prefetchedStoragePath, storageSourceEncrypted: true }
+              : { fileName: file.name, fileUrl: file.url_private, mimeType: file.mimetype, size: file.size },
+          );
         return await new ExternalAttachmentService().downloadAttachmentsForSource(
           externalSourceName,
           externalAttachments,
@@ -451,6 +455,13 @@ export async function ingestConversationSlack(
       // Download attachments (continues on failure)
       const downloadedAttachments = await downloadAttachments(slackFiles);
 
+      // If a message had files but none migrated and there's no text, use file name(s) as
+      // placeholder so the message isn't dropped.
+      let effectiveContent = content;
+      if ((!effectiveContent || !effectiveContent.trim()) && downloadedAttachments.length === 0 && (slackFiles?.length ?? 0) > 0) {
+        effectiveContent = slackFiles!.map((f) => `📎 ${f.name}`).join(' ');
+      }
+
       // Find or create conversation
       const existingConversationId = await findConversationByThread(externalThreadId);
       const isNewConversation = !existingConversationId;
@@ -464,7 +475,7 @@ export async function ingestConversationSlack(
         const result = await conversationService.createConversationWithMessage({
           channelId,
           userId: resolvedUserId,
-          content,
+          content: effectiveContent,
           msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           isBot: false,
@@ -483,7 +494,7 @@ export async function ingestConversationSlack(
         const result = await conversationService.addMessageToConversation({
           conversationId,
           userId: resolvedUserId,
-          content,
+          content: effectiveContent,
           msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           replyBroadcast: replyBroadcast ?? false,
@@ -607,6 +618,8 @@ export async function ingestConversationSlack(
         });
         // Continue with next message
       }
+      // Pace DB writes / Vespa-queue jobs when the caller asks (self-serve migration).
+      if (interMessageDelayMs > 0) await new Promise((r) => setTimeout(r, interMessageDelayMs));
     }
 
     logger.info('[IngestSlack] Ingestion completed', {
