@@ -2587,10 +2587,20 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    Colours use theme tokens so the light and midnight themes both work
    automatically.
    ============================================================ */
-.canvas-surface {
-  --canvas-content-width: 720px;
+:where(.canvas-surface, .canvas-editor-title-column) {
+  --canvas-content-width: 600px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
+  --canvas-block-content-offset: 14px;
+}
+
+.canvas-editor-title-column {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--canvas-content-width);
+  margin-inline: auto;
+  padding-left: var(--canvas-block-content-offset);
+  padding-right: 0;
 }
 
 /* Centered reading column. .bn-editor keeps its inline padding as the
@@ -2901,7 +2911,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    shifts uniformly and every block stays aligned, just a few px off the handles. */
 .canvas-surface .bn-editor .bn-block {
   box-sizing: border-box;
-  padding-left: 14px;
+  padding-left: var(--canvas-block-content-offset);
 }
 
 /* Read-only preview surfaces (message cards, config panels).

@@ -67,13 +67,24 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasMatchesSharedByFilter } from '../canvasListFilters';
+import {
+  getCanvasLabelDotClassName,
+  getCanvasLabelKey,
+  getCanvasLabels,
+  type CanvasLabelChip,
+} from '../canvasLabelUtils';
+import {
+  mergeCanvasRestLabels,
+  type CanvasLabelMap,
+  useCanvasLabelMapResult,
+} from '../useCanvasLabels';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 type CanvasCursor = { id: string; updatedAt: number };
-type CanvasMetadataLabel = { name: string; color?: string };
 type CanvasSearchScope = 'direct' | 'via_channel' | 'all';
 type CanvasSearchScopeMenuView = 'main' | 'channels';
 type CanvasFolderGroup = { folder: CanvasFolder };
+type CanvasLabelCount = { label: CanvasLabelChip; count: number };
 type CanvasEmptyStateCopy = {
   title: string;
   description: string;
@@ -102,15 +113,6 @@ type CanvasCardMenuItem = {
 const CANVAS_PAGE_SIZE = 25;
 const CANVAS_FILTERED_PAGE_SIZE = 200;
 const CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD = 8;
-const CANVAS_LABEL_COLORS = [
-  'bg-emerald-500',
-  'bg-sky-500',
-  'bg-violet-500',
-  'bg-amber-600',
-  'bg-rose-500',
-  'bg-indigo-500',
-];
-const DEFAULT_CANVAS_LABEL_COLOR = 'bg-emerald-500';
 const MONTH_SECTION_FORMATTER = new Intl.DateTimeFormat(undefined, { month: 'long' });
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -163,48 +165,6 @@ const getInitials = (name: string | undefined): string => {
   const initials =
     parts.length > 1 ? `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}` : parts[0]?.[0];
   return (initials || '?').toUpperCase();
-};
-
-const normalizeLabelName = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const getCanvasLabels = (canvas: Canvas): CanvasMetadataLabel[] => {
-  const metadata = canvas.metadata;
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
-
-  const labelsValue = (metadata as Record<string, unknown>)['labels'];
-  const tagsValue = (metadata as Record<string, unknown>)['tags'];
-  const rawLabels = Array.isArray(labelsValue)
-    ? labelsValue
-    : Array.isArray(tagsValue)
-      ? tagsValue
-      : [];
-
-  return rawLabels
-    .map((label): CanvasMetadataLabel | null => {
-      const name =
-        normalizeLabelName(label) ??
-        (label && typeof label === 'object' && !Array.isArray(label)
-          ? normalizeLabelName((label as Record<string, unknown>)['name'])
-          : null);
-      if (!name) return null;
-
-      const color =
-        label && typeof label === 'object' && !Array.isArray(label)
-          ? normalizeLabelName((label as Record<string, unknown>)['color'])
-          : null;
-      return color ? { name, color } : { name };
-    })
-    .filter((label): label is CanvasMetadataLabel => Boolean(label))
-    .slice(0, 3);
-};
-
-const getLabelDotClassName = (label: CanvasMetadataLabel, index: number): string => {
-  if (label.color?.startsWith('bg-')) return label.color;
-  return CANVAS_LABEL_COLORS[index % CANVAS_LABEL_COLORS.length] ?? DEFAULT_CANVAS_LABEL_COLOR;
 };
 
 const getUserBadgeClassName = (userId: string): string => {
@@ -385,18 +345,17 @@ const getCanvasCardMenuItemClassName = (
   );
 
 const renderCanvasCardMenuItem = (item: CanvasCardMenuItem): React.ReactNode => {
-  const trackAttributes = item.trackName
-    ? {
-        'data-track-category': 'CANVAS',
-        'data-track-name': item.trackName,
-        ...(item.testId ? { 'data-testid': item.testId } : {}),
-        ...(item.trackMetadata
-          ? { 'data-track-metadata': JSON.stringify(item.trackMetadata) }
-          : {}),
-      }
-    : item.testId
-      ? { 'data-testid': item.testId }
-      : {};
+  const trackAttributes: Record<string, string> = {};
+  if (item.trackName) {
+    trackAttributes['data-track-category'] = 'CANVAS';
+    trackAttributes['data-track-name'] = item.trackName;
+    if (item.trackMetadata) {
+      trackAttributes['data-track-metadata'] = JSON.stringify(item.trackMetadata);
+    }
+  }
+  if (item.testId) {
+    trackAttributes['data-testid'] = item.testId;
+  }
 
   const content = (
     <>
@@ -469,16 +428,104 @@ const mergeCanvasItems = (...groups: Canvas[][]): Canvas[] => {
   return sortCanvasItems(Array.from(byId.values()));
 };
 
+const getCanvasLabelsKey = (canvas: Canvas): string =>
+  getCanvasLabels(canvas)
+    .map(label => `${label.id}:${label.name}`)
+    .join('|');
+
+const mergeCanvasLabelSnapshot = (
+  canvas: Canvas,
+  selectedCanvasLabelSnapshot: Canvas | null | undefined,
+): Canvas => {
+  if (!selectedCanvasLabelSnapshot || selectedCanvasLabelSnapshot.id !== canvas.id) {
+    return canvas;
+  }
+
+  return {
+    ...canvas,
+    ...(selectedCanvasLabelSnapshot.labels !== undefined && {
+      labels: selectedCanvasLabelSnapshot.labels,
+    }),
+    ...(selectedCanvasLabelSnapshot.userStatuses !== undefined && {
+      userStatuses: selectedCanvasLabelSnapshot.userStatuses,
+    }),
+  };
+};
+
+const areCanvasItemsEqual = (left: Canvas, right: Canvas | undefined): boolean => {
+  if (!right) return false;
+  return (
+    right.id === left.id &&
+    right.updatedAt === left.updatedAt &&
+    right.isStarred === left.isStarred &&
+    getCanvasLabelsKey(right) === getCanvasLabelsKey(left)
+  );
+};
+
 const areCanvasItemListsEqual = (left: Canvas[], right: Canvas[]): boolean =>
   left.length === right.length &&
-  left.every((canvas, index) => {
-    const nextCanvas = right[index];
-    return (
-      nextCanvas?.id === canvas.id &&
-      nextCanvas.updatedAt === canvas.updatedAt &&
-      nextCanvas.isStarred === canvas.isStarred
-    );
-  });
+  left.every((canvas, index) => areCanvasItemsEqual(canvas, right[index]));
+
+const getAvailableLabelCounts = (labels: CanvasLabelChip[]): CanvasLabelCount[] => {
+  const labelCounts = new Map<string, CanvasLabelCount>();
+  for (const label of labels) {
+    const key = getCanvasLabelKey(label.name);
+    if (!key) continue;
+
+    const existing = labelCounts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      labelCounts.set(key, { label, count: 1 });
+    }
+  }
+
+  return Array.from(labelCounts.values()).sort((a, b) => a.label.name.localeCompare(b.label.name));
+};
+
+const getAvailableCanvasLabelsFromMap = (
+  canvases: Canvas[],
+  labelsByCanvasId: CanvasLabelMap,
+): CanvasLabelCount[] =>
+  getAvailableLabelCounts(canvases.flatMap(canvas => labelsByCanvasId[canvas.id] ?? []));
+
+const mergeCanvasLabelCounts = (labelGroups: CanvasLabelCount[][]): CanvasLabelCount[] => {
+  const merged = new Map<string, CanvasLabelCount>();
+  for (const group of labelGroups) {
+    for (const { label, count } of group) {
+      const key = getCanvasLabelKey(label.name);
+      if (!key) continue;
+
+      const existing = merged.get(key);
+      if (existing) {
+        existing.count += count;
+      } else {
+        merged.set(key, { label, count });
+      }
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => a.label.name.localeCompare(b.label.name));
+};
+
+const areCanvasLabelCountsEqual = (
+  left: CanvasLabelCount[] | null | undefined,
+  right: CanvasLabelCount[] | null,
+): boolean => {
+  const normalizedLeft = left ?? null;
+  if (normalizedLeft === null || right === null) return normalizedLeft === right;
+  return (
+    normalizedLeft.length === right.length &&
+    normalizedLeft.every((entry, index) => {
+      const nextEntry = right[index];
+      return (
+        nextEntry?.label.name === entry.label.name &&
+        nextEntry.label.id === entry.label.id &&
+        nextEntry.count === entry.count
+      );
+    })
+  );
+};
 
 const toCanvasArray = <T,>(value: unknown): T[] => (value as T[] | undefined) ?? [];
 
@@ -495,6 +542,7 @@ const getFilteredCanvasItems = ({
   selectedLabel,
   searchQuery,
   filterSearchQuery = true,
+  labelsByCanvasId,
 }: {
   canvases: Canvas[];
   onlyCallGeneratedCanvases: boolean;
@@ -508,6 +556,7 @@ const getFilteredCanvasItems = ({
   selectedLabel: string | null;
   searchQuery: string;
   filterSearchQuery?: boolean;
+  labelsByCanvasId?: CanvasLabelMap | undefined;
 }): Canvas[] => {
   let filtered = onlyCallGeneratedCanvases
     ? canvases.filter(isExcludedCallGeneratedCanvas)
@@ -526,9 +575,13 @@ const getFilteredCanvasItems = ({
   );
 
   if (selectedLabel) {
-    filtered = filtered.filter(canvas =>
-      getCanvasLabels(canvas).some(label => label.name === selectedLabel),
-    );
+    const selectedLabelKey = getCanvasLabelKey(selectedLabel);
+    filtered = filtered.filter(canvas => {
+      const labels = labelsByCanvasId
+        ? (labelsByCanvasId[canvas.id] ?? [])
+        : getCanvasLabels(canvas);
+      return labels.some(label => getCanvasLabelKey(label.name) === selectedLabelKey);
+    });
   }
 
   const trimmedSearchQuery = searchQuery.trim().toLowerCase();
@@ -666,6 +719,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onlyArchived: boolean;
   onToggleFolder: (folderId: string) => void;
   onVisibleCanvasCountChange: (folderId: string, count: number | null) => void;
+  onAvailableLabelsChange: (folderId: string, labels: CanvasLabelCount[] | null) => void;
+  selectedCanvasLabelSnapshot?: Canvas | undefined;
   renderCanvasItem: (canvas: Canvas) => React.ReactNode;
 }> = ({
   folder,
@@ -684,6 +739,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onlyArchived,
   onToggleFolder,
   onVisibleCanvasCountChange,
+  onAvailableLabelsChange,
+  selectedCanvasLabelSnapshot,
   renderCanvasItem,
 }) => {
   const [folderCanvasesResult, folderCanvasesDetails] = useCachedQuery(
@@ -696,43 +753,60 @@ const ChannelScopeFolderGroupSection: React.FC<{
     { enabled: true },
   );
   const folderCanvases = useMemo(
-    () => withStarredCanvasState(toCanvasArray<Canvas>(folderCanvasesResult)),
-    [folderCanvasesResult],
+    () =>
+      withStarredCanvasState(
+        toCanvasArray<Canvas>(folderCanvasesResult).map(canvas =>
+          mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+        ),
+      ),
+    [folderCanvasesResult, selectedCanvasLabelSnapshot],
+  );
+  const folderCanvasIds = useMemo(() => folderCanvases.map(canvas => canvas.id), [folderCanvases]);
+  const { labelsByCanvasId: folderLabelsByCanvasId, isLoading: isFolderLabelsLoading } =
+    useCanvasLabelMapResult(folderCanvasIds);
+  const folderCanvasesWithLabels = useMemo(
+    () => folderCanvases.map(canvas => mergeCanvasRestLabels(canvas, folderLabelsByCanvasId)),
+    [folderCanvases, folderLabelsByCanvasId],
   );
   const archiveFilteredFolderCanvases = useMemo(
-    () => filterArchivedCanvases(folderCanvases, { includeArchived, onlyArchived }),
-    [folderCanvases, includeArchived, onlyArchived],
+    () => filterArchivedCanvases(folderCanvasesWithLabels, { includeArchived, onlyArchived }),
+    [folderCanvasesWithLabels, includeArchived, onlyArchived],
   );
-  const folderFilteredCanvases = useMemo(
-    () =>
-      getFilteredCanvasItems({
-        canvases: archiveFilteredFolderCanvases,
-        onlyCallGeneratedCanvases,
-        excludeCallGeneratedCanvases,
-        showStarredOnly,
-        activeFilter,
-        currentUserId,
-        searchScope,
-        selectedScopeChannelId,
-        selectedSharedByUserId,
-        selectedLabel,
-        searchQuery,
-        filterSearchQuery: false,
-      }),
-    [
-      activeFilter,
-      archiveFilteredFolderCanvases,
-      currentUserId,
-      excludeCallGeneratedCanvases,
+  const isFolderCanvasesLoading = folderCanvasesDetails.type !== 'complete';
+  const isFolderLabelFilterLoading = Boolean(selectedLabel && isFolderLabelsLoading);
+  const folderFilteredCanvases = useMemo(() => {
+    if (isFolderLabelFilterLoading) return [];
+
+    return getFilteredCanvasItems({
+      canvases: archiveFilteredFolderCanvases,
       onlyCallGeneratedCanvases,
-      searchQuery,
+      excludeCallGeneratedCanvases,
+      showStarredOnly,
+      activeFilter,
+      currentUserId,
       searchScope,
-      selectedLabel,
       selectedScopeChannelId,
       selectedSharedByUserId,
-      showStarredOnly,
-    ],
-  );
+      selectedLabel,
+      searchQuery,
+      filterSearchQuery: false,
+      labelsByCanvasId: folderLabelsByCanvasId,
+    });
+  }, [
+    activeFilter,
+    archiveFilteredFolderCanvases,
+    currentUserId,
+    excludeCallGeneratedCanvases,
+    folderLabelsByCanvasId,
+    isFolderLabelFilterLoading,
+    onlyCallGeneratedCanvases,
+    searchQuery,
+    searchScope,
+    selectedLabel,
+    selectedScopeChannelId,
+    selectedSharedByUserId,
+    showStarredOnly,
+  ]);
   const folderNameMatches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return query.length > 0 && folder.name.toLowerCase().includes(query);
@@ -742,7 +816,19 @@ const ChannelScopeFolderGroupSection: React.FC<{
     if (!query || folderNameMatches) return folderFilteredCanvases;
     return folderFilteredCanvases.filter(canvas => canvas.title.toLowerCase().includes(query));
   }, [folderFilteredCanvases, folderNameMatches, searchQuery]);
-  const isFolderLoading = folderCanvasesDetails.type !== 'complete';
+  const isFolderLoading = isFolderCanvasesLoading || isFolderLabelFilterLoading;
+  const folderAvailableLabels = useMemo(
+    () =>
+      isFolderCanvasesLoading || isFolderLabelsLoading
+        ? null
+        : getAvailableCanvasLabelsFromMap(archiveFilteredFolderCanvases, folderLabelsByCanvasId),
+    [
+      archiveFilteredFolderCanvases,
+      folderLabelsByCanvasId,
+      isFolderCanvasesLoading,
+      isFolderLabelsLoading,
+    ],
+  );
   const hasContentFilter =
     activeFilter !== 'all' ||
     showStarredOnly ||
@@ -752,6 +838,10 @@ const ChannelScopeFolderGroupSection: React.FC<{
   useEffect(() => {
     onVisibleCanvasCountChange(folder.id, isFolderLoading ? null : visibleFolderCanvases.length);
   }, [folder.id, isFolderLoading, onVisibleCanvasCountChange, visibleFolderCanvases.length]);
+
+  useEffect(() => {
+    onAvailableLabelsChange(folder.id, folderAvailableLabels);
+  }, [folder.id, folderAvailableLabels, onAvailableLabelsChange]);
 
   if (
     hasContentFilter &&
@@ -848,6 +938,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [channelFolderVisibleCanvasCounts, setChannelFolderVisibleCanvasCounts] = useState<
     Record<string, number | null>
   >({});
+  const [channelFolderAvailableLabels, setChannelFolderAvailableLabels] = useState<
+    Record<string, CanvasLabelCount[] | null>
+  >({});
   const [pageCursor, setPageCursor] = useState<CanvasCursor | null>(null);
   const [isNextPageLoading, setIsNextPageLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -887,6 +980,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }, [allVisibleChannels, channelId, selectedScopeChannelId]);
   const selectedScopeChannelLabel = selectedScopeChannel?.name ?? 'All channels';
   const isGlobalCanvasSearchActive = trimmedSearchQuery.length > 0;
+  const isGlobalCanvasLookupActive = isGlobalCanvasSearchActive || Boolean(selectedLabel);
   const selectedSearchScope: CanvasSearchScope = channelId ? 'via_channel' : searchScope;
   const SearchScopeIcon =
     selectedSearchScope === 'direct'
@@ -895,10 +989,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ? Hash
         : Layers;
   const selectedSearchScopeChannelId = channelId ?? selectedScopeChannelId;
-  const effectiveSearchScope: CanvasSearchScope = isGlobalCanvasSearchActive
+  const effectiveSearchScope: CanvasSearchScope = isGlobalCanvasLookupActive
     ? 'all'
     : selectedSearchScope;
-  const effectiveSelectedScopeChannelId = isGlobalCanvasSearchActive
+  const effectiveSelectedScopeChannelId = isGlobalCanvasLookupActive
     ? null
     : selectedSearchScopeChannelId;
   const isSpecificChannelScope =
@@ -926,10 +1020,39 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         }),
     { enabled: isSpecificChannelScope },
   );
+  const rawMergedCanvasItems = useMemo(
+    () => mergeCanvasItems(canvasItems, channelCanvasItems),
+    [canvasItems, channelCanvasItems],
+  );
+  const selectedChannelRootCanvasItems = useMemo(
+    () => toCanvasArray<Canvas>(selectedChannelRootCanvasesResult),
+    [selectedChannelRootCanvasesResult],
+  );
+  const canvasLabelIds = useMemo(
+    () => [
+      ...rawMergedCanvasItems.map(canvas => canvas.id),
+      ...selectedChannelRootCanvasItems.map(canvas => canvas.id),
+      ...(selectedCanvasId && selectedCanvasId !== 'new' ? [selectedCanvasId] : []),
+    ],
+    [rawMergedCanvasItems, selectedCanvasId, selectedChannelRootCanvasItems],
+  );
+  const {
+    labelsByCanvasId,
+    isLoading: isCanvasLabelsLoading,
+    refreshIfStale: refreshCanvasLabelsIfStale,
+  } = useCanvasLabelMapResult(canvasLabelIds);
+  const [selectedCanvasLabelSnapshotResult] = useCachedQuery(
+    queries.getCanvas({ canvasId: selectedCanvasId ?? '' }),
+    { enabled: Boolean(selectedCanvasId && selectedCanvasId !== 'new') },
+  );
+  const selectedCanvasLabelSnapshot = useMemo(() => {
+    const snapshot = (selectedCanvasLabelSnapshotResult as Canvas | undefined) ?? null;
+    return snapshot ? mergeCanvasRestLabels(snapshot, labelsByCanvasId) : null;
+  }, [labelsByCanvasId, selectedCanvasLabelSnapshotResult]);
 
   const extraChannelSourceIds = useMemo(() => {
     if (channelId || !paginated) return [];
-    if (isGlobalCanvasSearchActive) {
+    if (isGlobalCanvasLookupActive) {
       return selectableScopeChannels.map(channel => channel.id);
     }
     if (searchScope === 'via_channel' && selectedScopeChannelId) return [selectedScopeChannelId];
@@ -939,7 +1062,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return [];
   }, [
     channelId,
-    isGlobalCanvasSearchActive,
+    isGlobalCanvasLookupActive,
     paginated,
     searchScope,
     selectableScopeChannels,
@@ -947,8 +1070,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   ]);
 
   const rawItems = useMemo(
-    () => mergeCanvasItems(canvasItems, channelCanvasItems),
-    [canvasItems, channelCanvasItems],
+    () =>
+      rawMergedCanvasItems.map(canvas =>
+        mergeCanvasRestLabels(
+          mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+          labelsByCanvasId,
+        ),
+      ),
+    [labelsByCanvasId, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
   );
   const archiveFilteredRawItems = useMemo(
     () => filterArchivedCanvases(rawItems, { includeArchived, onlyArchived }),
@@ -1151,35 +1280,39 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return (): void => cancelAnimationFrame(rafId);
   }, [activeFilter, isMobile]);
 
-  const filteredCanvases = useMemo(
-    () =>
-      getFilteredCanvasItems({
-        canvases: itemsWithStarState,
-        onlyCallGeneratedCanvases,
-        excludeCallGeneratedCanvases,
-        showStarredOnly,
-        activeFilter,
-        currentUserId,
-        searchScope: effectiveSearchScope,
-        selectedScopeChannelId: effectiveSelectedScopeChannelId,
-        selectedSharedByUserId,
-        selectedLabel,
-        searchQuery: debouncedSearchQuery,
-      }),
-    [
+  const isLabelFilterLoading = Boolean(selectedLabel && isCanvasLabelsLoading);
+  const filteredCanvases = useMemo(() => {
+    if (isLabelFilterLoading) return [];
+
+    return getFilteredCanvasItems({
+      canvases: itemsWithStarState,
+      onlyCallGeneratedCanvases,
+      excludeCallGeneratedCanvases,
+      showStarredOnly,
       activeFilter,
       currentUserId,
-      effectiveSearchScope,
-      effectiveSelectedScopeChannelId,
-      excludeCallGeneratedCanvases,
-      itemsWithStarState,
-      onlyCallGeneratedCanvases,
-      debouncedSearchQuery,
-      selectedLabel,
+      searchScope: effectiveSearchScope,
+      selectedScopeChannelId: effectiveSelectedScopeChannelId,
       selectedSharedByUserId,
-      showStarredOnly,
-    ],
-  );
+      selectedLabel,
+      searchQuery: debouncedSearchQuery,
+      labelsByCanvasId,
+    });
+  }, [
+    activeFilter,
+    currentUserId,
+    effectiveSearchScope,
+    effectiveSelectedScopeChannelId,
+    excludeCallGeneratedCanvases,
+    isLabelFilterLoading,
+    itemsWithStarState,
+    labelsByCanvasId,
+    onlyCallGeneratedCanvases,
+    debouncedSearchQuery,
+    selectedLabel,
+    selectedSharedByUserId,
+    showStarredOnly,
+  ]);
 
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
@@ -1237,44 +1370,57 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     [channelFolderGroups],
   );
 
-  const selectedChannelRootCanvases = useMemo(
-    () =>
-      getFilteredCanvasItems({
-        canvases: withStarredCanvasState(
-          filterArchivedCanvases(toCanvasArray<Canvas>(selectedChannelRootCanvasesResult), {
+  const selectedChannelRootCanvases = useMemo(() => {
+    if (isLabelFilterLoading) return [];
+
+    return getFilteredCanvasItems({
+      canvases: withStarredCanvasState(
+        filterArchivedCanvases(
+          selectedChannelRootCanvasItems.map(canvas =>
+            mergeCanvasRestLabels(
+              mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+              labelsByCanvasId,
+            ),
+          ),
+          {
             includeArchived,
             onlyArchived,
-          }),
+          },
         ),
-        onlyCallGeneratedCanvases,
-        excludeCallGeneratedCanvases,
-        showStarredOnly,
-        activeFilter,
-        currentUserId,
-        searchScope: effectiveSearchScope,
-        selectedScopeChannelId: effectiveSelectedScopeChannelId,
-        selectedSharedByUserId,
-        selectedLabel,
-        searchQuery: debouncedSearchQuery,
-      }),
-    [
+      ),
+      onlyCallGeneratedCanvases,
+      excludeCallGeneratedCanvases,
+      showStarredOnly,
       activeFilter,
       currentUserId,
-      effectiveSearchScope,
-      effectiveSelectedScopeChannelId,
-      excludeCallGeneratedCanvases,
-      includeArchived,
-      onlyArchived,
-      onlyCallGeneratedCanvases,
-      debouncedSearchQuery,
-      selectedChannelRootCanvasesResult,
-      selectedLabel,
+      searchScope: effectiveSearchScope,
+      selectedScopeChannelId: effectiveSelectedScopeChannelId,
       selectedSharedByUserId,
-      showStarredOnly,
-    ],
-  );
+      selectedLabel,
+      searchQuery: debouncedSearchQuery,
+      labelsByCanvasId,
+    });
+  }, [
+    activeFilter,
+    currentUserId,
+    effectiveSearchScope,
+    effectiveSelectedScopeChannelId,
+    excludeCallGeneratedCanvases,
+    includeArchived,
+    isLabelFilterLoading,
+    labelsByCanvasId,
+    onlyArchived,
+    onlyCallGeneratedCanvases,
+    debouncedSearchQuery,
+    selectedChannelRootCanvasItems,
+    selectedCanvasLabelSnapshot,
+    selectedLabel,
+    selectedSharedByUserId,
+    showStarredOnly,
+  ]);
   useEffect(() => {
     setChannelFolderVisibleCanvasCounts({});
+    setChannelFolderAvailableLabels({});
   }, [
     activeFilter,
     channelFolderGroupKey,
@@ -1295,6 +1441,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       setChannelFolderVisibleCanvasCounts(previous => {
         if (previous[folderId] === count) return previous;
         return { ...previous, [folderId]: count };
+      });
+    },
+    [],
+  );
+  const handleChannelFolderAvailableLabelsChange = useCallback(
+    (folderId: string, labels: CanvasLabelCount[] | null): void => {
+      setChannelFolderAvailableLabels(previous => {
+        if (areCanvasLabelCountsEqual(previous[folderId], labels)) return previous;
+        return { ...previous, [folderId]: labels };
       });
     },
     [],
@@ -1341,24 +1496,49 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     channelFolderGroups.length === 0 &&
     selectedChannelRootCanvases.length === 0 &&
     (selectedChannelFoldersDetails.type !== 'complete' ||
-      selectedChannelRootCanvasesDetails.type !== 'complete');
+      selectedChannelRootCanvasesDetails.type !== 'complete' ||
+      isLabelFilterLoading);
 
-  const availableLabels = useMemo(() => {
-    const labelCounts = new Map<string, { label: CanvasMetadataLabel; count: number }>();
-    for (const canvas of itemsWithStarState) {
-      for (const label of getCanvasLabels(canvas)) {
-        const existing = labelCounts.get(label.name);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          labelCounts.set(label.name, { label, count: 1 });
-        }
-      }
+  const selectedChannelRootAvailableLabels = useMemo(
+    () =>
+      getAvailableCanvasLabelsFromMap(
+        withStarredCanvasState(
+          selectedChannelRootCanvasItems.map(canvas =>
+            mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+          ),
+        ),
+        labelsByCanvasId,
+      ),
+    [labelsByCanvasId, selectedCanvasLabelSnapshot, selectedChannelRootCanvasItems],
+  );
+  const loadedAvailableLabels = useMemo(() => {
+    if (!shouldRenderChannelFolderGroups) {
+      return getAvailableCanvasLabelsFromMap(itemsWithStarState, labelsByCanvasId);
     }
-    return Array.from(labelCounts.values()).sort((a, b) =>
-      a.label.name.localeCompare(b.label.name),
-    );
-  }, [itemsWithStarState]);
+
+    return mergeCanvasLabelCounts([
+      selectedChannelRootAvailableLabels,
+      ...channelFolderGroups.map(
+        folderGroup => channelFolderAvailableLabels[folderGroup.folder.id] ?? [],
+      ),
+    ]);
+  }, [
+    channelFolderAvailableLabels,
+    channelFolderGroups,
+    itemsWithStarState,
+    labelsByCanvasId,
+    selectedChannelRootAvailableLabels,
+    shouldRenderChannelFolderGroups,
+  ]);
+  const hasPendingChannelFolderAvailableLabels = channelFolderGroups.some(
+    group =>
+      channelFolderAvailableLabels[group.folder.id] === undefined ||
+      channelFolderAvailableLabels[group.folder.id] === null,
+  );
+  const isAvailableLabelsLoading =
+    isCanvasLabelsLoading ||
+    (shouldRenderChannelFolderGroups && hasPendingChannelFolderAvailableLabels);
+  const availableLabels = loadedAvailableLabels;
 
   // j/k keyboard navigation through canvas list
   const canvasSelectedIdx = useRef(-1);
@@ -1379,7 +1559,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       // Navigate directly with nofocus instead of clicking (avoids auto-focus in canvas editor)
       void navigate(`/chat/canvas/${targetId}?nofocus=1`);
     },
-    [filteredCanvases],
+    [filteredCanvases, navigate],
   );
 
   useShortcut('j', () => navigateCanvas(1), {
@@ -1538,7 +1718,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     window.open(`/chat/canvas/${canvas.id}`, '_blank');
   }, []);
 
-  const renderCanvasItem = (canvas: Canvas): React.ReactNode => {
+  const renderCanvasItem = (canvasItem: Canvas): React.ReactNode => {
+    const canvas = mergeCanvasLabelSnapshot(canvasItem, selectedCanvasLabelSnapshot);
     const isSelected = selectedCanvasId === canvas.id;
     const isMenuOpen = openCanvasMenuId === canvas.id;
     const activityTime = getCanvasActivityTime(canvas);
@@ -1752,15 +1933,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
           {labels.length > 0 && (
             <div className='mt-1 flex min-w-0 flex-wrap items-center gap-1'>
-              {labels.map((label, index) => (
+              {labels.slice(0, 3).map(label => (
                 <span
-                  key={`${label.name}:${index}`}
+                  key={label.id}
                   className='inline-flex h-5 max-w-full items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/75'
                 >
                   <span
-                    className={`size-1.5 shrink-0 rounded-full ${getLabelDotClassName(
-                      label,
-                      index,
+                    className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
+                      label.name,
                     )}`}
                   />
                   <span className='truncate'>{label.name}</span>
@@ -1864,6 +2044,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onlyArchived={onlyArchived}
                 onToggleFolder={toggleChannelFolder}
                 onVisibleCanvasCountChange={handleChannelFolderVisibleCanvasCountChange}
+                onAvailableLabelsChange={handleChannelFolderAvailableLabelsChange}
+                selectedCanvasLabelSnapshot={selectedCanvasLabelSnapshot ?? undefined}
                 renderCanvasItem={renderCanvasItem}
               />
             );
@@ -1880,7 +2062,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   );
 
   return (
-    <div className='flex flex-col h-full' data-testid='canvas-list'>
+    <div
+      className='flex flex-col h-full'
+      data-testid='canvas-list'
+      onMouseEnter={() => refreshCanvasLabelsIfStale()}
+    >
       {paginated && (
         <CanvasPageSubscription
           key={`${canvasListResetKey}:${
@@ -2286,17 +2472,20 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     <DropdownMenuSeparator />
                   </>
                 )}
-                {availableLabels.length > 0 ? (
-                  availableLabels.map(({ label, count }, index) => (
+                {isAvailableLabelsLoading ? (
+                  <DropdownMenuItem disabled className='text-muted-foreground'>
+                    Loading labels...
+                  </DropdownMenuItem>
+                ) : availableLabels.length > 0 ? (
+                  availableLabels.map(({ label, count }) => (
                     <DropdownMenuItem
                       key={label.name}
                       className='gap-2'
                       onClick={() => setSelectedLabel(label.name)}
                     >
                       <span
-                        className={`size-2 shrink-0 rounded-full ${getLabelDotClassName(
-                          label,
-                          index,
+                        className={`size-2 shrink-0 rounded-full ${getCanvasLabelDotClassName(
+                          label.name,
                         )}`}
                       />
                       <span className='min-w-0 flex-1 truncate'>{label.name}</span>
@@ -2334,6 +2523,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         {isInitialLoading || isChannelFolderViewInitialLoading ? (
           <div className='flex items-center justify-center h-64'>
             <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+          </div>
+        ) : isLabelFilterLoading ? (
+          <div className='flex items-center justify-center h-64'>
+            <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
           </div>
         ) : shouldRenderChannelFolderGroups ? (
           renderChannelFolderGroupedList()
