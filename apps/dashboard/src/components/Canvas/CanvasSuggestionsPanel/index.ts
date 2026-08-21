@@ -1,0 +1,1 @@
+export { CanvasSuggestionsPanel } from './CanvasSuggestionsPanel';
