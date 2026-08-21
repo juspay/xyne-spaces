@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
-  CheckCircle2,
-  Clock,
+  CheckTickCircle,
+  ClockDefault,
   Hourglass,
-  Loader2,
   MinusCircle,
-  XCircle,
-} from 'lucide-react';
+  MultipleCrossCancelCircle,
+  Spinner,
+} from '@xyne/icons';
 import { cn } from '../../../../utils/classNames';
 import {
   Select,
@@ -224,17 +224,17 @@ function RunRow({
     >
       <div className='flex size-9 items-center justify-center'>
         {run.status === 'COMPLETED' ? (
-          <CheckCircle2 className='size-4 text-green-600' />
+          <CheckTickCircle className='size-4 text-green-600' />
         ) : run.status === 'FAILED' ? (
-          <XCircle className='size-4 text-red-600' />
+          <MultipleCrossCancelCircle className='size-4 text-red-600' />
         ) : run.status === 'EXTERNAL_WAIT' ? (
           <Hourglass className='size-4 text-purple-600' />
         ) : run.status === 'SKIPPED' ? (
           <MinusCircle className='size-4 text-muted-foreground' />
         ) : run.status === 'PENDING' ? (
-          <Clock className='size-4 text-muted-foreground' />
+          <ClockDefault className='size-4 text-muted-foreground' />
         ) : (
-          <Loader2 className='size-4 animate-spin text-blue-600' />
+          <Spinner className='size-4 animate-spin text-blue-600' />
         )}
       </div>
       <div className='flex flex-1 flex-col gap-0.5'>
