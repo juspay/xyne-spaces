@@ -9,6 +9,8 @@ import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import {
   applyBehaviour,
+  MAX_DELEGATIONS_PER_RUN_BOUNDS,
+  MAX_DELEGATIONS_PER_RUN_OPTIONS,
   readBehaviourDraft,
   type BehaviourDraft,
 } from '@/services/claw/behaviourConfig';
@@ -265,7 +267,6 @@ export function AgentBehaviourTabV2({
           <BehaviourRow
             title='Always goal'
             hint='Run every message as an autonomous loop. Only for agents purpose-built for it — users can type /stop to cancel mid-run.'
-            last
           >
             <BehaviourToggle
               checked={behaviour.autoGoal}
@@ -274,6 +275,27 @@ export function AgentBehaviourTabV2({
               label='Always goal'
               trackName='Agent detail v2: toggle always goal'
               onChange={next => setBehaviour({ autoGoal: next }, 'Autonomy updated')}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Delegation budget'
+            hint='Max sub-agent delegations this agent may make in a single run. Raise it for orchestrators that fan out to several sub-agents (each delegation is a full nested run, so higher budgets cost more).'
+            last
+          >
+            <BehaviourSelect
+              value={String(behaviour.maxDelegationsPerRun)}
+              options={MAX_DELEGATIONS_PER_RUN_OPTIONS.map(n => ({
+                value: String(n),
+                label: n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? `Default (${n})` : String(n),
+              }))}
+              editable={editable}
+              disabled={busy}
+              label='Delegation budget'
+              trackName='Agent detail v2: set delegation budget'
+              onChange={next =>
+                setBehaviour({ maxDelegationsPerRun: Number(next) }, 'Delegation budget updated')
+              }
             />
           </BehaviourRow>
         </DetailCard>

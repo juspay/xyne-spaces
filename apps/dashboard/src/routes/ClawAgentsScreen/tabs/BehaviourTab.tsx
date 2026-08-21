@@ -10,7 +10,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import type { AgentPermissions } from '@/services/claw/agentPermissions';
-import type { BehaviourDraft } from '@/services/claw/behaviourConfig';
+import {
+  clampMaxDelegationsPerRun,
+  MAX_DELEGATIONS_PER_RUN_BOUNDS,
+  MAX_DELEGATIONS_PER_RUN_OPTIONS,
+  type BehaviourDraft,
+} from '@/services/claw/behaviourConfig';
 
 /**
  * Whitelist people-picker for the Privacy section. Stores userIds in the draft;
@@ -292,6 +297,37 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
         onCheckedChange={next => onChange({ autoGoal: next })}
         disabled={!canEdit}
       />
+
+      <div className='rounded-lg border border-border p-4'>
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-0.5'>
+            <span className='text-sm font-medium text-foreground'>Delegation budget</span>
+            <p className='text-xs text-muted-foreground'>
+              Max sub-agent delegations per run. Raise it for orchestrators that fan out to several
+              sub-agents in one workflow — each delegation is a full nested run, so higher budgets
+              cost more. Default is {MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT}.
+            </p>
+          </div>
+          <select
+            aria-label='Delegation budget'
+            value={String(value.maxDelegationsPerRun)}
+            disabled={!canEdit}
+            onChange={e =>
+              onChange({ maxDelegationsPerRun: clampMaxDelegationsPerRun(e.target.value) })
+            }
+            className={cn(
+              'h-9 shrink-0 rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring',
+              readOnlyCls,
+            )}
+          >
+            {MAX_DELEGATIONS_PER_RUN_OPTIONS.map(n => (
+              <option key={n} value={String(n)}>
+                {n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? `Default (${n})` : n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <ToggleCard
         title='Plan mode'
