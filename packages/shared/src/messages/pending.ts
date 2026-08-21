@@ -175,7 +175,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         messageId: entry.messageId,
         timestamp: fireTimestamp,
         type: entry.type,
-        attachmentIds,
+        ...(attachmentIds.length > 0 && { attachmentIds }),
       }),
     );
   } else {
@@ -186,7 +186,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         type: entry.type,
         timestamp: fireTimestamp,
         messageId: entry.messageId,
-        attachmentIds,
+        ...(attachmentIds.length > 0 && { attachmentIds }),
         ...(entry.alsoSendToChannel !== undefined && {
           showInChannel: entry.alsoSendToChannel,
         }),
