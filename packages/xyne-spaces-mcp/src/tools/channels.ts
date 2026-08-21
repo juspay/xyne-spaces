@@ -45,6 +45,7 @@ interface ChannelRow {
 	addUserPolicy?: string | null;
 	createdAt?: number;
 	updatedAt?: number;
+	/** Joined by the query. Carries the membership count that is actually kept up to date. */
 	channelStats?: Record<string, unknown> | Record<string, unknown>[] | null;
 }
 
@@ -68,7 +69,12 @@ function renderChannel(status: ChannelStatusRow, index: number): string | undefi
 	if (channel.description) lines.push(indented(cleanText(channel.description)));
 
 	const stat: string[] = [];
-	if (typeof channel.participantCount === "number") stat.push(`${channel.participantCount} members`);
+	// From `channel_stats`, not `Channel.participantCount` — the scalar on the
+	// channel is unmaintained and reads 0 for every row. The stats row is joined
+	// by the query already, so this costs nothing.
+	const stats = firstRelated(channel.channelStats);
+	const memberCount = typeof stats?.["participantCount"] === "number" ? (stats["participantCount"] as number) : undefined;
+	if (memberCount !== undefined) stat.push(`${memberCount} members`);
 	if (typeof status.unreadCount === "number" && status.unreadCount > 0) stat.push(`${status.unreadCount} unread`);
 	if (channel.addUserPolicy) stat.push(`add-user policy: ${channel.addUserPolicy}`);
 	if (stat.length > 0) lines.push(`  ${stat.join(" · ")}`);
@@ -96,7 +102,7 @@ const channelsList: ToolDef = {
 		"NAME into a channel id — it reads the database directly and so works for private channels, unlike " +
 		"spaces_search, which is a fuzzy relevance index. Always resolve a channel here and copy the id verbatim " +
 		"before posting or creating anything in it; never re-type an id from memory or from earlier prose. " +
-		"Returns per channel: name, scope, visibility, description, member count, your unread count, creator, project " +
+		"Returns per channel: name, scope, visibility, description, live member count, your unread count, creator, project " +
 		"id, and created / updated / last-active times. Email, Slack, App and Call channels are excluded by default — " +
 		"set include_email_channels to include them.",
 	inputSchema: {

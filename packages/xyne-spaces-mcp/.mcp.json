@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "xyne-spaces": {
+      "command": "node",
+      "args": ["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"],
+      "env": {
+        "XYNE_SPACES_BASE_URL": "https://spaces.xyne.juspay.net",
+        "XYNE_SPACES_API_KEY": "xyne_sk_..."
+      }
+    }
+  }
+}

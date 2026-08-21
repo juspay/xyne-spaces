@@ -70,6 +70,14 @@ excluded: 57
 accounted for: 508/508
 ```
 
+## Another consumer of the same endpoints
+
+`packages/xyne-spaces-mcp` is an MCP server over this same API, carrying the same
+`xyne_sk_` key. It does not depend on this package: it speaks HTTP to
+`/api/sdk/catalog/*` and the direct routes, exposing 33 curated tools rather than
+the full catalog. It has its own conformance gate for the operation names it
+hardcodes, sharing this package's catalog parser (`scripts/catalog.mjs`).
+
 ## Attachment flow
 
 Files can be sent inline with `tickets.create` and
