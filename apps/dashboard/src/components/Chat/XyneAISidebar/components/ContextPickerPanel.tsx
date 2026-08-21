@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import GlobalCommandMenu from '../../../GlobalCommandMenu/GlobalCommandMenu';
 import type { ContextItem } from '../../ThreadContextPanel/ThreadContextPanel.types';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
+import type { CanvasRole } from '../utils/XyneAITypes';
 
 // ─── Exported Types ───────────────────────────────────────────────────────────
 
@@ -27,6 +28,14 @@ export interface SelectedCanvas {
    * attachment id for dedupe and is not what the canvas route accepts.
    */
   canvasId?: string;
+  /**
+   * What this canvas IS, when the attaching screen knows. A recording attaches two
+   * canvases that look identical from their row alone — the machine-written summary
+   * and the human's own notes — and the agent has to weigh them very differently.
+   * Undefined for a canvas the user picked by hand; the agent then treats it as a
+   * plain document.
+   */
+  canvasRole?: CanvasRole;
 }
 
 /**
@@ -64,6 +73,8 @@ export interface AttachedContextItem {
   id: string;
   title: string;
   threadId?: string;
+  /** Canvas items only — see SelectedCanvas.canvasRole. */
+  canvasRole?: CanvasRole;
   // For activity items
   eventName?: string;
   eventCategory?: string;
@@ -99,6 +110,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       type: 'canvas',
       id: canvas.id,
       title: canvas.title,
+      ...(canvas.canvasRole ? { canvasRole: canvas.canvasRole } : {}),
     });
   }
 
