@@ -1836,6 +1836,10 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   display: none !important;
 }
 
+[data-message-preview="true"] .message-html-root .xyne-code-block button {
+  display: none !important;
+}
+
 [data-message-preview="true"] .message-html-root a {
   color: var(--link-color) !important;
   text-decoration: underline !important;
