@@ -1,3 +1,10 @@
+## [1.208.2](https://github.com/juspay/xyne-spaces/compare/v1.208.1...v1.208.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* remove unread mentions hover opacity ([#900](https://github.com/juspay/xyne-spaces/issues/900)) ([c3a46e3](https://github.com/juspay/xyne-spaces/commit/c3a46e349f042d54035e62fb11e4a0c91fa05eae))
+
 ## [1.208.1](https://github.com/juspay/xyne-spaces/compare/v1.208.0...v1.208.1) (2026-08-21)
 
 
