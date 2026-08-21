@@ -6836,6 +6836,12 @@ export function createMutators(
           if (mappedTicketId === ticketId) {
             throw new Error('A ticket cannot be linked as its own sub-ticket');
           }
+          
+          if (tx.location === 'server') {
+            await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+              `link-subticket:${mappedTicketId}`,
+            ]);
+          }
 
           const subTicketId = linkedSubTicketId(ticketId, mappedTicketId);
 
