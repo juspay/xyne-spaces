@@ -80,7 +80,8 @@ const WhitelistPicker = ({
       {/* Selected members */}
       {whitelist.length === 0 ? (
         <p className='text-xs text-muted-foreground'>
-          No one is allowed yet — an empty whitelist means <span className='font-medium'>nobody</span> can call this agent. Add people below.
+          No one is allowed yet — an empty whitelist means{' '}
+          <span className='font-medium'>nobody</span> can call this agent. Add people below.
         </p>
       ) : (
         <div className='flex flex-wrap gap-2'>
@@ -101,6 +102,8 @@ const WhitelistPicker = ({
                     onClick={() => remove(id)}
                     className='rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground'
                     aria-label={`Remove ${u?.name ?? id}`}
+                    data-track-category='Claw Agents'
+                    data-track-name='Remove whitelist member'
                   >
                     <X className='size-3' />
                   </button>
@@ -122,7 +125,9 @@ const WhitelistPicker = ({
               placeholder='Search people by name or email…'
               className='border-0 px-0 focus-visible:ring-0'
             />
-            {searching && <Loader2 className='size-4 shrink-0 animate-spin text-muted-foreground' />}
+            {searching && (
+              <Loader2 className='size-4 shrink-0 animate-spin text-muted-foreground' />
+            )}
           </div>
           {visibleResults.length > 0 && (
             <div className='absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-border bg-popover shadow-md'>
@@ -132,6 +137,8 @@ const WhitelistPicker = ({
                   type='button'
                   onClick={() => add(u)}
                   className='flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted'
+                  data-track-category='Claw Agents'
+                  data-track-name='Add whitelist member'
                 >
                   <Avatar userId={u.id} size='sm' />
                   <span className='flex flex-col'>
@@ -231,7 +238,8 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
               <Lock className='size-3.5' /> Privacy
             </span>
             <p className='text-xs text-muted-foreground'>
-              Who can call this agent. Applies everywhere — mentions, DMs, automations, chat and CLI.
+              Who can call this agent. Applies everywhere — mentions, DMs, automations, chat and
+              CLI.
             </p>
           </div>
           <SegmentedToggle<'everyone' | 'whitelist'>

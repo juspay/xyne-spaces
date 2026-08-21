@@ -112,7 +112,7 @@ export function KnowledgeStep({ state, update }: Props): ReactElement {
         />
         <p className='text-[11px] text-muted-foreground'>
           {state.selectedKbResources.length === 0
-            ? 'No specific KB resources attached — this agent will match your access (inherits the running user\'s spaces access).'
+            ? "No specific KB resources attached — this agent will match your access (inherits the running user's spaces access)."
             : `${state.selectedKbResources.length} grant${state.selectedKbResources.length === 1 ? '' : 's'} attached`}
         </p>
       </div>
