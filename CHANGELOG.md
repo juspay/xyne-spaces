@@ -1,3 +1,10 @@
+## [1.206.1](https://github.com/juspay/xyne-spaces/compare/v1.206.0...v1.206.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes show more button overlay issue for code block ([#859](https://github.com/juspay/xyne-spaces/issues/859)) ([917f073](https://github.com/juspay/xyne-spaces/commit/917f0735ebc4896de37037487951fae16f934d5d))
+
 ## [1.206.0](https://github.com/juspay/xyne-spaces/compare/v1.205.3...v1.206.0) (2026-08-21)
 
 
