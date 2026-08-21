@@ -284,8 +284,6 @@ export function AgentKnowledgeTabV2({
         onOpenChange={open => {
           if (!open) knowledge.closeBrowse();
         }}
-        scope={knowledge.draftScope}
-        onScopeChange={knowledge.setDraftScope}
         grants={knowledge.draftGrants}
         onGrantsChange={knowledge.setDraftGrants}
       />

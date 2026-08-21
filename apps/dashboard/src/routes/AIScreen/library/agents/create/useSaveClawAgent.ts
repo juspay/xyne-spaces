@@ -41,8 +41,12 @@ export function useSaveClawAgent(agent: Agent | undefined): SaveClawAgent {
         description: state.description.trim(),
         systemPrompt: state.systemPrompt.trim(),
         color: state.color,
-        kbScope: state.selectedKbScope,
-        ...(state.selectedKbScope === 'USER' ? {} : { knowledgeBase: state.selectedKbResources }),
+        // No explicit scope choice in the UI — an empty allowlist means the
+        // agent matches the running user's own spaces access.
+        kbScope: state.selectedKbResources.length > 0 ? 'COLLECTIONS' : 'USER',
+        ...(state.selectedKbResources.length > 0
+          ? { knowledgeBase: state.selectedKbResources }
+          : {}),
         config,
         skills: state.selectedSkillIds,
       });
