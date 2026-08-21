@@ -61,7 +61,9 @@ export interface WizardState {
 
   // Knowledge
   selectedSkillIds: string[];
-  selectedKbScope: 'COLLECTIONS' | 'USER';
+  // No explicit scope choice — an empty selectedKbResources means the agent
+  // matches the running user's own spaces access; a non-empty one scopes it
+  // to that allowlist. Computed at save time (see ClawAgentCreateScreen).
   selectedKbResources: KbSelection[];
 }
 
@@ -78,7 +80,6 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   researchAgentProductId: '',
   researchAgentRepositoryId: '',
   selectedSkillIds: [],
-  selectedKbScope: 'COLLECTIONS',
   selectedKbResources: [],
 };
 

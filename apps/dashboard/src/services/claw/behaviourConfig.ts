@@ -181,7 +181,9 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
   // canonical { mode, whitelist } block (server re-normalizes on save).
   setOrDelete('privacy', draft.privacyMode === 'whitelist', {
     mode: 'whitelist',
-    whitelist: Array.from(new Set(draft.whitelist.filter((u) => typeof u === 'string' && u.length > 0))),
+    whitelist: Array.from(
+      new Set(draft.whitelist.filter(u => typeof u === 'string' && u.length > 0)),
+    ),
   });
 
   // Only persist a CUSTOM plan-mode prompt. Empty, or unchanged from the default,

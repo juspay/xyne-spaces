@@ -4,20 +4,16 @@ import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
 import { BrowseKnowledgeDialog } from './BrowseKnowledgeDialog';
-import { buildKbIndex, describeGrants, removeGrant, type KbScope } from './knowledgeCatalog';
+import { buildKbIndex, describeGrants, removeGrant } from './knowledgeCatalog';
 
 const CAPTION = 'Give your agent trusted information to reference.';
 
 interface KnowledgeCapabilityRowProps {
-  scope: KbScope;
-  onScopeChange: (next: KbScope) => void;
   grants: KbSelection[];
   onGrantsChange: (next: KbSelection[]) => void;
 }
 
 export function KnowledgeCapabilityRow({
-  scope,
-  onScopeChange,
   grants,
   onGrantsChange,
 }: KnowledgeCapabilityRowProps): ReactElement {
@@ -44,11 +40,9 @@ export function KnowledgeCapabilityRow({
             </Tooltip>
           </div>
           <span className='truncate text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
-            {scope === 'USER'
-              ? 'Matches the running user’s access'
-              : grants.length > 0
-                ? `${grants.length} grant${grants.length === 1 ? '' : 's'} attached`
-                : 'No collections attached'}
+            {grants.length > 0
+              ? `${grants.length} grant${grants.length === 1 ? '' : 's'} attached`
+              : 'No specific KB attached — matches your access'}
           </span>
         </div>
 
@@ -66,7 +60,7 @@ export function KnowledgeCapabilityRow({
 
       <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
-      {scope === 'COLLECTIONS' && labels.length > 0 && (
+      {labels.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
           {labels.map(grant => (
             <button
@@ -101,8 +95,6 @@ export function KnowledgeCapabilityRow({
       <BrowseKnowledgeDialog
         open={browseOpen}
         onOpenChange={setBrowseOpen}
-        scope={scope}
-        onScopeChange={onScopeChange}
         grants={grants}
         onGrantsChange={onGrantsChange}
       />
