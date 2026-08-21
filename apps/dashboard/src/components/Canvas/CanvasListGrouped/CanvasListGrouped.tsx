@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Folder } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { CanvasChannel, CanvasFolder, CanvasProject } from '../Canvas.types';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -13,7 +14,6 @@ import type { CanvasListGroupedProps } from './CanvasListGrouped.utils';
 import { getChannelDisplayName, nextFolderName } from './CanvasListGrouped.utils';
 import { useCanvasListGroupedData } from './useCanvasListGroupedData';
 import { CanvasListGroupedContent } from './CanvasListGroupedContent';
-import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   onSelect,

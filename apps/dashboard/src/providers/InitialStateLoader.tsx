@@ -23,14 +23,13 @@ import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
-import { usePendingQueue } from '@xyne/shared/messages';
 import { axiosHttpClient } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
 
@@ -91,10 +90,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   logger.setZeroClientGroupId(zero.clientGroupID);
 
   useZeroConnectionLogger(state);
-
-  // Durable pending-message queue: reconciles server-confirmed sends and
-  // auto-retries messages queued while the socket was reconnecting.
-  usePendingQueue();
 
   // Connection failure modal state — in-memory only
   const [showModal, setShowModal] = useState(false);
@@ -208,8 +203,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
       });
 
-      // Clear Zero's local databases
-      void dropAllDatabases();
+      // Clear this lane's Zero local databases
+      void dropZeroDatabases();
 
       // Clear all cookies and auth tokens (handles Electron + Web)
       clearAuthTokens();

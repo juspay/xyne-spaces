@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { CalendarView, type DateRangeValue } from '../../ui/DateRangeFilter';
 
-const MAX_CUSTOM_DAYS = 30;
+const MAX_CUSTOM_DAYS = 90;
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);
@@ -54,6 +54,24 @@ const PRESETS = [
       const e = new Date(),
         s = new Date();
       s.setDate(s.getDate() - 29);
+      return { startDate: startOfDay(s), endDate: endOfDay(e) };
+    },
+  },
+  {
+    label: 'Last 60 days',
+    getValue: () => {
+      const e = new Date(),
+        s = new Date();
+      s.setDate(s.getDate() - 59);
+      return { startDate: startOfDay(s), endDate: endOfDay(e) };
+    },
+  },
+  {
+    label: 'Last 90 days',
+    getValue: () => {
+      const e = new Date(),
+        s = new Date();
+      s.setDate(s.getDate() - 89);
       return { startDate: startOfDay(s), endDate: endOfDay(e) };
     },
   },

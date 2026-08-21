@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePath } from '../../../hooks/usePath';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -86,8 +86,6 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
-import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -114,6 +112,7 @@ interface CanvasScreenProps {
   canvasId?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  showAskAiAction?: boolean;
 }
 
 const getCanvasRolePriority = (role: CanvasRole): number => {
@@ -139,6 +138,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
   onToggleFullscreen,
+  showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -151,7 +151,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const skipAutoFocus = searchParams.get('nofocus') === '1';
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
-  const canvasPanelContext = useOutletContext<CanvasPanelOutletContext | null>();
 
   // Determine if we're on /chat/canvas (full-screen canvas page)
   const isOnChatCanvasPage = usePath().startsWith('/chat/canvas');
@@ -174,6 +173,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const canvasParticipants = canvasWithParticipants?.participants;
 
   const currentUserGroupIds = useCurrentUserGroupIds();
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const adminChannelIds = useMemo(
+    () => new Set((adminParticipations ?? []).map(participant => participant.channelId)),
+    [adminParticipations],
+  );
   const visibleChannels = useAllVisibleChannels();
   const currentUserChannelIds = useMemo(
     () => new Set(visibleChannels.map(channel => channel.id).filter(Boolean)),
@@ -294,6 +298,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
+      const sdlcMetadata = canvasData.metadata as Record<string, unknown> | null | undefined;
+      const isAdminEditableSdlcBaseline =
+        sdlcMetadata?.['surface'] === 'SDLC' &&
+        sdlcMetadata['artifactKind'] === 'BASELINE' &&
+        Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
+
+      if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
 
       if (!accessLevel) {
         const inheritedRoles = [
@@ -364,6 +375,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     state,
     currentUserGroupIds,
     currentUserChannelIds,
+    adminChannelIds,
     queryClient,
   ]);
 
@@ -1077,7 +1089,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     </Button>
 
                     <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
-                      {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
                       <Input
                         type='text'
@@ -1216,24 +1227,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
-                          {/* Ask AI */}
-                          <button
-                            type='button'
-                            onClick={handleAskAI}
-                            className={headerIconButtonClass}
-                            title='Ask AI'
-                            aria-label='Ask AI'
-                            data-track-category='CANVAS'
-                            data-track-name='Ask_AI_From_Canvas'
-                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                          >
-                            <img
-                              alt='AI'
-                              width='16'
-                              height='16'
-                              src='/svgs/icons/ai-bot-gradient-star.svg'
-                            />
-                          </button>
+                          {showAskAiAction && (
+                            <button
+                              type='button'
+                              onClick={handleAskAI}
+                              className={headerIconButtonClass}
+                              title='Ask AI'
+                              aria-label='Ask AI'
+                              data-track-category='CANVAS'
+                              data-track-name='Ask_AI_From_Canvas'
+                              data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                            >
+                              <img
+                                alt='AI'
+                                width='16'
+                                height='16'
+                                src='/svgs/icons/ai-bot-gradient-star.svg'
+                              />
+                            </button>
+                          )}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

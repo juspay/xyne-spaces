@@ -22,7 +22,9 @@ import {
   InformationCircle,
   AlertCircle,
   TicketToken,
+  UserPlus,
 } from '@xyne/icons';
+import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -42,6 +44,8 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
@@ -53,6 +57,7 @@ import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
+import WorkspaceInviteDialog from './WorkspaceInviteDialog';
 
 const mobileNavigationItems = [
   {
@@ -153,6 +158,10 @@ const AppSidebar = (): ReactElement => {
   const { isMobile } = usePlatform();
   const visibleChannels = useAllVisibleChannels();
   const unreadCounts = useAllUnreadCount();
+  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
+    enabled: !!workspaceId,
+  });
+  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -193,6 +202,7 @@ const AppSidebar = (): ReactElement => {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
@@ -468,6 +478,28 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
+          {isCommunityWorkspace && (
+            <Tooltip content='Invite people' side='right' delayDuration={0}>
+              <button
+                type='button'
+                aria-label='Invite people to workspace'
+                title='Invite people'
+                onClick={() => setIsInviteDialogOpen(true)}
+                data-testid='nav-invite-people'
+                data-track-category='App_Sidebar'
+                data-track-name='Sidebar_InvitePeople_Open'
+                className={cn(
+                  'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                  isInviteDialogOpen
+                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <UserPlus size={18} variant='Solid' className='text-black' />
+              </button>
+            </Tooltip>
+          )}
+
           <Popover
             open={isSupportOpen}
             onOpenChange={setIsSupportOpen}
@@ -590,6 +622,12 @@ const AppSidebar = (): ReactElement => {
 
         {/* Error Report Modal — opened from the Support rail button */}
         <ErrorReportModal isOpen={isErrorReportOpen} onClose={() => setIsErrorReportOpen(false)} />
+
+        <WorkspaceInviteDialog
+          open={isInviteDialogOpen}
+          onOpenChange={setIsInviteDialogOpen}
+          workspaceId={workspaceId}
+        />
 
         {/* Status Update Modal */}
         <UpdateStatusModal

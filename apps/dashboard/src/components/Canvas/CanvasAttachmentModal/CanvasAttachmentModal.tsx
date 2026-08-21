@@ -6,7 +6,7 @@ import { OverlayPortal } from '../../ui/OverlayPortal';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
 
-type FilterTab = 'all' | 'created_by_me' | 'shared';
+type FilterTab = 'all' | 'created_by_me';
 
 export interface CanvasAttachmentModalProps {
   /** Whether the modal is open */

@@ -59,11 +59,16 @@ function randomHex(length: number): string {
 function createKubeClient(): CustomObjectsApi {
   const config = new KubeConfig();
 
-  try {
-    config.loadFromCluster();
-  } catch {
-    config.loadFromDefault();
-  }
+  // loadFromDefault supports both execution modes: it reads KUBECONFIG or
+  // ~/.kube/config for local development, and falls back to the mounted
+  // service-account credentials when running inside Kubernetes (it calls
+  // loadFromCluster itself once it sees the service-account token file).
+  // Calling loadFromCluster first and catching does not work: it only records
+  // the token/CA file *paths* without reading them and always sets a current
+  // context, so off-cluster it cannot throw, the catch never runs, and we end
+  // up with a client aimed at https://undefined:undefined that only fails on
+  // the first API request.
+  config.loadFromDefault();
 
   return config.makeApiClient(CustomObjectsApi);
 }

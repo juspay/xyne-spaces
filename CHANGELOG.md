@@ -1,3 +1,101 @@
+## [1.188.0-release-20260817.10](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.9...v1.188.0-release-20260817.10) (2026-08-21)
+
+
+### Bug Fixes
+
+* acl fix for cross-app support ([#821](https://github.com/juspay/xyne-spaces/issues/821)) ([26f93c6](https://github.com/juspay/xyne-spaces/commit/26f93c6350a8395b828feb8d4b6afc7e49b5bb62))
+
+## [1.188.0-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.8...v1.188.0-release-20260817.9) (2026-08-21)
+
+
+### Reverts
+
+* Revert "refact: XYNE-55516 update canvas sidebar filters (#376)" (#851) ([f625093](https://github.com/juspay/xyne-spaces/commit/f625093f219cf85d68b2d7cd4f6a165eb4a228f0)), closes [#376](https://github.com/juspay/xyne-spaces/issues/376) [#851](https://github.com/juspay/xyne-spaces/issues/851)
+
+## [1.188.0-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.7...v1.188.0-release-20260817.8) (2026-08-20)
+
+
+### Bug Fixes
+
+* strip the router basename before reading the workspace id ([#841](https://github.com/juspay/xyne-spaces/issues/841)) ([865ba14](https://github.com/juspay/xyne-spaces/commit/865ba14169a85817cbb9a91f783e93c97720dd98))
+
+## [1.188.0-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.6...v1.188.0-release-20260817.7) (2026-08-20)
+
+
+### Features
+
+* deploy the SDLC surface as an independent lane ([#787](https://github.com/juspay/xyne-spaces/issues/787)) ([37fec01](https://github.com/juspay/xyne-spaces/commit/37fec01a5b4aef52d39bcfd75023817db26fc3f4)), closes [#836](https://github.com/juspay/xyne-spaces/issues/836)
+
+## [1.188.0-release-20260817.6](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.5...v1.188.0-release-20260817.6) (2026-08-20)
+
+
+### Reverts
+
+* Revert "feat: reuse shared pending-message framework in dashboard channel sends (#281)" (#828) ([e78153a](https://github.com/juspay/xyne-spaces/commit/e78153a53d8c76c5e30a5b5b0cc4cb7414b199f8)), closes [#281](https://github.com/juspay/xyne-spaces/issues/281) [#828](https://github.com/juspay/xyne-spaces/issues/828)
+
+## [1.188.0-release-20260817.5](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.4...v1.188.0-release-20260817.5) (2026-08-20)
+
+
+### Features
+
+* add tags backfill stats ([#822](https://github.com/juspay/xyne-spaces/issues/822)) ([779a451](https://github.com/juspay/xyne-spaces/commit/779a4514c33a9b877ff2fb62a5a2aecbdb4f11c4))
+
+## [1.188.0-release-20260817.4](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.3...v1.188.0-release-20260817.4) (2026-08-20)
+
+
+### Bug Fixes
+
+* updating catch block to provide actual error ([#815](https://github.com/juspay/xyne-spaces/issues/815)) ([e1d73d6](https://github.com/juspay/xyne-spaces/commit/e1d73d68e332699be5a9d02762c8ec1cba24b8d4))
+
+## [1.188.0-release-20260817.3](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.2...v1.188.0-release-20260817.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* backport redirect fix ([#555](https://github.com/juspay/xyne-spaces/issues/555)) and XYNE-56551 runAsSystem syncBotUsers ([#807](https://github.com/juspay/xyne-spaces/issues/807)) to release-20260817 ([#809](https://github.com/juspay/xyne-spaces/issues/809)) ([dca2218](https://github.com/juspay/xyne-spaces/commit/dca2218053550e3c6af8d89f40e527d80d8c1217))
+
+## [1.188.0-release-20260817.2](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.1...v1.188.0-release-20260817.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* flowJson ingestion in vespa ([#581](https://github.com/juspay/xyne-spaces/issues/581)) ([#795](https://github.com/juspay/xyne-spaces/issues/795)) ([39b5dc4](https://github.com/juspay/xyne-spaces/commit/39b5dc4c60314b9f626e253e9fb0f89818faffef))
+
+## [1.188.0-release-20260817.1](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.11...v1.188.0-release-20260817.1) (2026-08-20)
+
+
+### Features
+
+* implement SDLC (backport to release-20260817) ([#777](https://github.com/juspay/xyne-spaces/issues/777)) ([f090900](https://github.com/juspay/xyne-spaces/commit/f0909001a0dd3924f86bf0f00e3409925300f668)), closes [#692](https://github.com/juspay/xyne-spaces/issues/692)
+
+## [1.187.1-release-20260817.11](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.10...v1.187.1-release-20260817.11) (2026-08-19)
+
+
+### Bug Fixes
+
+* auth middleware set user role ([#738](https://github.com/juspay/xyne-spaces/issues/738)) ([e1c9c3f](https://github.com/juspay/xyne-spaces/commit/e1c9c3fdb9cc581ef83e3a314aa37221260b2b10))
+
+## [1.187.1-release-20260817.10](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.9...v1.187.1-release-20260817.10) (2026-08-19)
+
+
+### Bug Fixes
+
+* scope automation approval DM send to service actor to stop empty duplicate DMs ([#743](https://github.com/juspay/xyne-spaces/issues/743)) ([08d02c1](https://github.com/juspay/xyne-spaces/commit/08d02c157d48da3a21515661e83dadf79d4dd540)), closes [#741](https://github.com/juspay/xyne-spaces/issues/741) [#517](https://github.com/juspay/xyne-spaces/issues/517)
+
+## [1.187.1-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.8...v1.187.1-release-20260817.9) (2026-08-19)
+
+
+### Bug Fixes
+
+* added 60 days and 90 days filter, added age column for tickets, form fields coming as columns ([#589](https://github.com/juspay/xyne-spaces/issues/589)) ([#748](https://github.com/juspay/xyne-spaces/issues/748)) ([72e7c72](https://github.com/juspay/xyne-spaces/commit/72e7c72fbb158cf109a8129b7f753d2a2254b28c))
+
+## [1.187.1-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.7...v1.187.1-release-20260817.8) (2026-08-19)
+
+
+### Bug Fixes
+
+* stack PR [#626](https://github.com/juspay/xyne-spaces/issues/626) and [#518](https://github.com/juspay/xyne-spaces/issues/518) onto release-20260817 ([#742](https://github.com/juspay/xyne-spaces/issues/742)) ([23ef50c](https://github.com/juspay/xyne-spaces/commit/23ef50ce378733df37f7b89519e91ff23ae61f50))
+
 ## [1.187.1-release-20260817.7](https://github.com/juspay/xyne-spaces/compare/v1.187.1-release-20260817.6...v1.187.1-release-20260817.7) (2026-08-18)
 
 

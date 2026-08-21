@@ -130,6 +130,8 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
+import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
@@ -169,6 +171,7 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -183,6 +186,10 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import sdlcRoutes from '@/routes/sdlc';
+import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 
 
 export class App {
@@ -198,6 +205,22 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
+
+    const apiPathPrefix = config.apiPathPrefix;
+    if (apiPathPrefix) {
+      this.app.use((req: Request, _res: Response, next: express.NextFunction): void => {
+        const url = req.url;
+        const isPrefixed =
+          url === apiPathPrefix ||
+          url.startsWith(`${apiPathPrefix}/`) ||
+          url.startsWith(`${apiPathPrefix}?`);
+        if (isPrefixed) {
+          req.url = `/api${url.slice(apiPathPrefix.length)}`;
+        }
+        next();
+      });
+    }
+
     // Security middleware
     this.app.use(helmet());
 
@@ -468,8 +491,9 @@ export class App {
 
     // Internal S2S endpoints (trusted service-to-service calls)
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const s2sKey = process.env['INTERNAL_S2S_KEY'];
-      if (!s2sKey || req.headers['x-s2s-key'] !== s2sKey) {
+      const supplied = req.headers['x-s2s-key'];
+      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
       }
@@ -542,6 +566,18 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
+    this.app.post(
+      '/api/internal/sdlc/claw-callback/:executionId/:step',
+      validateS2SKey,
+      handleSdlcClawCallback,
+    );
+    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    this.app.use(
+      '/api/internal/sdlc/artifact-versions',
+      validateS2SKey,
+      sdlcArtifactVersionsInternalRoutes
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
@@ -571,6 +607,8 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
+    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
@@ -845,6 +883,9 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
+    logger.info('Initializing SDLC queue (producer)...');
+    await sdlcQueue.initialize();
+
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -1038,6 +1079,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close SDLC producer queue
+      await sdlcQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();

@@ -1,14 +1,16 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.187.1-release-20260817.7",
+  "version": "1.188.0-release-20260817.10",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
     "dev": "vite",
+    "dev:sdlc": "vite --mode sdlc",
     "dev:test": "vite --mode test",
     "claw:test": "VITE_SANDBOX_TEST_MODE=true vite --mode test",
     "dev:prod": "vite --mode prod-local",
     "build": "tsc --noEmit && vite build",
+    "build:sdlc": "tsc --noEmit && vite build --mode sdlc",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:errors-only": "eslint . --quiet",
@@ -33,7 +35,9 @@
   "dependencies": {
     "@base-ui/react": "^1.1.0",
     "@blocknote/core": "0.54.0",
+    "@blocknote/diagram-block": "0.54.0",
     "@blocknote/mantine": "0.54.0",
+    "@blocknote/math-block": "0.54.0",
     "@blocknote/react": "0.54.0",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/lang-json": "^6.0.2",
