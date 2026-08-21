@@ -57,23 +57,19 @@ export function ProjectRepositoriesSection(props: {
   useEffect(() => {
     void load();
   }, [load, props.refreshKey]);
-  const hasRunningCheck = repositories.some(repo =>
-    ['QUEUED', 'CHECKING'].includes(repo.accessJobStatus),
-  );
-  useEffect((): (() => void) | undefined => {
-    if (!hasRunningCheck) return;
-    const timer = window.setInterval(() => void load(true), 2500);
-    return () => window.clearInterval(timer);
-  }, [hasRunningCheck, load]);
 
   const check = async (repoId: string): Promise<void> => {
     setChecking(repoId);
     try {
-      await apiInstance.post(`/sdlc/repositories/${repoId}/access-check`, { force: true });
-      toast.success('Repository access refresh queued');
+      const response = await apiInstance.post<{ status: string; errorMessage: string | null }>(
+        `/sdlc/repositories/${repoId}/access-check`,
+        { force: true },
+      );
+      if (response.data.status === 'READY') toast.success('Repository access is ready');
+      else toast.error(response.data.errorMessage || 'Repository access is not available');
       await load(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not queue access check');
+      toast.error(error instanceof Error ? error.message : 'Could not run access check');
     } finally {
       setChecking(null);
     }
@@ -140,7 +136,6 @@ function RepositoryCard(props: {
     () => (Array.isArray(repo.accessCapabilities) ? (repo.accessCapabilities as Capability[]) : []),
     [repo.accessCapabilities],
   );
-  const running = ['QUEUED', 'CHECKING'].includes(repo.accessJobStatus);
   return (
     <article className='rounded-lg border border-border p-5'>
       <div className='flex flex-wrap items-start justify-between gap-4'>
@@ -157,20 +152,15 @@ function RepositoryCard(props: {
             {repo.configuredBaseBranch || 'branch pending'}
           </p>
           <p className='mt-1 text-xs text-muted-foreground'>
-            {running
-              ? 'Checking automatically…'
+            {props.checking
+              ? 'Checking…'
               : repo.accessJobStatus === 'READY'
                 ? 'Access ready'
                 : 'Access check pending'}
           </p>
         </div>
         <div className='flex flex-wrap gap-2'>
-          <Button
-            variant='outline'
-            loading={props.checking || running}
-            disabled={running}
-            onClick={props.onCheck}
-          >
+          <Button variant='outline' loading={props.checking} onClick={props.onCheck}>
             <RefreshCw className='h-4 w-4' /> Refresh now
           </Button>
           <Button onClick={props.onOpen}>

@@ -3,7 +3,6 @@ import { BASELINE_DEFINITIONS } from './baselineDefinitions';
 import type { VcsCapability } from './vcs/types';
 
 export const BASELINE_CAPABILITIES: readonly VcsCapability[] = ['READ_REPOSITORY'];
-export const ARTIFACT_CAPABILITIES: readonly VcsCapability[] = ['READ_REPOSITORY'];
 
 export function allBaselinesApproved(
   canvases: ReadonlyArray<{ metadata: unknown; lastEditedAt?: Date | string | number | null }>
