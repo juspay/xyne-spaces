@@ -2390,7 +2390,7 @@ model OnyxEvalRun {
   corrections    Int      @default(0)
   lastError      String?
   createdBy      String?
-  orgId          String?
+  orgId          String
   startedAt      DateTime @default(now())
   finishedAt     DateTime?
   questions      OnyxEvalQuestion[]
@@ -2404,6 +2404,7 @@ model OnyxEvalRun {
 model OnyxEvalQuestion {
   runId                String
   run                  OnyxEvalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  orgId                String
   questionId           String
   questionType         String
   question             String

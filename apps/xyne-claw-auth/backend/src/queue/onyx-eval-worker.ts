@@ -148,7 +148,7 @@ function retrievalEvidence(toolInvocations: unknown[] | null): { retrievedIds: s
     if (!inv || typeof inv !== "object") continue;
     const rec = inv as Record<string, unknown>;
     const toolName = String(rec["toolName"] ?? rec["tool"] ?? "");
-    if (toolName !== "spaces-search" && toolName !== "xyne-spaces__spaces-search" && toolName !== "spaces-search-v2" && toolName !== "xyne-spaces__spaces-search-v2") continue;
+    if (toolName !== "spaces-vespa-search" && toolName !== "xyne-spaces__spaces-vespa-search") continue;
     const result = rec["result"];
     const candidates: string[] = [];
     const collect = (items: unknown) => {
@@ -199,7 +199,7 @@ async function processQuestion(
   q: PostedQuestion,
   cfg: store.OnyxRunConfigShape,
   workspaceId: string,
-  run: { id: string; orgId: string | null; createdBy: string | null },
+  run: { id: string; orgId: string; createdBy: string | null },
 ): Promise<store.OnyxQuestionPersist> {
   const dsidToSynthetic: Record<string, { docId: string | null; sourceType: string | null }> = {};
   const goldSyntheticSet = new Set<string>();
@@ -229,7 +229,7 @@ async function processQuestion(
 
   // (1) Ask the bench agent: fire + await its callback.
   const ref = { runId: run.id, questionId: q.questionId, orgId };
-  let epoch = 0;
+  const epoch = 0;
   const fire = await agent.fireOnyxQuestionRun({
     orgId,
     agentSlug: BENCH_AGENT_SLUG,
@@ -360,6 +360,7 @@ async function processQuestion(
     goldAnswer: goldAnswer || null,
     answerFacts,
     dsidToSynthetic,
+    orgId: run.orgId?.trim() ?? "",
     error: null,
   };
 
@@ -386,6 +387,7 @@ async function processQuestion(
       goldAnswer: q2.goldAnswer || null,
       answerFacts: q2.answerFacts,
       dsidToSynthetic: map,
+      orgId: run.orgId?.trim() ?? "",
       error: errorMsg,
     };
   }
@@ -458,6 +460,7 @@ async function processJob(job: Job<OnyxEvalRunJobData>): Promise<OnyxEvalRunProg
         goldAnswer: q.goldAnswer || null,
         answerFacts: q.answerFacts,
         dsidToSynthetic: {},
+        orgId: run.orgId?.trim() ?? "",
         error: msg,
       });
     } finally {

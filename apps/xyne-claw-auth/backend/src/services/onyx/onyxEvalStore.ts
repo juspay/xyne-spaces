@@ -54,14 +54,14 @@ export async function createRun(input: {
   config: Record<string, unknown>;
   totalQuestions: number;
   createdBy?: string | undefined;
-  orgId?: string | undefined;
+  orgId: string;
 }): Promise<string> {
   const run = await prisma.onyxEvalRun.create({
     data: {
       config: input.config,
       totalQuestions: input.totalQuestions,
       createdBy: input.createdBy ?? null,
-      orgId: input.orgId ?? null,
+      orgId: input.orgId,
     },
     select: { id: true },
   });
@@ -72,6 +72,7 @@ export interface OnyxQuestionPersist {
   questionId: string;
   questionType: string;
   question: string;
+  orgId: string;
   retrieved: unknown;
   rawAnswer: string | null;
   answerText: string | null;

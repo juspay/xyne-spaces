@@ -83,11 +83,17 @@ router.post("/run", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  const orgId = getOrgId(req) ?? "";
+  if (!orgId.trim()) {
+    res.status(400).json({ success: false, error: "unable to resolve caller org — the run must be org-scoped" });
+    return;
+  }
+
   const runId = await store.createRun({
     config: parsed.data,
     totalQuestions: parsed.data.questions.length,
     createdBy: getRequesterId(req),
-    orgId: getOrgId(req),
+    orgId,
   });
   const jobId = await enqueueOnyxEvalRun({ runId, userId: getRequesterId(req) ?? "unknown" });
   await store.attachJobId(runId, jobId);

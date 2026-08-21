@@ -13,7 +13,7 @@ CREATE TABLE "public"."onyx_eval_runs" (
     "corrections"     INTEGER     NOT NULL DEFAULT 0,
     "last_error"      TEXT,
     "created_by"      TEXT,
-    "org_id"          TEXT,
+    "org_id"          TEXT        NOT NULL DEFAULT '',
     "started_at"      TIMESTAMPTZ NOT NULL DEFAULT now(),
     "finished_at"     TIMESTAMPTZ,
     CONSTRAINT "onyx_eval_runs_pkey" PRIMARY KEY ("id")
@@ -23,6 +23,7 @@ CREATE INDEX "onyx_eval_runs_status_started_at_idx" ON "public"."onyx_eval_runs"
 
 CREATE TABLE "public"."onyx_eval_questions" (
     "run_id"                 TEXT      NOT NULL,
+    "org_id"                 TEXT      NOT NULL DEFAULT '',
     "question_id"            TEXT      NOT NULL,
     "question_type"          TEXT      NOT NULL,
     "question"               TEXT      NOT NULL,
