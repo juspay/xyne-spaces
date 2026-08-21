@@ -68,6 +68,8 @@ import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
 import { evalsRouter } from "./routes/evals/index.js";
 import { searchEvalsRouter } from "./routes/search-evals/index.js";
+import { onyxEvalsRouter } from "./routes/onyx-evals/index.js";
+import { onyxEvalsCallbackRouter } from "./routes/onyx-evals/callback.js";
 import { entityExtractionRouter } from "./routes/entity-extraction.js";
 import { cliAuthRouter } from "./routes/cli-auth.js";
 import { slackRouter } from "./surfaces/slack/routes/index.js";
@@ -86,6 +88,7 @@ import { closeAgentBackfillQueue } from "./queue/agent-backfill-queue.js";
 import { initEvalImportWorker, closeEvalImportWorker } from "./queue/eval-import-worker.js";
 import { initEvalGenerationWorker, closeEvalGenerationWorker } from "./queue/eval-generation-worker.js";
 import { initSearchEvalRunWorker, closeSearchEvalRunWorker } from "./queue/search-eval-run-worker.js";
+import { initOnyxEvalRunWorker } from "./queue/onyx-eval-worker.js";
 import { initEntityExtractionWorker, closeEntityExtractionWorker } from "./queue/entity-extraction-worker.js";
 import { closeEntityExtractionQueue } from "./queue/entity-extraction-queue.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "./queue/eval-judge-worker.js";
@@ -113,7 +116,7 @@ const app = express();
 // HMAC-check inbound webhook bodies. express.json() consumes the stream
 // otherwise; the verify callback gets the buffer before parsing.
 app.use(express.json({
-  limit: "50mb",
+  limit: "100mb", // onyx bench uploads (question subset + 722-entry dsidMapping) can approach ~60MB
   verify: (req, _res, buf) => {
     if (buf && buf.length > 0) {
       (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
@@ -306,6 +309,10 @@ app.use(`${BASE}/control-center`, requireAuth, requireNoAccessToken, controlCent
 app.use(`${BASE}/research-agent`, requireAuth, requireNoAccessToken, researchAgentRouter);
 app.use(`${BASE}/evals`, requireAuth, requireNoAccessToken, requireClawAdmin, evalsRouter);
 app.use(`${BASE}/search-evals`, requireAuth, requireNoAccessToken, requireSearchEvalAccess, searchEvalsRouter);
+// EnterpriseRAG-Bench harness: retrieval direct against the eval Vespa, judges
+// on xyne-claw /eval-onyx/* via S2S. CLAW_ADMIN-only, same as /evals.
+app.use(`${BASE}/onyx-evals/callback`, requireStrictS2S, onyxEvalsCallbackRouter);
+app.use(`${BASE}/onyx-evals`, requireAuth, requireClawAdmin, onyxEvalsRouter);
 // A run reads a whole channel with no per-user ACL guard — operator action only.
 app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireClawAdmin, entityExtractionRouter);
 
@@ -357,6 +364,7 @@ listen(CONFIG.port, () => {
     initEvalGenerationWorker();
     initEvalJudgeWorker();
     initSearchEvalRunWorker();
+    initOnyxEvalRunWorker();
     initEntityExtractionWorker();
     initMemoryCron();
     initSlackConfigTokenCron();

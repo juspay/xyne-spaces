@@ -44,6 +44,17 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
         XYNE_SPACES_AUTH_MODE: authMode,
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: userId,
+        // Bench lane — set ONLY when the cred lane stamped directVespa + the
+        // benchmark Vespa endpoint on this session. Direct-query the bench
+        // cluster from THIS child, never through prod's spaces backend.
+        ...(credentials["directVespa"] === "true"
+          ? {
+              DIRECT_VESPA_SEARCH: "true",
+              ...(typeof credentials["vespaEndpoint"] === "string" && (credentials["vespaEndpoint"] as string).trim()
+                ? { VESPA_QUERY_ENDPOINT: String(credentials["vespaEndpoint"]).trim() }
+                : {}),
+            }
+          : {}),
       },
     };
   },

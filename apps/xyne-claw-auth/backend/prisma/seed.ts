@@ -1071,6 +1071,45 @@ You:
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
 
+  // ── Onyx bench variant of ask-ai ────────────────────────────────────────
+  // Shares the complete persona + memory/citation wiring but the ONLY tool it
+  // is allowed is `spaces-vespa-search` — the bench's exclusive retrieval
+  // surface: direct Vespa queries against the benchmark cluster, so runs
+  // under this slug never cross the prod-side spaces backend.
+  const ONYX_ASK_AI_CONFIG = {
+    memoryEnabled: true,
+    citationReflection: true,
+    tools: {
+      subagents: [],
+      direct: ["spaces-vespa-search"],
+      custom: [],
+    },
+    toolPermissions: {},
+    skillTriggers: [
+      { toolName: "spaces-vespa-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
+    ],
+  };
+  await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "onyx-ask-ai" } },
+    create: {
+      slug: "onyx-ask-ai",
+      orgId: defaultOrg.id,
+      name: "Onyx AskAI",
+      description: "Bench-only ask-ai — direct-vespa retrieval on the benchmark corpus.",
+      systemPrompt: ASK_AI_PROMPT,
+      scope: "global",
+      color: "#22a06b",
+      config: ONYX_ASK_AI_CONFIG,
+    },
+    update: {
+      name: "Onyx AskAI",
+      description: "Bench-only ask-ai — direct-vespa retrieval on the benchmark corpus.",
+      systemPrompt: ASK_AI_PROMPT,
+      config: ONYX_ASK_AI_CONFIG,
+    },
+  });
+  console.log("[seed] Upserted onyx-ask-ai bench agent (spaces-vespa-search only)");
+
   const SDLC_DIRECT_TOOL_SLUGS = [
     // Selecting the connector subagents exposes their complete read palettes.
     // Keep connector write tools direct so the normal approval gates still apply.

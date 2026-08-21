@@ -211,13 +211,31 @@ async function getOrCreateSession(
       // No login session for this userId. If it's an agent's app user, fall back
       // to the agent's app token in APP MODE so the spaces tools work headlessly
       // via /api/apps/* (no user session needed).
-      const appToken = await resolveAppTokenForAppUser(userId);
-      if (appToken) {
-        log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
-        const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
-        credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
+      // Bench lane: the onyx bench agent NEVER needs an app token — its tool
+      // (spaces-vespa-search) talks straight to the benchmark Vespa cluster.
+      if (agentSlug === "onyx-ask-ai") {
+        if (!CONFIG.onyxVespaEndpoint.trim()) {
+          throw new Error("[mcp/runner] onyx dispatch but ONYX_EVAL_VESPA_ENDPOINT is unset — refusing to spawn (no prod fallback).");
+        }
+        log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint}`);
+        credentials = {
+          ...credentials,
+          authMode: "app",
+          userId,
+          workspaceId: CONFIG.onyxWorkspaceId,
+          directVespa: "true",
+          vespaEndpoint: CONFIG.onyxVespaEndpoint,
+          url: CONFIG.spacesBackendUrl,
+        };
       } else {
-        credentials = { ...credentials, userId };
+        const appToken = await resolveAppTokenForAppUser(userId);
+        if (appToken) {
+          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+          log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
+          credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
+        } else {
+          credentials = { ...credentials, userId };
+        }
       }
     }
   }

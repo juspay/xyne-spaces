@@ -2358,3 +2358,92 @@ model EntityExtractionRun {
   @@index([workspaceId, status])
   @@map("entity_extraction_runs")
 }
+
+// ==========================================
+// EnterpriseRAG-Bench (Onyx) eval harness — run RESULTS only.
+//
+// The dataset itself (questions/gold answers/facts) is NOT stored: the UI
+// parses the benchmark's questions.jsonl + dsid_mapping.json in the browser
+// and posts each run's question slice inline. The corpus lives only in the
+// separate eval Vespa (env-driven: ONYX_EVAL_VESPA_ENDPOINT +
+// ONYX_EVAL_WORKSPACE_ID), so these tables carry no workspaceId and are
+// deployment-global like the other eval tables.
+// ==========================================
+
+/// One POST /onyx-evals/run invocation. Durable progress + final aggregate
+/// (the BullMQ job only carries runId + config; per-question rows land here).
+model OnyxEvalRun {
+  id             String   @id @default(cuid())
+  /// running | completed | failed | stopped
+  status         String   @default("running")
+  /// Run options: topK, rankProfile, concurrency, threeJudgeCorrection, model,
+  /// maxQuestions — so a run can be reproduced; includes the posted question
+  /// slice (dataset rows are inputs, not table rows).
+  config         Json
+  /// Paper aggregates: { totalQuestions, correctnessPercent,
+  /// completenessPercent, documentRecallPercent, invalidExtraDocsAvg,
+  /// leaderboardScore } — written on completion; null while running.
+  aggregate      Json?
+  totalQuestions Int      @default(0)
+  processed      Int      @default(0)
+  /// Count of questions whose gold set the 3-judge correction rewrote.
+  corrections    Int      @default(0)
+  lastError      String?
+  createdBy      String?
+  orgId          String?
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  questions      OnyxEvalQuestion[]
+
+  @@index([status, startedAt])
+  @@map("onyx_eval_runs")
+}
+
+/// One question's outcome within a run: retrieved set, generated answer, the
+/// four paper metrics, and (when enabled) the 3-judge gold-set votes.
+model OnyxEvalQuestion {
+  runId                String
+  run                  OnyxEvalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  questionId           String
+  questionType         String
+  question             String
+  /// Retrieved docs as dsids: [{ docId(synthetic), benchmarkDocId(dsid), title, rank, score }]
+  retrieved            Json
+  rawAnswer            String?
+  /// Citation-stripped text the judges saw (strip before judging).
+  answerText           String?
+  /// Answerer-cited dsids (audit; NOT used for recall — recall uses `retrieved`).
+  citedDocIds          String[]  @default([])
+  /// binary correctness.
+  correctness          Int?
+  correctnessReasoning String?
+  /// fraction of atomic facts supported (0..1).
+  completeness         Float?
+  factSupported        Boolean[] @default([])
+  /// { dsid: { label, votes: [{label, note}] } } when the 3-judge
+  /// correction ran.
+  goldVotes            Json?
+  /// Docs judged "valid" (relevant but not required) — excluded from gold and
+  /// NOT counted as invalid extras.
+  validDocIds          String[]  @default([])
+  /// absolute count of retrieved docs that are neither gold nor valid.
+  invalidExtra         Int?
+  /// Recall@K over the RETRIEVED set (null when no gold ids).
+  documentRecall       Float?
+  /// True when the corrected required-set differed from the original gold set.
+  corrected            Boolean   @default(false)
+  goldDocIdsOriginal   String[]  @default([])
+  goldDocIdsCorrected  String[]  @default([])
+  /// Effective gold used for scoring (regenerated on accepted corrections).
+  goldAnswer           String?
+  answerFacts          String[]  @default([])
+  /// dsid -> { docId (synthetic vespa id), schema, sourceType } audit map.
+  dsidToSynthetic      Json      @default("{}")
+  error                String?
+  createdAt            DateTime  @default(now())
+
+  @@id([runId, questionId])
+  @@index([runId, questionType])
+  @@index([runId, correctness])
+  @@map("onyx_eval_questions")
+}

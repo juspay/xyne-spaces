@@ -125,6 +125,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
       { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
       { label: "Search Evals", path: "/v3/search-evals", icon: MagnifyingGlassIcon },
+      { label: "Onyx Evals", path: "/v3/onyx-evals", icon: PulseIcon },
       { label: "Error Pipeline", path: "/v3/error-pipeline", icon: PulseIcon },
       { label: "Entity Types", path: "/v3/entity-types", icon: TagIcon },
     ],
@@ -311,7 +312,8 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
           if (i.path === "/v3/search-evals") return hasSearchEvalAccess;
           return i.path !== "/v3/evals"
             && i.path !== "/v3/entity-types"
-            && i.path !== "/v3/configurations/digital-twin";
+            && i.path !== "/v3/configurations/digital-twin"
+            && i.path !== "/v3/onyx-evals";
         }),
       }))
   ).filter((g) => g.items.length > 0);
