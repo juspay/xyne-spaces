@@ -1,3 +1,4 @@
+import { isBaselineCanvasType } from '@xyne/shared';
 import type { WikiFreshnessContext } from './wiki/wikiFreshness';
 import { wikiAskAiFreshnessInstruction } from './wiki/wikiFreshness';
 import {
@@ -12,26 +13,19 @@ export interface SdlcAskAiSelectedArtifact {
 }
 
 export function resolveSdlcAskAiArtifactKind(
-  metadata: Record<string, unknown> | null | undefined
+  canvasType: string | null | undefined
 ): SdlcAskAiSelectedArtifact['artifactKind'] | undefined {
-  const kind = metadata?.artifactKind ?? metadata?.documentKind;
-  return kind === 'PRD' || kind === 'TECH_DOC' || kind === 'WIKI' || kind === 'BASELINE'
-    ? kind
-    : undefined;
+  if (canvasType === 'PRD' || canvasType === 'TECH_DOC' || canvasType === 'WIKI') {
+    return canvasType;
+  }
+  return isBaselineCanvasType(canvasType) ? 'BASELINE' : undefined;
 }
 
 export function resolveSdlcAskAiSelectedArtifact(
-  canvas:
-    | { id: string; title: string; metadata: Record<string, unknown> | null }
-    | null
-    | undefined,
-  repoId: string
+  canvas: { id: string; title: string; canvasType: string } | null | undefined
 ): SdlcAskAiSelectedArtifact | undefined {
-  const artifactKind = resolveSdlcAskAiArtifactKind(canvas?.metadata);
-  return canvas &&
-    canvas.metadata?.surface === 'SDLC' &&
-    canvas.metadata.repoId === repoId &&
-    artifactKind
+  const artifactKind = resolveSdlcAskAiArtifactKind(canvas?.canvasType);
+  return canvas && artifactKind
     ? { canvasId: canvas.id, title: canvas.title, artifactKind }
     : undefined;
 }

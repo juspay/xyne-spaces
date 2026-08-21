@@ -491,8 +491,9 @@ const AppRoot = (): ReactElement => {
   // /sdlc/<repoId> route SdlcScreen renders its own assistant + debugger, so
   // neither app-shell panel should appear there.
   const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null;
-  const showXyneAIPanel =
-    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && sdlcRepoId === null && !showSdlcDebuggerPanel;
+  // SDLC routes DO show the generic XyneAI panel (header Ask AI opens it);
+  // only the standalone SDLC debugger stays suppressed there (SdlcScreen embeds its own).
+  const showXyneAIPanel = isXyneAIDrawerOpen && !isMobile && !isOnAIPage && !showSdlcDebuggerPanel;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -1364,15 +1365,27 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'sdlc',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId/:section',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'team-intelligence',

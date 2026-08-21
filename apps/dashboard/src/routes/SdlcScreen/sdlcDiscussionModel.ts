@@ -1,9 +1,10 @@
+import { isBaselineCanvasType } from '@xyne/shared/sdlc';
 import type { SdlcDiscussion, SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
 interface CanvasSummary {
   id: string;
   title: string;
-  metadata: unknown;
+  canvasType: string;
 }
 
 interface LinkSummary {
@@ -16,13 +17,8 @@ interface LinkSummary {
 
 export interface SdlcDiscussionContext {
   owner: { canvasId: string; title: string; kind: 'PIPELINE' | 'REPO_KNOWLEDGE' | 'WIKI' };
-  surface: { type: SdlcDiscussion['surfaceType']; id: string };
+  surface: { type: NonNullable<SdlcDiscussion['surfaceType']>; id: string };
 }
-
-const metadataOf = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 
 export function resolveCanvasDiscussionOwner(
   canvasId: string,
@@ -31,17 +27,16 @@ export function resolveCanvasDiscussionOwner(
 ): SdlcDiscussionContext['owner'] | null {
   const canvas = canvases.find(item => item.id === canvasId);
   if (!canvas) return null;
-  const metadata = metadataOf(canvas.metadata);
-  if (metadata['artifactKind'] === 'PRD') {
+  if (canvas.canvasType === 'PRD') {
     return { canvasId: canvas.id, title: canvas.title, kind: 'PIPELINE' };
   }
-  if (metadata['artifactKind'] === 'BASELINE') {
+  if (isBaselineCanvasType(canvas.canvasType)) {
     return { canvasId: canvas.id, title: canvas.title, kind: 'REPO_KNOWLEDGE' };
   }
-  if (metadata['documentKind'] === 'WIKI') {
+  if (canvas.canvasType === 'WIKI') {
     return { canvasId: canvas.id, title: canvas.title, kind: 'WIKI' };
   }
-  if (metadata['artifactKind'] !== 'TECH_DOC') return null;
+  if (canvas.canvasType !== 'TECH_DOC') return null;
   const parentLink = links.find(
     link =>
       link.relationType === 'TECH_DOC' &&

@@ -32,10 +32,12 @@ export class SdlcWikiService implements SdlcWiki {
       select: {
         name: true,
         canvases: {
+          where: { canvasType: 'WIKI' },
           select: {
             id: true,
             title: true,
             metadata: true,
+            lastEditedAt: true,
             updatedAt: true,
           },
         },
@@ -47,13 +49,7 @@ export class SdlcWikiService implements SdlcWiki {
       .flatMap((folder) =>
         folder.canvases.flatMap((canvas) => {
           const metadata = metadataRecord(canvas.metadata);
-          if (
-            metadata.surface !== 'SDLC' ||
-            metadata.repoId !== repoId ||
-            metadata.documentKind !== 'WIKI' ||
-            typeof metadata.wikiArchivedAt === 'string' ||
-            typeof metadata.wikiRelativePath !== 'string'
-          ) {
+          if (typeof metadata.wikiRelativePath !== 'string') {
             return [];
           }
           return [
@@ -62,10 +58,7 @@ export class SdlcWikiService implements SdlcWiki {
               title: canvas.title,
               path: metadata.wikiRelativePath,
               folderPath: folder.name,
-              syncedAt:
-                typeof metadata.wikiSyncedAt === 'string'
-                  ? metadata.wikiSyncedAt
-                  : canvas.updatedAt.toISOString(),
+              syncedAt: (canvas.lastEditedAt ?? canvas.updatedAt).toISOString(),
               updatedAt: canvas.updatedAt.toISOString(),
             },
           ];

@@ -10,6 +10,8 @@ import {
   ChannelVisibility,
   SDLC_BASELINE_COUNT,
   WorkspaceRole,
+  canvasTypeForSdlcArtifact,
+  stringifySdlcSourceReferences,
   type AttachSdlcRepositoryInput,
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
@@ -20,7 +22,6 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcQueue } from '@/queues/sdlcQueue';
 import { sdlcAdmission } from '@/queues/sdlcAdmission';
-import { vespaQueue } from '@/queues/vespaQueue';
 import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
 import {
   cancelS2SClawRun,
@@ -30,25 +31,22 @@ import {
 import { logger } from '@/utils/logger';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { fileSchema, SubApp } from '@/vespa/src/types';
 import { BASELINE_DEFINITIONS } from './baselineDefinitions';
 import {
   applyBaselineDraftSection,
   baselineDraftMissingSections,
   buildBaselineDraftMarkdown,
   baselineRefreshChanged,
-  finalizeBaselineMetadata,
-  isCompletedBaselineMetadata,
+  finalizeBaselineDraft,
 } from './sdlcBaselineDraft';
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import {
-  allBaselinesApproved,
+  allBaselinesReady,
   ARTIFACT_CAPABILITIES,
   BASELINE_CAPABILITIES,
 } from './sdlcProgressiveGate';
 import type {
-  ApprovedSdlcBaseline,
   SdlcActor,
   SdlcArtifact,
   SdlcHub,
@@ -107,7 +105,7 @@ export class SdlcHubService implements SdlcHub {
             id: channelId,
             name: `${name} · SDLC`,
             description: `Private SDLC workspace for ${name}`,
-            type: ChannelType.DEFAULT,
+            type: ChannelType.SDLC,
             scopeType: ChannelScopeType.DEFAULT,
             visibility: ChannelVisibility.PRIVATE,
             createdBy: actor.userId,
@@ -116,11 +114,7 @@ export class SdlcHubService implements SdlcHub {
             participantCount: 1,
             addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
             showTicketsTabTicketsInChat: false,
-            metadata: {
-              surface: 'SDLC',
-              hiddenFromChat: true,
-              repoId,
-            },
+            metadata: {},
             channelStats: {
               create: {
                 workspaceId: actor.workspaceId,
@@ -661,11 +655,11 @@ export class SdlcHubService implements SdlcHub {
       if (executionContext.repoId !== repo.id) {
         throw new AppError('SDLC setup execution does not belong to this repository', 403);
       }
-      const existing = await this.findSdlcCanvas(repo.channelId, {
-        artifactKind: 'BASELINE',
-        baselineKind: input.baselineKind,
-        setupExecutionId: input.setupExecutionId,
-      });
+      const existing = await this.findSdlcCanvas(
+        repo.channelId,
+        input.baselineKind!,
+        input.setupExecutionId!
+      );
       if (existing) {
         return {
           canvasId: existing.id,
@@ -674,6 +668,14 @@ export class SdlcHubService implements SdlcHub {
           kind: 'BASELINE',
         };
       }
+    }
+
+    if (input.trackId) {
+      const track = await this.prisma.sdlcTrack.findFirst({
+        where: { id: input.trackId, repoId: repo.id },
+        select: { id: true },
+      });
+      if (!track) throw new AppError('SDLC track not found for this repository', 404);
     }
 
     let artifactMarkdown = input.markdown;
@@ -722,27 +724,39 @@ export class SdlcHubService implements SdlcHub {
               viewAccessId,
               visibility: CanvasVisibility.PRIVATE,
               isCollaborative: true,
-              metadata: {
-                source: 'claw',
-                surface: 'SDLC',
-                repoId: repo.id,
-                projectId: repo.projectId,
-                repositoryUrl: repo.url,
-                artifactKind: input.kind,
-                ...(input.baselineKind ? { baselineKind: input.baselineKind } : {}),
-                ...(input.setupExecutionId ? { setupExecutionId: input.setupExecutionId } : {}),
-                ...(input.kind === 'BASELINE' && input.workflowExecutionId
-                  ? { workflowExecutionId: input.workflowExecutionId }
-                  : {}),
-                ...(artifactGenerationCommit ? { generationCommit: artifactGenerationCommit } : {}),
-                ...(artifactSourceReferences.length > 0
-                  ? { sdlcSourceReferences: artifactSourceReferences }
-                  : {}),
-                ...(input.kind === 'BASELINE' ? { generationStatus: 'READY' } : {}),
-              } as unknown as Prisma.InputJsonValue,
+              canvasType: canvasTypeForSdlcArtifact(input.kind, input.baselineKind),
+              canvasStatus: 'ACTIVE',
+              metadata: {} as Prisma.InputJsonValue,
               participants: {
                 create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
               },
+            },
+          });
+          if (input.kind === 'PRD' && input.trackId) {
+            await tx.sdlcEntityLink.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                repoId: repo.id,
+                sourceType: 'TRACK',
+                sourceId: input.trackId,
+                targetType: 'CANVAS',
+                targetId: canvas.id,
+                relationType: 'TRACK_ITEM',
+                createdBy: actor.userId,
+              },
+            });
+          }
+          await tx.sdlcArtifact.create({
+            data: {
+              workspaceId: actor.workspaceId,
+              repoId: repo.id,
+              artifactId: canvas.id,
+              ...(input.kind === 'BASELINE' && input.workflowExecutionId
+                ? { workflowExecutionId: input.workflowExecutionId }
+                : {}),
+              ...(artifactGenerationCommit ? { generationCommit: artifactGenerationCommit } : {}),
+              sourceReferences: stringifySdlcSourceReferences(artifactSourceReferences),
+              createdBy: actor.userId,
             },
           });
 
@@ -849,42 +863,37 @@ export class SdlcHubService implements SdlcHub {
           }
 
           const candidates = await tx.canvas.findMany({
-            where: { channelId: repo.channelId },
+            where: { channelId: repo.channelId, canvasType: input.baselineKind },
             select: {
               id: true,
               title: true,
               viewAccessId: true,
+              canvasStatus: true,
               metadata: true,
               content: true,
             },
           });
-          let canvas = candidates.find((candidate) => {
-            const metadata = candidate.metadata as Record<string, unknown> | null;
-            return (
-              metadata?.artifactKind === 'BASELINE' &&
-              metadata.baselineKind === input.baselineKind &&
-              metadata.setupExecutionId === input.setupExecutionId
-            );
-          });
+          const candidateEntities = candidates.length
+            ? await tx.sdlcArtifact.findMany({
+                where: {
+                  artifactId: { in: candidates.map((candidate) => candidate.id) },
+                },
+                select: { artifactId: true, workflowExecutionId: true },
+              })
+            : [];
+          const executionIdByCanvasId = new Map(
+            candidateEntities.map((entity) => [entity.artifactId, entity.workflowExecutionId])
+          );
+          let canvas = candidates.find(
+            (candidate) => executionIdByCanvasId.get(candidate.id) === input.setupExecutionId
+          );
 
           if (!canvas) {
             if (input.action === 'finalize') {
               throw new AppError('Begin the baseline draft before finalizing it', 409);
             }
             const metadata: Record<string, unknown> = {
-              source: 'claw',
-              surface: 'SDLC',
-              repoId: repo.id,
-              projectId: repo.projectId,
-              repositoryUrl: repo.url,
-              artifactKind: 'BASELINE',
-              baselineKind: input.baselineKind,
-              setupExecutionId: input.setupExecutionId,
-              workflowExecutionId: input.workflowExecutionId,
-              generationStatus: 'GENERATING',
-              generationCommit,
               draftSections: {},
-              ...(executionContext.refreshExisting === true ? { refreshCandidate: true } : {}),
             };
             const nextMetadata =
               input.action === 'upsert_section'
@@ -915,6 +924,9 @@ export class SdlcHubService implements SdlcHub {
                 viewAccessId: randomUUID(),
                 visibility: CanvasVisibility.PRIVATE,
                 isCollaborative: true,
+                canvasType: input.baselineKind,
+                canvasStatus:
+                  executionContext.refreshExisting === true ? 'REFRESH_CANDIDATE' : 'DRAFT',
                 metadata: nextMetadata as Prisma.InputJsonValue,
                 ...(executionContext.refreshExisting === true
                   ? {}
@@ -924,10 +936,20 @@ export class SdlcHubService implements SdlcHub {
                       },
                     }),
               },
-              select: { id: true, title: true, viewAccessId: true, metadata: true, content: true },
+              select: { id: true, title: true, viewAccessId: true, canvasStatus: true, metadata: true, content: true },
+            });
+            await tx.sdlcArtifact.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                repoId: repo.id,
+                artifactId: created.id,
+                workflowExecutionId: input.workflowExecutionId,
+                generationCommit,
+                createdBy: actor.userId,
+              },
             });
             canvas = created;
-          } else if (!isCompletedBaselineMetadata(canvas.metadata as Record<string, unknown>)) {
+          } else if (canvas.canvasStatus !== 'ACTIVE') {
             const metadata = canvas.metadata as Record<string, unknown>;
             if (input.action === 'upsert_section') {
               const nextMetadata = this.applyValidatedDraftSection(
@@ -955,6 +977,7 @@ export class SdlcHubService implements SdlcHub {
                   id: true,
                   title: true,
                   viewAccessId: true,
+                  canvasStatus: true,
                   metadata: true,
                   content: true,
                 },
@@ -974,13 +997,15 @@ export class SdlcHubService implements SdlcHub {
                 true
               );
               const content = await convertMarkdownToBlockNote(markdown);
-              const nextMetadata = finalizeBaselineMetadata(input.baselineKind, metadata);
+              const finalSourceReferences = finalizeBaselineDraft(input.baselineKind, metadata);
               const finalizedCandidate = await tx.canvas.update({
                 where: { id: canvas.id },
                 data: {
                   title: input.title,
                   content: content as unknown as Prisma.InputJsonValue,
-                  metadata: nextMetadata as Prisma.InputJsonValue,
+                  metadata: {} as Prisma.InputJsonValue,
+                  canvasStatus:
+                    executionContext.refreshExisting === true ? 'REFRESH_CANDIDATE' : 'ACTIVE',
                   lastEditedBy: actor.userId,
                   lastEditedAt: new Date(),
                 },
@@ -988,24 +1013,25 @@ export class SdlcHubService implements SdlcHub {
                   id: true,
                   title: true,
                   viewAccessId: true,
+                  canvasStatus: true,
                   metadata: true,
                   content: true,
                 },
               });
               canvas = finalizedCandidate;
+              await tx.sdlcArtifact.updateMany({
+                where: { artifactId: finalizedCandidate.id },
+                data: {
+                  sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
+                },
+              });
 
               if (executionContext.refreshExisting === true) {
                 const stagedCanvasId = finalizedCandidate.id;
-                let canonical = candidates.find((candidate) => {
-                  const candidateMetadata = candidate.metadata as Record<string, unknown> | null;
-                  return (
-                    candidate.id !== finalizedCandidate.id &&
-                    candidateMetadata?.artifactKind === 'BASELINE' &&
-                    candidateMetadata.baselineKind === input.baselineKind &&
-                    candidateMetadata.refreshCandidate !== true &&
-                    isCompletedBaselineMetadata(candidateMetadata)
-                  );
-                });
+                let canonical = candidates.find(
+                  (candidate) =>
+                    candidate.id !== finalizedCandidate.id && candidate.canvasStatus === 'ACTIVE'
+                );
 
                 if (canonical) {
                   await tx.$queryRaw`SELECT "id" FROM "public"."canvases" WHERE "id" = ${canonical.id} FOR UPDATE`;
@@ -1015,6 +1041,7 @@ export class SdlcHubService implements SdlcHub {
                       id: true,
                       title: true,
                       viewAccessId: true,
+                      canvasStatus: true,
                       metadata: true,
                       content: true,
                     },
@@ -1023,11 +1050,13 @@ export class SdlcHubService implements SdlcHub {
                     await convertBlockNoteToMarkdown(canonical.content as unknown[])
                   ).trim();
                   if (!baselineRefreshChanged(currentMarkdown, markdown)) {
+                    await tx.sdlcArtifact.deleteMany({
+                      where: { artifactId: finalizedCandidate.id },
+                    });
                     await tx.canvas.delete({ where: { id: finalizedCandidate.id } });
                     canvas = canonical;
                   } else {
                     const now = new Date();
-                    const canonicalMetadata = canonical.metadata as Record<string, unknown>;
                     const oldHash = createHash('sha256').update(currentMarkdown).digest('hex');
                     const newHash = createHash('sha256').update(markdown.trim()).digest('hex');
                     await tx.canvasVersion.upsert({
@@ -1063,20 +1092,8 @@ export class SdlcHubService implements SdlcHub {
                       data: {
                         title: input.title,
                         content: content as unknown as Prisma.InputJsonValue,
-                        metadata: {
-                          ...canonicalMetadata,
-                          ...nextMetadata,
-                          refreshCandidate: false,
-                          ...(typeof canonicalMetadata.approvedAt === 'string'
-                            ? { approvedAt: canonicalMetadata.approvedAt }
-                            : {}),
-                          ...(typeof canonicalMetadata.approvedBy === 'string'
-                            ? { approvedBy: canonicalMetadata.approvedBy }
-                            : {}),
-                          ...(typeof canonicalMetadata.knowledgeDocumentId === 'string'
-                            ? { knowledgeDocumentId: canonicalMetadata.knowledgeDocumentId }
-                            : {}),
-                        } as Prisma.InputJsonValue,
+                        metadata: {} as Prisma.InputJsonValue,
+                        canvasStatus: 'ACTIVE',
                         lastEditedBy: actor.userId,
                         lastEditedAt: now,
                       },
@@ -1084,25 +1101,44 @@ export class SdlcHubService implements SdlcHub {
                         id: true,
                         title: true,
                         viewAccessId: true,
+                        canvasStatus: true,
                         metadata: true,
                         content: true,
                       },
+                    });
+                    await tx.sdlcArtifact.upsert({
+                      where: {
+                        artifactId: canonical.id,
+                      },
+                      create: {
+                        workspaceId: actor.workspaceId,
+                        repoId: repo.id,
+                        artifactId: canonical.id,
+                        workflowExecutionId: input.workflowExecutionId,
+                        generationCommit,
+                        sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
+                        createdBy: actor.userId,
+                      },
+                      update: {
+                        workflowExecutionId: input.workflowExecutionId,
+                        generationCommit,
+                        sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
+                      },
+                    });
+                    await tx.sdlcArtifact.deleteMany({
+                      where: { artifactId: stagedCanvasId },
                     });
                     await tx.canvas.delete({ where: { id: stagedCanvasId } });
                   }
                 } else {
                   canvas = await tx.canvas.update({
                     where: { id: finalizedCandidate.id },
-                    data: {
-                      metadata: {
-                        ...(finalizedCandidate.metadata as Record<string, unknown>),
-                        refreshCandidate: false,
-                      } as Prisma.InputJsonValue,
-                    },
+                    data: { canvasStatus: 'ACTIVE' },
                     select: {
                       id: true,
                       title: true,
                       viewAccessId: true,
+                      canvasStatus: true,
                       metadata: true,
                       content: true,
                     },
@@ -1160,19 +1196,17 @@ export class SdlcHubService implements SdlcHub {
       where: {
         id: input.canvasId,
         channelId: repo.channelId,
-        metadata: { path: ['artifactKind'], equals: input.kind },
+        canvasType: input.kind,
       },
-      select: { id: true, viewAccessId: true, title: true, metadata: true },
+      select: { id: true, viewAccessId: true, title: true },
     });
     if (!existing) throw new AppError(`${input.kind} artifact not found`, 404);
-    const metadata =
-      existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
-        ? (existing.metadata as Record<string, unknown>)
-        : {};
+    const existingEntity = await this.prisma.sdlcArtifact.findUnique({
+      where: { artifactId: existing.id },
+      select: { generationCommit: true },
+    });
     const generationCommit =
-      typeof metadata.generationCommit === 'string'
-        ? metadata.generationCommit
-        : await sdlcVcs.resolveBaseBranchHead(repo.id);
+      existingEntity?.generationCommit ?? (await sdlcVcs.resolveBaseBranchHead(repo.id));
     const resolved = await this.resolveSourceReferences({
       repoId: repo.id,
       repositoryUrl: repo.canonicalUrl || repo.url,
@@ -1189,15 +1223,25 @@ export class SdlcHubService implements SdlcHub {
             data: {
               ...(input.title ? { title: input.title } : {}),
               content: content as unknown as Prisma.InputJsonValue,
-              metadata: {
-                ...metadata,
-                generationCommit,
-                sdlcSourceReferences: resolved.sourceReferences,
-              } as unknown as Prisma.InputJsonValue,
               lastEditedBy: actor.userId,
               lastEditedAt: new Date(),
             },
             select: { id: true, viewAccessId: true },
+          });
+          await tx.sdlcArtifact.upsert({
+            where: { artifactId: existing.id },
+            create: {
+              workspaceId: actor.workspaceId,
+              repoId: repo.id,
+              artifactId: existing.id,
+              generationCommit,
+              sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+              createdBy: actor.userId,
+            },
+            update: {
+              generationCommit,
+              sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+            },
           });
           return {
             artifact: {
@@ -1256,138 +1300,6 @@ export class SdlcHubService implements SdlcHub {
     if (result.count === 0) {
       throw new AppError('SDLC relationship not found', 404);
     }
-  }
-
-  async approveBaseline(
-    actor: SdlcActor,
-    repoId: string,
-    canvasId: string
-  ): Promise<ApprovedSdlcBaseline> {
-    const repo = await this.requireRepositoryRole(actor, repoId, true);
-    const approval = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "public"."canvases" WHERE "id" = ${canvasId} FOR UPDATE`;
-      const canvas = await tx.canvas.findFirst({
-        where: { id: canvasId, channelId: repo.channelId },
-        select: { id: true, title: true, content: true, metadata: true },
-      });
-      const metadata = canvas?.metadata as Record<string, unknown> | null | undefined;
-      if (
-        !canvas ||
-        metadata?.surface !== 'SDLC' ||
-        metadata.repoId !== repoId ||
-        metadata.artifactKind !== 'BASELINE' ||
-        !isCompletedBaselineMetadata(metadata)
-      ) {
-        throw new AppError('Finalized baseline canvas not found', 404);
-      }
-
-      const markdown = await convertBlockNoteToMarkdown(canvas.content as unknown[]);
-      const existingDocumentId =
-        typeof metadata.knowledgeDocumentId === 'string' ? metadata.knowledgeDocumentId : undefined;
-      const existingDocument = existingDocumentId
-        ? await tx.knowledgeDocument.findFirst({
-            where: { id: existingDocumentId, workspaceId: actor.workspaceId },
-            select: { id: true },
-          })
-        : null;
-      const approvedAt = new Date();
-      const document = existingDocument
-        ? await tx.knowledgeDocument.update({
-            where: { id: existingDocument.id },
-            data: {
-              title: canvas.title,
-              content: markdown,
-              repositoryUrl: repo.url,
-              workflowExecutionId: repo.sdlcSetupExecutionId,
-              approvedBy: actor.userId,
-              approvedAt,
-              metadata: {
-                canvasId,
-                repoId,
-                baselineKind:
-                  typeof metadata.baselineKind === 'string' ? metadata.baselineKind : null,
-                generationCommit:
-                  typeof metadata.generationCommit === 'string' ? metadata.generationCommit : null,
-              },
-            },
-          })
-        : await tx.knowledgeDocument.create({
-            data: {
-              workspaceId: actor.workspaceId,
-              projectId: repo.projectId!,
-              repositoryUrl: repo.url,
-              title: canvas.title,
-              content: markdown,
-              workflowExecutionId: repo.sdlcSetupExecutionId,
-              approvedBy: actor.userId,
-              approvedAt,
-              metadata: {
-                canvasId,
-                repoId,
-                baselineKind:
-                  typeof metadata.baselineKind === 'string' ? metadata.baselineKind : null,
-                generationCommit:
-                  typeof metadata.generationCommit === 'string' ? metadata.generationCommit : null,
-              },
-            },
-          });
-
-      await tx.canvas.update({
-        where: { id: canvasId },
-        data: {
-          metadata: {
-            ...metadata,
-            approvedAt: approvedAt.toISOString(),
-            approvedBy: actor.userId,
-            knowledgeDocumentId: document.id,
-          },
-        },
-      });
-      return document.id;
-    });
-
-    const canvases = await this.prisma.canvas.findMany({
-      where: { channelId: repo.channelId },
-      select: { metadata: true, lastEditedAt: true },
-    });
-    const allApproved = allBaselinesApproved(canvases);
-    if (allApproved && repo.sdlcSetupExecutionId) {
-      const execution = await this.prisma.workflowExecution.findUnique({
-        where: { id: repo.sdlcSetupExecutionId },
-        select: { context: true },
-      });
-      if (execution) {
-        let context: Record<string, unknown> = {};
-        try {
-          context = execution.context
-            ? (JSON.parse(execution.context) as Record<string, unknown>)
-            : {};
-        } catch {
-          context = {};
-        }
-        await this.prisma.workflowExecution.update({
-          where: { id: repo.sdlcSetupExecutionId },
-          data: { context: JSON.stringify({ ...context, phase: 'APPROVED' }) },
-        });
-      }
-    }
-    try {
-      await vespaQueue.addJob({
-        schema: fileSchema,
-        docId: canvasId,
-        jobType: 'feed',
-        userId: actor.userId,
-        workspaceId: actor.workspaceId,
-        app: SubApp.CANVAS,
-      });
-    } catch {
-      // Approval is durable. Search refresh can be retried independently.
-    }
-    return {
-      canvasId,
-      knowledgeDocumentId: approval,
-      allBaselinesApproved: allApproved,
-    };
   }
 
   private async requireProjectBoardAccess(
@@ -1492,11 +1404,11 @@ export class SdlcHubService implements SdlcHub {
     await sdlcVcs.requireCapabilities(actor, repoId, [...ARTIFACT_CAPABILITIES]);
     const baselines = await this.prisma.canvas.findMany({
       where: { channelId },
-      select: { metadata: true, lastEditedAt: true },
+      select: { canvasType: true, canvasStatus: true },
     });
-    if (!allBaselinesApproved(baselines)) {
+    if (!allBaselinesReady(baselines)) {
       throw new AppError(
-        `Approve all ${SDLC_BASELINE_COUNT} baseline documents before creating SDLC artifacts`,
+        `Generate all ${SDLC_BASELINE_COUNT} Repo Knowledge documents before creating SDLC artifacts`,
         409
       );
     }
@@ -1543,41 +1455,37 @@ export class SdlcHubService implements SdlcHub {
 
   private async findSdlcCanvas(
     channelId: string,
-    expected: Record<string, unknown>
+    canvasType: string,
+    workflowExecutionId: string
   ): Promise<{ id: string; viewAccessId: string | null } | null> {
-    const canvases = await this.prisma.canvas.findMany({
-      where: { channelId },
-      select: { id: true, viewAccessId: true, metadata: true },
+    const entities = await this.prisma.sdlcArtifact.findMany({
+      where: { workflowExecutionId },
+      select: { artifactId: true },
     });
-    return (
-      canvases.find((canvas) => {
-        const metadata = canvas.metadata as Record<string, unknown> | null;
-        return (
-          metadata && Object.entries(expected).every(([key, value]) => metadata[key] === value)
-        );
-      }) ?? null
-    );
+    if (entities.length === 0) return null;
+    return this.prisma.canvas.findFirst({
+      where: {
+        id: { in: entities.map((entity) => entity.artifactId) },
+        channelId,
+        canvasType,
+      },
+      select: { id: true, viewAccessId: true },
+    });
   }
 
   private async requireArtifactCanvas(
     tx: TransactionClient,
-    repoId: string,
+    _repoId: string,
     channelId: string,
     canvasId: string,
-    artifactKind: string
+    canvasType: string
   ): Promise<void> {
     const canvas = await tx.canvas.findFirst({
-      where: { id: canvasId, channelId },
-      select: { metadata: true },
+      where: { id: canvasId, channelId, canvasType },
+      select: { id: true },
     });
-    const metadata = canvas?.metadata as Record<string, unknown> | null | undefined;
-    if (
-      !canvas ||
-      metadata?.surface !== 'SDLC' ||
-      metadata.repoId !== repoId ||
-      metadata.artifactKind !== artifactKind
-    ) {
-      throw new AppError(`${artifactKind} canvas not found`, 404);
+    if (!canvas) {
+      throw new AppError(`${canvasType} canvas not found`, 404);
     }
   }
 
