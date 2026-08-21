@@ -3,8 +3,6 @@ import { ReactElement } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useUser } from '../../hooks/useUsers';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
-import { getAvatarColorClassNames } from '../ui/Avatar/Avatar';
-import { cn } from '../../utils/classNames';
 
 const SmallUserAvatar = ({ userId }: { userId?: string | null }): ReactElement => {
   const { user: currentUser } = useAuth();
@@ -19,15 +17,10 @@ const SmallUserAvatar = ({ userId }: { userId?: string | null }): ReactElement =
       .toUpperCase() || '?';
 
   const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
-  const colorClass = getAvatarColorClassNames(targetUserId);
 
   return (
     <div
-      className={cn(
-        'w-[15px] h-[15px] rounded-full flex items-center justify-center text-[8px] font-medium flex-shrink-0',
-        colorClass.bg,
-        colorClass.text,
-      )}
+      className='w-[15px] h-[15px] rounded-full bg-muted-foreground/50 flex items-center justify-center text-[8px] font-medium text-foreground flex-shrink-0'
       style={pictureUrl ? { backgroundImage: `url(${pictureUrl})`, backgroundSize: 'cover' } : {}}
     >
       {!pictureUrl && initials}

@@ -1,37 +1,30 @@
 import { useSyncExternalStore, useCallback } from 'react';
 
-export type FilterTab = 'all' | 'created_by_me' | 'shared';
+export type FilterTab = 'all' | 'created_by_me';
 export type ViewMode = 'grouped' | 'list';
 
 const STORAGE_KEY = 'canvas-preferences';
-const PREFERENCES_VERSION = 3;
 
 interface CanvasPreferences {
-  version: number;
   filter: FilterTab;
   viewMode: ViewMode;
   lastCanvasId: string | null;
-  isSidebarCollapsed: boolean;
 }
 
 const DEFAULT: CanvasPreferences = {
-  version: PREFERENCES_VERSION,
   filter: 'all',
-  viewMode: 'list',
+  viewMode: 'grouped',
   lastCanvasId: null,
-  isSidebarCollapsed: false,
 };
 
 const isValidFilter = (value: unknown): value is FilterTab =>
-  value === 'all' || value === 'created_by_me' || value === 'shared';
+  value === 'all' || value === 'created_by_me';
 
 const isValidViewMode = (value: unknown): value is ViewMode =>
   value === 'grouped' || value === 'list';
 
 const isValidLastCanvasId = (value: unknown): value is string | null =>
   value === null || typeof value === 'string';
-
-const isValidSidebarCollapsed = (value: unknown): value is boolean => typeof value === 'boolean';
 
 const readPreferences = (): CanvasPreferences => {
   try {
@@ -44,15 +37,10 @@ const readPreferences = (): CanvasPreferences => {
         isValidViewMode(parsed['viewMode']) &&
         isValidLastCanvasId(parsed['lastCanvasId'])
       ) {
-        const version = typeof parsed['version'] === 'number' ? parsed['version'] : 1;
         return {
-          version: PREFERENCES_VERSION,
           filter: parsed['filter'],
-          viewMode: version >= 2 ? parsed['viewMode'] : DEFAULT.viewMode,
+          viewMode: parsed['viewMode'],
           lastCanvasId: parsed['lastCanvasId'],
-          isSidebarCollapsed: isValidSidebarCollapsed(parsed['isSidebarCollapsed'])
-            ? parsed['isSidebarCollapsed']
-            : DEFAULT.isSidebarCollapsed,
         };
       }
     }
@@ -85,7 +73,7 @@ const subscribe = (listener: () => void): (() => void) => {
 const getSnapshot = (): CanvasPreferences => preferences;
 
 const updatePreferences = (updater: (prefs: CanvasPreferences) => CanvasPreferences): void => {
-  preferences = { ...updater(preferences), version: PREFERENCES_VERSION };
+  preferences = updater(preferences);
   writePreferences(preferences);
   subscribers.forEach(listener => listener());
 };
@@ -97,8 +85,6 @@ export interface CanvasPreferencesResult {
   setViewMode: (viewMode: ViewMode) => void;
   lastCanvasId: string | null;
   setLastCanvasId: (id: string | null) => void;
-  isSidebarCollapsed: boolean;
-  setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 export const usePersistedCanvasPreferences = (): CanvasPreferencesResult => {
@@ -116,10 +102,6 @@ export const usePersistedCanvasPreferences = (): CanvasPreferencesResult => {
     updatePreferences(prev => ({ ...prev, lastCanvasId }));
   }, []);
 
-  const setSidebarCollapsed = useCallback((isSidebarCollapsed: boolean) => {
-    updatePreferences(prev => ({ ...prev, isSidebarCollapsed }));
-  }, []);
-
   return {
     filter: prefs.filter,
     setFilter,
@@ -127,7 +109,5 @@ export const usePersistedCanvasPreferences = (): CanvasPreferencesResult => {
     setViewMode,
     lastCanvasId: prefs.lastCanvasId,
     setLastCanvasId,
-    isSidebarCollapsed: prefs.isSidebarCollapsed,
-    setSidebarCollapsed,
   };
 };

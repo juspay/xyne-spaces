@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
@@ -63,7 +63,6 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
-import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface CanvasTabProps {
   channelId: string;
