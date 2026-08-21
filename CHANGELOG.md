@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.8...v1.188.0-release-20260817.9) (2026-08-21)
+
+
+### Reverts
+
+* Revert "refact: XYNE-55516 update canvas sidebar filters (#376)" (#851) ([f625093](https://github.com/juspay/xyne-spaces/commit/f625093f219cf85d68b2d7cd4f6a165eb4a228f0)), closes [#376](https://github.com/juspay/xyne-spaces/issues/376) [#851](https://github.com/juspay/xyne-spaces/issues/851)
+
 ## [1.188.0-release-20260817.8](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.7...v1.188.0-release-20260817.8) (2026-08-20)
 
 
