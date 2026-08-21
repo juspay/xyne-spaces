@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { searchService } from '../services/searchService';
+import { useDebouncedValue } from './useDebouncedValue';
 import { logger, Event as LogEvent } from '../utils/logger';
 
 export type ProjectTicketSearchResult = {
@@ -11,6 +12,9 @@ export type ProjectTicketSearchResult = {
 // Vespa never pages past this offset, so stop asking.
 const VESPA_PROJECT_TICKET_MAX_OFFSET = 1000;
 const VESPA_PROJECT_TICKET_PAGE_SIZE = 200;
+// EntitySelector calls onSearchChange straight from the input's onChange, so without
+// this every keystroke costs a full page of tickets.
+const PROJECT_TICKET_SEARCH_DEBOUNCE_MS = 300;
 
 interface UseProjectTicketSearchParams {
   projectId?: string | undefined;
@@ -74,6 +78,8 @@ export const useProjectTicketSearch = ({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
+  // `search` drives the input; `debouncedSearch` drives the fetch, paging included.
+  const debouncedSearch = useDebouncedValue(search, PROJECT_TICKET_SEARCH_DEBOUNCE_MS);
   const [nextOffset, setNextOffset] = useState(0);
   // Bumped on every reset so a superseded response cannot overwrite newer results.
   const requestIdRef = useRef(0);
@@ -94,7 +100,7 @@ export const useProjectTicketSearch = ({
         return;
       }
 
-      const normalizedQuery = search.trim();
+      const normalizedQuery = debouncedSearch.trim();
       const requestId = ++requestIdRef.current;
       const isInitialLoad = replace || offset === 0;
 
@@ -152,10 +158,10 @@ export const useProjectTicketSearch = ({
         }
       }
     },
-    [projectId, search],
+    [projectId, debouncedSearch],
   );
 
-  // Re-query whenever the dropdown opens or the term changes.
+  // Re-query whenever the dropdown opens or the debounced term settles.
   useEffect(() => {
     if (!isActive || !projectId) {
       return;
@@ -165,10 +171,14 @@ export const useProjectTicketSearch = ({
     setNextOffset(0);
     setHasMore(false);
 
-    if (search.trim()) {
+    if (debouncedSearch.trim()) {
       void loadPage(0, true);
+    } else {
+      // Typed then cleared: no request will follow to clear handleSearchChange's flag.
+      setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [isActive, projectId, search, loadPage]);
+  }, [isActive, projectId, debouncedSearch, loadPage]);
 
   useEffect(() => {
     reset();

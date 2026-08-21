@@ -4320,32 +4320,31 @@ export const mutators = defineMutators({
         // Trees may nest, but must stay trees — see the server twin. Walk up from the
         // parent and reject a link that would close a loop.
         const seenAncestors = new Set<string>();
-        let ancestorCursor: string | null = ticketId;
-        while (ancestorCursor) {
-          // A fresh const per turn: feeding the mutable cursor straight back into the query
-          // it also receives from makes its type circular.
-          const currentTicketId: string = ancestorCursor;
+        const ancestorQueue: string[] = [ticketId];
+        while (ancestorQueue.length > 0) {
+          const currentTicketId = ancestorQueue.shift();
+          if (!currentTicketId) {
+            continue;
+          }
           if (currentTicketId === mappedTicketId) {
             throw new Error('Cannot link a ticket to one of its own sub-tickets');
           }
           // Guard against pre-existing bad data rather than spinning forever on it.
           if (seenAncestors.has(currentTicketId)) {
-            break;
+            continue;
           }
           seenAncestors.add(currentTicketId);
 
           const asSubTicket = await tx.run(
             zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
           );
-          let nextAncestorId: string | null = null;
           for (const row of asSubTicket) {
-            const parentMapping = (row.ticketMappings ?? [])[0];
-            if (parentMapping) {
-              nextAncestorId = parentMapping.ticketId;
-              break;
+            for (const parentMapping of row.ticketMappings ?? []) {
+              if (!seenAncestors.has(parentMapping.ticketId)) {
+                ancestorQueue.push(parentMapping.ticketId);
+              }
             }
           }
-          ancestorCursor = nextAncestorId;
         }
 
         const existingSubTickets = await tx.run(
@@ -4359,6 +4358,12 @@ export const mutators = defineMutators({
           if (mappings.length > 0) {
             throw new Error('This ticket is already a sub-ticket of another ticket');
           }
+        }
+
+        // Mirrors the server twin; best-effort, since the row may not be synced locally.
+        const rowAtDerivedId = await tx.run(zql.sub_tickets.where('id', subTicketId).one());
+        if (rowAtDerivedId && rowAtDerivedId.mappedTicketId !== mappedTicketId) {
+          throw new Error('This ticket cannot be linked as a sub-ticket right now');
         }
 
         await tx.mutate.sub_tickets.insert({
