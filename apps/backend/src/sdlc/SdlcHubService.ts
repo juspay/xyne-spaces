@@ -8,7 +8,6 @@ import {
   ChannelScopeType,
   ChannelType,
   ChannelVisibility,
-  SDLC_BASELINE_COUNT,
   WorkspaceRole,
   normalizeChannelName,
   validateChannelName,
@@ -45,11 +44,7 @@ import {
 } from './sdlcBaselineDraft';
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
-import {
-  allBaselinesApproved,
-  ARTIFACT_CAPABILITIES,
-  BASELINE_CAPABILITIES,
-} from './sdlcProgressiveGate';
+import { allBaselinesApproved, BASELINE_CAPABILITIES } from './sdlcProgressiveGate';
 import type {
   ApprovedSdlcBaseline,
   SdlcActor,
@@ -196,9 +191,9 @@ export class SdlcHubService implements SdlcHub {
         };
       });
       try {
-        await sdlcVcs.queueRepositoryCheck(actor, repository.id);
+        await sdlcVcs.checkRepositoryAccess(actor, repository.id);
       } catch (error) {
-        logger.error('[SDLC] automatic access-check dispatch failed', {
+        logger.error('[SDLC] automatic access check failed', {
           repoId: repository.id,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -638,8 +633,6 @@ export class SdlcHubService implements SdlcHub {
     }
     if (input.kind === 'BASELINE') {
       await sdlcVcs.requireCapabilities(actor, input.repoId, [...BASELINE_CAPABILITIES]);
-    } else {
-      await this.requireArtifactCreationGate(actor, input.repoId, repo.channelId);
     }
 
     const folderName =
@@ -650,6 +643,7 @@ export class SdlcHubService implements SdlcHub {
     });
     if (!folder) throw new AppError(`${folderName} folder not found`, 409);
 
+    let baselineGenerationCommit: string | null = null;
     if (input.kind === 'BASELINE') {
       const execution = await this.prisma.workflowExecution.findFirst({
         where: {
@@ -672,6 +666,10 @@ export class SdlcHubService implements SdlcHub {
       if (executionContext.repoId !== repo.id) {
         throw new AppError('SDLC setup execution does not belong to this repository', 403);
       }
+      baselineGenerationCommit =
+        typeof executionContext.generationCommit === 'string'
+          ? executionContext.generationCommit
+          : null;
       const existing = await this.findSdlcCanvas(repo.channelId, {
         artifactKind: 'BASELINE',
         baselineKind: input.baselineKind,
@@ -690,19 +688,26 @@ export class SdlcHubService implements SdlcHub {
     let artifactMarkdown = input.markdown;
     let artifactGenerationCommit: string | undefined;
     let artifactSourceReferences: SdlcSourceReference[] = [];
-    if (input.kind !== 'BASELINE') {
-      artifactGenerationCommit = await sdlcVcs.resolveBaseBranchHead(repo.id);
+    const citesRepository =
+      (input.sourceReferences?.length ?? 0) > 0 || input.markdown.includes('[[source:');
+    if (citesRepository) {
+      const pinnedCommit =
+        input.kind === 'BASELINE'
+          ? baselineGenerationCommit
+          : await sdlcVcs.resolveBaseBranchHead(repo.id);
+      if (!pinnedCommit) {
+        throw new AppError('Structured SDLC references require a pinned artifact execution', 409);
+      }
+      artifactGenerationCommit = pinnedCommit;
       const resolved = await this.resolveSourceReferences({
         repoId: repo.id,
         repositoryUrl: repo.canonicalUrl || repo.url,
-        generationCommit: artifactGenerationCommit,
+        generationCommit: pinnedCommit,
         markdown: input.markdown,
         sourceReferences: input.sourceReferences,
       });
       artifactMarkdown = resolved.markdown;
       artifactSourceReferences = resolved.sourceReferences;
-    } else if (input.markdown.includes('[[source:')) {
-      throw new AppError('Structured SDLC references require a pinned artifact execution', 409);
     }
 
     const content = await convertMarkdownToBlockNote(artifactMarkdown);
@@ -1166,7 +1171,6 @@ export class SdlcHubService implements SdlcHub {
   ): Promise<SdlcArtifact> {
     const repo = await this.requireRepositoryRole(actor, input.repoId, false);
     if (!repo.channelId || !repo.projectId) throw new AppError('SDLC repository not found', 404);
-    await this.requireArtifactCreationGate(actor, repo.id, repo.channelId);
     const existing = await this.prisma.canvas.findFirst({
       where: {
         id: input.canvasId,
@@ -1493,24 +1497,6 @@ export class SdlcHubService implements SdlcHub {
         commitSha: input.generationCommit,
       })),
     };
-  }
-
-  private async requireArtifactCreationGate(
-    actor: SdlcActor,
-    repoId: string,
-    channelId: string
-  ): Promise<void> {
-    await sdlcVcs.requireCapabilities(actor, repoId, [...ARTIFACT_CAPABILITIES]);
-    const baselines = await this.prisma.canvas.findMany({
-      where: { channelId },
-      select: { metadata: true, lastEditedAt: true },
-    });
-    if (!allBaselinesApproved(baselines)) {
-      throw new AppError(
-        `Approve all ${SDLC_BASELINE_COUNT} baseline documents before creating SDLC artifacts`,
-        409
-      );
-    }
   }
 
   private async requireRepositoryRole(actor: SdlcActor, repoId: string, requireAdmin: boolean) {
