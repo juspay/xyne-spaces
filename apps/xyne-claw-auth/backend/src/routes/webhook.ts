@@ -1281,6 +1281,43 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     return lines.join("\n");
   }
 
+  if (tool === "spaces-update-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [`**Update ${tickets.length} Tickets**`, ``];
+
+    const defaults: string[] = [];
+    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
+    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
+    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
+    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
+    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
+      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
+    }
+    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
+
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const ticketId = String(ticket["ticketId"] ?? "(no id)");
+      const changes: string[] = [];
+      const status = ticket["status"] ?? params["defaultStatus"];
+      const stage = ticket["stage"] ?? params["defaultStage"];
+      const priority = ticket["priority"] ?? params["defaultPriority"];
+      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
+      if (status) changes.push(`status \u2192 ${String(status)}`);
+      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
+      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
+      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
+      if (ticket["title"]) changes.push(`title`);
+      if (ticket["description"]) changes.push(`description`);
+      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
+      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
+      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
+    }
+    return lines.join("\n");
+  }
+
   if (tool === "spaces-schedule-call") {
     const title = params["title"] as string ?? "Call";
     const startsAt = params["startsAt"] as string ?? "";
