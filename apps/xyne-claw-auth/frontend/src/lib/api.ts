@@ -6747,3 +6747,149 @@ export async function resyncChannelEntityTypes(
     { method: "POST", headers: { "x-user-id": userId } },
   );
 }
+
+// ── Onyx Evals (EnterpriseRAG-Bench harness) ────────────────────────────────
+
+/** One parsed questions.jsonl row, as posted to /onyx-evals/run. */
+export interface OnyxRunQuestionInput {
+  questionId: string;
+  questionType: string;
+  sourceTypes: string[];
+  question: string;
+  expectedDocIds: string[];
+  goldAnswer: string;
+  answerFacts: string[];
+}
+
+export interface OnyxDsidEntry { sourceType: string; syntheticId: string }
+
+export interface OnyxRunConfig {
+  questions: OnyxRunQuestionInput[];
+  dsidMapping: Record<string, OnyxDsidEntry[]>;
+  topK: number;
+  rankProfile: string;
+  concurrency: number;
+  threeJudgeCorrection: boolean;
+  model?: string;
+}
+
+export interface OnyxAggregate {
+  totalQuestions: number;
+  correctnessPercent: number;
+  completenessPercent: number;
+  documentRecallPercent: number;
+  invalidExtraDocsAvg: number;
+  leaderboardScore: number;
+}
+
+export interface OnyxRunSummary {
+  id: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  config: unknown;
+  aggregate: OnyxAggregate | null;
+  totalQuestions: number;
+  processed: number;
+  corrections: number;
+  lastError: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  jobId?: string | null;
+  createdBy?: string | null;
+}
+
+export interface OnyxRunDetail extends OnyxRunSummary {
+  cancelRequested: boolean;
+}
+
+export interface OnyxQuestionRow {
+  questionId: string;
+  questionType: string;
+  question: string;
+  correctness: number | null;
+  completeness: number | null;
+  documentRecall: number | null;
+  invalidExtra: number | null;
+  corrected: boolean;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface OnyxRetrievedEntry { docId: string; title: string; rank: number; score: number }
+
+export interface OnyxQuestionDetail extends OnyxQuestionRow {
+  retrieved: OnyxRetrievedEntry[];
+  rawAnswer: string | null;
+  answerText: string | null;
+  citedDocIds: string[];
+  correctnessReasoning: string | null;
+  factSupported: boolean[];
+  goldVotes: Record<string, { label: string; votes: Array<{ label: string; note: string }> }> | null;
+  validDocIds: string[];
+  goldDocIdsOriginal: string[];
+  goldDocIdsCorrected: string[];
+  goldAnswer: string | null;
+  answerFacts: string[];
+  dsidToSynthetic: Record<string, { docId: string | null; sourceType: string | null }>;
+}
+
+export async function startOnyxEvalRun(config: OnyxRunConfig, userId: string): Promise<{ runId: string; jobId: string }> {
+  const data = await request<{ success: boolean; runId: string; jobId: string }>(
+    `${AUTH_API_URL}/api/v1/onyx-evals/run`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(config) },
+  );
+  return { runId: data.runId, jobId: data.jobId };
+}
+
+export async function stopOnyxEvalRun(runId: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/onyx-evals/runs/${runId}/stop`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+}
+
+export async function resumeOnyxEvalRun(runId: string | undefined, userId: string): Promise<{ runId: string }> {
+  const url = runId ? `${AUTH_API_URL}/api/v1/onyx-evals/runs/${runId}/resume` : `${AUTH_API_URL}/api/v1/onyx-evals/runs/resume`;
+  const data = await request<{ success: boolean; runId: string }>(url, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+  return { runId: data.runId };
+}
+
+export async function listOnyxEvalRuns(limit: number, userId: string): Promise<OnyxRunSummary[]> {
+  const data = await request<{ success: boolean; runs: OnyxRunSummary[] }>(
+    `${AUTH_API_URL}/api/v1/onyx-evals/runs?limit=${limit}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.runs;
+}
+
+export async function getOnyxEvalRun(runId: string, userId: string): Promise<OnyxRunDetail> {
+  const data = await request<{ success: boolean; run: OnyxRunDetail }>(
+    `${AUTH_API_URL}/api/v1/onyx-evals/runs/${runId}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.run;
+}
+
+export async function getOnyxEvalRunQuestions(
+  runId: string,
+  opts: { page: number; pageSize: number; type?: string },
+  userId: string,
+): Promise<{ total: number; questions: OnyxQuestionRow[] }> {
+  const qs = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });
+  if (opts.type) qs.set("type", opts.type);
+  const data = await request<{ success: boolean; total: number; questions: OnyxQuestionRow[] }>(
+    `${AUTH_API_URL}/api/v1/onyx-evals/runs/${runId}/questions?${qs}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return { total: data.total, questions: data.questions };
+}
+
+export async function getOnyxEvalRunQuestion(runId: string, questionId: string, userId: string): Promise<OnyxQuestionDetail> {
+  const data = await request<{ success: boolean; question: OnyxQuestionDetail }>(
+    `${AUTH_API_URL}/api/v1/onyx-evals/runs/${runId}/questions/${encodeURIComponent(questionId)}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.question;
+}

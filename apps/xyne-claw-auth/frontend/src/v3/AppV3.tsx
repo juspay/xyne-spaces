@@ -32,6 +32,7 @@ import { AdminPageV3 } from "./components/AdminPageV3";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
 import { SearchEvalsPageV3 } from "./components/SearchEvalsPageV3";
+import { OnyxEvalsPageV3 } from "./components/OnyxEvalsPageV3";
 import { EntityTypesPageV3 } from "./components/EntityTypesPageV3";
 import { ErrorPipelinePageV3 } from "./components/ErrorPipelinePageV3";
 import { CliLoginPageV3 } from "./components/CliLoginPageV3";
@@ -225,6 +226,15 @@ export function AppV3() {
               hasSearchEvalAccess ? (
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                   <SearchEvalsPageV3 userId={userId} />
+                </div>
+              ) : isAdminLoading ? null : (
+                <Navigate to="/v3/home" replace />
+              )
+            } />
+            <Route path="/v3/onyx-evals" element={
+              isAdmin ? (
+                <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                  <OnyxEvalsPageV3 userId={userId} />
                 </div>
               ) : isAdminLoading ? null : (
                 <Navigate to="/v3/home" replace />
