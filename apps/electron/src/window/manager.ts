@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, Menu, MenuItem, app } from 'electron';
+import { BrowserWindow, shell, Menu, MenuItem, app, dialog } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -16,7 +16,25 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
+import { isRecordingInProgress } from '../services/recording-controller';
 import type { Counter } from '@opentelemetry/api';
+
+async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boolean> {
+  if (!isRecordingInProgress()) return true;
+
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['Keep recording', 'Reload anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: 'Recording in progress',
+    message: 'Reloading will stop your recording.',
+    detail: 'Everything captured so far is saved to your recordings.',
+  });
+
+  return response === 1;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
@@ -255,6 +273,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           // Clear cache before reloading for a true hard refresh
           await mainWindow.webContents.session.clearCache();
           await loadApp(mainWindow);
@@ -275,6 +294,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           await loadUrl(mainWindow, mainWindow.webContents.getURL());
         }
       } catch (error) {

@@ -23,6 +23,7 @@ import {
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -139,6 +140,7 @@ export const NotificationHandler: React.FC = () => {
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,

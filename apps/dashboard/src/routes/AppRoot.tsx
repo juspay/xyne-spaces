@@ -114,6 +114,11 @@ import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
+import { isElectronApp } from '../utils/electronApp';
+import {
+  confirmRecordingInterrupt,
+  isRecordingInterruptible,
+} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -351,6 +356,35 @@ const AppRoot = (): ReactElement => {
     window.addEventListener('pagehide', stopRecordingForTeardown);
     return (): void => {
       window.removeEventListener('pagehide', stopRecordingForTeardown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (isElectronApp()) return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return (): void => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interceptReload = (event: KeyboardEvent): void => {
+      if (isElectronApp()) return;
+      const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
+      if (!isReloadCombo && event.key !== 'F5') return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+      void confirmRecordingInterrupt('reload').then(proceed => {
+        if (proceed) window.location.reload();
+      });
+    };
+    window.addEventListener('keydown', interceptReload, true);
+    return (): void => {
+      window.removeEventListener('keydown', interceptReload, true);
     };
   }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
