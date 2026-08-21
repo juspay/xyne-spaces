@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.10](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.9...v1.188.0-release-20260817.10) (2026-08-21)
+
+
+### Bug Fixes
+
+* acl fix for cross-app support ([#821](https://github.com/juspay/xyne-spaces/issues/821)) ([26f93c6](https://github.com/juspay/xyne-spaces/commit/26f93c6350a8395b828feb8d4b6afc7e49b5bb62))
+
 ## [1.188.0-release-20260817.9](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.8...v1.188.0-release-20260817.9) (2026-08-21)
 
 
