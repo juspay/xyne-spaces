@@ -77,6 +77,7 @@ import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel'
 import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
+import { CanvasInlineAIEdit } from '../CanvasInlineAIEdit/CanvasInlineAIEdit';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
@@ -509,14 +510,17 @@ export const CollaborativeCanvasEditor = forwardRef<
       isCommentsOpen,
       setIsCommentsOpen,
       inlineCommentThread,
+      inlineAIEdit,
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
+      openAskAIForCurrentSelection,
       focusCommentBlock,
       clearActiveCommentAnchor,
       closeInlineCommentThread,
+      closeInlineAIEdit,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
     } = useCanvasCommentEditorBridge({
@@ -596,8 +600,16 @@ export const CollaborativeCanvasEditor = forwardRef<
           ...(canvasId && { canvasId }),
           ...(title && { canvasTitle: title }),
           canComment: editable && !isReadOnly,
+          onAskAI: openAskAIForCurrentSelection,
         }),
-      [canvasId, editable, isReadOnly, openCommentsForCurrentBlock, title],
+      [
+        canvasId,
+        editable,
+        isReadOnly,
+        openAskAIForCurrentSelection,
+        openCommentsForCurrentBlock,
+        title,
+      ],
     );
 
     useEffect((): (() => void) | void => {
@@ -746,6 +758,17 @@ export const CollaborativeCanvasEditor = forwardRef<
               onBeforeCreateThread={applyCommentAnchorStyle}
               onCreateThreadCreated={clearActiveCommentAnchor}
               onCreateThreadFailed={removeCommentAnchorStyle}
+            />
+          )}
+
+          {inlineAIEdit && (
+            <CanvasInlineAIEdit
+              canvasId={canvasId}
+              canvasTitle={title}
+              channelId={channelId}
+              selectedText={inlineAIEdit.selectedText}
+              anchorRect={inlineAIEdit.rect}
+              onClose={closeInlineAIEdit}
             />
           )}
         </div>
