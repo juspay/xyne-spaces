@@ -3,13 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Settings01 } from '@xyne/icons';
+import { InformationCircle, ListAiGenerated, Settings01 } from '@xyne/icons';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
 import { BriefHistoryMenu, HEADER_ICON_CLASS } from './BriefHistoryMenu';
 import { BriefSettingsDialog } from './BriefSettingsDialog';
+import { BriefIntroBanner } from './BriefIntroBanner';
+import { BriefFeaturesDialog } from './BriefFeaturesDialog';
+import { useBriefIntroSeen } from './useBriefIntroSeen';
 import { BriefLine, useBriefRenderContext, type BriefRenderContext } from './briefText';
 import { RawBriefView } from './RawBriefView';
 import { BriefSkeleton } from './BriefSkeleton';
@@ -22,6 +25,7 @@ import {
 import {
   trackDailyBriefRegenerateAbandoned,
   trackDailyBriefSwitched,
+  type BriefSwitchSource,
 } from '../../services/otel/dailyBriefMetrics';
 
 const REMARK_PLUGINS = [remarkGfm];
@@ -167,17 +171,25 @@ function BriefSection({
 
 const BRIEF_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TODAY_SEGMENT = 'today';
+// Today's brief plus the previous seven. Anything older is fetched on demand
+// when the date picker routes to it.
+const HISTORY_LIMIT = 7;
 
 const DailyBriefScreen = (): ReactElement => {
   const [latest, setLatest] = useState<DailyBriefLatest | null>(null);
   const [history, setHistory] = useState<DailyBriefHistoryItem[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A brief older than the loaded window, pulled in by URL/date-picker.
+  const [fetched, setFetched] = useState<SelectedBrief | null>(null);
+  const [fetching, setFetching] = useState(false);
 
   const [regenerating, setRegenerating] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [featuresOpen, setFeaturesOpen] = useState(false);
   const mountedRef = useRef(true);
   const navigate = useNavigate();
   const { workspaceId, briefDate } = useParams();
@@ -190,6 +202,7 @@ const DailyBriefScreen = (): ReactElement => {
   // Read on unmount, where component state is already stale.
   const regenerateStartedAtRef = useRef<number | null>(null);
   const isInPanelWebview = useIsInPanelWebview();
+  const { introSeen, markIntroSeen } = useBriefIntroSeen();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!mountedRef.current) return;
@@ -198,13 +211,15 @@ const DailyBriefScreen = (): ReactElement => {
       setError(null);
     }
     try {
-      const [latestRes, historyRes] = await Promise.all([
+      const [latestRes, historyRes, datesRes] = await Promise.all([
         dailyBriefApi.getLatest(),
-        dailyBriefApi.getHistory(),
+        dailyBriefApi.getHistory(HISTORY_LIMIT),
+        dailyBriefApi.getDates(),
       ]);
       if (!mountedRef.current) return;
       setLatest(latestRes);
       setHistory(historyRes);
+      setAvailableDates(datesRes.map(item => item.date));
     } catch {
       if (mountedRef.current && !opts?.quiet) setError('Failed to load daily brief.');
     } finally {
@@ -234,13 +249,46 @@ const DailyBriefScreen = (): ReactElement => {
     void navigate(todayPath, { replace: true });
   }, [briefDate, navigate, todayPath]);
 
-  // A well-formed date with no brief behind it would otherwise render the
-  // latest brief under a URL that disagrees with it.
+  const inHistory = selectedDate !== null && history.some(item => item.date === selectedDate);
+
+  // Dates outside the loaded window are legitimate — the picker can reach any
+  // day the user has a brief for, so fetch it rather than bouncing to today.
   useEffect(() => {
-    if (loading || selectedDate === null) return;
-    if (history.some(item => item.date === selectedDate)) return;
-    void navigate(todayPath, { replace: true });
-  }, [loading, selectedDate, history, navigate, todayPath]);
+    if (loading || selectedDate === null || inHistory) {
+      setFetched(null);
+      setFetching(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setFetching(true);
+    void dailyBriefApi
+      .getByDate(selectedDate)
+      .then(res => {
+        if (cancelled) return;
+        if (!res || res.status === 'none') {
+          setFetched(null);
+          void navigate(todayPath, { replace: true });
+          return;
+        }
+        setFetched({
+          date: res.date ?? selectedDate,
+          status: res.status,
+          content: res.content ?? '',
+          data: res.data ?? null,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFetched(null);
+        setError('Failed to load that brief.');
+      })
+      .finally(() => {
+        if (!cancelled) setFetching(false);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [loading, selectedDate, inHistory, navigate, todayPath]);
 
   const selected = useMemo((): SelectedBrief | null => {
     if (selectedDate) {
@@ -253,6 +301,7 @@ const DailyBriefScreen = (): ReactElement => {
           data: fromHistory.data ?? null,
         };
       }
+      return fetched?.date === selectedDate ? fetched : null;
     }
     if (latest && latest.status !== 'none') {
       return {
@@ -263,7 +312,7 @@ const DailyBriefScreen = (): ReactElement => {
       };
     }
     return null;
-  }, [selectedDate, history, latest]);
+  }, [selectedDate, history, latest, fetched]);
 
   const briefStatus = selected?.status;
   const briefGenerating = briefStatus === 'generating';
@@ -334,10 +383,14 @@ const DailyBriefScreen = (): ReactElement => {
   }, [generationInFlight, load, navigate, todayPath]);
 
   const currentDate = selected?.date ?? null;
+  const activeDate = currentDate ?? selectedDate;
   const handleSelectDate = useCallback(
-    (date: string) => {
+    (date: string, source: BriefSwitchSource) => {
       if (date !== currentDate) {
-        trackDailyBriefSwitched();
+        trackDailyBriefSwitched(source);
+        // Device-scoped `instance` cannot answer "how many users" — the server
+        // counts distinct userIds behind this beacon instead.
+        void dailyBriefApi.trackSwitch(source);
       }
       void navigate(date === todayBucket ? todayPath : `${briefPath}/${date}`);
     },
@@ -363,10 +416,13 @@ const DailyBriefScreen = (): ReactElement => {
   // A regeneration always targets today, so it only blanks the body when today
   // is what you're looking at — other briefs stay readable while it runs.
   const isBusy =
-    (loading && !selected) || (viewingToday && regenerating) || (!showRaw && briefGenerating);
+    (loading && !selected) ||
+    fetching ||
+    (viewingToday && regenerating) ||
+    (!showRaw && briefGenerating);
 
   const actionLabel = ((): string => {
-    if (loading && !selected) return 'Loading…';
+    if ((loading && !selected) || fetching) return 'Loading…';
     if (regenerating) return hasBrief ? 'Regenerating…' : 'Generating…';
     if (briefGenerating) return 'Generating…';
     return hasBrief ? 'Regenerate' : 'Generate';
@@ -476,8 +532,9 @@ const DailyBriefScreen = (): ReactElement => {
             style={APP_NO_DRAG_STYLE}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-regenerate'
-            className='mr-1 rounded-[8px] border border-border px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+            className='mr-1 flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           >
+            <ListAiGenerated size={16} className='shrink-0' />
             {actionLabel}
           </button>
           <button
@@ -493,9 +550,21 @@ const DailyBriefScreen = (): ReactElement => {
           </button>
           <BriefHistoryMenu
             history={history}
-            selectedDate={currentDate}
+            availableDates={availableDates}
+            selectedDate={activeDate}
             onSelect={handleSelectDate}
           />
+          <button
+            type='button'
+            aria-label='About the daily brief'
+            onClick={() => setFeaturesOpen(true)}
+            style={APP_NO_DRAG_STYLE}
+            data-track-category='DailyBrief'
+            data-track-name='daily-brief-open-features'
+            className={cn(HEADER_ICON_CLASS, featuresOpen && 'bg-accent text-foreground')}
+          >
+            <InformationCircle size={18} />
+          </button>
         </div>
       </header>
 
@@ -507,6 +576,9 @@ const DailyBriefScreen = (): ReactElement => {
 
       <main className='min-h-0 flex-1 overflow-y-auto px-6 pb-16'>
         <article className='mx-auto w-full max-w-[750px]'>
+          {!introSeen && !isBusy && (
+            <BriefIntroBanner onSeeMore={() => setFeaturesOpen(true)} onDismiss={markIntroSeen} />
+          )}
           {hasBrief && !isBusy && (
             <h1 className='py-10 text-center font-serif text-[40px] font-semibold italic leading-[1.2] text-foreground'>
               {formatBriefTitle(selected.date)}
@@ -539,6 +611,8 @@ const DailyBriefScreen = (): ReactElement => {
           {renderBody()}
         </article>
       </main>
+
+      <BriefFeaturesDialog open={featuresOpen} onOpenChange={setFeaturesOpen} />
 
       <BriefSettingsDialog
         open={settingsOpen}

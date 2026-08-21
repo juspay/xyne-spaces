@@ -29,9 +29,14 @@ import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
-import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
 import { usePendingQueue } from '@xyne/shared/messages';
-import { axiosHttpClient } from '../services/affinityService';
+import {
+  SharedAuthProvider,
+  HttpClientProvider,
+  ChannelServiceProvider,
+  AffinityServiceProvider,
+} from '@xyne/shared/hooks';
+import { axiosHttpClient, affinityService } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
@@ -509,15 +514,17 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
-          <ChannelServiceProvider
-            getVespaParticipants={(id): Promise<string[]> =>
-              channelService.getVespaParticipants(id)
-            }
-          >
-            {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
-            <DeferredLoader />
-            {children}
-          </ChannelServiceProvider>
+          <AffinityServiceProvider value={affinityService}>
+            <ChannelServiceProvider
+              getVespaParticipants={(id): Promise<string[]> =>
+                channelService.getVespaParticipants(id)
+              }
+            >
+              {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
+              <DeferredLoader />
+              {children}
+            </ChannelServiceProvider>
+          </AffinityServiceProvider>
         </HttpClientProvider>
       </SharedAuthProvider>
     );

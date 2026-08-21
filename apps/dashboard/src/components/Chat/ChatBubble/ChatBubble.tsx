@@ -34,6 +34,7 @@ import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { isSlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
@@ -98,6 +99,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
 import { parseRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 export interface ThreadData {
@@ -474,6 +477,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setShowParticipantsModal(true);
   };
 
+  // Starts a headless ("take notes") recording anchored to this message's
+  // thread — directly via the recording store (no navigation), same as the
+  // ThreadPannel "Take notes" button. Only rendered for the thread's root
+  // message (see HoverActionsToolbar's messageId === initialMessageId gate).
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const handleStartRecordingFromMessage = (): void => {
+    const targetConversationId = conversation?.conversationId || message.conversationId;
+    if (!targetConversationId || !channelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: targetConversationId,
+      channelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
+  };
+
   const handleAddBookmark = (): void => {
     try {
       const addResult = zero.mutate(
@@ -805,7 +832,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       });
   };
 
-  const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
+  // but do not open this message in the generic editor, which would discard that wrapper.
+  const canEditMessage = canModifyMessage && !isSlashCommandArtifactMessage(message.content);
+  const canDeleteMessage = canModifyMessage && !hasTicket;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -1019,7 +1050,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
-      ...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage }),
+      ...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage }),
       ...(replies?.onOpenThread &&
         (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
         !isShowInChannel &&
@@ -1030,6 +1061,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
           isCallDisabled: hasActiveCallForConversation,
+          onStartRecording: handleStartRecordingFromMessage,
+          isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
         }),
       ...(conversation &&
         (!isSystemMessage || isTicketCreationMessage) &&
@@ -1337,7 +1370,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
-              {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
+              {...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage })}
               {...(canEditMessage && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(replies &&
                 (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
@@ -1355,6 +1388,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,
                   isCallDisabled: hasActiveCallForConversation,
+                  onStartRecording: handleStartRecordingFromMessage,
+                  isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
                 })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&

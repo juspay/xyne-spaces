@@ -7,6 +7,7 @@ import {
 } from './activitySkipMarkAsRead';
 import { Activity, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
+import { resolveSdlcActivityTarget } from './sdlcActivityNavigation';
 
 /** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
 const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
@@ -35,6 +36,7 @@ interface ActivityItemCardProps {
   channelId: string | undefined;
   badgeIcon: ReactNode;
   badgeColorClass?: string;
+  titlePrefix?: ReactNode;
   description: ReactNode;
   targetPath: string;
   supportTargetPath?: string | undefined;
@@ -56,6 +58,7 @@ export const ActivityItemCard = ({
   isExpanded = true,
   badgeIcon,
   badgeColorClass,
+  titlePrefix,
   description,
   targetPath,
   supportTargetPath,
@@ -119,13 +122,18 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
-    const path = isDeskChannel
+    const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
+    const path = resolveSdlcActivityTarget({
+      activity,
+      channelMetadata: channel?.metadata,
+      fallbackPath: defaultPath,
+    });
 
     if (path) {
       const pathWithActivityId =
-        focusThread && !isDeskChannel
+        focusThread && !isDeskChannel && !path.startsWith('/sdlc/')
           ? appendFocusThread(appendSelectedActivity(path))
           : appendSelectedActivity(path);
       const state = {
@@ -278,6 +286,7 @@ export const ActivityItemCard = ({
               activity.isRead ? 'text-muted-foreground' : 'text-foreground',
             )}
           >
+            {titlePrefix && <span className='mr-1.5 inline-flex align-middle'>{titlePrefix}</span>}
             {isMobile ? (
               <span className='font-semibold'>{actorName}</span>
             ) : (

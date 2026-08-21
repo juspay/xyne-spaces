@@ -329,9 +329,6 @@ export const createMarkdownComponents = (
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
         if (!href) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey) {
-          logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
-        }
         openLink(href, event);
       };
       return (

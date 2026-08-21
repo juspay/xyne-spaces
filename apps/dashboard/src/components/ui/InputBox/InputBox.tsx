@@ -29,6 +29,7 @@ import { all, createLowlight } from 'lowlight';
 import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
 import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
+import { ShortcutHint } from '../ShortcutHint';
 import Avatar from '../Avatar/Avatar';
 import {
   DropdownMenu,
@@ -79,7 +80,7 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
-import { CanvasVisibility } from '@xyne/shared';
+import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { VoiceInput } from './VoiceInput';
@@ -196,6 +197,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      slashCommandArtifactCommand,
+      slashCommandArtifactChannelLabel,
+      onCancelSlashCommandArtifact,
     },
 
     ref,
@@ -364,6 +368,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [isVoiceRecording]);
+
+    const artifactComposerDefinition = getSlashCommandArtifactDefinition(
+      slashCommandArtifactCommand,
+    );
+
+    useEffect(() => {
+      if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
+      const onKeyDown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancelSlashCommandArtifact();
+      };
+      document.addEventListener('keydown', onKeyDown, true);
+      return () => document.removeEventListener('keydown', onKeyDown, true);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
 
     const handleTyping = onTyping;
 
@@ -702,10 +722,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const channelMentionState = channelMentionPluginKey.getState(view.state);
               const commandState = commandPluginKey.getState(view.state);
               const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+              if (commandState?.isOpen && commandState.items.length > 0) {
+                event.preventDefault();
+                view.dispatch(
+                  view.state.tr.setMeta(commandPluginKey, {
+                    shouldSelect: true,
+                  }),
+                );
+                return true;
+              }
               if (
                 (mentionState?.isOpen && mentionState.items.length > 0) ||
                 (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-                (commandState?.isOpen && commandState.items.length > 0) ||
                 (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
               ) {
                 return false;
@@ -829,11 +857,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             const commandState = commandPluginKey.getState(view.state);
             const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
 
+            // editorProps.handleKeyDown runs before extension plugins. Select the
+            // highlighted slash command here and consume Enter so it cannot fall
+            // through to the message-send branch.
+            if (commandState?.isOpen && commandState.items.length > 0) {
+              event.preventDefault();
+              view.dispatch(
+                view.state.tr.setMeta(commandPluginKey, {
+                  shouldSelect: true,
+                }),
+              );
+              return true;
+            }
+
             // If any menu is open, let it handle the Enter key
             if (
               (mentionState?.isOpen && mentionState.items.length > 0) ||
               (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-              (commandState?.isOpen && commandState.items.length > 0) ||
               (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
             ) {
               return false;
@@ -1177,7 +1217,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         // and @group → <groupid:xyneId> instead of bare display names.
         const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
         const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd) {
+        if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
           editor.commands.setContent('');
           setContent('');
           editor.commands.focus();
@@ -1474,15 +1514,41 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             overflow-hidden transition-all flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
-              !isMobile && isFocused
-                ? 'border-chat-composer-border-active'
-                : !isMobile
-                  ? 'border-chat-composer-border'
-                  : ''
+              !isMobile && artifactComposerDefinition
+                ? 'border-orange-500 ring-1 ring-orange-500'
+                : !isMobile && isFocused
+                  ? 'border-chat-composer-border-active'
+                  : !isMobile
+                    ? 'border-chat-composer-border'
+                    : ''
             }
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
           >
+            {artifactComposerDefinition && (
+              <div className='flex h-11 items-center justify-between border-b border-orange-200 bg-orange-50/80 px-3 text-orange-700 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300'>
+                <div className='flex min-w-0 items-center gap-2 text-sm font-semibold'>
+                  <span className='rounded bg-orange-500 px-2 py-0.5 text-xs font-bold text-white'>
+                    {artifactComposerDefinition.badge}
+                  </span>
+                  <span className='truncate'>
+                    {artifactComposerDefinition.composerLabel}
+                    {slashCommandArtifactChannelLabel
+                      ? ` in ${slashCommandArtifactChannelLabel}`
+                      : ''}
+                  </span>
+                </div>
+                <button
+                  type='button'
+                  onClick={onCancelSlashCommandArtifact}
+                  className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
+                  aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
+                >
+                  <span className='hidden sm:inline'>esc to cancel</span>
+                  <X className='size-3.5' />
+                </button>
+              </div>
+            )}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
@@ -1699,16 +1765,27 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <div className='flex min-w-0 items-center gap-1'>
                   {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type='button'
-                          className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                          aria-label='Add content'
-                          disabled={disabled || isSending}
-                        >
-                          <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
-                        </button>
-                      </DropdownMenuTrigger>
+                      <Tooltip
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Attach files
+                            <ShortcutHint keys='mod+o' />
+                          </span>
+                        }
+                        side='top'
+                        delayDuration={300}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            aria-label='Add content'
+                            disabled={disabled || isSending}
+                          >
+                            <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
                       <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
                         <DropdownMenuItem
                           onClick={() => {
@@ -1717,6 +1794,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }}
                         >
                           <Plus className='h-4 w-4' /> Upload Files
+                          <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => {
@@ -1891,7 +1969,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
-                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                : 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
@@ -1970,7 +2050,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
-                              ? 'bg-primary text-white hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                : 'bg-primary text-white hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >

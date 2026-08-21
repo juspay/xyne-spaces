@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.189.6",
+  "version": "1.205.3",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -11,6 +11,7 @@
     "doctor": "node scripts/xyne-doctor.mjs",
     "doctor:demo": "node scripts/xyne-doctor.mjs --demo",
     "doctor:test": "node --test scripts/xyne-doctor.test.mjs",
+    "doctor:llm": "node scripts/ping-llm.mjs",
     "services": "node scripts/xyne-doctor.mjs services",
     "services:raw": "node scripts/select-services.mjs",
     "services:sh": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
@@ -30,6 +31,7 @@
     "services:vespa": "chmod +x vespa-core/scripts/deploy-dev.sh && ./vespa-core/scripts/deploy-dev.sh",
     "sandbox": "chmod +x scripts/sandbox.sh && ./scripts/sandbox.sh",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
+    "sdlc:cleanup": "bash scripts/cleanup-sdlc-local.sh",
     "reset": "chmod +x scripts/reset-local.sh && ./scripts/reset-local.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
     "test": "./tools/xyne-automation/scripts/run-test.sh",
@@ -203,6 +205,7 @@
       }
     },
     "overrides": {
+      "@types/express": "4.17.25",
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
       "@excalidraw/excalidraw>react-dom": "^19.2.1",

@@ -1,6 +1,6 @@
 services:
   ysweet:
-    image: ghcr.io/xynehq/y-sweet:sha-dceb9d1
+    image: ghcr.io/juspay/y-sweet:sha-221d5af
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-ysweet
     ports:
       - "${YSWEET_BIND_PORT:-8080}:8080"
