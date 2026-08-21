@@ -1,8 +1,11 @@
 import type {
+  DeskMetricKey,
   DeskMetricsAgentRow,
   DeskMetricsCustomFieldBreakdown,
   DeskMetricsCustomFieldSummary,
   DeskMetricsPartial,
+  DeskMetricsPerDeskRow,
+  DeskMetricsQueryPerDeskRow,
   DeskMetricsResponse,
   DeskMetricsTicketRow,
 } from '@xyne/shared';
@@ -255,6 +258,32 @@ export const mergeCustomFieldSlices = (
       : {}),
   };
 };
+
+/**
+ * Drop per-desk fields whose metric was never requested. fillDeskMetrics
+ * zero-fills those slices so aggregateDeskMetrics can run, and without this
+ * the placeholders reach the caller as real measurements.
+ */
+export const prunePerDesk = (
+  rows: DeskMetricsPerDeskRow[],
+  wanted: Set<DeskMetricKey>,
+): DeskMetricsQueryPerDeskRow[] =>
+  rows.map(row => ({
+    channelId: row.channelId,
+    channelName: row.channelName,
+    ...(wanted.has('frt')
+      ? { avgFrtSeconds: row.avgFrtSeconds, respondedTickets: row.respondedTickets }
+      : {}),
+    ...(wanted.has('rt')
+      ? { avgRtSeconds: row.avgRtSeconds, resolvedTickets: row.resolvedTickets }
+      : {}),
+    ...(wanted.has('csat')
+      ? { csatAvgScore: row.csatAvgScore, csatGood: row.csatGood, csatBad: row.csatBad }
+      : {}),
+    ...(wanted.has('counts')
+      ? { openedInRange: row.openedInRange, emailRepliesInRange: row.emailRepliesInRange }
+      : {}),
+  }));
 
 export const aggregateDeskMetrics = (
   contributions: DeskMetricsContribution[],

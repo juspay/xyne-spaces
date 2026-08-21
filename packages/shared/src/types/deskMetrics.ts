@@ -163,9 +163,27 @@ export interface DeskMetricsDeskListResponse {
   desks: DeskMetricsDeskSummary[];
 }
 
+/**
+ * Per-desk row on the agent-facing query response. Metric fields are optional:
+ * absent means "not requested", which a hard zero cannot express.
+ */
+export interface DeskMetricsQueryPerDeskRow {
+  channelId: string;
+  channelName: string | null;
+  avgFrtSeconds?: number | null;
+  respondedTickets?: number;
+  avgRtSeconds?: number | null;
+  resolvedTickets?: number;
+  csatAvgScore?: number | null;
+  csatGood?: number;
+  csatBad?: number;
+  openedInRange?: number;
+  emailRepliesInRange?: number;
+}
+
 export interface DeskMetricsQueryResponse extends DeskMetricsPartial {
   desks: DeskMetricsDeskSummary[];
   skipped: DeskMetricsSkippedDesk[];
-  perDesk?: DeskMetricsPerDeskRow[];
+  perDesk?: DeskMetricsQueryPerDeskRow[];
   notes: string[];
 }
