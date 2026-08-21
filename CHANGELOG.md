@@ -1,3 +1,10 @@
+## [1.205.4-release-20260821.2](https://github.com/juspay/xyne-spaces/compare/v1.205.4-release-20260821.1...v1.205.4-release-20260821.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* resolve release-canvas creator under service scope ([#885](https://github.com/juspay/xyne-spaces/issues/885)) ([302e6e3](https://github.com/juspay/xyne-spaces/commit/302e6e3dac183a4c14ac2d516f2de79a25e90539))
+
 ## [1.205.4-release-20260821.1](https://github.com/juspay/xyne-spaces/compare/v1.205.3...v1.205.4-release-20260821.1) (2026-08-21)
 
 
