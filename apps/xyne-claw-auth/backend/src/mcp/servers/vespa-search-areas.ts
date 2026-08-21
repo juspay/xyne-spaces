@@ -686,6 +686,17 @@ export interface StructuredQueryParams {
   hitsPerGroup?: number;
   sort?: { by: string; dir?: "asc" | "desc" };
   hits?: number;
+  /**
+   * Optional projection. Replaces `select *` with just these columns, so the
+   * summary fetch skips message bodies entirely. Measured on chat_message:
+   * 60 hits went 461 KB -> 19.9 KB (23x) with no change in which rows match.
+   *
+   * For CALLERS THAT ONLY NEED IDS (prefetch's channel probe). Never a way to
+   * reach a column the area does not already expose: every entry is validated
+   * against the area's own field list plus the render-critical columns below,
+   * so nothing user-supplied is interpolated into the YQL.
+   */
+  fields?: string[];
   rankProfile?: string;
 }
 
@@ -866,7 +877,33 @@ export function buildYqlFromParams(
     throw new Error(`groupBy and sort cannot be combined — Vespa grouping ignores order by. Use one or the other.`);
   }
 
-  let yql = `select * from sources ${source} where ${clauses.join(" and ")}`;
+  // Projection (optional). `transformHit` classifies rows off docType/sddocname
+  // and titles a message from messageChannelName/channelName + username — drop
+  // those and every row renders as an untyped, nameless blob, so they are always
+  // allowed through even when the caller does not ask for them.
+  const RENDER_CRITICAL = ["docType", "sddocname", "channelId", "channelName", "messageChannelName", "username", "userId"];
+  let projection = "*";
+  if (params.fields && params.fields.length > 0) {
+    const allowed = new Set<string>([
+      ...RENDER_CRITICAL,
+      ...area.fields.map(f => f.vespaField ?? f.name),
+      ...area.fields.map(f => f.name),
+    ]);
+    const picked: string[] = [];
+    for (const f of params.fields) {
+      const name = String(f).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(`fields entry "${name}" is not a valid column name.`);
+      }
+      if (!allowed.has(name)) {
+        throw new Error(`fields entry "${name}" is not a column of area "${params.searchArea}". Allowed: ${[...allowed].sort().join(", ")}.`);
+      }
+      if (!picked.includes(name)) picked.push(name);
+    }
+    for (const rc of RENDER_CRITICAL) if (!picked.includes(rc)) picked.push(rc);
+    projection = picked.join(", ");
+  }
+  let yql = `select ${projection} from sources ${source} where ${clauses.join(" and ")}`;
 
   // 7a. Sort — order by an allowed (date/number attribute) field, asc/desc.
   if (hasSort) {

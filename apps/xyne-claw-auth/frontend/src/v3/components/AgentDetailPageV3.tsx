@@ -186,6 +186,12 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // suppresses the card at claw-auth's doRenderPlanCard choke point. The agent
   // still tracks TODOs internally for loop discipline — only the render is hidden.
   const [draftPostTodos, setDraftPostTodos] = useState(true);
+  // Per-agent opt-OUT: plan tracking itself (the todo-write/todo-read tools AND
+  // the primer that mandates them). Default true. Distinct from postTodos above,
+  // which only hides the rendered card — this removes the tools entirely, so no
+  // turn is spent on plan bookkeeping. Off is for agents that answer in a single
+  // message and get no value from the checklist.
+  const [draftPlanTracking, setDraftPlanTracking] = useState(true);
   // Per-agent opt-in: when true, claw-auth's webhook wraps every user message
   // as `/goal <text>` before parsing, so every interaction with this agent
   // runs as an autonomous /goal loop. User-typed `/stop` and `/goal status`
@@ -320,6 +326,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
         setDraftPrefetchContext((agentData.config as { prefetchContext?: boolean }).prefetchContext === true);
         setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
+        setDraftPlanTracking((agentData.config as { planTracking?: boolean }).planTracking !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
         {
@@ -428,6 +435,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
     const basePrefetchContext = (agent.config as { prefetchContext?: boolean }).prefetchContext === true;
     const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
+    const basePlanTracking = (agent.config as { planTracking?: boolean }).planTracking !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
@@ -472,6 +480,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftSuggestGoal !== baseSuggestGoal ||
       draftPrefetchContext !== basePrefetchContext ||
       draftPostTodos !== basePostTodos ||
+      draftPlanTracking !== basePlanTracking ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
@@ -489,7 +498,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -575,6 +584,15 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         delete nextConfig.postTodos;
       } else {
         nextConfig.postTodos = false;
+      }
+      // Plan tracking (agent.config.planTracking). Opt-OUT, same shape: only
+      // persisted when turned OFF, so existing agents keep today's behaviour.
+      // Gates planToolsDefaultOn in xyne-claw, which owns both the todo tools
+      // and the "Plan tracking — REQUIRED" primer.
+      if (draftPlanTracking) {
+        delete nextConfig.planTracking;
+      } else {
+        nextConfig.planTracking = false;
       }
       if (draftVerifyResponses) {
         nextConfig.verifyResponses = true;
@@ -710,7 +728,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1097,6 +1115,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftPrefetchContextChange={setDraftPrefetchContext}
             draftPostTodos={draftPostTodos}
             onDraftPostTodosChange={setDraftPostTodos}
+            draftPlanTracking={draftPlanTracking}
+            onDraftPlanTrackingChange={setDraftPlanTracking}
             draftVerifyResponses={draftVerifyResponses}
             onDraftVerifyResponsesChange={setDraftVerifyResponses}
             draftCitationReflection={draftCitationReflection}

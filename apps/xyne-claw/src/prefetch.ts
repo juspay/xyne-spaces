@@ -54,11 +54,33 @@ const MAX_BLOCK_CHARS = 4_000;
 const RESOLVER_LIMIT = 10;
 /** Each entity fans out to every resolver, so this bounds the fan-out at MAX_ENTITIES x 3. */
 const MAX_ENTITIES = 3;
+/**
+ * Hits for the content probe.
+ *
+ * Deliberately much larger than the other resolvers, because this one PROJECTS
+ * (see MENTION_PROBE_FIELDS): it never fetches message bodies, so a hit costs a
+ * few hundred bytes instead of a few KB. Measured on chat_message —
+ *   select *      : 8 hits 22 KB | 60 hits 461 KB
+ *   projected     : 8 hits  2.8 KB | 60 hits  19.9 KB
+ * i.e. 40 projected hits cost less than 8 unprojected ones. More hits directly
+ * improves the answer here: the section reports which channels the ranked hits
+ * fall in, so a wider sample surfaces the second and third channel instead of
+ * only the top one.
+ */
+const MENTION_PROBE_HITS = Number(process.env["XYNE_CLAW_PREFETCH_MENTION_HITS"] ?? 40);
+/**
+ * Columns the probe needs. `transformHit` types a row off docType/sddocname and
+ * titles a message from messageChannelName/channelName + username, so those are
+ * required for the row to render as `[message] <channel> — <sender>` at all;
+ * claw-auth re-adds them anyway. Everything else — above all `text`, the whole
+ * cost — is left behind.
+ */
+const MENTION_PROBE_FIELDS = ["docType", "channelId", "channelName", "messageChannelName", "username"];
 /** Second-hop lookups (channel→project, project→channels). One hop, never recursive. */
 const MAX_HOPS = 2;
 
 /** Which resolver produced a section — drives the graph hops below. */
-type ResolvedKind = "channels" | "projects" | "people";
+type ResolvedKind = "channels" | "projects" | "people" | "mentions";
 
 interface ResolvedSection {
   kind: ResolvedKind;
@@ -144,7 +166,7 @@ Rules:
 - List ONLY the names the question actually mentions. Never infer, expand, or add related things.
 - Do NOT try to say whether a name is a channel, a project, or a person. You have not seen this workspace and cannot know — the platform looks each one up. Just report the name.
 - Strip a leading '#'.
-- If the question mentions nothing and needs no data (a greeting, a thank-you, a question about you), use intent "conversational" with an empty list.
+- Intent "conversational" is ONLY for a question that names NOTHING in the workspace: a greeting, a thank-you, or a question about you. If the question mentions ANY name, product, team, project, channel, person or topic, it is NEVER conversational — even if it is very short, has no verb, or is only two or three words. "why namma cloud", "euler status", "billing?" are all lookups.
 - Classify intent by the ask, not the topic: "what all X" / "list every X" is sweep; "how many" is count; finding specific items is lookup.
 
 Call record_query_entities exactly once.`;
@@ -387,10 +409,14 @@ async function runResolver(
   tool: ExecutableTool | undefined,
   params: unknown,
   label: string,
+  condense?: (text: string) => string | null,
 ): Promise<string | null> {
   if (!tool) return null;
   try {
     const text = toolResultText(await tool.execute("prefetch", params));
+    // A condenser reshapes the rows itself and is NOT line-capped by `digest`:
+    // it already emits one short line per group.
+    if (condense) return condense(scrub(text));
     return digest(scrub(text));
   } catch (err) {
     log.warn(`[prefetch] ${label} resolver failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -410,6 +436,49 @@ function findTool(tools: ExecutableTool[], bareName: string): ExecutableTool | u
  * Identity is emitted even with no spec: it is free (already in the run payload)
  * and removes the `spaces-whoami` round trip on its own.
  */
+/**
+ * Collapse a rendered `message` search into the CHANNELS those hits came from.
+ *
+ * The name resolvers answer "what is CALLED x". This answers "where is x
+ * TALKED ABOUT" — the case they all miss: an entity discussed inside a channel
+ * whose name has nothing to do with it (measured locally: "InfraSwitch",
+ * "Ceph" and "sovereignty" each matched 0 channels by name while being
+ * discussed in a real one).
+ *
+ * The raw result is the wrong shape for a prefetch block — 8 hits is tens of KB
+ * of message bodies. Everything except the channel identity is dropped, so the
+ * section costs one line per distinct channel instead of `digest`'s 24-line cap.
+ * Ordering is by how many of the top hits landed in each channel, which is a
+ * relevance proxy: the rows are already ranked, so this counts the ranked
+ * sample, never the corpus (rule: a prefetch count is a hint, never a fact).
+ */
+export function condenseMentions(text: string, max = 5): string | null {
+  if (!text) return null;
+  const order: string[] = [];
+  const seen = new Map<string, { name: string; hits: number }>();
+  let pendingName: string | null = null;
+  for (const line of text.split("\n")) {
+    const head = line.match(/\[message\]\s+(.+?)\s+—/);
+    if (head) { pendingName = (head[1] ?? "").trim(); continue; }
+    const id = line.match(/^\s*channelId:\s*(\S+)\s*$/);
+    if (!id) continue;
+    const key = id[1] ?? "";
+    if (!key) continue;
+    const existing = seen.get(key);
+    if (existing) existing.hits += 1;
+    else { seen.set(key, { name: pendingName ?? "(unnamed)", hits: 1 }); order.push(key); }
+    pendingName = null;
+  }
+  if (seen.size === 0) return null;
+  const total = [...seen.values()].reduce((n, v) => n + v.hits, 0);
+  const rows = order
+    .map((id) => ({ id, ...seen.get(id)! }))
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, max)
+    .map((r) => `#${r.name} — channelId: ${r.id} (${r.hits}/${total} top hits)`);
+  return rows.join("\n");
+}
+
 export async function buildPrefetchBlock(opts: {
   spec: PrefetchSpec | null;
   tools: ExecutableTool[];
@@ -425,9 +494,14 @@ export async function buildPrefetchBlock(opts: {
   ].join("");
   sections.push(who);
 
-  // Conversational questions need no lookups; doing them anyway spends latency
-  // and invites the model to anchor on irrelevant rows.
-  if (spec && spec.intent !== "conversational") {
+  // Gate on ENTITIES, not on intent. Intent is a label the extractor guesses and
+  // gets wrong on terse questions — "why namma cloud" came back
+  // `{intent: "conversational", entities: []}`, which silently skipped every
+  // resolver and shipped an identity-only block. Entities is the thing the
+  // resolvers actually consume: empty means there is nothing to look up (so a
+  // real greeting still costs no calls), non-empty means resolve regardless of
+  // what the extractor called it.
+  if (spec && spec.entities.length > 0) {
     // ONE budget for every round, so adding the hop below can never push the
     // first turn out. Each round races the time that is actually left.
     const deadline = Date.now() + RESOLVE_TIMEOUT_MS;
@@ -454,21 +528,65 @@ export async function buildPrefetchBlock(opts: {
       area: string;
       filters: (name: string) => Record<string, unknown>;
       label: (n: string) => string;
+      /** Free-text ranked query instead of a structured name filter. */
+      query?: (name: string) => string;
+      hits?: number;
+      /** Column projection — skips the summary fetch for bodies we never read. */
+      fields?: string[];
+      /** Replaces the default scrub+digest when the rows need reshaping. */
+      condense?: (text: string) => string | null;
     }> = [
-      { kind: "channels", area: "channel", filters: (n) => ({ channelName: { contains: n } }), label: (n) => `Channels matching "${n}"` },
+      // `mine: true` narrows the channel guard from the area default —
+      // `(permissions contains <me> or isPrivate contains "false")` — down to
+      // `permissions contains <me>`, i.e. the SAME guard the `message` area
+      // applies. Without it prefetch resolves public channels the caller never
+      // joined: the channel row passes on the isPrivate branch, but every
+      // message inside fails the strict message ACL. Measured locally on the
+      // namma-cloud project: the 5 channels `mine` drops held 0 readable
+      // messages each, while the 2 it keeps held 7621 and 3590. Handing the
+      // model a dead id is worse than omitting it — it scopes a search there,
+      // gets nothing, and reads that as "nothing was discussed" rather than
+      // "no access".
+      { kind: "channels", area: "channel", filters: (n) => ({ channelName: { contains: n }, mine: { eq: true } }), label: (n) => `Channels matching "${n}"` },
       { kind: "projects", area: "project", filters: (n) => ({ name: { contains: n } }), label: (n) => `Projects matching "${n}"` },
       { kind: "people", area: "user", filters: (n) => ({ name: { contains: n } }), label: (n) => `People matching "${n}"` },
+      // Content probe. The three above match NAMES; this one matches what people
+      // actually wrote, so an entity discussed inside a channel not named after
+      // it still resolves to a usable channelId. Measured locally: "InfraSwitch",
+      // "Ceph" and "sovereignty" each matched 0 channels by name while being
+      // actively discussed in one. Ranked retrieval on purpose — `userInput` ORs
+      // its terms, so for a multi-word entity the match set is near-everything
+      // and only the ORDERING carries signal; counting the corpus would be
+      // meaningless (and rule 6 forbids reporting it anyway).
+      {
+        kind: "mentions",
+        area: "message",
+        filters: () => ({}),
+        query: (n) => n,
+        hits: MENTION_PROBE_HITS,
+        fields: MENTION_PROBE_FIELDS,
+        condense: (t) => condenseMentions(t),
+        label: (n) => `Channels discussing "${n}"`,
+      },
     ];
     const vespa = findTool(tools, "spaces-vespa-search");
 
     const round1: Array<Promise<ResolvedSection>> = [];
     for (const name of spec.entities) {
       for (const r of resolvers) {
+        const params: Record<string, unknown> = {
+          searchArea: r.area,
+          filters: r.filters(name),
+          hits: r.hits ?? RESOLVER_LIMIT,
+        };
+        if (r.query) params["query"] = r.query(name);
+        if (r.fields) params["fields"] = r.fields;
         round1.push(
           runResolver(
             vespa,
-            { searchArea: r.area, filters: r.filters(name), hits: RESOLVER_LIMIT },
+            params,
             `spaces-vespa-search(${r.area})`,
+            r.condense,
           ).then((body) => ({ kind: r.kind, heading: r.label(name), body })),
         );
       }
@@ -516,7 +634,8 @@ export async function buildPrefetchBlock(opts: {
           vespa,
           {
             searchArea: "channel",
-            filters: { projectId: { contains: projectId } },
+            // Same membership narrowing as the name resolver above.
+            filters: { projectId: { contains: projectId }, mine: { eq: true } },
             hits: RESOLVER_LIMIT,
             sort: { by: "lastActiveDate", dir: "desc" },
           },

@@ -2779,12 +2779,28 @@ async function processTask(
     // server-owned here and cannot be changed from the dashboard. Excluded from the
     // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
     const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
+    // `postTodos`, which only hides the Spaces card while the agent still keeps
+    // the list: this removes the todo tools AND the primer, so no turn is spent
+    // on plan bookkeeping at all.
+    //
+    // Why an agent would turn it off: `todo-write` ends the assistant turn like
+    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
+    // of a run ("before your first tool call", and again immediately before the
+    // final answer). On a slow model that is two full round trips of pure
+    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
+    // agents that answer in one message get no value from the checklist card and
+    // pay the whole cost.
+    const planTrackingEnabled =
+      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
     const planToolsDefaultOn =
+      planTrackingEnabled &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) allTools.push(...planTools);
