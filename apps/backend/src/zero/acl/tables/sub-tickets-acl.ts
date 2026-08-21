@@ -66,9 +66,13 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       return;
     }
 
-    // Get existing subTicket to verify workspace
+    // Get existing subTicket to verify workspace. A missing row is not an auth failure —
+    // subTicket.unlink deletes rows, and the update is a zero-row no-op anyway.
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
-    if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
+    if (!subTicket) {
+      return;
+    }
+    if (subTicket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
     }
 
@@ -97,10 +101,11 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
                 ),
                 and(
                   cmp('visibility', ChannelVisibility.PUBLIC),
+                  // Participation via ANY channel, matching TicketACl.canUpdate —
+                  // otherwise this is stricter than the ACL on the ticket it mirrors.
                   exists('project', (project) => {
                     return project.whereExists('channels', (channelQuery) => {
                       return channelQuery
-                        .where('visibility', ChannelVisibility.PUBLIC)
                         .whereExists('participants', (participants) => {
                           return participants.where('userId', this.ctx.userID);
                         });

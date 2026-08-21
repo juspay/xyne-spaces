@@ -6028,11 +6028,21 @@ export function createMutators(
               }
             }
             if (params.assignedTo || progression) {
-              await tx.mutate.sub_tickets.update({
-                id: subTickets.id,
-                assignedTo: params.assignedTo ? params.assignedTo : subTickets.assignedTo,
-                stageProgression: progression ? progression : subTickets.stageProgression
-              });
+              // Best-effort mirror: a throw here would abort the ticket update itself.
+              // The ACL runs before any SQL is issued, so catching is safe.
+              try {
+                await tx.mutate.sub_tickets.update({
+                  id: subTickets.id,
+                  assignedTo: params.assignedTo ? params.assignedTo : subTickets.assignedTo,
+                  stageProgression: progression ? progression : subTickets.stageProgression
+                });
+              } catch (error) {
+                logger.warn('[Mutator] Failed to mirror ticket update onto sub-ticket', {
+                  ticketId: params.id,
+                  subTicketId: subTickets.id,
+                  error,
+                });
+              }
             }
           }
 
@@ -6875,36 +6885,36 @@ export function createMutators(
           }
 
           // Sub-ticket trees may nest arbitrarily deep, but they must stay TREES. Walk up
-          // from the parent: if the ticket being linked is already an ancestor, this link
-          // would close a loop. The one-parent rule below does not prevent that — a cycle
-          // is precisely the case where every node has exactly one parent.
+          // from the parent over EVERY in-edge — a row can have several parents (jira
+          // import, FLOW) — and reject a link that would close a loop. The one-parent rule
+          // below does not prevent that: a cycle is precisely the case where every node
+          // has exactly one parent.
           const seenAncestors = new Set<string>();
-          let ancestorCursor: string | null = ticketId;
-          while (ancestorCursor) {
-            // A fresh const per turn: feeding the mutable cursor straight back into the query
-            // it also receives from makes its type circular.
-            const currentTicketId: string = ancestorCursor;
+          const ancestorQueue: string[] = [ticketId];
+          while (ancestorQueue.length > 0) {
+            const currentTicketId = ancestorQueue.shift();
+            if (!currentTicketId) {
+              continue;
+            }
             if (currentTicketId === mappedTicketId) {
               throw new Error('Cannot link a ticket to one of its own sub-tickets');
             }
             // Guard against pre-existing bad data rather than spinning forever on it.
             if (seenAncestors.has(currentTicketId)) {
-              break;
+              continue;
             }
             seenAncestors.add(currentTicketId);
 
             const asSubTicket = await tx.run(
               zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
             );
-            let nextAncestorId: string | null = null;
             for (const row of asSubTicket) {
-              const parentMapping = (row.ticketMappings ?? [])[0];
-              if (parentMapping) {
-                nextAncestorId = parentMapping.ticketId;
-                break;
+              for (const parentMapping of row.ticketMappings ?? []) {
+                if (!seenAncestors.has(parentMapping.ticketId)) {
+                  ancestorQueue.push(parentMapping.ticketId);
+                }
               }
             }
-            ancestorCursor = nextAncestorId;
           }
 
           // One parent per linked ticket, so the `.one()`/`findFirst` lookups on
@@ -6920,6 +6930,13 @@ export function createMutators(
             if (mappings.length > 0) {
               throw new Error('This ticket is already a sub-ticket of another ticket');
             }
+          }
+
+          // The insert below is ON CONFLICT (id) DO NOTHING, so an unrelated row already
+          // on the derived id would be absorbed silently and reported as a success.
+          const rowAtDerivedId = await tx.run(zql.sub_tickets.where('id', subTicketId).one());
+          if (rowAtDerivedId && rowAtDerivedId.mappedTicketId !== mappedTicketId) {
+            throw new Error('This ticket cannot be linked as a sub-ticket right now');
           }
 
           await tx.mutate.sub_tickets.insert({
