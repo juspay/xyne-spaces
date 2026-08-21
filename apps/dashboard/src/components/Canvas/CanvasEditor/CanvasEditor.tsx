@@ -16,6 +16,8 @@ import {
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import {
   InlineContentSchema,
   PartialBlock,
@@ -217,7 +219,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       if (!editor) return [];
       const editorTyped = asBlockNoteEditorForView(editor);
       const whiteboardItems = getWhiteboardSlashMenuItems(editorTyped);
-      return [...whiteboardItems];
+      const mathItems = getMathSlashMenuItems(editorTyped);
+      const diagramItems = getDiagramSlashMenuItems(editorTyped);
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
     // Get slash menu items with custom blocks
@@ -651,7 +655,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={asBlockNoteEditorForView(editor)}
+          />
+        )}
       </div>
     );
   },

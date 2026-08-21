@@ -53,6 +53,21 @@ export class UserService {
     this.prisma = DatabaseClient.getInstance();
   }
 
+  async hasCompletedOnboarding(email: string): Promise<boolean> {
+    const normalizedEmail = email.toLowerCase().trim();
+    return await runAsSystem(async () => {
+      const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
+        where: {
+          questionnaireType: 'onboarding',
+          email: normalizedEmail,
+        },
+        select: { id: true },
+      });
+
+      return Boolean(onboardingResponse);
+    });
+  }
+
   /**
    * Get org role by memberId
    */
@@ -206,6 +221,17 @@ export class UserService {
       logger.info(
         `Created new user: ${user.email} (${user.id}) without assigning to a default group.`
       );
+
+      try {
+        await aiProvisioningService.enqueueUserSync(user.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for created user', {
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          orgMemberId: user.orgMemberId,
+          error,
+        });
+      }
 
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
       await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
@@ -772,13 +798,14 @@ export class UserService {
       }
 
       const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
 
       if (workspaceUser) {
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
           data: { authProvider: normalizedAuthProvider }
         });
-        return { user: workspaceUser, isNewUser: false };
+        return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
       }
 
       // Also check by email (for users created by seed script or when providerUserId is unavailable)
@@ -812,25 +839,23 @@ export class UserService {
         throw new Error('Workspace not found');
       }
 
-      // Check if user is invited to this workspace
+      // A live, unconsumed invitation for this workspace. Revoking sets the expiry to the
+      // moment of revocation, so one comparison covers both a lapsed invitation and a
+      // withdrawn one. An already-accepted invitation is not a second entry: whoever used it
+      // holds an account in the workspace and is resolved before this point.
       const invitation = await this.prisma.invitation.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email
-        }
-      });
-
-      // Find if there's an existing user with this email in the org
-      const existingOrgUsers = await this.prisma.user.findMany({
-        where: {
           email: userData.email,
-          workspace: {
-            orgId: workspace.orgId
-          }
+          acceptedAt: null,
+          expiredAt: { gt: new Date() }
         }
       });
 
-      const hasAccess = invitation || existingOrgUsers.length > 0;
+      // Entry to a workspace comes from an invitation to that workspace, or an approved join
+      // request for it. Holding an account in another workspace of the same organisation is
+      // not itself entry to this one.
+      const hasAccess = !!invitation;
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
@@ -885,6 +910,17 @@ export class UserService {
         }
       });
 
+      try {
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for workspace user', {
+          userId: workspaceUser.id,
+          workspaceId: workspaceUser.workspaceId,
+          orgMemberId: workspaceUser.orgMemberId,
+          error,
+        });
+      }
+
       // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role as WorkspaceRole, userData.workspaceId);
 
@@ -900,7 +936,7 @@ export class UserService {
       });
 
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
-      return { user: workspaceUser, isNewUser: true };
+      return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating workspace user:', error);
       throw error instanceof Error ? error : new Error('Failed to create workspace user');
@@ -996,6 +1032,8 @@ export class UserService {
       // Step 4: Add/upgrade user as OrgMember first so they can create additional workspaces later.
       // A COMMUNITY_MEMBER row is the only global OrgMember row public users have before
       // joining/creating an enterprise workspace. Move that row to the enterprise org.
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
+
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email },
       });
@@ -1103,7 +1141,7 @@ export class UserService {
       }
 
       logger.info(`Created organization ${orgName} with workspace ${workspaceName} for ${userData.email}`);
-      return { organization, workspace, workspaceUser, isNewUser: true };
+      return { organization, workspace, workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating organization:', error);
       if (isOrganizationPolicyError(error) || (error as Error & { statusCode?: number }).statusCode) {

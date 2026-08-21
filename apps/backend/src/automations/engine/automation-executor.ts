@@ -18,7 +18,7 @@ import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver'
 import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
 import {
-  AUTOMATION_WORKFLOW_TYPE,
+  isExecutableAutomationWorkflowType,
   mayDrainInFlight,
   parseAutomationConfig,
   parseAutomationMetadata,
@@ -77,7 +77,7 @@ export class AutomationExecutor {
       logger.warn(`[automations] runExecution: row ${executionId} not found, dropping`);
       return undefined;
     }
-    if (existing.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    if (!isExecutableAutomationWorkflowType(existing.workflowType)) {
       logger.warn(
         `[automations] runExecution: row ${executionId} workflowType=${existing.workflowType ?? '∅'} — not an automation, dropping`,
       );

@@ -36,11 +36,9 @@ export const APPS_PUBLIC_BASE_URL = isLocalhost
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-export const VITE_ZERO_SERVER =
-  (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
-  (isElectronBundled
-    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-    : `${protocol}://${hostname}${zeroServerPort}/zero`);
+export const VITE_ZERO_SERVER = isElectronBundled
+  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+  : `${protocol}://${hostname}${zeroServerPort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;

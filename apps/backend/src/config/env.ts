@@ -3,6 +3,8 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { parseInternalAppHostMap } from '@/utils/internalHostMap';
+
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
@@ -63,7 +65,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -112,6 +114,18 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
+  SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
+  SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(24 * 60 * 60 * 1000),
+  SDLC_CAPACITY_RETRY_DELAY_MS: Joi.number().integer().min(1000).default(30_000),
+  SDLC_CLAW_RUN_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(60_000)
+    .default(3 * 60 * 60 * 1000),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -157,8 +171,15 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  // The development key pair ships in LiveKit's own published sample config, so a
+  // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
+  // deployments without calls do not configure LiveKit at all.
+  LIVEKIT_API_KEY: Joi.string().allow('').invalid('devkey').default('').messages({
+    'any.invalid': 'LIVEKIT_API_KEY must not be the published development key',
+  }),
+  LIVEKIT_API_SECRET: Joi.string().allow('').invalid('devsecret').default('').messages({
+    'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+  }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
@@ -197,7 +218,7 @@ const envSchema = Joi.object({
         'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
         'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
         'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.'
     ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
@@ -365,6 +386,15 @@ const envSchema = Joi.object({
   CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
+  // When true, Drive imports are handed to the dedicated background worker (run in
+  // worker.ts). When false, the API process runs the import itself (fallback).
+  ENABLE_DRIVE_IMPORT_WORKER: Joi.boolean().default(false),
+  // Drive import caps (set on whichever process downloads: the drive-import worker,
+  // or the API when ENABLE_DRIVE_IMPORT_WORKER is false). Bytes are absolute values.
+  DRIVE_IMPORT_MAX_FILE_BYTES: Joi.number().integer().min(1).default(100 * 1024 * 1024), // 100 MB / file
+  DRIVE_IMPORT_MAX_FILES: Joi.number().integer().min(1).default(7000), // files per folder import
+  DRIVE_IMPORT_MAX_TOTAL_BYTES: Joi.number().integer().min(1).default(1024 * 1024 * 1024), // 1 GB / folder
+  DRIVE_IMPORT_MAX_DEPTH: Joi.number().integer().min(1).default(40), // folder nesting depth
   VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion'),
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8080'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
@@ -384,6 +414,9 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
+  // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
+  INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -488,6 +521,7 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -623,6 +657,12 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
+  sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
+  sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
+  sdlcCapacityRetryDelayMs: envVars.SDLC_CAPACITY_RETRY_DELAY_MS as number,
+  sdlcClawRunTimeoutMs: envVars.SDLC_CLAW_RUN_TIMEOUT_MS as number,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
@@ -915,6 +955,13 @@ export const config = {
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
+  enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,
+  driveImport: {
+    maxFileBytes: envVars.DRIVE_IMPORT_MAX_FILE_BYTES as number,
+    maxFiles: envVars.DRIVE_IMPORT_MAX_FILES as number,
+    maxTotalBytes: envVars.DRIVE_IMPORT_MAX_TOTAL_BYTES as number,
+    maxDepth: envVars.DRIVE_IMPORT_MAX_DEPTH as number,
+  },
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
@@ -938,6 +985,9 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  apps: {
+    internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },

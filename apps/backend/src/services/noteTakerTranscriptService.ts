@@ -1,5 +1,6 @@
 import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -10,7 +11,8 @@ import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { recordingSharingService } from '@/services/recordingSharingService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -134,7 +136,7 @@ class NoteTakerTranscriptService {
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
         try {
-          await repositories.calls.update(call.id, { labels: labelIds });
+          await repositories.calls.appendLabels(call.id, labelIds);
           logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
         } catch (error) {
           logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });
@@ -150,11 +152,21 @@ class NoteTakerTranscriptService {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
+          detailedSummaryReady: detailedSummary ? true : undefined,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
+
+      // Thread-linked recording: already auto-shared to the thread's channel
+      // immediately when the recording ended (see
+      // noteTakerWebhookController.handleParticipantLeft /
+      // handleRoomFinished). This call is now just an idempotent fallback in
+      // case that earlier attempt failed — recordingSharingService's grant
+      // is a safe upsert, so re-running it here is harmless even when the
+      // earlier share already succeeded.
+      await this.shareThreadRecordingIfLinked(call);
     } finally {
       await releaseLock(lockHandle);
     }
@@ -170,6 +182,7 @@ class NoteTakerTranscriptService {
   ): Promise<{
     summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
+    detailedSummaryReady: boolean;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
@@ -196,6 +209,7 @@ class NoteTakerTranscriptService {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
+        detailedSummaryReady: true,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
       markedItems,
@@ -204,6 +218,7 @@ class NoteTakerTranscriptService {
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
       detailedSummaryCanvasId: detailedSummary.canvasId,
+      detailedSummaryReady: true,
     };
   }
 
@@ -239,6 +254,45 @@ class NoteTakerTranscriptService {
   }
 
   /**
+   * Grants the thread's channel VIEW access to this recording (same
+   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses),
+   * so every thread/channel member can see the recording message card and
+   * open /recordings/:callId. No-op for recordings not started from a thread
+   * (no channelId on Call.metadata). Best-effort — a failure here must never
+   * block transcript/summary processing. Public so
+   * noteTakerWebhookController can call this immediately once the recording
+   * ends (handleParticipantLeft / handleRoomFinished) — both canvases
+   * already exist by then via eager creation, so there's no reason to wait
+   * for the detailed-summary pipeline anymore.
+   */
+  async shareThreadRecordingIfLinked(call: Call): Promise<void> {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    const channelId = typeof metadata.channelId === 'string' ? metadata.channelId : undefined;
+    if (!channelId) return;
+
+    try {
+      await recordingSharingService.execute(
+        call.externalId,
+        { userId: call.createdByUserId, workspaceId: call.workspaceId },
+        {
+          action: 'grant',
+          targets: [{ type: 'channel', id: channelId }],
+          access: EntityUserAccess.VIEW,
+        },
+      );
+    } catch (error) {
+      logger.error(`[${call.externalId}] thread_channel_share_failed`, {
+        channelId,
+        error,
+        path: 'note_taker',
+      });
+    }
+  }
+
+  /**
    * Single combined Call write for anything computed during this run
    * (metadata fields, labels, markedItems). Merging everything here — instead
    * of each step writing independently — avoids one step's write clobbering
@@ -266,6 +320,17 @@ class NoteTakerTranscriptService {
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
 
+    // Fetch the current DB row once (rather than trusting `call`, which is the
+    // in-memory snapshot from the top of processTranscript) whenever we're about
+    // to merge onto either JSON column. Generation can take minutes, during
+    // which another write — e.g. ensureStreamingCanvas's early publish of
+    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+    // the DB. Merging onto the stale snapshot would silently erase that write.
+    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+    const current = needsFreshRead
+      ? await repositories.calls.findByExternalId(call.externalId)
+      : undefined;
+
     const data: {
       metadata?: Record<string, unknown>;
       labels?: string[];
@@ -273,9 +338,12 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      const currentMetadataSource = current?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        currentMetadataSource &&
+        typeof currentMetadataSource === 'object' &&
+        !Array.isArray(currentMetadataSource)
+          ? (currentMetadataSource as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
@@ -283,7 +351,6 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems !== undefined) {
-      const current = await repositories.calls.findByExternalId(call.externalId);
       data.markedItems = mergeRecordingSummaryMarkedItems(
         current?.markedItems ?? call.markedItems,
         updates.markedItems,
@@ -364,7 +431,7 @@ class NoteTakerTranscriptService {
       });
     const titlePromise = call.title
       ? Promise.resolve(null)
-      : transcriptService.generateCallTitle(formattedTranscript, callId).catch((err) => {
+      : transcriptService.generateRecordingTitle(formattedTranscript, callId).catch((err) => {
             logger.error(`[${callId}] generate_title_threw`, {
               path: 'note_taker',
               error: err,
@@ -403,6 +470,19 @@ class NoteTakerTranscriptService {
       try {
         await repositories.calls.update(call.id, { title });
         logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        // Thread-linked recording: patch the anchor message's content with
+        // this title too (mirrors how a regular call's ended message shows its
+        // AI text as message.content) so RecordingBubble never needs its own
+        // live query on the Call row just to display the ended-state title.
+        // Best-effort — a failure here must not affect the saved Call.title.
+        try {
+          await noteTakerCallRepository.updateThreadMessageTitle(call.id, title);
+        } catch (messageError) {
+          logger.error(`[${callId}] thread_message_title_update_failed`, {
+            path: 'note_taker',
+            error: messageError,
+          });
+        }
         return true;
       } catch (error) {
         logger.error(`[${callId}] call_record_update_failed`, {
@@ -734,7 +814,7 @@ class NoteTakerTranscriptService {
       const slug = this.slugifyLabel(rawLabel);
       if (!slug) continue;
       try {
-        const tagId = await this.getOrCreateLabelTag(call, slug);
+        const tagId = await this.getOrCreateLabelTag(call, slug, TagMethod.LLM);
         if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
       } catch (error) {
         logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
@@ -743,13 +823,34 @@ class NoteTakerTranscriptService {
     return tagIds;
   }
 
+  /**
+   * Labels arrive as a mix of Tag ids (already applied) and raw text (just typed), and
+   * leave as ids only — typed text becomes a real Tag marked `manual`.
+   */
+  async resolveLabelsToTagIds(call: Call, incoming: string[]): Promise<string[]> {
+    if (!call.workspaceId) return [...new Set(incoming)];
+
+    const known = await tagRepository.findByIds(incoming, call.workspaceId);
+    const knownIds = new Set(known.map((tag) => tag.id));
+    const ids: string[] = [];
+
+    for (const entry of incoming) {
+      if (knownIds.has(entry)) {
+        ids.push(entry);
+        continue;
+      }
+      const slug = this.slugifyLabel(entry);
+      if (!slug) continue;
+      const id = await this.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
+      if (id) ids.push(id);
+    }
+
+    return [...new Set(ids)];
+  }
+
   /** Normalize an LLM-generated label into the Tag framework's required format (lowercase, hyphenated). */
   private slugifyLabel(raw: string): string | null {
-    const slug = raw
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    const slug = normalizeTagName(raw);
     if (!slug) return null;
     const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
     return TAG_FORMAT_REGEX.test(safe) ? safe : null;
@@ -761,9 +862,19 @@ class NoteTakerTranscriptService {
    * so tagService.createTag doesn't require a workspace-level TagsConfig for
    * the "topic" category (see assertManualCategoryOrOverride).
    */
-  private async getOrCreateLabelTag(call: Call, slug: string): Promise<string | null> {
+  private async getOrCreateLabelTag(
+    call: Call,
+    slug: string,
+    method: TagMethod,
+  ): Promise<string | null> {
     const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-    if (existing) return existing.id;
+    if (existing) {
+      // Typing a label the LLM only suggested asserts it just as the tick button does.
+      if (method === TagMethod.MANUAL && existing.method === TagMethod.LLM) {
+        await tagService.confirmTag(existing.id, call.workspaceId!);
+      }
+      return existing.id;
+    }
 
     try {
       const created = await tagService.createTag(
@@ -772,7 +883,7 @@ class NoteTakerTranscriptService {
         call.workspaceId!,
         NOTE_TAKER_LABEL_CATEGORY,
         slug,
-        TagMethod.LLM,
+        method,
       );
       return created.id;
     } catch (error) {

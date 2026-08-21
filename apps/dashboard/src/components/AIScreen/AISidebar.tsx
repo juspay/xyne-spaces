@@ -67,7 +67,7 @@ interface AINavItem {
 
 const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
     key: 'organization',

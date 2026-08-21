@@ -157,6 +157,19 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       keyframes: {
+        // Incoming-call modal: the radar ping behind a solo caller's avatar.
+        'call-radar': {
+          '0%': { transform: 'scale(1)', opacity: '0.45' },
+          '100%': { transform: 'scale(1.92)', opacity: '0' },
+        },
+        'call-card-in': {
+          from: { opacity: '0', transform: 'scale(0.96) translateY(6px)' },
+          to: { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        'call-overlay-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
         'accordion-down': {
           from: {
             height: '0',
@@ -251,6 +264,9 @@ export default {
         },
       },
       animation: {
+        'call-radar': 'call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'call-card-in': 'call-card-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+        'call-overlay-in': 'call-overlay-in 150ms linear',
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'slide-in-up': 'slide-in-up 0.2s ease-in forwards',

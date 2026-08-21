@@ -384,6 +384,17 @@ export enum ActivityClassificationJobType {
   SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
 }
 
+// Lifecycle of a structured message whose state drives UI outside the message
+// bubble. Stored as a string in Postgres so adding a future lifecycle state
+// does not require altering a database enum.
+// @ts-ignore TS1294
+export enum MessageArtifactStatus {
+  ACTIVE = 'active',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
+}
+
 // @ts-ignore TS1294
 export enum CallType {
   AUDIO = 'AUDIO',
@@ -621,6 +632,7 @@ export enum NotificationType {
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
 }
 
 // @ts-ignore TS1294

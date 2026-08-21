@@ -15,6 +15,8 @@ import {
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -22,6 +24,7 @@ import type {
   PartialBlock,
   StyleSchema,
 } from '@blocknote/core';
+import { withCollaboration } from '@blocknote/core/yjs';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
@@ -77,14 +80,18 @@ import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasIn
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
-const canvasDictionary = {
+const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
+
+const buildCanvasDictionary = (placeholder: string): typeof en => ({
   ...en,
   placeholders: {
     ...en.placeholders,
-    default: "Write something, or press '/' for commands",
-    emptyDocument: "Write something, or press '/' for commands",
+    default: placeholder,
+    emptyDocument: placeholder,
   },
-};
+});
+
+const canvasDictionary = buildCanvasDictionary(DEFAULT_CANVAS_PLACEHOLDER);
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
@@ -124,7 +131,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       channelId,
       title,
       editable = true,
-      placeholder: _placeholder,
+      placeholder,
       className = '',
       onFileUpload,
       onChange,
@@ -186,16 +193,26 @@ export const CollaborativeCanvasEditor = forwardRef<
     }
 
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
+    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
-    const editorOptions = {
+    const dictionary = useMemo(
+      () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
+      [placeholder],
+    );
+
+    const baseEditorOptions = {
       schema: canvasSchema,
-      dictionary: canvasDictionary,
+      dictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
       _tiptapOptions: canvasTiptapOptions,
-      ...(shouldUseCollaboration
-        ? {
+    };
+
+    const editorOptions =
+      shouldUseCollaboration && provider && fragment
+        ? withCollaboration({
+            ...baseEditorOptions,
             collaboration: {
               fragment,
               user: {
@@ -205,13 +222,14 @@ export const CollaborativeCanvasEditor = forwardRef<
               },
               provider,
             },
-          }
-        : {}),
-    };
+          })
+        : baseEditorOptions;
 
     const editor = useCreateBlockNote(editorOptions as Parameters<typeof useCreateBlockNote>[0], [
       canvasId,
       awareness,
+      fragment,
+      provider,
       shouldUseCollaboration,
     ]);
 
@@ -266,8 +284,14 @@ export const CollaborativeCanvasEditor = forwardRef<
       const whiteboardItems = getWhiteboardSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
+      const mathItems = getMathSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      const diagramItems = getDiagramSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
 
-      return [...whiteboardItems];
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
     // Get slash menu items with custom blocks
@@ -660,7 +684,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 overflowWrap: 'break-word',
               }}
             >
-              {editor && (
+              {editor && canMountEditor && (
                 <CanvasMentionContext.Provider value={mentionContextValue}>
                   <BlockNoteView
                     editor={
@@ -751,7 +775,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={
+              editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>
+            }
+          />
+        )}
       </div>
     );
   },

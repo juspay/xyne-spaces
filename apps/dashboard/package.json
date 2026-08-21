@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.189.7",
+  "version": "1.208.0",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
@@ -33,7 +33,9 @@
   "dependencies": {
     "@base-ui/react": "^1.1.0",
     "@blocknote/core": "0.54.0",
+    "@blocknote/diagram-block": "0.54.0",
     "@blocknote/mantine": "0.54.0",
+    "@blocknote/math-block": "0.54.0",
     "@blocknote/react": "0.54.0",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/lang-json": "^6.0.2",

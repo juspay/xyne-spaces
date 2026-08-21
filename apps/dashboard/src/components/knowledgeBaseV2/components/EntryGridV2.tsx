@@ -14,6 +14,8 @@ interface EntryGridV2Props {
   /** Surfaces a hover-revealed share button on FOLDER cards. Wired by
    *  the root-level collections view only; files are not shareable. */
   onShare?: (entry: CollectionChild) => void;
+  /** Opens the per-collection ingestion status drawer (root collections view). */
+  onOpenStatus?: (entry: CollectionChild) => void;
   /** Entry id currently in inline-rename mode (only one at a time). When
    *  set the matching card renders an editable input instead of its name. */
   editingId?: string | null;
@@ -65,6 +67,7 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
   onRenameCancel,
   scrollParentRef,
   folderCaption,
+  onOpenStatus,
 }) => {
   const cols = useResponsiveCols();
   const rowCount = Math.ceil(entries.length / cols);
@@ -115,6 +118,7 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
                       onShare={onShare ? () => onShare(e) : undefined}
+                      onOpenStatus={onOpenStatus}
                       isRenaming={isRenaming}
                       onRenameCommit={commitFor}
                       onRenameCancel={onRenameCancel}
