@@ -224,6 +224,19 @@ export const CollaborativeCanvasEditor = forwardRef<
       shouldUseCollaboration,
     ]);
 
+    // Editor mount marker — log once per canvas when the editor is live, to bound
+    // load timing between query complete and an interactive editor.
+    const editorMountedIdRef = useRef<string | null>(null);
+    useEffect(() => {
+      if (!canMountEditor || !editor) return;
+      if (editorMountedIdRef.current === canvasId) return;
+      editorMountedIdRef.current = canvasId;
+      logger.info(Event.CANVAS_EDITOR_MOUNTED, {
+        canvasId,
+        collaborative: shouldUseCollaboration,
+      });
+    }, [canMountEditor, editor, canvasId, shouldUseCollaboration]);
+
     // Presentation state and handlers
     const {
       selectedTheme,

@@ -15,6 +15,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
+import { logger, Event } from '../../../utils/logger';
 import { useAuth } from '../../../hooks/useAuth';
 import { Switch } from '../../ui/Switch';
 import {
@@ -127,11 +128,17 @@ const CanvasPanel = (): ReactElement => {
       setIsPersonalSectionCollapsed(false);
     }
     const newCanvasId = uuidv4();
+    const createStartedAt = performance.now();
 
     try {
       await canvasService.createCollaborativeCanvas({
         id: newCanvasId,
         title: 'Untitled Canvas',
+      });
+
+      logger.info(Event.CANVAS_CREATED, {
+        canvasId: newCanvasId,
+        durationMs: Math.round(performance.now() - createStartedAt),
       });
 
       const now = Date.now();
@@ -151,7 +158,11 @@ const CanvasPanel = (): ReactElement => {
       };
 
       void navigate(`/chat/canvas/${newCanvasId}`, { state: { canvas: optimisticCanvas } });
-    } catch {
+    } catch (error) {
+      logger.error(Event.CANVAS_CREATE_FAILED, {
+        canvasId: newCanvasId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       toast.error('Error', {
         description: 'Failed to create canvas. Please try again.',
       });
