@@ -457,6 +457,10 @@ const envSchema = Joi.object({
     .default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default('http://localhost:3001'),
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
+
+  // Canvas suggestion mode: park agent edits for human approval instead of
+  // writing them straight to the collaborative document. Off by default.
+  ENABLE_CANVAS_SUGGESTIONS: Joi.boolean().default(false),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
@@ -1084,6 +1088,9 @@ export const config = {
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
+  },
+  canvasSuggestions: {
+    enabled: envVars.ENABLE_CANVAS_SUGGESTIONS as boolean,
   },
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,

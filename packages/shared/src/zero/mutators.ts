@@ -6687,6 +6687,86 @@ export const mutators = defineMutators({
       },
     ),
   },
+  /** Optimistic client half of the suggestion mutators: updates statuses for instant UI; the server applies the document change. */
+  canvasSuggestion: {
+    resolveChange: defineMutator(
+      z.object({ changeId: z.string(), accept: z.boolean(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { changeId, accept, timestamp } }) => {
+        const change = await tx.run(zql.canvas_suggestion_changes.where('id', changeId).one());
+        if (!change) throw new Error('Suggestion change not found');
+        const suggestion = await tx.run(
+          zql.canvas_suggestions.where('id', change.suggestionId).one(),
+        );
+        if (!suggestion) throw new Error('Suggestion not found');
+        const canvas = await tx.run(zql.canvases.where('id', suggestion.canvasId).one());
+        if (!canvas) throw new Error('Canvas not found');
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
+        if (!canEdit) throw new Error('You do not have permission to edit this canvas');
+
+        await tx.mutate.canvas_suggestion_changes.update({
+          id: changeId,
+          status: accept ? 'ACCEPTED' : 'REJECTED',
+                    updatedAt: timestamp,
+        });
+      },
+    ),
+
+    acceptChanges: defineMutator(
+      z.object({ changeIds: z.array(z.string()).min(1).max(200), timestamp: z.number() }),
+      async ({ tx, ctx, args: { changeIds, timestamp } }) => {
+        for (const changeId of changeIds) {
+          await tx.mutate.canvas_suggestion_changes.update({
+            id: changeId,
+            status: 'ACCEPTED',
+                        updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+
+    acceptAll: defineMutator(
+      z.object({ suggestionId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { suggestionId, timestamp } }) => {
+        const changes = await tx.run(
+          zql.canvas_suggestion_changes.where('suggestionId', suggestionId),
+        );
+        for (const change of changes) {
+          if (change.status !== 'PENDING') continue;
+          await tx.mutate.canvas_suggestion_changes.update({
+            id: change.id,
+            status: 'ACCEPTED',
+                        updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+
+    rejectAll: defineMutator(
+      z.object({ suggestionId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { suggestionId, timestamp } }) => {
+        const changes = await tx.run(
+          zql.canvas_suggestion_changes.where('suggestionId', suggestionId),
+        );
+        for (const change of changes) {
+          if (change.status !== 'PENDING') continue;
+          await tx.mutate.canvas_suggestion_changes.update({
+            id: change.id,
+            status: 'REJECTED',
+                        updatedAt: timestamp,
+          });
+        }
+        await tx.mutate.canvas_suggestions.update({
+          id: suggestionId,
+          status: 'REJECTED',
+                    updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+
   canvasFolder: {
     create: defineMutator(
       z.object({
