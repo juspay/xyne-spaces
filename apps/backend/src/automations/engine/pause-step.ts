@@ -1,6 +1,7 @@
 export class PauseStep extends Error {
   readonly externalRef: string | undefined;
   readonly statePatch: Record<string, unknown> | undefined;
+  pausePath: string | undefined;
 
   constructor(
     reason: string,
