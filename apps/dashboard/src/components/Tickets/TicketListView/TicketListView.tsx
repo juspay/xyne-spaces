@@ -146,6 +146,10 @@ export interface SelectableRow {
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
+  // Bulk actions route stage changes by board type and create labels under the
+  // ticket's project, so both ids ride along with the selection.
+  boardId?: string | null;
+  projectId?: string | null;
 }
 
 export const TicketListView = function TicketListView({
@@ -781,6 +785,8 @@ export const TicketListView = function TicketListView({
                       priority: row.priority,
                       assignedTo: row.assignedTo,
                       userGroupId: row.userGroupId,
+                      boardId: row.boardId,
+                      projectId: row.projectId,
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -811,6 +817,8 @@ export const TicketListView = function TicketListView({
       priority: t.priority,
       assignedTo: t.assignedTo,
       userGroupId: t.userGroupId,
+      boardId: t.boardId,
+      projectId: t.projectId,
     };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>

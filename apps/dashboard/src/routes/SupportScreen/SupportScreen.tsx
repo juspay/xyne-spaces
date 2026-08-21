@@ -139,11 +139,18 @@ import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
-import { useUser } from '../../hooks/useUsers';
+import { useActiveUsers, useUser } from '../../hooks/useUsers';
+import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
+import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
+import {
+  dueDateToEta,
+  useBulkTicketActions,
+  type BulkTicketUpdates,
+} from '../../components/Tickets/TicketTable/useBulkTicketActions';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
@@ -1549,6 +1556,10 @@ const SupportScreen = (): ReactElement => {
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
+    // The bulk bar routes stage changes by board type and creates labels under the
+    // ticket's project, so both ids are captured with the selection.
+    boardId?: string | null | undefined;
+    projectId?: string | null | undefined;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1574,6 +1585,8 @@ const SupportScreen = (): ReactElement => {
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
+      boardId?: string | null | undefined;
+      projectId?: string | null | undefined;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1593,6 +1606,8 @@ const SupportScreen = (): ReactElement => {
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
+            boardId: row.boardId,
+            projectId: row.projectId,
           });
         }
         return next;
@@ -1632,6 +1647,8 @@ const SupportScreen = (): ReactElement => {
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
+        boardId?: string | null | undefined;
+        projectId?: string | null | undefined;
       }>,
       select: boolean,
     ): void => {
@@ -1652,6 +1669,8 @@ const SupportScreen = (): ReactElement => {
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
+              boardId: row.boardId,
+              projectId: row.projectId,
             });
           } else {
             next.delete(row.id);
@@ -1686,11 +1705,86 @@ const SupportScreen = (): ReactElement => {
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
+            boardId: ticket.boardId,
+            projectId: ticket.projectId,
           },
         ]),
       ),
     );
   }, []);
+
+  // --- Bulk field edits over the current selection ---------------------------
+  // The list view has no grid of its own, so the shared bulk bar is driven from
+  // here; the table view renders the same bar from inside TicketTable.
+  // Active only — the server rejects a deactivated assignee, so don't offer one.
+  const deskUsers = useActiveUsers();
+  const { applyUpdates: applyBulkUpdates, applyTags: applyBulkTags } = useBulkTicketActions();
+
+  const selectedTicketList = useMemo(() => Array.from(selectedTickets.values()), [selectedTickets]);
+
+  // Every desk ticket lives on the channel's board, so the label catalog can be
+  // read off whichever page of tickets is currently loaded.
+  const deskProjectId = kanbanTickets[0]?.projectId;
+  const [deskProjectTags] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: deskProjectId ?? '' }),
+    { enabled: !!deskProjectId },
+  );
+  const deskAvailableTags = useMemo(
+    () => Array.from(new Set((deskProjectTags ?? []).map(tag => tag.name))).sort(),
+    [deskProjectTags],
+  );
+  // No Stage control on boards that gate moves client-side (evaluateLinearStageGate) —
+  // a bulk bar can't run per-ticket forms/approvals. NON_LINEAR is server-enforced.
+  const deskBoardGatesStageMoves = useMemo(() => {
+    if (channelBoardDetail?.boardType === BoardType.NON_LINEAR) return false;
+    return (channelBoardDetail?.stages ?? []).some(
+      stage =>
+        (stage.approvers?.length ?? 0) > 0 ||
+        (stage.formContextMappings ?? []).some(
+          mapping => mapping.contextType === FormContextType.STAGE,
+        ),
+    );
+  }, [channelBoardDetail?.boardType, channelBoardDetail?.stages]);
+
+  const deskBulkStages = useMemo(
+    () =>
+      deskBoardGatesStageMoves
+        ? []
+        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+    [availableStages, deskBoardGatesStageMoves],
+  );
+
+  // A stage's default status must ride along in the same write — see BulkTicketUpdates.stage.
+  const deskStageStatusByName = useMemo(
+    () => new Map(availableStages.map(stage => [stage.name, stage.status])),
+    [availableStages],
+  );
+
+  const handleBulkFieldUpdate = useCallback(
+    (updates: BulkTicketUpdates): void => {
+      if (selectedTicketList.length === 0) return;
+      applyBulkUpdates(selectedTicketList, updates);
+      clearTicketSelection();
+    },
+    [applyBulkUpdates, selectedTicketList, clearTicketSelection],
+  );
+
+  const handleBulkStageChange = useCallback(
+    (name: string): void => {
+      const statusV2 = deskStageStatusByName.get(name);
+      handleBulkFieldUpdate({ stage: { name, ...(statusV2 ? { statusV2 } : {}) } });
+    },
+    [deskStageStatusByName, handleBulkFieldUpdate],
+  );
+
+  const handleBulkTagsChange = useCallback(
+    (tags: string[]): void => {
+      if (selectedTicketList.length === 0 || tags.length === 0) return;
+      applyBulkTags(selectedTicketList, tags);
+      clearTicketSelection();
+    },
+    [applyBulkTags, selectedTicketList, clearTicketSelection],
+  );
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
@@ -3442,6 +3536,29 @@ const SupportScreen = (): ReactElement => {
                   </>
                 )}
               </div>
+              {/* Bulk field actions for the list view — the table view already gets
+                  the same bar from TicketTable, driven by its own grid selection. */}
+              {viewMode === 'list' && selectedTicketIds.size > 0 && (
+                <BulkActionToolbar
+                  selectedCount={selectedTicketIds.size}
+                  users={deskUsers}
+                  stages={deskBulkStages}
+                  onAssigneeChange={value =>
+                    handleBulkFieldUpdate(assigneeOptionToTicketUpdate(value))
+                  }
+                  onStatusChange={value => handleBulkFieldUpdate({ statusV2: value })}
+                  onPriorityChange={value => {
+                    if (value) handleBulkFieldUpdate({ priority: value });
+                  }}
+                  onStageChange={handleBulkStageChange}
+                  onDueDateChange={date => {
+                    if (date) handleBulkFieldUpdate({ eta: dueDateToEta(date) });
+                  }}
+                  onClearSelection={clearTicketSelection}
+                  availableTags={deskAvailableTags}
+                  onTagsChange={handleBulkTagsChange}
+                />
+              )}
             </div>
           </Panel>
         )}
