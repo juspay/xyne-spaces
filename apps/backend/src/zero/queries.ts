@@ -4833,6 +4833,19 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Every explicit grant (per-user or per-group) on a root collection — the
+  // "Who has access" list in ShareCollectionModal.
+  collectionPermissions: defineQuery(
+    z.object({ collectionId: z.string() }),
+    ({ args: { collectionId } }) => {
+      return zql.collection_permissions
+        .where('collectionId', collectionId)
+        .related('user')
+        .related('userGroup')
+        .related('channel');
+    },
+  ),
+
 
 
   messageNudges: defineQuery(
