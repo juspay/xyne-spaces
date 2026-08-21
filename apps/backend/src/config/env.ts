@@ -3,6 +3,8 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { parseInternalAppHostMap } from '@/utils/internalHostMap';
+
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
@@ -404,6 +406,9 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
+  // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
+  INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -960,6 +965,9 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  apps: {
+    internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },

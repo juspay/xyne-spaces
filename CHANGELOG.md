@@ -1,3 +1,24 @@
+## [1.208.1](https://github.com/juspay/xyne-spaces/compare/v1.208.0...v1.208.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes reaction hover tooltip max 2 cap on names issue ([#894](https://github.com/juspay/xyne-spaces/issues/894)) ([bce423c](https://github.com/juspay/xyne-spaces/commit/bce423c7af9ccd0dca2e5183f2f46a2421c4373f))
+
+## [1.208.0](https://github.com/juspay/xyne-spaces/compare/v1.207.2...v1.208.0) (2026-08-21)
+
+
+### Features
+
+* setup internal claw calls ([#778](https://github.com/juspay/xyne-spaces/issues/778)) ([cf6f5e0](https://github.com/juspay/xyne-spaces/commit/cf6f5e009a9dbbf23e752af74c1edf0e2414e4a7))
+
+## [1.207.2](https://github.com/juspay/xyne-spaces/compare/v1.207.1...v1.207.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* resolve release-canvas creator under service scope ([#883](https://github.com/juspay/xyne-spaces/issues/883)) ([79c5491](https://github.com/juspay/xyne-spaces/commit/79c549146fad05d35c19ccb52797a0b1d5e0e2b9))
+
 ## [1.207.1](https://github.com/juspay/xyne-spaces/compare/v1.207.0...v1.207.1) (2026-08-21)
 
 
