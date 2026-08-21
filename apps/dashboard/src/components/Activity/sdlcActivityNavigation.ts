@@ -21,10 +21,7 @@ const metadataRecord = (value: unknown): CanvasMetadata =>
 
 const sdlcRepoId = (metadata: unknown): string | null => {
   const value = metadataRecord(metadata);
-  return value['surface'] === 'SDLC' &&
-    value['hiddenFromChat'] === true &&
-    typeof value['repoId'] === 'string' &&
-    value['repoId']
+  return value['surface'] === 'SDLC' && typeof value['repoId'] === 'string' && value['repoId']
     ? value['repoId']
     : null;
 };
