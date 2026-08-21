@@ -16,6 +16,7 @@ import {
   CapabilityChipRow,
   CapabilityRow,
 } from '../../../shared/primitives/CapabilityChips';
+import type { DetailTypeScale } from '../../../shared/primitives/DetailPrimitives';
 import { ChipIconTile } from '../../../shared/primitives/TokenChip';
 import type { AgentKnowledge } from './useAgentKnowledge';
 
@@ -32,11 +33,13 @@ export function AgentKnowledgeChips({
   knowledge,
   trackName,
   showAdd = true,
+  typeScale = 'library',
 }: {
   canEdit: boolean;
   knowledge: AgentKnowledge;
   trackName: string;
   showAdd?: boolean;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   const skills = useSkillCatalog();
   const tree = useClawKnowledgeBaseTree();
@@ -74,6 +77,7 @@ export function AgentKnowledgeChips({
               return (
                 <CapabilityChip
                   key={entry.id}
+                  typeScale={typeScale}
                   radius='12'
                   icon={
                     <ChipIconTile>
@@ -112,6 +116,7 @@ export function AgentKnowledgeChips({
             {knowledgeChips.map(grant => (
               <CapabilityChip
                 key={grant.key}
+                typeScale={typeScale}
                 icon={
                   <ChipIconTile>
                     <FolderDefault className='size-4' variant='Solid' />

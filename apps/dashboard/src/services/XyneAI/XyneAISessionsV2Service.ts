@@ -13,6 +13,11 @@ import type {
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
 import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPendingActionStore';
+import {
+  XYNE_AI_DEFAULT_AGENT_SLUG,
+  XYNE_AI_LEGACY_AGENT_SLUG,
+  resolveStreamAgentSlug,
+} from '../../utils/xyneAIAgentSlug';
 
 // ============================================================================
 // Claw API response types
@@ -83,7 +88,7 @@ interface ClawMessagesResponse {
 export async function fetchV2Conversations(
   agentSlug?: string | null,
 ): Promise<ConversationHistoryType[]> {
-  const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  const effectiveAgentSlug = resolveStreamAgentSlug(agentSlug);
   const url = `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
   const response = await apiInstance.get<ClawConversationListResponse>(url);
 
@@ -100,7 +105,28 @@ export async function fetchV2Conversations(
     lastUpdated: new Date(conv.lastMessageAt),
     createdAt: new Date(conv.lastMessageAt),
     messages: [],
+    agentSlug: effectiveAgentSlug,
   }));
+}
+
+/** Dual-read legacy ask-ai and digital-twin threads for the default Xyne AI recents list. */
+export async function fetchV2ConversationsForDefaultXyneAI(): Promise<ConversationHistoryType[]> {
+  const [legacy, current] = await Promise.all([
+    fetchV2Conversations(XYNE_AI_LEGACY_AGENT_SLUG),
+    fetchV2Conversations(XYNE_AI_DEFAULT_AGENT_SLUG),
+  ]);
+
+  const merged = new Map<string, ConversationHistoryType>();
+  for (const conversation of [...legacy, ...current]) {
+    const existing = merged.get(conversation.sessionId);
+    if (!existing || conversation.lastUpdated > existing.lastUpdated) {
+      merged.set(conversation.sessionId, conversation);
+    }
+  }
+
+  return [...merged.values()].sort(
+    (left, right) => right.lastUpdated.getTime() - left.lastUpdated.getTime(),
+  );
 }
 
 /**
@@ -113,7 +139,7 @@ export async function fetchV2ConversationMessages(
   agentSlug?: string | null,
   urlOverride?: string,
 ): Promise<Message[]> {
-  const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  const effectiveAgentSlug = resolveStreamAgentSlug(agentSlug);
   const url =
     urlOverride ??
     `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
@@ -298,7 +324,7 @@ export async function deleteV2Conversation(
   conversationId: string,
   agentSlug?: string | null,
 ): Promise<void> {
-  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
+  const query = `?agentSlug=${encodeURIComponent(resolveStreamAgentSlug(agentSlug))}`;
   await apiInstance.delete(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
   );

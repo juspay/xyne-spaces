@@ -4,7 +4,7 @@ import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage
 
 export function useAIChatHandoff(): {
   onCreateChat: () => void;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, _agentSlug?: string) => void;
 } {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -17,7 +17,7 @@ export function useAIChatHandoff(): {
   }, [navigate, chatPath]);
 
   const onSelectSession = useCallback(
-    (sessionId: string): void => {
+    (sessionId: string, _agentSlug?: string): void => {
       sessionStorage.setItem(AI_ACTIVE_SESSION_KEY, sessionId);
       sessionStorage.setItem(AI_SHOW_CHAT_VIEW_KEY, '1');
       void navigate(chatPath);

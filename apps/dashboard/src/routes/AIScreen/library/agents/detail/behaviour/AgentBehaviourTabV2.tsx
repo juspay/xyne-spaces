@@ -61,12 +61,14 @@ export function AgentBehaviourTabV2({
   className,
   heading = 'section',
   typeScale = 'library',
+  headingClassName,
 }: {
   agent: Agent;
   canEdit: boolean;
   className?: string;
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -141,6 +143,7 @@ export function AgentBehaviourTabV2({
       typeScale={typeScale}
       label='Behaviour'
       {...(className === undefined ? {} : { className })}
+      {...(headingClassName === undefined ? {} : { headingClassName })}
     >
       <DetailStack>
         <DetailSection

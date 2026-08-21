@@ -17,7 +17,7 @@ import { cn } from '../../utils/classNames';
 interface AIShellProps {
   activeSessionId?: string | undefined;
   onCreateChat: () => void;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, agentSlug?: string) => void;
   onAccount?: (() => void) | undefined;
   mobileOpen?: boolean | undefined;
   onMobileOpenChange?: ((open: boolean) => void) | undefined;

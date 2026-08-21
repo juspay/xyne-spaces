@@ -7,7 +7,28 @@
 
 This document maps the Digital Twin experience in the repository's shipped
 baseline (`HEAD`) to the current local version. Routes are shown relative to
-`/claw-agents/digital-twin`.
+`/claw-agents/digital-twin` unless noted as **Xyne AI settings** (`/ai/settings`).
+
+## Xyne AI settings home (current)
+
+Digital Twin is no longer a separate sidebar product. The same capabilities live
+under **Xyne AI settings** at `/ai/settings` (default **Overview**). Internal
+agent slug remains `digital-twin`.
+
+| Former Twin route (under `/ai/digital-twin` or `/claw-agents/digital-twin`) | Current destination |
+| --- | --- |
+| `/` or `/overview` | `/ai/settings/overview` |
+| `/configuration`, `/persona` | `/ai/settings/configuration` (includes AI Providers + Agent Model Assignment at top, then Model / Credentials / Behaviour / Tools and Knowledge / People) |
+| `/memories` | `/ai/settings/memories` |
+| `/proposals` | `/ai/settings/review` (`/proposals` alias preserved) |
+| `/activity` | `/ai/settings/activity` |
+| `/settings` (reply policy, disable, delete) | `/ai/settings/settings` (header **Settings** gear; `/learning` redirects here) |
+| `/hot`, `/recall`, `/graph`, `/metrics` | `/ai/settings/hot`, `/recall`, `/graph`, `/metrics` (Activity overflow / inspect tools) |
+| `/claw-agents/settings` (providers only) | `/ai/settings/configuration` |
+
+**Chat:** default Xyne AI at `/ai/chat/new` streams as `digital-twin`. Twin is
+not listed in Library or the agent picker; configure it only via `/ai/settings`.
+Chat works when learning is disabled; a banner points users to settings to enable.
 
 ## Navigation mapping
 
@@ -21,7 +42,7 @@ baseline (`HEAD`) to the current local version. Routes are shown relative to
 | Metrics      | `/metrics`    | **Inspect -> Approval insights**                      | `/metrics`    | Renamed and moved into advanced tools     |
 | Settings     | `/settings`   | Header **Settings** action                            | `/settings`   | Same route; removed from the old sidebar  |
 | None         | None          | Primary **Overview** tab (first; default landing)     | `/overview` (`/` redirects here) | Twin description, instructions, and capability chips (MCP, Subagent, Built in tools, Skills, Knowledge) |
-| None         | None          | Primary **Configuration** tab                         | `/configuration` (`/persona` redirects here) | Model and Credentials as separate sections, Behaviour, Tools and Knowledge (one heading over MCP / Subagent / Built in tools / Skills / Knowledge chip rows in the same #fafafa DetailGroup as the other sections), People. Twin-only type scale: section titles **14px** semibold (`heading='title'`), nested field titles **14px** medium, Behaviour and People group labels (Sandbox, Constant reminders, Autonomy, Verification, Output; Access, Members, Pending Requests) **14px / 400 / 1.35 / tertiary** (`heading='subcategory'`, `font-normal`) sit **outside** the grey fill; each group's content uses the same #fafafa DetailGroup as Model / Credentials. Hints **14px** `font-normal` (400). Twin-only **16px** section heading-to-content gap; nested Twin subcategory title-to-content is **8px**. Twin Configuration hairline is **`TWIN_STROKE_CLASS`**: `border-[0.8px] border-foreground/10` (same as capability chips) on DetailGroups, selects, credentials control, reminders field, member filter, and empty search; Library / Overview `#e8e8e8` fields stay. Tools and Knowledge is display-only until **Edit** (pencil) on the heading; Edit reveals + on capability titles and × on pills, **Done** hides them again. Overview chips stay display-only. 16px top padding like Overview. Description and instructions live on Overview. |
+| None         | None          | Primary **Configuration** tab                         | `/configuration` (`/persona` redirects here) | Model and Credentials as separate sections, Behaviour, Tools and Knowledge (one heading over MCP / Subagent / Built in tools / Skills / Knowledge chip rows in the same #f7f7f7 DetailGroup as the other sections), People. Configuration section titles (**AI Providers**, **Agent Model Assignment**, Model, Credentials, Behaviour, Tools and Knowledge, People) are **16px** semibold (`TWIN_SETTINGS_TITLE_CLASS` on `headingClassName`; `DigitalTwinPersonaTab` is settings-only). Nested field titles **14px** medium, Behaviour and People group labels (Sandbox, Constant reminders, Autonomy, Verification, Output; Access, Members, Pending Requests) **14px / 400 / 1.35 / tertiary** (`heading='subcategory'`, `font-normal`) sit **outside** the grey fill; each group's content uses the same #f7f7f7 DetailGroup as Model / Credentials. Hints **14px** `font-normal` (400). Twin-only **16px** section heading-to-content gap; nested Twin subcategory title-to-content is **8px**. Twin Configuration hairline is **`TWIN_STROKE_CLASS`**: `border-[0.8px] border-foreground/10` (same as capability chips) on DetailGroups, selects, credentials control, reminders field, member filter, and empty search; Library / Overview `#e8e8e8` fields stay. Tools and Knowledge is display-only until **Edit** (pencil) on the heading; Edit reveals + on capability titles and × on pills, **Done** hides them again. Overview chips stay display-only. 16px top padding like Overview. Description and instructions live on Overview. |
 | None         | None          | Primary **Activity** tab                              | `/activity`   | New dashboard route                       |
 
 The old Digital Twin sidebar has not disappeared feature by feature. Its
@@ -57,7 +78,8 @@ destinations are now divided between:
 | Created date               | `Added [date]` in card metadata                                         | Renamed                                              |
 | Recall count               | `[N] uses this week`                                                    | Plain-language rename                                |
 | Delete icon                | Three-dot menu -> **Delete memory**                                     | Same function, labeled and confirmed                 |
-| Client-side search         | Main Memories search field                                              | Now searches server-side across the complete library |
+| Client-side search         | Twin-column search above the memory list (Agent Assignment chrome: `#f7f7f7` DetailGroup, h-9, no extra stroke) | Now searches server-side across the complete library |
+| Knowledge-area filters     | Filter control next to Memories search (Communication, Expertise, Projects, Relationships, Preferences, Decisions, Documents, Context) | Eight curator areas; still server-side with search |
 | Loaded/total counter       | Memories count badge                                                    | Simplified                                           |
 | Category guide             | No direct equivalent                                                    | Replaced by knowledge-area categorization            |
 | Category badge             | Colored knowledge-area icon and label                                   | Different taxonomy; see the warning below            |
@@ -139,8 +161,8 @@ combine them through the Disable modal.
 
 | Current-version feature     | Location                               | Backend relationship                            |
 | --------------------------- | -------------------------------------- | ----------------------------------------------- |
-| Overview                    | `/overview` (**Overview**)             | Description, instructions, and selected MCP / subagent / built-in tool / skill / knowledge chips. Overview inputs use 12px top padding (`pt-3`) and 20px bottom (`pb-5`). Instructions hug content while idle (overflow hidden, no empty 250px well); if text exceeds ~250px, idle caps there with an inside bottom fade into `#fbfbfb`. Focus expands to 400px, enables vertical scroll when needed, and hides the fade. Chips are display-only (no Edit); add and remove live on Configuration after **Edit**. |
-| Stacked agent detail        | `/configuration` (**Configuration**; `/persona` still resolves here) | Model and Credentials ungrouped (not one persona stack). Behaviour. Tools and Knowledge as one section: MCP, Subagent, Built in tools, Skills, and Knowledge chip rows are siblings in one #fafafa DetailGroup (not a nested Knowledge group, not per-row cards). Twin-only type scale: section titles **14px** semibold, nested titles **14px** medium, Behaviour and People group labels **14px / 400** subcategory (`text-foreground/60`, `font-normal`) sit **outside** the grey fill; each group's content (Sandbox, Constant reminders, Autonomy, Verification, Output; Access, Members, Pending Requests) uses the same #fafafa DetailGroup as Model / Credentials. Nested hints **14px** / 400 (`font-normal`). Twin-only **16px** section heading-to-content gap; nested Twin subcategory title-to-content is **8px**. Twin Configuration stroke is `TWIN_STROKE_CLASS` (`border-[0.8px] border-foreground/10`) on groups, controls, reminders, member filter, and empty search. Tools and Knowledge heading **Edit** (pencil) reveals + / ×; **Done** returns to display-only. Overview chips stay display-only. Stack has **16px** top padding like Overview. Description and instructions are on Overview, not repeated here. Activity is a primary tab, not stacked here. |
+| Overview                    | `/overview` (**Overview**)             | Description, instructions, and selected MCP / subagent / built-in tool / skill / knowledge chips. Overview inputs use 12px top padding (`pt-3`) and 20px bottom (`pb-5`). Description and instructions wells (editable and read-only) fill `#f7f7f7` with no stroke. Instructions hug content while idle (overflow hidden, no empty 250px well); if text exceeds ~250px, idle caps there with an inside bottom fade into `#f7f7f7`. Focus expands to 400px, enables vertical scroll when needed, and hides the fade. Display-only capability chips fill `#f7f7f7` with no stroke; add and remove live on Configuration after **Edit**. |
+| Stacked agent detail        | `/configuration` (**Configuration**; `/persona` still resolves here) | Independent section groups (no nested providers/persona mega-wrappers): **AI Providers**, **Agent Model Assignment**, Model, Credentials, Behaviour, Tools and Knowledge, People. Model and Credentials ungrouped (not one persona stack). Behaviour. Tools and Knowledge as one section: MCP, Subagent, Built in tools, Skills, and Knowledge chip rows are siblings in one #f7f7f7 DetailGroup (not a nested Knowledge group, not per-row cards). Configuration section titles **16px** semibold (`TWIN_SETTINGS_TITLE_CLASS`), nested titles **14px** medium, Behaviour and People group labels **14px / 400** subcategory (`text-foreground/60`, `font-normal`) sit **outside** the grey fill; each group's content (Sandbox, Constant reminders, Autonomy, Verification, Output; Access, Members, Pending Requests) uses the same #f7f7f7 DetailGroup as Model / Credentials. Nested hints **14px** / 400 (`font-normal`). Twin-only **16px** section heading-to-content gap; nested Twin subcategory title-to-content is **8px**. Twin Configuration stroke is `TWIN_STROKE_CLASS` (`border-[0.8px] border-foreground/10`) on groups, controls, reminders, member filter, and empty search. Tools and Knowledge heading **Edit** (pencil) reveals + / ×; **Done** returns to display-only. Overview chips stay display-only. Description and instructions are on Overview, not repeated here. Activity is a primary tab, not stacked here. |
 | Learning-event timeline     | `/activity`                            | Exposes pipeline-event APIs                     |
 | Record and source previews  | Activity details and memory provenance | Exposes stored pipeline records                 |
 | Curator outcomes and errors | Activity details                       | Exposes stored traces                           |
@@ -166,6 +188,12 @@ tracked separately from the product changes above.
 
 ## Stakeholder summary
 
+> **Xyne AI merge:** Twin capabilities now live at `/ai/settings` (Overview default).
+> Chat at `/ai/chat/new` is Xyne AI (`digital-twin` slug). Old Twin URLs redirect
+> to matching settings tabs. Providers sit in **Configuration**; former Twin
+> **Settings** is **Settings** (header gear at `/ai/settings/settings`; `/learning`
+> redirects). Chat works when learning is off; a banner links to settings to enable.
+>
 > No existing Digital Twin destination was deleted. Memories and Settings kept
 > their routes; Proposals became Review; Hot, Recall, Graph, and Metrics moved
 > under Inspect with clearer names. The header is a centered identity stack
@@ -187,17 +215,16 @@ tracked separately from the product changes above.
 > the Enable flow and Resume. Disable moved into Settings. Overview
 > (`/overview`) is the default landing: description, instructions, and
 > capability chips. Configuration (`/configuration`; `/persona` redirects here)
-> stacks Model, Credentials, Behaviour, Tools and Knowledge, and People from the
-> AI Library agent page (Model and Credentials are ungrouped; Tools and Knowledge
+> starts with **AI Providers** and **Agent Model Assignment**, then Model, Credentials, Behaviour, Tools and Knowledge, and People from the
+> AI Library agent page as independent section groups (Model and Credentials are ungrouped; Tools and Knowledge
 > is one heading over MCP, Subagent, Built in tools, Skills, and Knowledge as
-> sibling chip rows in the same #fafafa group as the other sections; Twin-only
-> type scale is 14px semibold section titles, 14px nested titles, Behaviour and People
+> sibling chip rows in the same #f7f7f7 group as the other sections; Configuration
+> section titles are 16px semibold via `TWIN_SETTINGS_TITLE_CLASS`, 14px nested titles, Behaviour and People
 > group labels 14px/400 subcategory, 14px/400 hints; Behaviour and People group
 > titles (Access, Members, Pending Requests) sit outside the grey fill, with
-> content in the same #fafafa DetailGroup; 16px section heading-to-content gap
+> content in the same #f7f7f7 DetailGroup; 16px section heading-to-content gap
 > and **8px** nested Twin subcategory title-to-content; Tools and Knowledge
-> **Edit** reveals add/remove on chips, **Done** hides them; 16px top padding
-> like Overview).
+> **Edit** reveals add/remove on chips, **Done** hides them).
 > Description and instructions are only on Overview.
 > Primary tabs are
 > Overview, Configuration, Memories, Review, and Activity (the Figma header

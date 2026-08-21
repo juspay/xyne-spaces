@@ -22,14 +22,12 @@ import ClawAgentCreateScreen from './ClawAgentsScreen/ClawAgentCreateScreen';
 import ClawMcpDetailScreen from './ClawAgentsScreen/ClawMcpDetailScreen';
 import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
 import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
-import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
 import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
 import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
 import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
 import ClawOrganizationScreen from './ClawAgentsScreen/ClawOrganizationScreen';
-import ClawDigitalTwinScreen from './ClawAgentsScreen/ClawDigitalTwinScreen';
 import ClawDigitalTwinMetricsScreen from './ClawAgentsScreen/ClawDigitalTwinMetricsScreen';
 import DigitalTwinMemoriesTab from './ClawAgentsScreen/tabs/DigitalTwinMemoriesTab';
 import DigitalTwinHotTab from './ClawAgentsScreen/tabs/DigitalTwinHotTab';
@@ -37,8 +35,6 @@ import DigitalTwinProposalsTab from './ClawAgentsScreen/tabs/DigitalTwinProposal
 import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
 import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
 import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
-import DigitalTwinPersonaTab from './ClawAgentsScreen/tabs/DigitalTwinPersonaTab';
-import DigitalTwinOverviewTab from './ClawAgentsScreen/tabs/DigitalTwinOverviewTab';
 import DigitalTwinActivityTab from './ClawAgentsScreen/tabs/DigitalTwinActivityTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
@@ -226,6 +222,10 @@ import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
+import XyneAISettingsScreen from './AIScreen/screens/XyneAISettingsScreen';
+import XyneAISettingsOverviewTab from './AIScreen/screens/XyneAISettingsOverviewTab';
+import XyneAISettingsConfigurationTab from './AIScreen/screens/XyneAISettingsConfigurationTab';
+import DigitalTwinToSettingsRedirect from './AIScreen/screens/DigitalTwinToSettingsRedirect';
 import UserGuideScreen from './UserGuideScreen';
 import DailyBriefScreen from './DailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
@@ -885,25 +885,27 @@ export const router = createBrowserRouter([
                     element: <AISectionLayout />,
                     children: [
                       {
-                        path: 'digital-twin',
-                        element: <ClawDigitalTwinScreen />,
+                        path: 'settings',
+                        element: <XyneAISettingsScreen />,
                         children: [
                           { index: true, element: <Navigate to='overview' replace /> },
-                          { path: 'overview', element: <DigitalTwinOverviewTab /> },
-                          { path: 'configuration', element: <DigitalTwinPersonaTab /> },
-                          { path: 'persona', element: <Navigate to='../configuration' replace /> },
+                          { path: 'overview', element: <XyneAISettingsOverviewTab /> },
+                          { path: 'configuration', element: <XyneAISettingsConfigurationTab /> },
                           { path: 'memories', element: <DigitalTwinMemoriesTab /> },
+                          { path: 'review', element: <DigitalTwinProposalsTab /> },
+                          { path: 'proposals', element: <Navigate to='../review' replace /> },
+                          { path: 'activity', element: <DigitalTwinActivityTab /> },
                           { path: 'hot', element: <DigitalTwinHotTab /> },
-                          { path: 'proposals', element: <DigitalTwinProposalsTab /> },
                           { path: 'recall', element: <DigitalTwinRecallTab /> },
                           { path: 'graph', element: <DigitalTwinGraphTab /> },
                           { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
                           { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                          { path: 'activity', element: <DigitalTwinActivityTab /> },
+                          { path: 'learning', element: <Navigate to='../settings' replace /> },
                         ],
                       },
+                      { path: 'digital-twin', element: <DigitalTwinToSettingsRedirect /> },
+                      { path: 'digital-twin/*', element: <DigitalTwinToSettingsRedirect /> },
                       { path: 'metrics', element: <ClawMetricsScreen /> },
-                      { path: 'settings', element: <ClawSettingsScreen /> },
                     ],
                   },
                 ],
@@ -1160,24 +1162,14 @@ export const router = createBrowserRouter([
                   { path: 'organization', element: <ClawOrganizationScreen /> },
                   {
                     path: 'digital-twin',
-                    element: <ClawDigitalTwinScreen />,
-                    children: [
-                      { index: true, element: <Navigate to='overview' replace /> },
-                      { path: 'overview', element: <DigitalTwinOverviewTab /> },
-                      { path: 'configuration', element: <DigitalTwinPersonaTab /> },
-                      { path: 'persona', element: <Navigate to='../configuration' replace /> },
-                      { path: 'memories', element: <DigitalTwinMemoriesTab /> },
-                      { path: 'hot', element: <DigitalTwinHotTab /> },
-                      { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                      { path: 'recall', element: <DigitalTwinRecallTab /> },
-                      { path: 'graph', element: <DigitalTwinGraphTab /> },
-                      { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                      { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                      { path: 'activity', element: <DigitalTwinActivityTab /> },
-                    ],
+                    element: <DigitalTwinToSettingsRedirect />,
                   },
+                  { path: 'digital-twin/*', element: <DigitalTwinToSettingsRedirect /> },
                   { path: 'metrics', element: <ClawMetricsScreen /> },
-                  { path: 'settings', element: <ClawSettingsScreen /> },
+                  {
+                    path: 'settings',
+                    element: <Navigate to='../ai/settings/configuration' replace />,
+                  },
                 ],
               },
               {

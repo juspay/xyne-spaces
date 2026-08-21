@@ -25,6 +25,7 @@ import {
   DetailGroup,
   DetailLockedNote,
   DetailSection,
+  TWIN_SETTINGS_TITLE_CLASS,
   TWIN_STROKE_CLASS,
 } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 
@@ -40,6 +41,12 @@ const SECTION_SEARCH_TERMS: Record<string, readonly string[]> = {
 };
 
 const TWIN_SECTION_GAP = 'gap-4';
+
+const TWIN_TITLE_PROPS = {
+  heading: 'title' as const,
+  typeScale: 'twin' as const,
+  headingClassName: TWIN_SETTINGS_TITLE_CLASS,
+};
 
 const TWIN_EDIT_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
@@ -68,8 +75,7 @@ const TwinToolsAndKnowledge = ({
 
   return (
     <DetailSection
-      heading='title'
-      typeScale='twin'
+      {...TWIN_TITLE_PROPS}
       label='Tools and Knowledge'
       className={TWIN_SECTION_GAP}
       {...(canEdit
@@ -225,86 +231,70 @@ const DigitalTwinPersonaTab = (): ReactElement => {
   return (
     <>
       {controlsHost && createPortal(controls, controlsHost)}
-      <div className='flex flex-col gap-10 pt-4'>
-        {!hasVisible ? (
-          <div
-            className={cn(
-              'flex min-h-48 flex-col items-center justify-center rounded-xl bg-muted/20 px-8 py-12 text-center',
-              TWIN_STROKE_CLASS,
-              'border-dashed',
-            )}
+      {!hasVisible ? (
+        <div
+          className={cn(
+            'flex min-h-48 flex-col items-center justify-center rounded-xl bg-muted/20 px-8 py-12 text-center',
+            TWIN_STROKE_CLASS,
+            'border-dashed',
+          )}
+        >
+          <p className='text-sm font-semibold text-foreground'>No configuration matched</p>
+          <p className='mt-1 max-w-[48ch] text-sm text-muted-foreground'>
+            Try a different search, or clear it to see Model, Credentials, Behaviour, Tools and
+            Knowledge, and People.
+          </p>
+          <Button
+            variant='outline'
+            size='sm'
+            className='mt-4'
+            onClick={() => setSearch('')}
+            data-track-category='Claw Agents'
+            data-track-name='Digital Twin clear configuration search'
           >
-            <p className='text-sm font-semibold text-foreground'>No configuration matched</p>
-            <p className='mt-1 max-w-[48ch] text-sm text-muted-foreground'>
-              Try a different search, or clear it to see Model, Credentials, Behaviour, Tools and
-              Knowledge, and People.
-            </p>
-            <Button
-              variant='outline'
-              size='sm'
-              className='mt-4'
-              onClick={() => setSearch('')}
-              data-track-category='Claw Agents'
-              data-track-name='Digital Twin clear configuration search'
-            >
-              Clear search
-            </Button>
-          </div>
-        ) : (
-          <>
-            {visibility.persona && (
-              <>
-                <section>
-                  <ModelCard
-                    agent={agent}
-                    canEdit={canEdit}
-                    className={TWIN_SECTION_GAP}
-                    heading='title'
-                    typeScale='twin'
-                  />
-                </section>
-                <section>
-                  <CredentialsCard
-                    slug={agent.slug}
-                    canRead={canEdit}
-                    canManage={canManageCredentials}
-                    className={TWIN_SECTION_GAP}
-                    heading='title'
-                    typeScale='twin'
-                  />
-                </section>
-              </>
-            )}
-            {visibility.behaviour && (
-              <section>
-                <AgentBehaviourTabV2
-                  agent={agent}
-                  canEdit={canEdit}
-                  className={TWIN_SECTION_GAP}
-                  heading='title'
-                  typeScale='twin'
-                />
-              </section>
-            )}
-            {visibility.toolsAndKnowledge && (
-              <section>
-                <TwinToolsAndKnowledge agent={agent} canEdit={canEdit} />
-              </section>
-            )}
-            {visibility.people && (
-              <section>
-                <AgentPeopleTabV2
-                  agent={agent}
-                  actions={actions}
-                  className={TWIN_SECTION_GAP}
-                  heading='title'
-                  typeScale='twin'
-                />
-              </section>
-            )}
-          </>
-        )}
-      </div>
+            Clear search
+          </Button>
+        </div>
+      ) : (
+        <>
+          {visibility.persona && (
+            <>
+              <ModelCard
+                agent={agent}
+                canEdit={canEdit}
+                className={TWIN_SECTION_GAP}
+                {...TWIN_TITLE_PROPS}
+              />
+              <CredentialsCard
+                slug={agent.slug}
+                canRead={canEdit}
+                canManage={canManageCredentials}
+                className={TWIN_SECTION_GAP}
+                {...TWIN_TITLE_PROPS}
+              />
+            </>
+          )}
+          {visibility.behaviour && (
+            <AgentBehaviourTabV2
+              agent={agent}
+              canEdit={canEdit}
+              className={TWIN_SECTION_GAP}
+              {...TWIN_TITLE_PROPS}
+            />
+          )}
+          {visibility.toolsAndKnowledge && (
+            <TwinToolsAndKnowledge agent={agent} canEdit={canEdit} />
+          )}
+          {visibility.people && (
+            <AgentPeopleTabV2
+              agent={agent}
+              actions={actions}
+              className={TWIN_SECTION_GAP}
+              {...TWIN_TITLE_PROPS}
+            />
+          )}
+        </>
+      )}
     </>
   );
 };

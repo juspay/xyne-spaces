@@ -8,6 +8,7 @@ import {
   type AccessibleClawAgent,
 } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { isHiddenPickerAgentSlug } from '../../utils/xyneAIAgentSlug';
 
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
@@ -40,10 +41,12 @@ export function AIAgentSelector({
   });
 
   const filteredAgents = useMemo(() => {
-    const withoutAskAI = agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai');
-    if (!query.trim()) return withoutAskAI;
+    const withoutDefault = agents.filter(
+      (a: AccessibleClawAgent) => !isHiddenPickerAgentSlug(a.slug),
+    );
+    if (!query.trim()) return withoutDefault;
     const q = query.toLowerCase();
-    return withoutAskAI.filter((a: AccessibleClawAgent) => a.name.toLowerCase().includes(q));
+    return withoutDefault.filter((a: AccessibleClawAgent) => a.name.toLowerCase().includes(q));
   }, [agents, query]);
 
   const selectedAgent = useMemo(
@@ -51,7 +54,7 @@ export function AIAgentSelector({
     [agents, selectedAgentSlug],
   );
 
-  const displayText = selectedAgent?.name ?? 'Ask AI';
+  const displayText = selectedAgent?.name ?? 'Xyne AI';
 
   const trigger = (
     <button
@@ -139,7 +142,7 @@ export function AIAgentSelector({
         {/* Scrollable list */}
         {!isLoading && (
           <div className='overflow-auto py-1'>
-            {/* Ask AI option */}
+            {/* Xyne AI option */}
             <button
               onClick={() => {
                 if (selectedAgentSlug !== null) {
@@ -156,10 +159,10 @@ export function AIAgentSelector({
               )}
               data-track-category='XyneAI'
               data-track-name='SELECT_AGENT'
-              data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
+              data-track-metadata={JSON.stringify({ agentSlug: 'digital-twin' })}
             >
               <Bot className='w-4 h-4 shrink-0' />
-              <span className='font-normal'>Ask AI</span>
+              <span className='font-normal'>Xyne AI</span>
             </button>
 
             {/* Divider if there are agents */}

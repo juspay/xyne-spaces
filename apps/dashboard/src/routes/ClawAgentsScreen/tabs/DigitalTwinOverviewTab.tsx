@@ -21,7 +21,7 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { CAPABILITY_LABEL_CLASS } from '@/routes/AIScreen/library/shared/primitives/CapabilityChips';
 import {
   DETAIL_TEXT_VALUE_CLASS,
-  TWIN_STROKE_CLASS,
+  TWIN_SURFACE_FILL_CLASS,
 } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { useAgentDetailActions } from '@/routes/AIScreen/library/agents/detail/useAgentDetailActions';
 import { AgentKnowledgeChips } from '@/routes/AIScreen/library/agents/detail/knowledge/AgentKnowledgeChips';
@@ -37,8 +37,8 @@ const INSTRUCTIONS_FOCUS_MAX_PX = 400;
 const OVERVIEW_FIELD_PAD = 'px-3 pt-3 pb-5';
 
 const OVERVIEW_FIELD_CHROME = cn(
-  'w-full rounded-2xl bg-muted',
-  TWIN_STROKE_CLASS,
+  'w-full rounded-2xl',
+  TWIN_SURFACE_FILL_CLASS,
   OVERVIEW_FIELD_PAD,
   'placeholder:text-foreground/40 focus:outline-none',
 );
@@ -101,11 +101,11 @@ const OverviewInstructionsChrome = ({
   children: ReactNode;
   clipped: boolean;
 }): ReactElement => (
-  <div className={cn('group relative overflow-hidden rounded-2xl bg-muted', TWIN_STROKE_CLASS)}>
+  <div className={cn('group relative overflow-hidden rounded-2xl', TWIN_SURFACE_FILL_CLASS)}>
     {children}
     <span
       className={cn(
-        'pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent transition-opacity duration-200 ease-out group-focus-within:opacity-0',
+        'pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#f7f7f7] to-transparent transition-opacity duration-200 ease-out group-focus-within:opacity-0',
         clipped ? 'opacity-100' : 'opacity-0',
       )}
       aria-hidden
@@ -269,6 +269,7 @@ const DigitalTwinOverviewBody = ({
         tools={tools}
         trackName='Digital Twin overview'
         showAdd={false}
+        typeScale='twin'
       />
 
       <AgentKnowledgeChips
@@ -276,6 +277,7 @@ const DigitalTwinOverviewBody = ({
         knowledge={knowledge}
         trackName='Digital Twin overview'
         showAdd={false}
+        typeScale='twin'
       />
 
       {savingCopy && (

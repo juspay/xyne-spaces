@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { normalizeSelectedAgentSlug } from '../utils/xyneAIAgentSlug';
 
 /**
  * Hook to manage the currently selected claw agent (sidebar/standalone scope).
@@ -32,7 +33,7 @@ function readStorageAgent(): string | null {
 function writeStorageAgent(slug: string | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (slug && slug !== 'ask-ai') {
+    if (slug && slug !== 'ask-ai' && slug !== 'digital-twin') {
       localStorage.setItem(STORAGE_KEY, slug);
     } else {
       localStorage.removeItem(STORAGE_KEY);
@@ -45,7 +46,7 @@ function writeStorageAgent(slug: string | null): void {
 function writeUrlAgent(slug: string | null): void {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  if (slug && slug !== 'ask-ai') {
+  if (slug && slug !== 'ask-ai' && slug !== 'digital-twin') {
     url.searchParams.set('agent', slug);
   } else {
     url.searchParams.delete('agent');
@@ -75,7 +76,7 @@ function getSnapshot(): string | null {
 }
 
 function setSelectedAgentSlugStore(slug: string | null): void {
-  const normalized = slug === 'ask-ai' ? null : slug;
+  const normalized = normalizeSelectedAgentSlug(slug);
   if (normalized === currentSlug) return;
   currentSlug = normalized;
   writeStorageAgent(normalized);
@@ -95,9 +96,9 @@ if (typeof window !== 'undefined') {
 }
 
 export interface UseSelectedAgentReturn {
-  /** Currently selected agent slug. `null` means the legacy Ask AI tab is active. */
+  /** Currently selected agent slug. `null` means the default Xyne AI agent is active. */
   selectedAgentSlug: string | null;
-  /** Change the selected agent. Pass `null` to switch to the Ask AI tab. */
+  /** Change the selected agent. Pass `null` to switch to Xyne AI. */
   setSelectedAgentSlug: (slug: string | null) => void;
 }
 

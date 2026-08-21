@@ -3,7 +3,11 @@ import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyn
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { cn } from '@/utils/classNames';
 import { VerifiedTick } from '../pickers/mcp/McpIdentity';
-import { TWIN_STROKE_CLASS } from './DetailPrimitives';
+import {
+  TWIN_STROKE_CLASS,
+  TWIN_SURFACE_FILL_CLASS,
+  type DetailTypeScale,
+} from './DetailPrimitives';
 
 export const CAPABILITY_LABEL_CLASS =
   'text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground';
@@ -16,6 +20,7 @@ export function CapabilityChip({
   onRemove,
   radius = '10',
   removeTrackName = 'Remove capability chip',
+  typeScale = 'library',
 }: {
   icon: ReactNode;
   label: string;
@@ -24,13 +29,16 @@ export function CapabilityChip({
   onRemove?: (() => void) | undefined;
   radius?: '10' | '12';
   removeTrackName?: string;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   return (
     <span
       title={secondary ? `${label} · ${secondary}` : label}
       className={cn(
-        'flex h-9 shrink-0 items-center gap-1.5 overflow-hidden bg-foreground/[0.06] py-1 pl-1 pr-2',
-        TWIN_STROKE_CLASS,
+        'flex h-9 shrink-0 items-center gap-1.5 overflow-hidden py-1 pl-1 pr-2',
+        typeScale === 'twin'
+          ? TWIN_SURFACE_FILL_CLASS
+          : cn('bg-foreground/[0.06]', TWIN_STROKE_CLASS),
         radius === '12' ? 'rounded-xl' : 'rounded-[10px]',
       )}
     >

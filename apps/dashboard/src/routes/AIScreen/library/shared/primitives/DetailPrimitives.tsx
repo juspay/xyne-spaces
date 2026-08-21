@@ -18,8 +18,11 @@ export const DETAIL_TEXT_FIELD_CLASS =
 export const DETAIL_TEXT_VALUE_CLASS =
   'whitespace-pre-wrap break-words text-[14px] font-[450] leading-5 tracking-[-0.28px] text-foreground';
 
-/** Twin Configuration hairline — CapabilityChip already uses this. */
+/** Twin Configuration hairline — compact controls, not gray fill surfaces. */
 export const TWIN_STROKE_CLASS = 'border-[0.8px] border-solid border-foreground/10';
+
+/** Twin / Xyne AI settings gray fill on white — containers, wells, Overview chips. */
+export const TWIN_SURFACE_FILL_CLASS = 'bg-[#f7f7f7]';
 
 /** Dropdown / compact control on a setting row (hug width, 12px radius, 15/450/1.2). */
 export const DETAIL_CONTROL_CLASS =
@@ -59,6 +62,13 @@ const HEADING_CLASS: Record<DetailHeading, string> = {
 const TWIN_TITLE_CLASS =
   'text-[14px] font-semibold leading-[1.2] tracking-[-0.2px] text-foreground';
 
+/**
+ * Xyne AI settings Configuration titles (AI Providers, Agent Model Assignment,
+ * Model, Credentials, Behaviour, Tools and Knowledge, People).
+ * Local 16px override — Library agent-detail titles keep default heading classes.
+ */
+export const TWIN_SETTINGS_TITLE_CLASS = HEADING_CLASS.title;
+
 /** Twin nested group labels (Verification, …) and hints: 14px Inter normal. */
 const TWIN_SUBCATEGORY_CLASS = 'text-[14px] font-normal leading-[1.35] text-foreground/60';
 
@@ -93,6 +103,7 @@ export function DetailSectionHeading({
   trailingAlign = 'inline',
   heading = 'subcategory',
   typeScale = 'library',
+  headingClassName,
 }: {
   label: string;
   info?: string;
@@ -100,6 +111,7 @@ export function DetailSectionHeading({
   trailingAlign?: 'inline' | 'end';
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
 }): ReactElement {
   const headingClass =
     typeScale === 'twin' && heading === 'title'
@@ -109,7 +121,7 @@ export function DetailSectionHeading({
         : HEADING_CLASS[heading];
   return (
     <div className='flex w-full items-center gap-1.5'>
-      <span className={cn('inline-flex items-center gap-1.5', headingClass)}>
+      <span className={cn('inline-flex items-center gap-1.5', headingClass, headingClassName)}>
         {label}
         {info && (
           <Tooltip side='top' content={info}>
@@ -142,10 +154,10 @@ export function DetailCard({
   );
 }
 
-/** Grouped setting rows — fill only (#fafafa), no stroke (library + twin). */
+/** Grouped setting rows — fill only, no stroke. Library #fafafa; Twin settings #f7f7f7. */
 export function DetailGroup({
   className,
-  typeScale: _typeScale = 'library',
+  typeScale = 'library',
   children,
 }: {
   className?: string;
@@ -153,7 +165,13 @@ export function DetailGroup({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className={cn('flex w-full flex-col gap-6 rounded-2xl bg-[#fafafa] p-4', className)}>
+    <div
+      className={cn(
+        'flex w-full flex-col gap-6 rounded-2xl p-4',
+        typeScale === 'twin' ? TWIN_SURFACE_FILL_CLASS : 'bg-[#fafafa]',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -182,6 +200,7 @@ export function DetailSection({
   trailingAlign,
   heading = 'subcategory',
   typeScale = 'library',
+  headingClassName,
   className,
   children,
 }: {
@@ -191,6 +210,7 @@ export function DetailSection({
   trailingAlign?: 'inline' | 'end';
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
   className?: string;
   children: ReactNode;
 }): ReactElement {
@@ -205,6 +225,7 @@ export function DetailSection({
         {...(info === undefined ? {} : { info })}
         {...(trailing === undefined ? {} : { trailing })}
         {...(trailingAlign === undefined ? {} : { trailingAlign })}
+        {...(headingClassName === undefined ? {} : { headingClassName })}
       />
       {children}
     </section>

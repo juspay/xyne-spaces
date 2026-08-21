@@ -11,6 +11,7 @@ import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/compo
 import type { UserActivity } from '../hooks/useUserActivity';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
+import { resolveStreamAgentSlug } from '../utils/xyneAIAgentSlug';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -152,9 +153,9 @@ export const useXyneAIStream = ({
   // React may still have the draft key in refs while the manager already updated streamSlotKey;
   // fall back to streamId (one POST == one streamId) so chunks are not dropped.
   useEffect(() => {
-    const expectedAgentSlug = agentSlug ?? 'ask-ai';
+    const expectedAgentSlug = resolveStreamAgentSlug(agentSlug);
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
-      if ((state.agentSlug ?? 'ask-ai') !== expectedAgentSlug) return;
+      if ((state.agentSlug ?? resolveStreamAgentSlug(null)) !== expectedAgentSlug) return;
       const slotRef = streamSessionKeyRef.current;
       const matchesSlot = state.streamSlotKey === slotRef;
       const matchesTrackedStream =
@@ -199,7 +200,7 @@ export const useXyneAIStream = ({
       // activeStreams TTL is 5min) and we want to adopt its messages.
       const sessionToMatch = conversationIdRef.current;
       for (const s of xyneAIStreamManager.getAllActiveStreams().values()) {
-        if ((s.agentSlug ?? 'ask-ai') !== expectedAgentSlug) continue;
+        if ((s.agentSlug ?? resolveStreamAgentSlug(null)) !== expectedAgentSlug) continue;
         if (
           s.streamSlotKey === streamSessionKey ||
           (sessionToMatch && s.sessionId === sessionToMatch)
@@ -417,7 +418,7 @@ export const useXyneAIStream = ({
           canvasIds: eCanvasIds,
           callIds: eCallIds,
           attachedContext: combinedAttachedContext,
-          agentSlug: agentSlug ?? undefined,
+          agentSlug: resolveStreamAgentSlug(agentSlug),
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
           ...(isV2 && model ? { model } : {}),
@@ -461,7 +462,10 @@ export const useXyneAIStream = ({
     xyneAIStreamManager.abortStreamByThread(threadId);
     const convId = conversationIdRef.current;
     if (convId) {
-      const match = xyneAIStreamManager.findActiveStreamBySessionId(convId, agentSlug ?? 'ask-ai');
+      const match = xyneAIStreamManager.findActiveStreamBySessionId(
+        convId,
+        resolveStreamAgentSlug(agentSlug),
+      );
       if (match && match.threadId !== threadId) {
         xyneAIStreamManager.abortStream(match.streamId);
       }

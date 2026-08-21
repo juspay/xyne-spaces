@@ -22,6 +22,7 @@ interface CredentialsCardProps {
   className?: string;
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
 }
 
 export function CredentialsCard({
@@ -31,6 +32,7 @@ export function CredentialsCard({
   className,
   heading = 'section',
   typeScale = 'library',
+  headingClassName,
 }: CredentialsCardProps): ReactElement {
   const [keysOpen, setKeysOpen] = useState(false);
   const { data: credentials } = useAgentCredentials(slug, canRead);
@@ -44,6 +46,7 @@ export function CredentialsCard({
       heading={heading}
       typeScale={typeScale}
       {...(className === undefined ? {} : { className })}
+      {...(headingClassName === undefined ? {} : { headingClassName })}
       {...(canManage ? {} : { trailing: <ReadOnlyBadge /> })}
     >
       <DetailGroup typeScale={typeScale}>

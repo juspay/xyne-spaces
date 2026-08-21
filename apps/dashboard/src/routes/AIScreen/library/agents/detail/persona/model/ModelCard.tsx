@@ -81,12 +81,14 @@ export function ModelCard({
   className,
   heading = 'section',
   typeScale = 'library',
+  headingClassName,
 }: {
   agent: Agent;
   canEdit: boolean;
   className?: string;
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -124,6 +126,7 @@ export function ModelCard({
       heading={heading}
       typeScale={typeScale}
       {...(className === undefined ? {} : { className })}
+      {...(headingClassName === undefined ? {} : { headingClassName })}
       {...(canEdit ? {} : { trailing: <ReadOnlyBadge /> })}
     >
       {!canEdit && (

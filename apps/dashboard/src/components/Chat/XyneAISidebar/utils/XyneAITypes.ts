@@ -263,6 +263,8 @@ export interface ConversationHistory {
   createdAt: Date;
   lastUpdated: Date;
   isStarred?: boolean;
+  /** Claw agent slug backing this conversation (for dual-read default Xyne AI recents). */
+  agentSlug?: string;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
   lastInputContext?: LastInputContext;
 }

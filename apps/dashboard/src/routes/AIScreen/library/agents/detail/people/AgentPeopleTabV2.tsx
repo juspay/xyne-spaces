@@ -58,12 +58,14 @@ export function AgentPeopleTabV2({
   className,
   heading = 'section',
   typeScale = 'library',
+  headingClassName,
 }: {
   agent: Agent;
   actions: AgentDetailActions;
   className?: string;
   heading?: DetailHeading;
   typeScale?: DetailTypeScale;
+  headingClassName?: string;
 }): ReactElement {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -191,6 +193,7 @@ export function AgentPeopleTabV2({
       typeScale={typeScale}
       label='People'
       {...(className === undefined ? {} : { className })}
+      {...(headingClassName === undefined ? {} : { headingClassName })}
     >
       <DetailStack>
         <DetailSection

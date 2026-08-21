@@ -11,7 +11,6 @@ import {
   Settings01,
   ThreeDotsMenuVertical,
   UserShield,
-  UserTwo,
 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -60,7 +59,6 @@ interface AINavItem {
 const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
   { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
-  { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
   { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
   { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
@@ -73,7 +71,7 @@ const NAV_ITEMS: AINavItem[] = [
 interface AISidebarProps {
   activeSessionId?: string | undefined;
   onCreateChat: () => void;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, agentSlug?: string) => void;
   onAccount?: (() => void) | undefined;
   /** External control for mobile drawer */
   mobileOpen?: boolean | undefined;
@@ -119,8 +117,8 @@ function SidebarNavItem({
 interface SessionHistoryProps {
   sessions: ConversationHistoryType[];
   activeSessionId?: string | undefined;
-  onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => Promise<void>;
+  onSelect: (sessionId: string, agentSlug?: string) => void;
+  onDelete: (sessionId: string, agentSlug?: string) => Promise<void>;
 }
 
 function SessionHistory({
@@ -189,7 +187,7 @@ function SessionHistory({
                     pulls the row's old left inset inside the hit area too. */}
                 <button
                   type='button'
-                  onClick={() => onSelect(session.sessionId)}
+                  onClick={() => onSelect(session.sessionId, session.agentSlug)}
                   className='flex min-w-0 flex-1 items-center self-stretch pl-3 pr-1 text-left text-sm'
                   data-track-category='XyneAI'
                   data-track-name='SELECT_SESSION'
@@ -322,13 +320,12 @@ export function AISidebar({
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   const { selectedAgentSlug } = useSelectedAgent();
-  const effectiveAgentSlug = selectedAgentSlug;
-  const { data: sessions = [] } = useV2SessionsList(effectiveAgentSlug, true);
+  const { data: sessions = [] } = useV2SessionsList(selectedAgentSlug, true);
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
-  const handleDeleteSession = async (sessionId: string): Promise<void> => {
+  const handleDeleteSession = async (sessionId: string, agentSlug?: string): Promise<void> => {
     try {
-      await deleteV2Conversation(sessionId, effectiveAgentSlug);
+      await deleteV2Conversation(sessionId, agentSlug ?? selectedAgentSlug);
       // If the user just deleted the conversation they're viewing, bounce
       // back to the new-chat landing so the thread pane isn't stuck on a
       // stale session id.
@@ -336,7 +333,7 @@ export function AISidebar({
         onCreateChat();
       }
     } finally {
-      invalidateV2Sessions(effectiveAgentSlug);
+      invalidateV2Sessions(selectedAgentSlug);
     }
   };
 

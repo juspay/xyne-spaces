@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
+import { isHiddenPickerAgentSlug } from '@/utils/xyneAIAgentSlug';
 import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
@@ -24,11 +25,12 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
   const userId = user?.id;
 
   const q = query.trim().toLowerCase();
-  const searched = useMemo(
-    () =>
-      q ? agents.filter(a => `${a.name} ${a.description ?? ''}`.toLowerCase().includes(q)) : agents,
-    [agents, q],
-  );
+  const searched = useMemo(() => {
+    const visible = agents.filter(agent => !isHiddenPickerAgentSlug(agent.slug));
+    return q
+      ? visible.filter(a => `${a.name} ${a.description ?? ''}`.toLowerCase().includes(q))
+      : visible;
+  }, [agents, q]);
 
   const { filtered, activeId, setActive, options } = useCategoryFilter({
     items: searched,

@@ -7,14 +7,20 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
+import {
+  fetchV2Conversations,
+  fetchV2ConversationsForDefaultXyneAI,
+} from '../services/XyneAI/XyneAISessionsV2Service';
+import { normalizeSelectedAgentSlug } from '../utils/xyneAIAgentSlug';
 
 // ============================================================================
 // Query Keys
 // ============================================================================
 
-const V2_SESSIONS_KEY = (agentSlug?: string | null): readonly string[] =>
-  agentSlug ? ['xyne-ai-v2-sessions', agentSlug] : ['xyne-ai-v2-sessions'];
+const V2_SESSIONS_KEY = (agentSlug?: string | null): readonly string[] => {
+  const normalized = normalizeSelectedAgentSlug(agentSlug);
+  return normalized ? ['xyne-ai-v2-sessions', normalized] : ['xyne-ai-v2-sessions', 'default'];
+};
 const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readonly string[] =>
   agentSlug
     ? ['xyne-ai-v2-session', convId, 'messages', agentSlug]
@@ -29,9 +35,11 @@ const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readon
  * @param agentSlug - Optional agent slug to filter conversations per-agent.
  */
 export function useV2SessionsList(agentSlug?: string | null, enabled = true) {
+  const normalized = normalizeSelectedAgentSlug(agentSlug);
   return useQuery({
-    queryKey: V2_SESSIONS_KEY(agentSlug),
-    queryFn: () => fetchV2Conversations(agentSlug),
+    queryKey: V2_SESSIONS_KEY(normalized),
+    queryFn: () =>
+      normalized ? fetchV2Conversations(normalized) : fetchV2ConversationsForDefaultXyneAI(),
     staleTime: 30_000,
     enabled,
   });

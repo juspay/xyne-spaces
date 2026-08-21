@@ -15,6 +15,7 @@ import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPane
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { XyneAITwinDisabledBanner } from '../../components/AIScreen/XyneAITwinDisabledBanner';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 const AIScreen = (): ReactElement => {
@@ -45,8 +46,8 @@ const AIScreen = (): ReactElement => {
   const location = useLocation();
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const isV2 = true;
-  const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
+  const [conversationAgentSlug, setConversationAgentSlug] = useState<string | undefined>(undefined);
   const consumedHandoffRef = useRef(false);
 
   useEffect(() => {
@@ -161,6 +162,7 @@ const AIScreen = (): ReactElement => {
 
   const handleCreateChat = useCallback((): void => {
     setActiveSessionId('');
+    setConversationAgentSlug(undefined);
     setInitialQuery('');
     setInitialAttachments(undefined);
     setInitialExtras(undefined);
@@ -169,9 +171,10 @@ const AIScreen = (): ReactElement => {
   }, []);
 
   const handleSelectSession = useCallback(
-    (sessionId: string): void => {
+    (sessionId: string, agentSlug?: string): void => {
       if (sessionId === activeSessionId) return;
       setActiveSessionId(sessionId);
+      setConversationAgentSlug(agentSlug);
       setInitialQuery('');
       setInitialAttachments(undefined);
       // Preserve the composer's current selections when opening a recent chat
@@ -219,9 +222,9 @@ const AIScreen = (): ReactElement => {
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
       // page reload or a navigate-away-and-back.
-      invalidateV2Sessions(effectiveAgentSlug);
+      invalidateV2Sessions(selectedAgentSlug);
     },
-    [effectiveAgentSlug, invalidateV2Sessions],
+    [selectedAgentSlug, invalidateV2Sessions],
   );
 
   const handleAccount = useCallback((): void => {
@@ -257,10 +260,12 @@ const AIScreen = (): ReactElement => {
         )}
         {showChatView ? (
           <ChatWithCitationDocs>
+            <XyneAITwinDisabledBanner />
             <AIChatThread
               ref={chatThreadRef}
               key={chatKey}
               sessionId={activeSessionId || undefined}
+              conversationAgentSlug={conversationAgentSlug}
               initialQuery={initialQuery}
               initialAttachments={initialAttachments}
               initialExtras={initialExtras}

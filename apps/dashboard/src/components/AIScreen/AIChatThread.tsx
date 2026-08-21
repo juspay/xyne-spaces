@@ -30,6 +30,7 @@ import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { resolveStreamAgentSlug } from '../../utils/xyneAIAgentSlug';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
   Message,
@@ -103,6 +104,8 @@ interface AIChatThreadProps {
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
+  /** When opening a legacy or stored conversation, the claw agent slug it was saved under. */
+  conversationAgentSlug?: string | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
   /** Forwarded to the composer's AIAgentSelector — fires when the user picks
@@ -1302,6 +1305,7 @@ function ChatMessageBubble({
 export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(function AIChatThread(
   {
     sessionId,
+    conversationAgentSlug,
     initialQuery,
     initialAttachments,
     initialExtras,
@@ -1468,7 +1472,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const { selectedAgentSlug } = useSelectedAgent();
   const { askAIVersion } = useAskAIVersion();
   const isV2 = askAIVersion === 'v2';
-  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  const streamAgentSlug = resolveStreamAgentSlug(conversationAgentSlug ?? selectedAgentSlug);
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -1479,7 +1483,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setDebugEvents,
     setDebugArtifactsReadyVersion,
     isV2,
-    agentSlug: effectiveAgentSlug,
+    agentSlug: isV2 ? streamAgentSlug : null,
   });
 
   // ── Branching: resolve the visible path from the full message tree ────────────
@@ -1697,7 +1701,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         setDebugSessionId(null);
 
         if (isV2) {
-          const messages = await fetchV2ConversationMessages(sessionId, effectiveAgentSlug);
+          const messages = await fetchV2ConversationMessages(sessionId, streamAgentSlug);
           const loadedMessages = messages.map(msg => ({
             ...msg,
             isStreaming: false,
@@ -1735,7 +1739,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               detach: xyneAIStreamManager.attachLiveViewer(
                 threadId,
                 sessionId,
-                effectiveAgentSlug || 'ask-ai',
+                streamAgentSlug,
                 loadedMessages,
               ),
             };
@@ -1758,7 +1762,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return () => {
       cancelled = true;
     };
-  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
+  }, [sessionId, threadId, onConversationChange, streamAgentSlug, isV2, conversationAgentSlug]);
 
   // Auto-submit initialQuery once on mount, applying the landing composer's
   // chosen context/toggles to this first turn.
@@ -2212,7 +2216,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          agentSlug={streamAgentSlug}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}

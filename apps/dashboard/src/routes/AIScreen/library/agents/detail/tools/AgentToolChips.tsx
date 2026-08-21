@@ -27,6 +27,7 @@ import {
   CapabilityChipRow,
   CapabilityRow,
 } from '../../../shared/primitives/CapabilityChips';
+import type { DetailTypeScale } from '../../../shared/primitives/DetailPrimitives';
 import { ChipIconTile } from '../../../shared/primitives/TokenChip';
 import type { AgentToolSelection } from './useAgentToolSelection';
 
@@ -35,11 +36,13 @@ export function AgentToolChips({
   tools,
   trackName,
   showAdd = true,
+  typeScale = 'library',
 }: {
   canEdit: boolean;
   tools: AgentToolSelection;
   trackName: string;
   showAdd?: boolean;
+  typeScale?: DetailTypeScale;
 }): ReactElement {
   const subagents = useSubagentCatalog();
   const mcp = useMcpCatalog();
@@ -85,6 +88,7 @@ export function AgentToolChips({
             {selectedMcps.map(entry => (
               <CapabilityChip
                 key={entry.slug}
+                typeScale={typeScale}
                 icon={<McpLogo type={entry.iconType} name={entry.label} />}
                 label={entry.label}
                 verified={entry.verified}
@@ -118,6 +122,7 @@ export function AgentToolChips({
             {selectedSubagents.map(entry => (
               <CapabilityChip
                 key={entry.name}
+                typeScale={typeScale}
                 icon={
                   <ChipIconTile>
                     <UserBot className='size-4' variant='Solid' />
@@ -151,6 +156,7 @@ export function AgentToolChips({
             {pickedBuiltinTools.map(tool => (
               <CapabilityChip
                 key={tool.slug}
+                typeScale={typeScale}
                 radius='12'
                 icon={
                   <ChipIconTile>
