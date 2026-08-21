@@ -45,6 +45,7 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -159,6 +160,7 @@ const AppSidebar = (): ReactElement => {
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();
+  const { pinnedApps } = usePinnedArtifactApps();
   const missedCallCount = useMissedCallCount();
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
@@ -459,6 +461,37 @@ const AppSidebar = (): ReactElement => {
                               {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                             </span>
                           )}
+                        </Link>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
+
+                {/* Pinned artifact apps — user-generated apps promoted to the
+                    rail from the AI Library. Stored per-device in localStorage. */}
+                {pinnedApps.map(app => {
+                  const path = `/ai/library/app/${app.id}`;
+                  const isActive = activeRoute === path;
+                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
+                  return (
+                    <li key={app.id} className='relative'>
+                      <Tooltip content={app.title} side='right' delayDuration={0}>
+                        <Link
+                          to={prefixWs(path)}
+                          onClick={() => handleNavigationClick(app.title)}
+                          aria-label={app.title}
+                          data-testid={`nav-artifact-app-${app.id}`}
+                          data-track-category='App_Sidebar'
+                          data-track-name='Sidebar_Pinned_App'
+                          data-track-metadata={JSON.stringify({ appId: app.id })}
+                          className={cn(
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
+                            isActive
+                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                          )}
+                        >
+                          {initial}
                         </Link>
                       </Tooltip>
                     </li>

@@ -235,6 +235,7 @@ import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
 import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
 import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
 import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
 import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
@@ -1078,7 +1079,21 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-                    { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                    { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
+                    {
+                      path: 'knowledge',
+                      element: <AIKnowledgeScreen />,
+                      children: [
+                        { index: true, element: <KnowledgeBaseV2Screen /> },
+                        {
+                          // Mirrors /knowledge-base's own file-viewer route so
+                          // opening a file from here stays under /ai/knowledge
+                          // instead of hopping to the standalone KB screen.
+                          path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                          element: <FileViewerLayout />,
+                        },
+                      ],
+                    },
                     {
                       path: 'organization',
                       element: (

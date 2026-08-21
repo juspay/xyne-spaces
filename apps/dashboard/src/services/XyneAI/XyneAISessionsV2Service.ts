@@ -10,6 +10,7 @@ import type {
   PendingAction,
   ToolInvocation,
   DebugArtifactBundle,
+  ReactArtifactManifest,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
 import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPendingActionStore';
@@ -52,6 +53,8 @@ interface ClawChatMessage {
     originalFilename: string;
     width: number | null;
     height: number | null;
+    /** Allowlisted by claw-auth's serializer — currently only `reactArtifact`. */
+    metadata?: { reactArtifact?: ReactArtifactManifest };
   }>;
 }
 
@@ -275,6 +278,11 @@ export async function fetchV2ConversationMessages(
         mimeType: att.mimeType,
         width: att.width,
         height: att.height,
+        // Carries the React-artifact manifest so a reloaded thread can render
+        // the artifact card without re-fetching per attachment.
+        ...(att.metadata?.reactArtifact
+          ? { metadata: { reactArtifact: att.metadata.reactArtifact } }
+          : {}),
       }));
     }
 

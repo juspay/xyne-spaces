@@ -46,6 +46,13 @@ const ATTACHMENT_GLOBAL_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]
 // file for self-verification without leaking it to the chat thread.
 const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)(?:\n([\s\S]*))?$/;
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
+// create-react-artifact's manifest marker. Same contract as SLIDE_JSON: the
+// artifact's FULL source rides the attachment bytes, while this small manifest
+// (title/entry/file paths/dep names) travels here so it lands on
+// ChatAttachment.metadata for the dashboard's inline card. Unlike SLIDE_JSON it
+// is also stripped from the text handed back to the model — the model just
+// authored the project and re-reading a listing of it buys nothing.
+const REACT_ARTIFACT_RE = /REACT_ARTIFACT_START\s*([\s\S]+?)\s*REACT_ARTIFACT_END/;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
 // truth — also enforced at the xyne-claw-auth /run boundary). See that module
@@ -372,6 +379,14 @@ export function loadCustomTools(
                 log.warn(`[custom-tool] ${ct.slug} slide JSON parse failed:`, err instanceof Error ? err.message : err);
               }
             }
+            const artifactMatch = trailingText.match(REACT_ARTIFACT_RE);
+            if (artifactMatch?.[1]) {
+              try {
+                metadata["reactArtifact"] = JSON.parse(artifactMatch[1]);
+              } catch (err) {
+                log.warn(`[custom-tool] ${ct.slug} react artifact manifest parse failed:`, err instanceof Error ? err.message : err);
+              }
+            }
           }
 
           const attachment: Attachment = {
@@ -392,11 +407,14 @@ export function loadCustomTools(
           // any SLIDE_JSON block so the fallback text doesn't include
           // metadata the user shouldn't see.
           if (trailingText && trailingText.length > 0) {
-            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").trim();
+            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").replace(REACT_ARTIFACT_RE, "").trim();
             if (visibleSummary.length > 0) lastAttachmentSummary = visibleSummary;
           }
-          const responseText = trailingText && trailingText.length > 0
-            ? `Rendered and attached ${singleMatch[1]}\n\n${trailingText}`
+          // No-op for every existing tool (only create-react-artifact emits the
+          // marker), so the model-facing text is unchanged for create-ppt et al.
+          const modelFacingText = trailingText ? trailingText.replace(REACT_ARTIFACT_RE, "").trim() : "";
+          const responseText = modelFacingText.length > 0
+            ? `Rendered and attached ${singleMatch[1]}\n\n${modelFacingText}`
             : `Rendered and attached ${singleMatch[1]}`;
 
           const isImage = singleMatch[2]!.startsWith("image/");
