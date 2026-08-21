@@ -473,8 +473,9 @@ const ticketUpdate: ToolDef = {
 		"Change fields on an existing Xyne Spaces ticket: title, description, status, priority, assignee, type, due " +
 		"date, board, owning group, or archived flag. Only the fields you pass are changed. Reassigning is done here — " +
 		"pass assigned_to as a user id or an email. " +
-		"To MOVE a ticket between workflow stages, use spaces_ticket_transition instead: setting stage_name here " +
-		"writes the field without running the board's transition rules, approvals, or stage forms.",
+		"To MOVE a ticket between workflow stages, prefer spaces_ticket_transition — it picks the right path for " +
+		"the board. Setting stage_name here works on linear boards but skips the form gates and approvals that " +
+		"NON_LINEAR boards enforce.",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -486,7 +487,7 @@ const ticketUpdate: ToolDef = {
 			assigned_to: { type: "string", description: "New assignee — user id or email address." },
 			stage_name: {
 				type: "string",
-				description: "Set the stage field directly, skipping transition rules. Prefer spaces_ticket_transition.",
+				description: "Change the stage. Prefer spaces_ticket_transition, which handles NON_LINEAR boards too.",
 			},
 			ticket_type: { type: "string", description: "New ticket type label." },
 			user_group_id: { type: "string", description: "New owning user group id." },
@@ -538,11 +539,12 @@ const ticketUpdate: ToolDef = {
 const ticketTransition: ToolDef = {
 	name: "spaces_ticket_transition",
 	description:
-		"Move a Xyne Spaces ticket to another workflow stage, running the board's own transition rules — allowed " +
-		"moves, approvals, and the status the target stage implies. This is what 'move PLAT-1234 to QA' means; " +
-		"prefer it over setting stage_name through spaces_ticket_update, which writes the field and skips all of " +
-		"that. The stage name must exactly match a stage on the ticket's board, so read the names from " +
-		"spaces_board_stages first. If the target stage has a form attached, pass its answers as form_values.",
+		"Move a Xyne Spaces ticket to another workflow stage. This is what 'move PLAT-1234 to QA' means, and it is " +
+		"the right tool for any stage change — it picks the correct path for the ticket's board on its own, so you " +
+		"do not have to know whether that board is linear. The status implied by the target stage is applied either " +
+		"way. The stage name must exactly match a stage on the ticket's board, so read the names from " +
+		"spaces_board_stages first. If the board is NON_LINEAR and the target stage has a form attached, pass its " +
+		"answers as form_values; on other boards form_values is ignored.",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -560,24 +562,70 @@ const ticketTransition: ToolDef = {
 		required: ["ticket_id", "to_stage_name"],
 		additionalProperties: false,
 	},
-	// `now` is a caller-supplied timestamp, and `formValuesJson` is an encoded
-	// string rather than an object — the mutator argument type cannot carry
-	// arbitrary nested JSON.
-	catalog: [{ name: "nonLinear.transition", sends: ["ticketId", "toStageName", "now"] }],
+	// Two paths, because the catalog has two. `nonLinear.transition` implements
+	// form gates, approvals and visit versioning, and refuses anything that is
+	// not a NON_LINEAR board — its own comment says DEFAULT and RELEASE boards
+	// must use the standard stage-update path instead. `ticket.update` is that
+	// path: it resolves the target stage on the board and reconciles statusV2
+	// against the stage's default. Picking wrong fails with a domain_rule error,
+	// so the board type is read first rather than guessed.
+	//
+	// `now` and `updatedAt` are caller-supplied timestamps, and `formValuesJson`
+	// is an encoded string rather than an object — the mutator argument type
+	// cannot carry arbitrary nested JSON.
+	catalog: [
+		{ name: "ticketRowById", sends: ["ticketId"] },
+		{ name: "getBoardById", sends: ["boardId"] },
+		{ name: "stagesByBoard", sends: ["boardId"] },
+		{ name: "nonLinear.transition", sends: ["ticketId", "toStageName", "now"] },
+		{ name: "ticket.update", sends: ["id", "updatedAt"] },
+	],
 	write: true,
 	async handler(args, client) {
 		const ticketId = requiredString(args, "ticket_id");
 		const toStageName = requiredString(args, "to_stage_name");
 		const formValues = args["form_values"];
 
-		await client.catalogMutate("nonLinear.transition", {
-			ticketId,
-			toStageName,
-			now: now(),
-			...(formValues && typeof formValues === "object" ? { formValuesJson: JSON.stringify(formValues) } : {}),
-		});
+		const ticket = asRows<TicketRow>(await client.catalogQuery("ticketRowById", { ticketId }))[0];
+		if (!ticket) throw new Error(`No ticket found with id ${ticketId}.`);
+		if (!ticket.boardId) throw new Error(`Ticket ${ticketId} is not on a board, so it has no stages.`);
 
-		return ok(`Moved ticket ${ticketId} to stage "${toStageName}".`);
+		const board = asRows<{ boardType?: string }>(
+			await client.catalogQuery("getBoardById", { boardId: ticket.boardId }),
+		)[0];
+
+		if (board?.boardType === "NON_LINEAR") {
+			await client.catalogMutate("nonLinear.transition", {
+				ticketId,
+				toStageName,
+				now: now(),
+				...(formValues && typeof formValues === "object" ? { formValuesJson: JSON.stringify(formValues) } : {}),
+			});
+		} else {
+			// `nonLinear.transition` applies the target stage's `defaultTicketStatusV2`
+			// as part of the move. `ticket.update` does not derive it, so it is
+			// resolved and passed explicitly — otherwise moving a ticket to Done
+			// would leave its status on TODO, and the two paths would disagree.
+			const stages = asRows<{ name?: string; defaultTicketStatusV2?: string }>(
+				await client.catalogQuery("stagesByBoard", { boardId: ticket.boardId }),
+			);
+			const target = stages.find((stage) => stage.name === toStageName);
+			if (!target) {
+				const names = stages.map((stage) => stage.name).filter(Boolean);
+				throw new Error(
+					`"${toStageName}" is not a stage on this ticket's board. Stages are: ${names.join(", ") || "(none)"}.`,
+				);
+			}
+			await client.catalogMutate("ticket.update", {
+				id: ticketId,
+				updatedAt: now(),
+				stageName: toStageName,
+				...(target.defaultTicketStatusV2 ? { statusV2: target.defaultTicketStatusV2 } : {}),
+			});
+		}
+
+		const from = ticket.stageName ? `"${ticket.stageName}" → ` : "";
+		return ok(`Moved ticket ${ticketId} ${from}"${toStageName}" (${board?.boardType ?? "unknown"} board).`);
 	},
 };
 

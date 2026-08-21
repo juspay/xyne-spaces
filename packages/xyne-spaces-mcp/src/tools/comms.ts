@@ -466,9 +466,14 @@ interface CanvasRow {
 function blocksToText(value: unknown, depth = 0): string {
 	if (!Array.isArray(value)) return "";
 	const out: string[] = [];
+	// Ordered lists are numbered as they run rather than all emitted as "1.".
+	// Markdown renderers renumber automatically, but a model reads this as plain
+	// text, and "step 4" has to actually say 4.
+	let ordinal = 0;
 	for (const raw of value) {
 		if (!raw || typeof raw !== "object") continue;
 		const block = raw as Record<string, unknown>;
+		const before = out.length;
 		const type = typeof block["type"] === "string" ? block["type"] : "paragraph";
 		const props = (block["props"] ?? {}) as Record<string, unknown>;
 		const text = inlineText(block["content"]);
@@ -480,7 +485,8 @@ function blocksToText(value: unknown, depth = 0): string {
 		} else if (type === "bulletListItem") {
 			out.push(`${pad}- ${text}`);
 		} else if (type === "numberedListItem") {
-			out.push(`${pad}1. ${text}`);
+			ordinal += 1;
+			out.push(`${pad}${ordinal}. ${text}`);
 		} else if (type === "checkListItem") {
 			out.push(`${pad}- [${props["checked"] === true ? "x" : " "}] ${text}`);
 		} else if (type === "codeBlock") {
@@ -493,6 +499,11 @@ function blocksToText(value: unknown, depth = 0): string {
 		} else if (text) {
 			out.push(`${pad}${text}`);
 		}
+
+		// Reset only when a block that actually rendered something interrupts the
+		// run. Empty paragraphs are common between list items and emit nothing, so
+		// resetting on every non-numbered block would restart the count mid-list.
+		if (type !== "numberedListItem" && out.length > before) ordinal = 0;
 
 		const children = blocksToText(block["children"], depth + 1);
 		if (children) out.push(children);
