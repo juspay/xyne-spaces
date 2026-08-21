@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Search, Share2, UserPlus, Users, X } from 'lucide-react';
+import { Search, Share2, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -150,6 +150,8 @@ export function RecordingParticipants({
   const total = participantIds.length;
   const withoutAccess = participantIds.filter(id => !withAccess.has(id)).length;
 
+  if (total === 0) return null;
+
   const rowMotion = reduceMotion
     ? {}
     : {
@@ -169,27 +171,13 @@ export function RecordingParticipants({
       type='button'
       variant='outline'
       size='sm'
-      className={cn(
-        'h-7 gap-1.5 rounded-lg text-xs font-normal active:scale-[0.96]',
-        total === 0
-          ? 'border-dashed border-muted-foreground/40 px-3 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-          : 'px-2',
-      )}
-      aria-label={total > 0 ? `Participants, ${total} added` : 'Add participants to this recording'}
+      className='h-7 gap-1.5 rounded-lg px-2 text-xs font-normal active:scale-[0.96]'
+      aria-label={`Participants, ${total} added`}
       data-track-category='RecordingDetailV2'
       data-track-name='open_recording_participants'
     >
-      {total === 0 ? (
-        <>
-          <UserPlus className='size-3.5' aria-hidden='true' />
-          Add people
-        </>
-      ) : (
-        <>
-          <AvatarGroup userIds={participantIds.slice(0, 3)} size='xs' />
-          <span className='tabular-nums'>{total}</span>
-        </>
-      )}
+      <AvatarGroup userIds={participantIds.slice(0, 3)} size='xs' />
+      <span className='tabular-nums'>{total}</span>
     </Button>
   );
 

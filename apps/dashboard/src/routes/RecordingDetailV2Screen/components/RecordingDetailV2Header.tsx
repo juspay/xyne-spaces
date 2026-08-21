@@ -305,6 +305,10 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex items-start'>
         <div className='flex flex-wrap items-center gap-2'>
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+          />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
@@ -313,10 +317,6 @@ export const RecordingDetailV2Header = ({
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
           )}
-          <RecordingParticipants
-            recordingExternalId={recording.externalId}
-            createdByUserId={recording.createdByUserId}
-          />
           <RecordingLabelPicker
             labels={recording.labels ?? []}
             canEdit={recording.createdByUserId === currentUser?.id}
