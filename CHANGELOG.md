@@ -1,3 +1,10 @@
+## [1.208.1](https://github.com/juspay/xyne-spaces/compare/v1.208.0...v1.208.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes reaction hover tooltip max 2 cap on names issue ([#894](https://github.com/juspay/xyne-spaces/issues/894)) ([bce423c](https://github.com/juspay/xyne-spaces/commit/bce423c7af9ccd0dca2e5183f2f46a2421c4373f))
+
 ## [1.208.0](https://github.com/juspay/xyne-spaces/compare/v1.207.2...v1.208.0) (2026-08-21)
 
 
