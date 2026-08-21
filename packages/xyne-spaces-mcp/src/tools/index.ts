@@ -13,5 +13,7 @@ import { threadTools } from "./threads.js";
 import { messageTools } from "./messages.js";
 import { ticketTools } from "./tickets.js";
 import { lookupTools } from "./lookups.js";
+import { commsTools } from "./comms.js";
+import { clawTools } from "./claw.js";
 
-export const allTools: ToolDef[] = [...identityTools, ...channelTools, ...threadTools, ...messageTools, ...ticketTools, ...lookupTools];
+export const allTools: ToolDef[] = [...identityTools, ...channelTools, ...threadTools, ...messageTools, ...ticketTools, ...lookupTools, ...commsTools, ...clawTools];
