@@ -7,6 +7,7 @@ export * from './ai';
 export * from './dashboard';
 export * from './types/activity';
 export * from './forwardedMessage';
+export * from './canvas/contentEmpty';
 export * from './activity';
 export * from './types/index';
 export * from './config/index';
