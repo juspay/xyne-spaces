@@ -327,6 +327,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const collectionId = spCollectionId;
   const isAtRoot = !collectionId;
   const isAtCollectionRoot = !!collectionId && !spParentId;
+  // Write access to an open collection's contents (upload, new folder,
+  // rename, delete) requires being a collaborator — owner or explicit
+  // EDITOR grant. Public collections are read-only by default; sub-folders
+  // have no ACL of their own, so this is depth-independent.
+  const canEdit = activeCollection?.role === 'EDITOR' || activeCollection?.role === 'OWNER';
 
   // Inside a collection, load ALL its files so each subfolder can show the same
   // rolled-up ingestion badge the root collections do. (The tree loads files
@@ -570,6 +575,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     (entry: CollectionChild): string => {
       const owning = globalCollections.byId(entry.id);
       if (!owning) return 'Collection';
+      if (owning.scopeType === 'WORKSPACE') return 'Workspace';
       const channelName = channelNameById.get(owning.scopeId);
       const projectName = owning.projectId ? projectNameById.get(owning.projectId) : undefined;
       if (channelName && projectName) return `#${channelName} · ${projectName}`;
@@ -624,9 +630,12 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       // `nodes[fileId]` resolution in FileViewerPanel, at the wrong folder
       // and show "No file selected".
       const found = globalCollections.byId(collectionId);
-      const projectId = found?.projectId;
       const channelId = found?.scopeId;
-      if (projectId && channelId) {
+      if (channelId) {
+        // `projectId` is only known for CHANNEL-scoped collections whose
+        // channel is in our visible-channel list — '_' for workspace-scoped
+        // (or unresolvable) collections, same sentinel as the folder segment.
+        const projectId = found?.projectId ?? '_';
         void navigate(
           `${browseBasePath}/${projectId}/${channelId}/${collectionId}/${
             entry.parentId ?? '_'
@@ -652,6 +661,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     if (!collectionId) return;
     if (!user) {
       toast.error('You must be logged in');
+      return;
+    }
+    if (!canEdit) {
+      toast.error("You don't have permission to add to this collection");
       return;
     }
     try {
@@ -692,6 +705,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         toast.error('Open a collection before uploading');
         return;
       }
+      if (!canEdit) {
+        toast.error("You don't have permission to add to this collection");
+        return;
+      }
       const files = Array.from(fileList);
       if (files.length === 0) return;
 
@@ -724,6 +741,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     },
     [
       collectionId,
+      canEdit,
       spParentId,
       activeCollection?.name,
       globalCollections,
@@ -780,6 +798,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       return;
     }
     if (!collectionId) return;
+    if (!canEdit) {
+      toast.error("You don't have permission to delete from this collection");
+      return;
+    }
     const what = entry.type === 'FOLDER' ? 'folder' : 'file';
     const ok = window.confirm(`Delete ${what} "${entry.name}"?`);
     if (!ok) return;
@@ -810,6 +832,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         toast.error('Only the collection owner can rename');
         return;
       }
+    } else if (!canEdit) {
+      toast.error("You don't have permission to rename items in this collection");
+      return;
     }
     setRenameTarget(entry);
   };
@@ -844,6 +869,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             setRenameTarget(null);
             return;
           }
+          if (!canEdit) {
+            toast.error("You don't have permission to rename items in this collection");
+            setRenameTarget(null);
+            return;
+          }
           await renameNode(entry.id, trimmed);
         }
         toast.success(`Renamed to "${trimmed}"`);
@@ -854,7 +884,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         setRenameTarget(null);
       }
     },
-    [user, isAtRoot, collectionId, renameCollection, renameNode, globalCollections],
+    [user, isAtRoot, collectionId, canEdit, renameCollection, renameNode, globalCollections],
   );
 
   // ── Entry deep link ──────────────────────────────────────────────────
@@ -873,9 +903,13 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       }
       if (!collectionId) return null;
       const owning = globalCollections.byId(collectionId);
-      const projectId = owning?.projectId;
       const channelId = owning?.scopeId;
-      if (!projectId || !channelId) return null;
+      if (!channelId) return null;
+      // `projectId` is only known for CHANNEL-scoped collections whose channel
+      // is in our visible-channel list; '_' mirrors the existing "no folder"
+      // sentinel below — the file-viewer route only needs a 5-segment URL,
+      // it doesn't require projectId/channelId to resolve to real entities.
+      const projectId = owning?.projectId ?? '_';
       return `${base}/${projectId}/${channelId}/${collectionId}/${entry.parentId ?? '_'}/${entry.id}`;
     },
     [browseBasePath, isAtRoot, collectionId, globalCollections],
@@ -886,7 +920,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // one of two dialogs depending on what's being shared:
   //   - At root (collection cards): the full access-management dialog
   //     (ShareCollectionModal — per-user roles, public/private visibility).
-  //     Matches V1's TreeSidebar gate (`canShare = perm?.canShare ?? isOwner`).
+  //     Open to anyone with a resolved role; the dialog itself bounds what
+  //     each role can actually do.
   //   - Inside a collection (a regular folder/file): those have no ACL of
   //     their own — access is entirely inherited from the owning collection
   //     — so there's nothing to grant, just a copy-link-only dialog
@@ -901,17 +936,15 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       setLinkShareTarget(entry);
       return;
     }
-    // The modal validates against `activeCollection.role/canShare`
-    // internally, so we seed those on the machine before opening — the
-    // URL→machine sync effect only re-runs when spCollectionId changes, so
-    // our seed sticks for the lifetime of the modal.
+    // The modal validates against `activeCollection.role` internally, so we
+    // seed it on the machine before opening — the URL→machine sync effect
+    // only re-runs when spCollectionId changes, so our seed sticks for the
+    // lifetime of the modal. Anyone with a resolved role (Viewer/Editor/
+    // Owner) can open the dialog — there's no separate "canShare" gate;
+    // what they can actually do inside it is bounded by role escalation.
     const owning = globalCollections.byId(entry.id);
     if (!owning) {
       toast.error('Could not resolve collection');
-      return;
-    }
-    if (!owning.canShare) {
-      toast.error("You don't have permission to share this collection");
       return;
     }
     setActiveCollection({
@@ -1021,7 +1054,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           <Plus className='h-4 w-4' strokeWidth={1.75} />
           New collection
         </button>
-      ) : (
+      ) : canEdit ? (
         <>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1074,7 +1107,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             onChange={onFileInputChange}
           />
         </>
-      )}
+      ) : null}
       <ViewToggleV2 value={view} onChange={setView} />
     </div>
   );
@@ -1298,10 +1331,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           <EntryGridV2
             entries={filteredEntries}
             onOpen={onOpenEntry}
-            onDelete={(e): void => {
-              void onDelete(e);
-            }}
-            onRename={onRename}
+            {...(isAtRoot || canEdit
+              ? {
+                  onDelete: (e: CollectionChild): void => {
+                    void onDelete(e);
+                  },
+                  onRename,
+                }
+              : {})}
             editingId={renameTarget?.id ?? null}
             onRenameCommit={onRenameCommit}
             onRenameCancel={onRenameCancel}
@@ -1316,10 +1353,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             entries={filteredEntries}
             columns={isAtRoot ? [...KB_ROOT_COLUMNS] : [...KB_COLUMNS]}
             onOpen={onOpenEntry}
-            onDelete={(e): void => {
-              void onDelete(e);
-            }}
-            onRename={onRename}
+            {...(isAtRoot || canEdit
+              ? {
+                  onDelete: (e: CollectionChild): void => {
+                    void onDelete(e);
+                  },
+                  onRename,
+                }
+              : {})}
             editingId={renameTarget?.id ?? null}
             onRenameCommit={onRenameCommit}
             onRenameCancel={onRenameCancel}
@@ -1344,7 +1385,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       className='flex h-full flex-col bg-background'
       onDragOver={e => {
         e.preventDefault();
-        if (collectionId) {
+        if (collectionId && canEdit) {
           setDragging(true);
         }
       }}
@@ -1397,7 +1438,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 onClose={closeShare}
                 collectionId={shareTarget.id}
                 collectionName={shareTarget.name}
-                channelId={owning?.scopeId ?? null}
+                channelId={owning?.scopeType === 'CHANNEL' ? (owning.scopeId ?? null) : null}
                 isPrivate={owning?.isPrivate ?? false}
                 canEditVisibility={owning?.role === 'OWNER'}
                 {...(link ? { link } : {})}
