@@ -30,7 +30,7 @@ import { AgentProgressIndicator } from './AgentProgressIndicator';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { websocketService } from '../../../services/clients/socketClient';
 import { processMessageForSending, containsSpecialBroadcastMention } from './ChatInput.utils';
-import { saveDraft, useDraft } from '../../../hooks/useDraft';
+import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -42,7 +42,7 @@ import {
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
-import { sendMessage, type ConversationRef } from '@xyne/shared/messages';
+import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
@@ -401,6 +401,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Subscribe to draft from state machine
     const lookupId = conversationId ?? channelId;
     const draft = useDraft(channelId, conversationId ?? null);
+    // DB-backed draft (with already-uploaded attachments) for the channel
+    // composer; used to carry attachments through the pending-message send.
+    const channelDraftForSend = useDraftFromDB(channelId, conversationId ?? null);
 
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
@@ -813,12 +816,29 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // server confirms the write. Failed sends stay queued and surface a
             // retry/delete affordance instead of being restored to the composer.
             const channelRef: ConversationRef = { kind: 'channel', channelId };
+            // Carry the composer's already-uploaded draft attachments through the
+            // pending-message framework so they are stored on the durable pending
+            // entry and promoted (DRAFT -> CHAT) via explicit attachmentIds — on the
+            // immediate send and on any offline auto-retry. The mutator's legacy
+            // draft-scan fallback cannot be relied on here because sendMessage
+            // detaches the draft as part of queueing the message.
+            const pendingAttachments: PendingAttachment[] = (
+              channelDraftForSend?.attachments ?? []
+            ).map(a => ({
+              attachmentId: a.id,
+              originalFilename: a.originalFilename,
+              mimetype: a.mimetype,
+              size: a.size,
+              ...(a.width !== null && { width: a.width }),
+              ...(a.height !== null && { height: a.height }),
+            }));
             sendMessage(zero as Parameters<typeof sendMessage>[0], channelRef, {
               content: processedHtml,
               type: MessageType.USER,
               conversationId: newConversationId,
               messageId: newMessageId,
               timestamp: messageCreatedAt,
+              ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
             });
 
             saveDraft(lookupId, '', '');
@@ -877,6 +897,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         context.workspaceId,
         allowThreadBroadcastMentions,
         twinEdit,
+        channelDraftForSend,
         activeArtifactCommand,
       ],
     );

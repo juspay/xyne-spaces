@@ -108,7 +108,7 @@ export function sendMessage(
             messageId,
             timestamp: fireTimestamp,
             type,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
           }),
         )
       : zero.mutate(
@@ -118,7 +118,7 @@ export function sendMessage(
             type,
             timestamp: fireTimestamp,
             messageId,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
             ...(payload.alsoSendToChannel !== undefined && {
               showInChannel: payload.alsoSendToChannel,
             }),
