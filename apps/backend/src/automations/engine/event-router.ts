@@ -13,60 +13,69 @@ import {
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import { triggerRegistry } from '../triggers/trigger-registry';
-import {
-  EMAIL_RECEIVED_EVENT,
-  matchEmailReceived,
-  type EmailReceivedConfig,
-  type EmailReceivedPayload,
-} from '../triggers/email-received.trigger';
-import {
-  matchEmailSent,
-  type EmailSentConfig,
-  type EmailSentPayload,
-} from '../triggers/email-sent.trigger';
+import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
 import type { AutomationEvent } from '../types/automation-events';
 
-// Was the entity actually found by hydration, or did the lookup fail (each hydrator already
-// signals this: ticket/email omitted, or deleted:true)? A "not found" is inconclusive, not a
-// real mismatch — callers must fail open on false. TAG_GENERATED excluded: its matchFilters()
-// still catches its own errors and returns false (same swallow issue EMAIL_RECEIVED/EMAIL_SENT
-// had) — matchTagGenerated isn't exported yet, so the same bypass used below for email isn't
-// wired up for it. CALL_EVENT/unknown: no reliable found signal either way. Never pre-filter.
-function hydrationFoundEntity(eventType: string, payload: Record<string, unknown>): boolean {
+type ScopeIds = Record<'boardIds' | 'projectIds' | 'channelIds', string | undefined>;
+
+// Scope ids the event carries, or null if they can't be established. Reads only entity columns
+// and emitter-stamped ids — never a value from a secondary lookup, so these can't be absent for
+// lookup reasons the way hasAttachments / isReply / performedBy.membership can.
+function eventScopeIds(eventType: string, payload: Record<string, unknown>): ScopeIds | null {
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const byChannel = (channelIds: string | undefined): ScopeIds => ({
+    boardIds: undefined,
+    projectIds: undefined,
+    channelIds,
+  });
+  const ticket = payload['ticket'] as Record<string, unknown> | undefined;
+  const email = payload['email'] as Record<string, unknown> | undefined;
   switch (eventType) {
     case 'TICKET_CREATED':
     case 'TICKET_UPDATED':
     case 'TICKET_COMMENTED':
-      return payload['ticket'] != null;
+      return ticket == null
+        ? null
+        : {
+            boardIds: str(ticket['boardId']),
+            projectIds: str(ticket['projectId']),
+            channelIds: str(ticket['channelId']),
+          };
     case 'EMAIL_RECEIVED':
     case 'EMAIL_SENT':
-      return payload['email'] != null;
+      return email == null ? null : byChannel(str(email['channelId']));
     case 'MESSAGE_RECEIVED':
-      return payload['deleted'] !== true;
+      return payload['deleted'] === true ? null : byChannel(str(payload['channelId']));
+    case 'TAG_GENERATED':
+      return byChannel(str(payload['channelId']));
     default:
-      return false;
+      return null; // CALL_EVENT / WEBHOOK / unknown — no reliable scope, never pre-filter
   }
 }
 
-// EMAIL_RECEIVED/EMAIL_SENT bypass triggerImpl.matchFilters() on purpose: that class method
-// catches its own exceptions internally and returns false, which would be indistinguishable
-// from a real mismatch here. matchEmailReceived/matchEmailSent are the same unwrapped
-// comparison logic — calling them directly lets a genuine error reach OUR try/catch below,
-// which correctly fails open instead of silently eating it.
-function evaluateMatch(
+// Only board / project / channel are judged; every other filter is left to the worker. Sound
+// because the matchers AND their scope dimensions together and OR within one, so judging a subset
+// can never reject a candidate the matcher would have accepted. Must not throw — the caller's
+// catch does not create a row.
+function isDefiniteScopeMismatch(
   eventType: string,
-  triggerImpl: { matchFilters(filter: Record<string, unknown>, payload: Record<string, unknown>): boolean },
   filterConfig: Record<string, unknown>,
-  hydratedPayload: Record<string, unknown>,
+  payload: Record<string, unknown>,
 ): boolean {
-  switch (eventType) {
-    case 'EMAIL_RECEIVED':
-      return matchEmailReceived(filterConfig as EmailReceivedConfig, hydratedPayload as EmailReceivedPayload);
-    case 'EMAIL_SENT':
-      return matchEmailSent(filterConfig as EmailSentConfig, hydratedPayload as EmailSentPayload);
-    default:
-      return triggerImpl.matchFilters(filterConfig, hydratedPayload);
+  const scope = eventScopeIds(eventType, payload);
+  if (scope === null) return false;
+  for (const key of ['boardIds', 'projectIds', 'channelIds'] as const) {
+    const configured = filterConfig[key];
+    if (!Array.isArray(configured)) continue;
+    const wanted = configured.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+    if (wanted.length === 0) continue;
+    const actual = scope[key];
+    if (actual === undefined) return true;
+    // Raw and trimmed: matchTicketScopeFilters and the message matcher trim configured ids,
+    // the email matchers' asStringArray does not.
+    if (!wanted.some(v => v === actual || v.trim() === actual)) return true;
   }
+  return false;
 }
 
 class EventRouter {
@@ -112,31 +121,18 @@ class EventRouter {
         const candidateConfig = parseAutomationConfig(workflow.context);
         // SCHEDULED automations always get a row (unchanged) — deferring is only meaningful for
         // candidates that already matched. trigger.type check guards against a stale/mismatched
-        // context being evaluated with the wrong trigger's matchFilters.
+        // context being evaluated with the wrong trigger's filter logic.
+        const filterConfig = (candidateConfig.trigger.config ?? {}) as Record<string, unknown>;
         const canPreFilter =
           preCheckEnabled &&
-          triggerImpl &&
           hydratedPayload &&
           candidateConfig.schedule?.type !== 'SCHEDULED' &&
-          candidateConfig.trigger.type === eventType &&
-          hydrationFoundEntity(eventType, hydratedPayload);
+          candidateConfig.trigger.type === eventType;
 
-        if (canPreFilter && triggerImpl && hydratedPayload) {
-          const filterConfig = (candidateConfig.trigger.config ?? {}) as Record<string, unknown>;
-          let matches: boolean;
-          try {
-            matches = evaluateMatch(eventType, triggerImpl, filterConfig, hydratedPayload);
-          } catch (err) {
-            logger.warn(
-              `[EVENT-ROUTER] matchFilters threw for automation=${workflow.id} event=${eventType} — failing open (creating row):`,
-              err,
-            );
-            matches = true;
-          }
-          if (!matches) {
-            preFiltered += 1;
-            continue;
-          }
+        if (canPreFilter && hydratedPayload &&
+            isDefiniteScopeMismatch(eventType, filterConfig, hydratedPayload)) {
+          preFiltered += 1;
+          continue;
         }
 
         const metadata = parseAutomationMetadata(workflow.metadata);
