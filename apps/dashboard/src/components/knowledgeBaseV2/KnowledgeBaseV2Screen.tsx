@@ -25,6 +25,7 @@ import {
   CollectionSummary,
   NodeType,
   uploadFilesInBatches,
+  searchCollectionItems,
 } from '../../services/Knowledge/collectionService';
 import CreateCollectionModal from '../../components/knowledgeBase/upload/CreateCollectionModal';
 import { ShareCollectionModal } from '../../components/knowledgeBase/upload/ShareCollectionModal';
@@ -55,6 +56,8 @@ import {
   runDriveImport,
   takePendingDriveImport,
 } from '../../components/knowledgeBaseV2/utils/driveImport';
+import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
+import { SearchResultsV2 } from '../../components/knowledgeBaseV2/components/SearchResultsV2';
 import { ViewToggleV2, ViewMode } from '../../components/knowledgeBaseV2/components/ViewToggleV2';
 import { EmptyPaneV2 } from '../../components/knowledgeBaseV2/components/EmptyPaneV2';
 import { StatusBadgeV2 } from '../../components/knowledgeBaseV2/components/StatusBadgeV2';
@@ -144,6 +147,7 @@ function typeFilterIcon(value: string): React.ReactElement {
 // xyne-search.
 const SP_COLLECTION = 'cl';
 const SP_PARENT = 'parent';
+const SP_QUERY = 'q';
 
 /** A folder id + all descendant folder ids (used to scope a file listing to a subtree). */
 function collectSubtreeFolderIds(
@@ -177,6 +181,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   const spCollectionId = searchParams.get(SP_COLLECTION);
   const spParentId = searchParams.get(SP_PARENT);
+  const spQuery = searchParams.get(SP_QUERY) ?? '';
 
   // Resume a Drive import after the full-page "Connect Google Drive" OAuth redirect.
   // The backend returns us to this KB URL with ?driveOAuth=success|driveOAuthError;
@@ -243,6 +248,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   );
 
   const [view, setView] = useState<ViewMode>('list');
+  const [query, setQueryState] = useState(spQuery);
   const [dragging, setDragging] = useState(false);
   const [dialog, setDialog] = useState<'folder' | null>(null);
   // Open rename target. Holds the original entry so the dialog can both
@@ -282,6 +288,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // displays the progress overlay. Keeping it out of the screen means file
   // progress events don't trigger a screen-wide re-render.
 
+  // Search
+  const [searchHits, setSearchHits] = useState<CollectionChild[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchTokenRef = useRef(0);
+  const trimmedQuery = query.trim();
+  const searching = trimmedQuery.length > 0;
+
   // ── URL → machine sync ───────────────────────────────────────────────
   // Search params are the source of truth. Push them into the XState
   // machine that drives CollectionTreeDataSync's Zero subscriptions.
@@ -304,6 +318,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spParentId]);
+
+  useEffect(() => {
+    setQueryState(spQuery);
+  }, [spQuery]);
 
   // Once the active collection's data has loaded, fill in its name on the
   // breadcrumb. Falls back to the global collections cache for the deep-link
@@ -369,6 +387,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     }
     return map;
   }, [isAtRoot, collectionId, allCollectionFiles, nodes]);
+
 
   // ── Build entries ────────────────────────────────────────────────────
   const entries: CollectionChild[] = useMemo(() => {
@@ -494,7 +513,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   // ── URL writers ─────────────────────────────────────────────────────
   const updateParams = useCallback(
-    (next: { cl?: string | null; parent?: string | null }, replace = false) => {
+    (next: { cl?: string | null; parent?: string | null; q?: string | null }, replace = false) => {
       const sp = new URLSearchParams(searchParams);
       const apply = (key: string, val: string | null | undefined): void => {
         if (val === undefined) return;
@@ -503,10 +522,77 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       };
       apply(SP_COLLECTION, next.cl);
       apply(SP_PARENT, next.parent);
+      apply(SP_QUERY, next.q);
       setSearchParams(sp, { replace });
     },
     [searchParams, setSearchParams],
   );
+
+  // ── Search field writer ─────────────────────────────────────────────
+  const setQuery = (next: string): void => {
+    setQueryState(next);
+    updateParams({ q: next === '' ? null : next }, /* replace */ true);
+  };
+
+  // ── Search ───────────────────────────────────────────────────────────
+  // Two regimes:
+  //   • Root (`/knowledge-base`, no `cl`): no dedicated KB-wide endpoint, so
+  //     we filter the already-loaded collections list client-side by name.
+  //   • Inside a collection: hit `searchCollectionItems` for full-text search
+  //     across files in that collection.
+  useEffect((): (() => void) | undefined => {
+    if (!searching) {
+      setSearchHits([]);
+      setSearchLoading(false);
+      setSearchError(null);
+      return undefined;
+    }
+    if (!collectionId) {
+      // Client-side filter on the root collections list.
+      const q = trimmedQuery.toLowerCase();
+      const hits: CollectionChild[] = globalCollections.collections
+        .filter(c => c.name.toLowerCase().includes(q))
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          type: 'FOLDER' as NodeType,
+          size: 0,
+          updatedAt: new Date().toISOString(),
+          ingestionStatus: null,
+          mimeType: '',
+          parentId: null,
+        }));
+      setSearchHits(hits);
+      setSearchLoading(false);
+      setSearchError(null);
+      return undefined;
+    }
+    setSearchLoading(true);
+    setSearchError(null);
+    const myToken = ++searchTokenRef.current;
+    const runSearch = async (): Promise<void> => {
+      try {
+        const results = await searchCollectionItems(collectionId, trimmedQuery);
+        if (myToken !== searchTokenRef.current) return;
+        setSearchHits(results);
+      } catch (err: unknown) {
+        if (myToken !== searchTokenRef.current) return;
+        const msg = err instanceof Error ? err.message : 'Search failed';
+        setSearchError(msg);
+        setSearchHits([]);
+      } finally {
+        if (myToken === searchTokenRef.current) {
+          setSearchLoading(false);
+        }
+      }
+    };
+    const handle = window.setTimeout((): void => {
+      void runSearch();
+    }, 160);
+    return (): void => {
+      window.clearTimeout(handle);
+    };
+  }, [searching, trimmedQuery, collectionId, globalCollections.collections]);
 
   // ── Navigation helpers ───────────────────────────────────────────────
   const goToCollections = useCallback((): void => {
@@ -1109,6 +1195,13 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         </>
       ) : null}
       <ViewToggleV2 value={view} onChange={setView} />
+      <SearchFieldV2
+        value={query}
+        onChange={setQuery}
+        className='w-64'
+        ariaLabel='Search files'
+        placeholder='Search files by name'
+      />
     </div>
   );
 
@@ -1316,7 +1409,15 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           </div>
         </div>
 
-        {filteredEntries.length === 0 && !loading && !isUploadingForThisCollection ? (
+        {searching ? (
+          <SearchResultsV2
+            query={trimmedQuery}
+            loading={searchLoading}
+            error={searchError}
+            hits={searchHits}
+            onOpen={onOpenEntry}
+          />
+        ) : filteredEntries.length === 0 && !loading && !isUploadingForThisCollection ? (
           entries.length > 0 ? (
             <div className='mx-auto flex max-w-md flex-col items-center justify-center gap-2 py-24 text-center'>
               <p className='text-[14px] font-medium text-foreground'>No items match this filter</p>

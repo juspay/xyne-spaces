@@ -2,11 +2,11 @@ import React from 'react';
 import { cn } from '../../../utils/classNames';
 import { FileCardPreviewV2 } from './FileCardPreviewV2';
 import { IngestStatusV2 } from './IngestStatusV2';
+import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
 import { FileFailedBadgeV2 } from './FileFailedBadgeV2';
 
 interface FileCardV2Props {
@@ -281,7 +281,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
         className={cn(
           // Matches FileCardV2's surface so mixed folder + file grids feel
           // consistent across light and dark themes.
-          'bg-background flex w-full flex-col items-start gap-3 rounded-2xl border border-border p-4 text-left transition',
+          'ai-page-bg flex w-full flex-col items-start gap-3 rounded-2xl border border-border p-4 text-left transition',
           isRenaming
             ? ''
             : 'cursor-pointer hover:border-ring/40 hover:bg-muted active:scale-[0.99]',
