@@ -13,6 +13,7 @@ import {
   ThreeDotsMenuVertical,
   UserShield,
   UserTwo,
+  File02Ai,
 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -56,13 +57,17 @@ interface AINavItem {
   label: string;
   icon: NavIcon;
   to: string;
+  /** Prefix for active matching when `to` points at one sub-route of a section. */
+  matchPath?: string;
+  /** Analytics name; emitted as data-track-* on the nav link when set. */
+  trackName?: string;
   adminOnly?: boolean;
   orgManagerOnly?: boolean;
 }
 
 const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
     key: 'organization',
@@ -74,6 +79,14 @@ const NAV_ITEMS: AINavItem[] = [
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
   { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
   { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
+  {
+    key: 'daily-brief',
+    label: 'Morning Brief',
+    icon: File02Ai as NavIcon,
+    to: '/ai/daily-brief/today',
+    matchPath: '/ai/daily-brief',
+    trackName: 'OPEN_DAILY_BRIEF',
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -324,7 +337,7 @@ export function AISidebar({
 
   const [recentsOpen, setRecentsOpen] = useState(true);
 
-  const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.to));
+  const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
 
   const { user } = useAuth();
   const { isAdmin } = useClawAdminAccessQuery(user?.id);
@@ -373,13 +386,16 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to }) => {
+            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
                   key={key}
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
+                  {...(trackName
+                    ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
+                    : {})}
                   className={cn(
                     NAV_ITEM_CLASS,
                     isActive ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS,

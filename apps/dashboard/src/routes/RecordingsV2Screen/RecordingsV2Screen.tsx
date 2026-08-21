@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { Spinner } from '@xyne/icons';
-import { CallStatus } from '@xyne/shared';
+import { LayersTo, Spinner } from '@xyne/icons';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PanelsTopLeft } from 'lucide-react';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
@@ -18,7 +17,6 @@ import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
-import { useShortcutById } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
 import { RecordingDateFilter } from './components/RecordingDateFilter';
@@ -114,10 +112,6 @@ const RecordingsV2Screen = (): ReactElement => {
     });
   }, [recordingStatus]);
 
-  useShortcutById('recording.start', handleStartRecording, {
-    enabled: recordingStatus === 'idle' || recordingStatus === 'error',
-  });
-
   useEffect(() => {
     if (pendingAutoStart && (recordingStatus === 'idle' || recordingStatus === 'error')) {
       handleStartRecording();
@@ -138,8 +132,18 @@ const RecordingsV2Screen = (): ReactElement => {
   );
   // recording.labels stores Tag ids (no FK), not display text — resolve them
   // to their actual value once here so both the filter dropdown and the
-  // per-row chips show real label names instead of raw ids.
-  const { resolveLabel } = useResolvedRecordingLabels(availableLabels);
+  // per-row chips show real label names instead of raw ids. Every id is passed
+  // in, including generated ones, since resolving is also what reveals the method.
+  const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(availableLabels);
+
+  const isManualLabel = useCallback(
+    (label: string): boolean => resolveMethod(label) !== TagMethod.LLM,
+    [resolveMethod],
+  );
+  const manualLabels = useMemo(
+    () => availableLabels.filter(isManualLabel),
+    [availableLabels, isManualLabel],
+  );
 
   /** An explicit pick in the People filter wins over the tab's shared-by picker. */
   const selectedCreatorIds = useMemo(
@@ -170,19 +174,21 @@ const RecordingsV2Screen = (): ReactElement => {
     activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
     isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
+  const hiddenLiveRecordingId =
+    recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
   const filteredRecordings = useMemo(
     () =>
       filterRecordingsByLabels(
         ownershipFilteredRecordings.filter(
-          // Hide only the recording currently shown in the live pill.
+          // Hide the local live row
           recording =>
-            recording.externalId !== recordingCallId &&
+            recording.externalId !== hiddenLiveRecordingId &&
             isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
         ),
         selectedLabels,
       ),
-    [ownershipFilteredRecordings, recordingCallId, selectedDatePreset, selectedLabels],
+    [ownershipFilteredRecordings, hiddenLiveRecordingId, selectedDatePreset, selectedLabels],
   );
   const recordingsCapturedThisWeek = useMemo(
     () =>
@@ -345,7 +351,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 />
 
                 <RecordingLabelFilter
-                  labels={availableLabels}
+                  labels={manualLabels}
                   selectedLabels={selectedLabels}
                   onSelectedLabelsChange={setSelectedLabels}
                   resolveLabel={resolveLabel}
@@ -361,7 +367,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   data-track-category='RecordingsV2'
                   data-track-name='open_summary_templates'
                 >
-                  <PanelsTopLeft className='size-4' />
+                  <LayersTo className='size-4' strokeWidth={2} />
                   Templates
                 </Button>
                 <Button
@@ -508,7 +514,7 @@ const RecordingsV2Screen = (): ReactElement => {
                       <RecordingsV2Pill
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
-                        tags={row.recording.labels}
+                        tags={row.recording.labels.filter(isManualLabel)}
                         resolveLabel={resolveLabel}
                         onOpen={handleOpenRecording}
                       />

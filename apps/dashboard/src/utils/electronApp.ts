@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
 import type { NavigateFunction } from 'react-router-dom';
@@ -125,7 +126,10 @@ export const standaloneNavigate = (
     if (newWindow) {
       newWindow.focus();
     } else {
-      console.warn('Failed to open new window,PopUp may be blocked');
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to open new window,PopUp may be blocked'),
+      });
     }
     return;
   }
@@ -203,7 +207,10 @@ export const openCreateTicketWindow = (draft: CreateTicketPopoutDraft): boolean 
   } catch {
     // ignore
   }
-  console.warn('Failed to open create-ticket window; popup may be blocked');
+  logger.warn(LogEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_warn',
+    message: String('Failed to open create-ticket window; popup may be blocked'),
+  });
   return false;
 };
 
@@ -257,7 +264,7 @@ export const subscribeCreateTicketResult = (
   timeoutMs = 15 * 60 * 1000,
 ): (() => void) => {
   if (typeof BroadcastChannel === 'undefined' || !popoutId) {
-    return () => {};
+    return () => undefined;
   }
 
   let channel: BroadcastChannel | null = null;

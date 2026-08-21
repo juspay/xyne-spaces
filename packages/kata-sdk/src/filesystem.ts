@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import type { Session } from "./session.js";
 import type { FileEntry } from "./types.js";
 
@@ -56,6 +57,112 @@ export class FilesystemModule {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: absolutePath, content: encoded, encoding: "base64" }),
     });
+  }
+
+  /**
+   * Write a large file without buffering it in the SDK, router, or workspace
+   * agent as one request. The source is split into bounded chunks; each chunk
+   * uses the existing /write endpoint, is appended to the destination by a
+   * fixed shell command, then immediately removed.
+   *
+   * DESTRUCTIVE CONTRACT: the destination is truncated to zero bytes as soon
+   * as the call starts, and on ANY failure both the part file AND the
+   * destination are deleted — the caller gets the thrown error and no file,
+   * never partial content. Do not point this at a file whose current content
+   * must survive a failed overwrite; write to a temp path and move instead.
+   *
+   * This deliberately needs no sandbox egress and no workspace-image change.
+   */
+  async writeStream(
+    path: string,
+    source: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>,
+    options: { maxBytes?: number; chunkBytes?: number } = {},
+  ): Promise<{ bytesWritten: number }> {
+    const targetPath = requirePath(path);
+    const absolutePath = targetPath.startsWith("/") ? targetPath : `/${targetPath}`;
+    const maxBytes = options.maxBytes ?? 1024 * 1024 * 1024;
+    const chunkBytes = options.chunkBytes ?? 4 * 1024 * 1024;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("maxBytes must be a positive safe integer.");
+    if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0 || chunkBytes > 16 * 1024 * 1024) {
+      throw new Error("chunkBytes must be between 1 byte and 16 MiB.");
+    }
+
+    const quote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
+    const uploadId = randomUUID().replace(/-/g, "");
+    const partPath = `${absolutePath}.upload-${uploadId}.part`;
+    let bytesWritten = 0;
+    let pendingParts: Buffer<ArrayBufferLike>[] = [];
+    let pendingBytes = 0;
+
+    const iterable: AsyncIterable<Uint8Array> = Symbol.asyncIterator in Object(source)
+      ? source as AsyncIterable<Uint8Array>
+      : {
+          async *[Symbol.asyncIterator]() {
+            const reader = (source as ReadableStream<Uint8Array>).getReader();
+            // Mirror native async iteration: on ANY early exit — a read error
+            // OR the consumer aborting mid-iteration (generator return()) —
+            // cancel the source so e.g. an underlying HTTP body releases its
+            // connection instead of wedging until an external timeout. Both
+            // paths land in `finally` with drained still false.
+            let drained = false;
+            try {
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) yield value;
+              }
+              drained = true;
+            } finally {
+              if (!drained) await reader.cancel().catch(() => undefined);
+              reader.releaseLock();
+            }
+          },
+        };
+
+    const append = async (chunk: Buffer): Promise<void> => {
+      if (bytesWritten + chunk.length > maxBytes) {
+        throw new Error(`Stream exceeds maximum size of ${maxBytes} bytes.`);
+      }
+      await this.write(partPath, chunk);
+      const appended = await this.session.commands.run(
+        `cat ${quote(partPath)} >> ${quote(absolutePath)} && rm -f -- ${quote(partPath)}`,
+        60_000,
+      );
+      if (appended.exitCode !== 0) {
+        throw new Error(appended.stderr.trim() || appended.stdout.trim() || "Sandbox chunk append failed.");
+      }
+      bytesWritten += chunk.length;
+    };
+
+    const initialized = await this.session.commands.run(`: > ${quote(absolutePath)}`, 15_000);
+    if (initialized.exitCode !== 0) {
+      throw new Error(initialized.stderr.trim() || initialized.stdout.trim() || "Sandbox file initialization failed.");
+    }
+    try {
+      for await (const value of iterable) {
+        const incoming = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        let offset = 0;
+        while (offset < incoming.length) {
+          const take = Math.min(chunkBytes - pendingBytes, incoming.length - offset);
+          pendingParts.push(incoming.subarray(offset, offset + take));
+          pendingBytes += take;
+          offset += take;
+          if (pendingBytes === chunkBytes) {
+            await append(Buffer.concat(pendingParts, pendingBytes));
+            pendingParts = [];
+            pendingBytes = 0;
+          }
+        }
+      }
+      if (pendingBytes > 0) await append(Buffer.concat(pendingParts, pendingBytes));
+      return { bytesWritten };
+    } catch (error) {
+      await this.session.commands.run(
+        `rm -f -- ${quote(partPath)} ${quote(absolutePath)}`,
+        15_000,
+      ).catch(() => undefined);
+      throw error;
+    }
   }
 
   async read(path: string): Promise<Buffer> {

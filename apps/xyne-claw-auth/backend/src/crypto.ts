@@ -1,7 +1,24 @@
-import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
+const HKDF_SALT = Buffer.from("xyne-claw-auth/hkdf-sha256/v1", "utf8");
+const decryptionFallbacks = new Map<string, Buffer[]>();
+
+export function derivePurposeKey(masterKey: Buffer, purpose: string): Buffer {
+  if (masterKey.length !== 32) throw new Error("Master encryption key must be 32 bytes");
+  if (!purpose.trim()) throw new Error("HKDF purpose must not be empty");
+  return Buffer.from(hkdfSync("sha256", masterKey, HKDF_SALT, Buffer.from(purpose, "utf8"), 32));
+}
+
+/** Register a read-only legacy key used only when the primary GCM key fails. */
+export function registerDecryptionFallback(primaryKey: Buffer, legacyKey: Buffer): void {
+  const id = primaryKey.toString("base64");
+  const existing = decryptionFallbacks.get(id) ?? [];
+  if (!existing.some((candidate) => candidate.equals(legacyKey))) {
+    decryptionFallbacks.set(id, [...existing, Buffer.from(legacyKey)]);
+  }
+}
 
 export interface EncryptedPayload {
   ciphertext: string;
@@ -24,15 +41,22 @@ export function encrypt(plaintext: string, key: Buffer): EncryptedPayload {
 }
 
 export function decrypt(ciphertext: string, iv: string, authTag: string, key: Buffer): string {
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(iv, "base64"));
-  decipher.setAuthTag(Buffer.from(authTag, "base64"));
-
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(ciphertext, "base64")),
-    decipher.final(),
-  ]);
-
-  return decrypted.toString("utf8");
+  const candidates = [key, ...(decryptionFallbacks.get(key.toString("base64")) ?? [])];
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      const decipher = createDecipheriv(ALGORITHM, candidate, Buffer.from(iv, "base64"));
+      decipher.setAuthTag(Buffer.from(authTag, "base64"));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(ciphertext, "base64")),
+        decipher.final(),
+      ]);
+      return decrypted.toString("utf8");
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 // Spaces encrypts DB-stored secrets (e.g. installed_apps.signingSecret) with
@@ -57,4 +81,3 @@ export function decryptSpacesCbc(blob: string, key: Buffer): string {
   ]);
   return decrypted.toString("utf8");
 }
-

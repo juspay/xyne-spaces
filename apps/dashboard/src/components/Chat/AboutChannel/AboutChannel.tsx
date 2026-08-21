@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useZero } from '../../../hooks/useZero';
@@ -103,7 +104,11 @@ const AboutChannel = ({
       setIsEditingDescription(false);
       toast.success(`Channel description updated`);
     } catch (error) {
-      console.error('Failed to update channel description:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to update channel description:'),
+        error: error,
+      });
       toast.error('Failed to update channel description. Please try again.');
     } finally {
       setIsSavingDescription(false);
@@ -197,7 +202,11 @@ const AboutChannel = ({
       setIsEditingName(false);
       toast.success(`Channel renamed to #${trimmed}`);
     } catch (err) {
-      console.error('Failed to rename channel:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to rename channel:'),
+        error: err,
+      });
       toast.error('Failed to rename channel. Please try again.');
     } finally {
       setIsSavingName(false);

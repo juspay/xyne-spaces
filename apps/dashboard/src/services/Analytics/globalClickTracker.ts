@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { Platform, TriggerType, ActivityEventPayload } from '@xyne/shared';
 import { websocketService } from '../clients/socketClient';
 import { authActor } from '../../machines/authMachine';
@@ -40,7 +41,10 @@ class GlobalClickTracker {
 
   initialize(): void {
     if (this.isInitialized) {
-      console.warn('GlobalClickTracker is already initialized');
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('GlobalClickTracker is already initialized'),
+      });
       return;
     }
 
@@ -212,7 +216,11 @@ class GlobalClickTracker {
       try {
         contextMetadata = JSON.parse(metadataAttr) as Record<string, unknown>;
       } catch (error) {
-        console.warn('[ActivityTracking] Invalid metadata JSON:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[ActivityTracking] Invalid metadata JSON:'),
+          context: [error],
+        });
       }
     }
 
@@ -269,7 +277,11 @@ class GlobalClickTracker {
         websocketService.emit(WS_ACTIVITY_EVENT, event);
       }
     } catch (error) {
-      console.error('[ActivityTracking] Failed to track event:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[ActivityTracking] Failed to track event:'),
+        error: error,
+      });
     }
   }
 }

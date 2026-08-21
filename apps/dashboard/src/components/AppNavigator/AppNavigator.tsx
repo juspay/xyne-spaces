@@ -1,10 +1,9 @@
-import { ReactElement, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, SearchBig, Share01, CheckTickSingle } from '@xyne/icons';
+import { ReactElement } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
-import { toast } from 'sonner';
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
@@ -18,23 +17,6 @@ const buttonClass = cn(
  */
 const AppNavigator = (): ReactElement => {
   const navigate = useNavigate();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const [copied, setCopied] = useState(false);
-
-  const handleShareWorkspace = async (): Promise<void> => {
-    if (!workspaceId) return;
-
-    const shareUrl = `${window.location.origin}/auth?workspaceId=${encodeURIComponent(workspaceId)}`;
-
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      toast.success('Workspace link copied to clipboard');
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      toast.error('Failed to copy workspace link');
-    }
-  };
 
   return (
     <div
@@ -42,19 +24,6 @@ const AppNavigator = (): ReactElement => {
       style={APP_DRAG_STYLE}
     >
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
-        {workspaceId && (
-          <button
-            type='button'
-            aria-label='Share workspace link'
-            onClick={() => void handleShareWorkspace()}
-            // Temporarily hidden — drop the `hidden` class to bring it back.
-            className={cn(buttonClass, 'hidden')}
-            data-track-category='APP_NAVIGATOR'
-            data-track-name='SHARE_WORKSPACE'
-          >
-            {copied ? <CheckTickSingle size={16} /> : <Share01 size={16} />}
-          </button>
-        )}
         <button
           type='button'
           aria-label='Back'

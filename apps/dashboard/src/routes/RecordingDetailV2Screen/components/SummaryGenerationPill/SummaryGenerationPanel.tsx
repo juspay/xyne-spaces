@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useMotionValue, useReducedMotion } from 'framer-motion';
 import { AlertCircle, Spinner } from '@xyne/icons';
 import { Button } from '../../../../components/ui/Button/Button';
@@ -18,9 +18,13 @@ export interface SummaryGenerationPanelProps {
   isAwaiting: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  onRetry: () => void;
   hasFailed?: boolean;
   onReadTranscript?: (() => void) | undefined;
   generationRunId?: number;
+  initialProgress?: number;
+  initialStageIndex?: number;
+  onProgressPause?: (progress: number, stageIndex: number) => void;
 }
 
 /** A status line shown while Scribe works, swapped in once `atMs` has elapsed. */
@@ -63,22 +67,37 @@ export const SummaryGenerationPanel = ({
   isAwaiting,
   canGenerate,
   onGenerate,
+  onRetry,
   hasFailed = false,
   onReadTranscript,
   generationRunId = 0,
+  initialProgress = 0,
+  initialStageIndex = 0,
+  onProgressPause,
 }: SummaryGenerationPanelProps): ReactElement => {
   // —— State and hooks ———
   const shouldReduceMotion = useReducedMotion() ?? false;
-  const [stageIndex, setStageIndex] = useState(0);
+  const clampedInitialStageIndex = Math.min(
+    Math.max(0, initialStageIndex),
+    GENERATION_STAGES.length - 1,
+  );
+  const [stageIndex, setStageIndex] = useState(clampedInitialStageIndex);
+  const stageIndexRef = useRef(clampedInitialStageIndex);
   const progressWidth = useMotionValue(INITIAL_PROGRESS_WIDTH);
 
-  /** Reset up front as well as on the way out, so every run starts on the first stage. */
   useEffect(() => {
-    setStageIndex(0);
+    stageIndexRef.current = stageIndex;
+  }, [stageIndex]);
+
+  useEffect(() => {
+    setStageIndex(clampedInitialStageIndex);
     if (!isAwaiting) return;
-    const timers = GENERATION_STAGES.slice(1).map((stage, index) =>
-      window.setTimeout(() => setStageIndex(index + 1), stage.atMs),
-    );
+    const baseMs = GENERATION_STAGES[clampedInitialStageIndex]?.atMs ?? 0;
+    const timers = GENERATION_STAGES.map((stage, index) => ({ stage, index }))
+      .filter(({ index }) => index > clampedInitialStageIndex)
+      .map(({ stage, index }) =>
+        window.setTimeout(() => setStageIndex(index), Math.max(0, stage.atMs - baseMs)),
+      );
     return (): void => {
       timers.forEach(window.clearTimeout);
     };
@@ -86,11 +105,23 @@ export const SummaryGenerationPanel = ({
 
   useLayoutEffect(() => {
     if (!isAwaiting) return;
-    const controls = animateSummaryProgress(progressWidth);
+    const controls = animateSummaryProgress(progressWidth, initialProgress);
     return (): void => {
       controls.stop();
     };
-  }, [isAwaiting, generationRunId, progressWidth]);
+  }, [initialProgress, isAwaiting, generationRunId, progressWidth]);
+
+  // Saves the current loading-bar percentage and stage label before the panel
+  // stops or disappears, so a remount resumes both in sync instead of just the bar.
+  useEffect((): (() => void) | undefined => {
+    if (!isAwaiting || !onProgressPause) return undefined;
+    return (): void => {
+      const progress = Number.parseFloat(progressWidth.get());
+      if (Number.isFinite(progress)) {
+        onProgressPause(progress, stageIndexRef.current);
+      }
+    };
+  }, [isAwaiting, onProgressPause, progressWidth]);
 
   // —— Derived values ———
   const fadeTransition = buildFadeTransition(shouldReduceMotion);
@@ -136,7 +167,7 @@ export const SummaryGenerationPanel = ({
                   <Button
                     variant='default'
                     size={null}
-                    onClick={onGenerate}
+                    onClick={onRetry}
                     disabled={!canGenerate}
                     className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
                     data-track-category='RecordingDetailV2'
@@ -193,7 +224,7 @@ export const SummaryGenerationPanel = ({
                 size='sm'
                 onClick={onGenerate}
                 disabled={!canGenerate}
-                className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground hover:bg-foreground/80 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
+                className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground text-background hover:bg-foreground/80 hover:text-background disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
                 data-track-category='RecordingDetailV2'
                 data-track-name='generate_summary'
               >

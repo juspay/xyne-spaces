@@ -21,8 +21,8 @@ import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
 import { Prisma } from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
@@ -1941,7 +1941,9 @@ export class EmailService {
       logger.warn(`[emailService.sendReplyOnConversation] Email sending blocked for ticket ${ticket.id} - emailReplyEnabled is false`);
       throw new Error(`Email sending is temporarily disabled for this ticket. An automated process is in progress.`);
     }
-    const externalSource = await new ExternalSourceRepository().findByChannelId(conversation.channelId);
+    const externalSource = await new ChannelExternalSourceResolver().resolveForChannel(
+      conversation.channelId,
+    );
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
     const emails = await this.emailRepository.findByConversationId(params.conversationId);
     if (emails.length === 0) throw new Error(`No emails in conversation ${params.conversationId}`);

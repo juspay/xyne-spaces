@@ -29,6 +29,7 @@ interface ChannelCanvasListProps {
   currentUserId?: string | undefined;
   selectedCanvasId?: string | undefined;
   onDelete?: (id: string) => void;
+  onArchiveToggle?: (canvas: Canvas) => void;
   onCreateCanvasInFolder?: (folder: CanvasFolder) => void;
   isCreatingCanvas?: boolean;
   showStarredOnly?: boolean;
@@ -48,6 +49,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   currentUserId,
   selectedCanvasId,
   onDelete,
+  onArchiveToggle,
   onCreateCanvasInFolder,
   isCreatingCanvas = false,
   showStarredOnly = false,
@@ -206,6 +208,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
+                  onArchiveToggle={onArchiveToggle}
                   onDelete={
                     onDelete
                       ? (id): void => {
@@ -266,6 +269,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           currentUserId={currentUserId}
                           trackNames={channelCanvasRowTrackNames}
                           onToggleStar={onToggleStar}
+                          onArchiveToggle={onArchiveToggle}
                           onDelete={
                             onDelete
                               ? (id): void => {
@@ -291,6 +295,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
+                  onArchiveToggle={onArchiveToggle}
                   onDelete={
                     onDelete
                       ? (id): void => {

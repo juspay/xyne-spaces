@@ -16,7 +16,14 @@
 //
 // Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
 
+import { Agent } from "undici";
 import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo } from "xyne-claw-shared";
+
+// An SSE run goes silent between frames while the model composes; undici's
+// default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
+// claw-auth → claw streaming fetch must use this dispatcher. connectTimeout
+// stays so a dead engine still fails fast.
+export const streamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 export interface ClawStreamHandlers {
   onStarted?: (sessionId: string) => void | Promise<void>;
@@ -81,12 +88,14 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
     ...(opts.extraHeaders ?? {}),
   };
 
-  const fetchInit: RequestInit = {
+  const fetchInit = {
     method: "POST",
     headers,
     body: JSON.stringify(opts.body),
+    // `dispatcher` is an undici extension not in the DOM RequestInit type.
+    dispatcher: streamDispatcher,
     ...(opts.signal ? { signal: opts.signal } : {}),
-  };
+  } as unknown as RequestInit;
 
   const response = await fetch(opts.url, fetchInit);
   if (!response.ok) {
@@ -204,7 +213,7 @@ function logHandlerError(eventName: string, err: unknown): void {
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
 //
 // Used by the /internal/run proxy when the caller did NOT request SSE itself
-// (i.e. it's webhook.ts / agent-chat.ts / app-callback.ts / chain-workflows.ts /
+// (i.e. it's webhook.ts / agent-chat.ts / flow-action.ts / chain-workflows.ts /
 // flow-action.ts / scheduled-jobs-worker / run-recovery-worker). The proxy
 // still opens SSE to claw (so the wire from claw-auth → claw is unified) and
 // this helper translates each SSE frame back into the JSON POST body the

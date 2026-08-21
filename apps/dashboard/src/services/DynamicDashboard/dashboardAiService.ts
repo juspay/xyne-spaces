@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import type { DashboardPlan } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 
@@ -111,8 +112,11 @@ function parseSseBlock(raw: string, onEvent: (event: ClawStreamEvent) => void): 
       if (IGNORED_EVENT_TYPES.has(json.type)) continue;
       onEvent(json);
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('[dashboardAi] failed to parse event', e);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[dashboardAi] failed to parse event'),
+        context: [e],
+      });
     }
   }
 }

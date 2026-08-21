@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import { session, BrowserWindow, app } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
@@ -74,8 +75,8 @@ function setupDownloadHandler(): void {
       counter++;
     }
     item.setSavePath(filePath);
-    
-    console.log(`[Download] Saving file to: ${filePath}`);
+
+    log.info(`[Download] Saving file to: ${filePath}`);
   });
 }
 

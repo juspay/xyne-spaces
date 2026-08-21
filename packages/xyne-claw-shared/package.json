@@ -35,6 +35,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.13.9",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   }
 }

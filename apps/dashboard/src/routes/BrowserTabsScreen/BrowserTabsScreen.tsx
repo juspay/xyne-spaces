@@ -168,7 +168,11 @@ function WebviewTab({
           new CustomEvent('xyne-ai-browser-context-ready', { detail: contextPill }),
         );
       } catch (error) {
-        console.error('[BrowserTabsScreen] Failed to store browser context:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[BrowserTabsScreen] Failed to store browser context:'),
+          error: error,
+        });
       }
     };
 
