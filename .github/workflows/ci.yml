@@ -57,7 +57,12 @@ jobs:
           # Exact lockfile match only (no restore-keys): never link a fresh
           # install on top of a stale tree from a different lockfile. A miss
           # just does a full install from the (cached) store.
-          key: nm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          # Per-job suffix: each job runs a filtered install and thus produces a
+          # DIFFERENT partial tree. Sharing one key made the jobs race for a
+          # single cache slot (first to finish wins, rest skipped), so most jobs
+          # restored a tree missing their packages. Namespacing by job gives each
+          # its own complete cache.
+          key: nm-${{ runner.os }}-backend-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
@@ -110,7 +115,7 @@ jobs:
             node_modules
             apps/*/node_modules
             packages/*/node_modules
-          key: nm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: nm-${{ runner.os }}-dashboard-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
@@ -169,7 +174,7 @@ jobs:
             node_modules
             apps/*/node_modules
             packages/*/node_modules
-          key: nm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: nm-${{ runner.os }}-agentic-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
@@ -204,7 +209,7 @@ jobs:
             node_modules
             apps/*/node_modules
             packages/*/node_modules
-          key: nm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: nm-${{ runner.os }}-claw-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-claw...
