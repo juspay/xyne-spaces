@@ -88,6 +88,7 @@ import {
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
+  clampMaxDelegationsPerRun,
   type CallableAgentLightSpec,
   type CallableAgentSpec,
   type NestedAgentRunner,
@@ -2581,8 +2582,20 @@ async function processTask(
       }
     };
 
+    // Per-agent, per-run delegation budget. Read from the parent agent's
+    // free-form config bag (set in the Behaviour screen) and clamped to a safe
+    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset.
+    const maxDelegationsPerRun = clampMaxDelegationsPerRun(
+      agentConfig?.["maxDelegationsPerRun"],
+    );
+    if (agentConfig?.["maxDelegationsPerRun"] !== undefined) {
+      log(
+        `A2A delegation budget: agent=${agentSlug ?? "root"} configured=${String(agentConfig["maxDelegationsPerRun"])} effective=${maxDelegationsPerRun}`,
+      );
+    }
     const delegationGovernor = new AgentDelegationGovernor({
       ownerSlug: agentSlug ?? "root",
+      maxDelegationsPerRun,
       onEvent: (ev) => {
         log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
         if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
