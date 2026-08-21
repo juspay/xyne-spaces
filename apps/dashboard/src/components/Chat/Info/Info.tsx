@@ -19,6 +19,7 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
@@ -131,7 +132,9 @@ const Info = ({
     const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
     const projectBoardsList = projectBoards ?? [];
     if (filtered.length > 0) {
-      console.info('[boardsByChannel] Info panel using ChannelBoardMapping', {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'Info',
+        resolution: 'channel-board-mapping',
         channelId: channel.id,
         mappedCount: filtered.length,
         projectBoardsCount: projectBoardsList.length,
@@ -141,7 +144,9 @@ const Info = ({
     if (!mappingSynced) {
       return projectBoardsList;
     }
-    console.info('[boardsByChannel] Info panel falling back to boardsListByProject', {
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'Info',
+      resolution: 'project-boards-fallback',
       channelId: channel.id,
       mappedCount: 0,
       projectBoardsCount: projectBoardsList.length,

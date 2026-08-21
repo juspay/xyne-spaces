@@ -485,7 +485,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
     const projectBoardsList = projectBoards ?? [];
     if (filtered.length > 0) {
-      console.info('[boardsByChannel] CreateTicketModal using ChannelBoardMapping', {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'CreateTicketModal',
+        resolution: 'channel-board-mapping',
         channelId: effectiveChannelId,
         mappedCount: filtered.length,
         projectBoardsCount: projectBoardsList.length,
@@ -498,7 +500,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (!mappingSynced) {
       return projectBoardsList;
     }
-    console.info('[boardsByChannel] CreateTicketModal falling back to boardsListByProject', {
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'CreateTicketModal',
+      resolution: 'project-boards-fallback',
       channelId: effectiveChannelId,
       mappedCount: 0,
       projectBoardsCount: projectBoardsList.length,
