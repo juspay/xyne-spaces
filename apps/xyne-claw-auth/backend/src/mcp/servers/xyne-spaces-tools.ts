@@ -475,6 +475,36 @@ async function resolveCanvasViewIds(canvasDocIds: string[]): Promise<Map<string,
   return out;
 }
 
+/**
+ * Batch Vespa file docId (= collectionItem.fileId, a stable UUID shared
+ * across all versions of the file) → collectionItem.id (the Postgres cuid
+ * the FE's KB file-viewer route, downloads, and picker all key on). The two
+ * ids are NOT interchangeable — see the identical translation map built in
+ * claw-auth's kb-handlers.ts (`vespaDocIdToItemId`) for the same reason.
+ * Without this, a COLLECTIONS citation's `collectionItemId`/url would carry
+ * the Vespa docId straight through and 404 (or resolve to nothing) on the FE.
+ */
+async function resolveCollectionItemIds(fileDocIds: string[]): Promise<Map<string, string>> {
+  // Sliced for the same gateway take-ceiling reason as resolveMailLinks.
+  const ids = [...new Set(fileDocIds.filter(Boolean))].slice(0, GATEWAY_MAX_TAKE);
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  try {
+    const rows = (await interact({
+      model: "collectionItem",
+      operation: "findMany",
+      where: { fileId: { in: ids } },
+      take: ids.length,
+    })) as Array<{ id: string; fileId: string }>;
+    for (const c of rows) {
+      out.set(c.fileId, c.id);
+    }
+  } catch {
+    // Non-fatal — COLLECTIONS rows degrade to a channel-level thread chip.
+  }
+  return out;
+}
+
 function applyChannelInfo(
   citations: Citation[],
   info: Map<string, { name?: string; scopeType?: string; type?: string }>,
@@ -6484,6 +6514,7 @@ async function renderDirectResult(
   data: DirectSearchResponse,
   hits: number,
   offset: number,
+  workspaceId?: string,
 ): Promise<ToolResult> {
   const citations: Citation[] = [];
 
@@ -6498,13 +6529,16 @@ async function renderDirectResult(
     (scOf(r)["subApp"] as string | undefined)?.toUpperCase();
   const isFile = (r: SearchResult): boolean => r.type.toLowerCase() === "file";
 
-  const [mailLinks, ticketLinks, canvasViewIds] = await Promise.all([
+  const [mailLinks, ticketLinks, canvasViewIds, collectionItemIds] = await Promise.all([
     resolveMailLinks(allRows.filter((r) => r.type.toLowerCase() === "mail").map((r) => r.id)),
     resolveTicketLinks(allRows.filter(isFile).map((r) => scOf(r)["ticketId"] as string | undefined)),
     resolveCanvasViewIds(
       allRows
         .filter((r) => isFile(r) && subAppOf(r) === "CANVAS" && !scOf(r)["viewAccessId"])
         .map((r) => r.id),
+    ),
+    resolveCollectionItemIds(
+      allRows.filter((r) => isFile(r) && subAppOf(r) === "COLLECTIONS").map((r) => r.id),
     ),
   ]);
 
@@ -6542,23 +6576,30 @@ async function renderDirectResult(
       return citations.length > before;
     }
     // KB collection file → deep-link to the knowledge-base file viewer
-    // (/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<docId>).
-    // All ids are denormalized on the file doc at ingest (mapper.ts mapFile) and
-    // surfaced by transformHit, so NO collection lookup is needed. The FE forwards
-    // this url verbatim (clawCitationUrl.ts collection-item branch). Channel-scoped
-    // collections carry projectId + channelId + collectionId; workspace-scoped ones
-    // don't, so degrade to the channel-level thread chip rather than route to the
-    // wrong channel or emit an uncited row.
+    // (/<workspaceId>/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<itemId>).
+    // projectId/channelId/collectionId(=clId, the ROOT collection)/folderId(=clFd)
+    // are denormalized on the file doc at ingest (mapper.ts mapFile) and surfaced
+    // by transformHit, so no collection lookup is needed for those. `r.id` itself
+    // is the Vespa docId (= collectionItem.fileId, a stable UUID) though — NOT the
+    // collectionItem.id the FE route/download/picker key on — so it's translated
+    // via resolveCollectionItemIds before landing in the citation. The dashboard
+    // mounts every route under /:workspaceId/... (see AppRoot.tsx), so a missing
+    // workspaceId is just as fatal to the link as a missing collection id.
+    // Channel-scoped collections carry projectId + channelId + collectionId;
+    // workspace-scoped ones don't (nor do untranslatable/deleted items), so
+    // degrade to the channel-level thread chip rather than route to the wrong
+    // channel or emit a citation whose link 404s.
     if (type === "file" && subApp === "COLLECTIONS") {
       const projectId = sc["projectId"] as string | undefined;
       const collectionId = sc["collectionId"] as string | undefined;
       const folderId = sc["folderId"] as string | undefined;
-      if (projectId && channelId && collectionId) {
+      const itemId = collectionItemIds.get(r.id);
+      if (workspaceId && projectId && channelId && collectionId && itemId) {
         citations.push({
           kind: "collection-item",
-          url: `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${r.id}`,
+          url: `/${workspaceId}/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${itemId}`,
           collectionId,
-          collectionItemId: r.id,
+          collectionItemId: itemId,
           fileName: label,
           chunkIndex,
           label,
@@ -6800,7 +6841,7 @@ const spacesVespaQuery: ToolDef = {
         rankInputs,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-query error", e);
     }
@@ -7040,7 +7081,7 @@ const spacesVespaSearch: ToolDef = {
         undefined,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-search error", e);
     }

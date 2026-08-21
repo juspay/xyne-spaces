@@ -108,7 +108,9 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
       description: state.description.trim(),
       systemPrompt: state.systemPrompt.trim(),
       color: state.color,
-      kbScope: state.selectedKbScope,
+      // No explicit scope choice in the UI — an empty allowlist means the
+      // agent matches the running user's own spaces access.
+      kbScope: state.selectedKbResources.length > 0 ? 'COLLECTIONS' : 'USER',
       knowledgeBase: state.selectedKbResources,
       tools: state.tools,
       skillIds: state.selectedSkillIds,
@@ -330,8 +332,6 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
             />
 
             <KnowledgeCapabilityRow
-              scope={state.selectedKbScope}
-              onScopeChange={selectedKbScope => update({ selectedKbScope })}
               grants={state.selectedKbResources}
               onGrantsChange={selectedKbResources => update({ selectedKbResources })}
             />
