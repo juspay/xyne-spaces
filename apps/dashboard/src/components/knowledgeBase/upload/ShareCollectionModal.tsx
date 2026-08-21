@@ -1,6 +1,18 @@
 import { ReactElement, useState, useCallback, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, Check, Crown, Globe, Hash, Link2, Lock, Search, Share2, UsersRound, X } from 'lucide-react';
+import {
+  ChevronDown,
+  Check,
+  Crown,
+  Globe,
+  Hash,
+  Link2,
+  Lock,
+  Search,
+  Share2,
+  UsersRound,
+  X,
+} from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -130,10 +142,9 @@ export const ShareCollectionModal = ({
 
   // Existing collaborators — "Who has access". Includes the owner's own
   // OWNER row (createCollection inserts one at creation time).
-  const [accessList] = useCachedQuery(
-    queries.collectionPermissions({ collectionId }),
-    { enabled: isOpen },
-  );
+  const [accessList] = useCachedQuery(queries.collectionPermissions({ collectionId }), {
+    enabled: isOpen,
+  });
   // Role edits on existing rows are staged (not applied) until
   // "Share Collection" is clicked — mirrors Canvas's share dialog ("Unsaved
   // changes" next to Done). Remove stays immediate, matching Canvas's own
@@ -176,7 +187,10 @@ export const ShareCollectionModal = ({
 
   // Stages a role change — applied on "Share Collection", not immediately.
   const handleAccessRoleChange = useCallback(
-    (row: { id: string; userId: string | null; userGroupId: string | null }, role: CollectionRole) => {
+    (
+      row: { id: string; userId: string | null; userGroupId: string | null },
+      role: CollectionRole,
+    ) => {
       if (!row.userId && !row.userGroupId) return;
       setPendingAccessRoles(prev => ({ ...prev, [row.id]: role }));
     },
@@ -185,7 +199,7 @@ export const ShareCollectionModal = ({
 
   const handleRemoveAccess = useCallback(
     (row: { id: string }) => {
-      zero
+      void zero
         .mutate(mutators.collection.revokePermission({ id: row.id, collectionId }))
         .server.then(res => {
           if (res.type === 'error') {
@@ -308,7 +322,13 @@ export const ShareCollectionModal = ({
     ]);
     const users: AddCandidate[] = userSearchResults
       .filter(u => !excludedUserIds.has(u.id) && (!allowedUserIds || allowedUserIds.has(u.id)))
-      .map(u => ({ kind: 'user', id: u.id, name: getUserDisplayName(u), sub: u.email ?? '', user: u }));
+      .map(u => ({
+        kind: 'user',
+        id: u.id,
+        name: getUserDisplayName(u),
+        sub: u.email ?? '',
+        user: u,
+      }));
 
     const groups: AddCandidate[] = availableGroups
       .filter(g => g.name.toLowerCase().includes(q))
@@ -510,115 +530,129 @@ export const ShareCollectionModal = ({
             owner-only — Viewer/Editor get a read-only view (Who has access +
             General access) below instead. */}
         {isManager && (
-        <>
-        {/* Combined search — one input for people, groups, and channels,
+          <>
+            {/* Combined search — one input for people, groups, and channels,
             mirroring Canvas's share dialog (CanvasShareModal) instead of
             three separate pickers. Channel results only appear for
             workspace-scoped collections (channelId prop null). */}
-        <div className='mb-4 relative'>
-          <label htmlFor='share-search' className='block text-sm font-medium text-foreground mb-2'>
-            Select Users
-          </label>
-          <div className='relative'>
-            <Search size={16} className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none' />
-            <input
-              id='share-search'
-              type='text'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && results[0]) {
-                  e.preventDefault();
-                  addCandidate(results[0]);
-                } else if (e.key === 'Escape') {
-                  setQuery('');
-                }
-              }}
-              disabled={isLoading}
-              placeholder={
-                channelId ? 'Add people or groups...' : 'Add people, groups, or channels...'
-              }
-              data-track-category='knowledge-base'
-              data-track-name='share-collection-search-input'
-              className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
-            />
-          </div>
-          {query.trim() && (
-            <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
-              {results.length > 0 ? (
-                results.map(c => (
-                  <button
-                    key={`${c.kind}:${c.id}`}
-                    type='button'
-                    onMouseDown={e => {
+            <div className='mb-4 relative'>
+              <label
+                htmlFor='share-search'
+                className='block text-sm font-medium text-foreground mb-2'
+              >
+                Select Users
+              </label>
+              <div className='relative'>
+                <Search
+                  size={16}
+                  className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none'
+                />
+                <input
+                  id='share-search'
+                  type='text'
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && results[0]) {
                       e.preventDefault();
-                      addCandidate(c);
-                    }}
-                    data-track-category='knowledge-base'
-                    data-track-name='share-collection-add-candidate'
-                    className='w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-left hover:bg-muted'
-                  >
-                    {c.kind === 'user' ? (
-                      <Avatar userId={c.id} size='sm' />
-                    ) : (
-                      <span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted'>
-                        {searchCandidateIcon(c.kind)}
-                      </span>
-                    )}
-                    <span className='min-w-0 flex-1'>
-                      <span className='block text-sm font-medium text-foreground truncate'>{c.name}</span>
-                      <span className='block text-xs text-muted-foreground truncate'>{c.sub}</span>
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className='px-3 py-2.5 text-sm text-muted-foreground'>
-                  {channelId
-                    ? 'No people or groups found'
-                    : 'No people, groups, or channels found'}
+                      addCandidate(results[0]);
+                    } else if (e.key === 'Escape') {
+                      setQuery('');
+                    }
+                  }}
+                  disabled={isLoading}
+                  placeholder={
+                    channelId ? 'Add people or groups...' : 'Add people, groups, or channels...'
+                  }
+                  data-track-category='knowledge-base'
+                  data-track-name='share-collection-search-input'
+                  className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+                />
+              </div>
+              {query.trim() && (
+                <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
+                  {results.length > 0 ? (
+                    results.map(c => (
+                      <button
+                        key={`${c.kind}:${c.id}`}
+                        type='button'
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          addCandidate(c);
+                        }}
+                        data-track-category='knowledge-base'
+                        data-track-name='share-collection-add-candidate'
+                        className='w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-left hover:bg-muted'
+                      >
+                        {c.kind === 'user' ? (
+                          <Avatar userId={c.id} size='sm' />
+                        ) : (
+                          <span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted'>
+                            {searchCandidateIcon(c.kind)}
+                          </span>
+                        )}
+                        <span className='min-w-0 flex-1'>
+                          <span className='block text-sm font-medium text-foreground truncate'>
+                            {c.name}
+                          </span>
+                          <span className='block text-xs text-muted-foreground truncate'>
+                            {c.sub}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className='px-3 py-2.5 text-sm text-muted-foreground'>
+                      {channelId
+                        ? 'No people or groups found'
+                        : 'No people, groups, or channels found'}
+                    </div>
+                  )}
                 </div>
               )}
+              {channelId && (
+                <p className='mt-1.5 text-xs text-muted-foreground'>
+                  Only users in this channel can be selected.
+                </p>
+              )}
             </div>
-          )}
-          {channelId && (
-            <p className='mt-1.5 text-xs text-muted-foreground'>
-              Only users in this channel can be selected.
-            </p>
-          )}
-        </div>
 
-        {/* Permission Selection for Selected Users + Groups + Channels */}
-        {(selectedUsers.length > 0 || selectedGroups.length > 0 || selectedChannels.length > 0) && (
-          <div className='mb-6'>
-            <div className='block text-sm font-medium text-foreground mb-3'>Set Permissions</div>
-            <div className='max-h-64 overflow-y-auto space-y-3 pr-2'>
-              {selectedUsers.map(user => (
-                <div
-                  key={user.id}
-                  className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
-                >
-                  <div className='flex items-center gap-3 flex-1 min-w-0'>
-                    <div className='flex-shrink-0'>
-                      <div className='w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-300 font-medium text-sm'>
-                        {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || '?'}
+            {/* Permission Selection for Selected Users + Groups + Channels */}
+            {(selectedUsers.length > 0 ||
+              selectedGroups.length > 0 ||
+              selectedChannels.length > 0) && (
+              <div className='mb-6'>
+                <div className='block text-sm font-medium text-foreground mb-3'>
+                  Set Permissions
+                </div>
+                <div className='max-h-64 overflow-y-auto space-y-3 pr-2'>
+                  {selectedUsers.map(user => (
+                    <div
+                      key={user.id}
+                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
+                    >
+                      <div className='flex items-center gap-3 flex-1 min-w-0'>
+                        <div className='flex-shrink-0'>
+                          <div className='w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-300 font-medium text-sm'>
+                            {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || '?'}
+                          </div>
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <div className='text-sm font-medium text-foreground truncate'>
+                            {user.name || 'Unnamed User'}
+                          </div>
+                          <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
+                        </div>
                       </div>
-                    </div>
-                    <div className='flex-1 min-w-0'>
-                      <div className='text-sm font-medium text-foreground truncate'>
-                        {user.name || 'Unnamed User'}
-                      </div>
-                      <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
-                    </div>
-                  </div>
-                  <div className='flex items-center gap-2 flex-shrink-0'>
-                    {allowedRoles.includes('VIEWER') && (
-                      <button
-                        type='button'
-                        onClick={() => handlePermissionChange(user.id, 'VIEWER')}
-                        disabled={isLoading}
-                        data-track-category='knowledge-base'
-                        data-track-name='set-viewer-permission'
-                        className={`
+                      <div className='flex items-center gap-2 flex-shrink-0'>
+                        {allowedRoles.includes('VIEWER') && (
+                          <button
+                            type='button'
+                            onClick={() => handlePermissionChange(user.id, 'VIEWER')}
+                            disabled={isLoading}
+                            data-track-category='knowledge-base'
+                            data-track-name='set-viewer-permission'
+                            className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
                             (userPermissions[user.id] || 'VIEWER') === 'VIEWER'
@@ -627,18 +661,18 @@ export const ShareCollectionModal = ({
                           }
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
-                      >
-                        Viewer
-                      </button>
-                    )}
-                    {allowedRoles.includes('EDITOR') && (
-                      <button
-                        type='button'
-                        onClick={() => handlePermissionChange(user.id, 'EDITOR')}
-                        disabled={isLoading}
-                        data-track-category='knowledge-base'
-                        data-track-name='set-editor-permission'
-                        className={`
+                          >
+                            Viewer
+                          </button>
+                        )}
+                        {allowedRoles.includes('EDITOR') && (
+                          <button
+                            type='button'
+                            onClick={() => handlePermissionChange(user.id, 'EDITOR')}
+                            disabled={isLoading}
+                            data-track-category='knowledge-base'
+                            data-track-name='set-editor-permission'
+                            className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
                             userPermissions[user.id] === 'EDITOR'
@@ -647,18 +681,18 @@ export const ShareCollectionModal = ({
                           }
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
-                      >
-                        Editor
-                      </button>
-                    )}
-                    {allowedRoles.includes('OWNER') && (
-                      <button
-                        type='button'
-                        onClick={() => handlePermissionChange(user.id, 'OWNER')}
-                        disabled={isLoading}
-                        data-track-category='knowledge-base'
-                        data-track-name='set-owner-permission'
-                        className={`
+                          >
+                            Editor
+                          </button>
+                        )}
+                        {allowedRoles.includes('OWNER') && (
+                          <button
+                            type='button'
+                            onClick={() => handlePermissionChange(user.id, 'OWNER')}
+                            disabled={isLoading}
+                            data-track-category='knowledge-base'
+                            data-track-name='set-owner-permission'
+                            className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
                             userPermissions[user.id] === 'OWNER'
@@ -667,49 +701,51 @@ export const ShareCollectionModal = ({
                           }
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
-                      >
-                        Owner
-                      </button>
-                    )}
-                    <button
-                      type='button'
-                      onClick={() => removeUser(user.id)}
-                      disabled={isLoading}
-                      aria-label={`Remove ${user.name || user.email || 'user'}`}
-                      data-track-category='knowledge-base'
-                      data-track-name='remove-pending-user'
-                      className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {selectedGroups.map(group => (
-                <div
-                  key={group.id}
-                  className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
-                >
-                  <div className='flex items-center gap-3 flex-1 min-w-0'>
-                    <div className='flex-shrink-0'>
-                      <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
-                        <UsersRound size={16} />
+                          >
+                            Owner
+                          </button>
+                        )}
+                        <button
+                          type='button'
+                          onClick={() => removeUser(user.id)}
+                          disabled={isLoading}
+                          aria-label={`Remove ${user.name || user.email || 'user'}`}
+                          data-track-category='knowledge-base'
+                          data-track-name='remove-pending-user'
+                          className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                     </div>
-                    <div className='flex-1 min-w-0'>
-                      <div className='text-sm font-medium text-foreground truncate'>{group.name}</div>
-                      <div className='text-xs text-muted-foreground truncate'>Group</div>
-                    </div>
-                  </div>
-                  <div className='flex items-center gap-2 flex-shrink-0'>
-                    {allowedRoles.includes('VIEWER') && (
-                      <button
-                        type='button'
-                        onClick={() => handleGroupPermissionChange(group.id, 'VIEWER')}
-                        disabled={isLoading}
-                        data-track-category='knowledge-base'
-                        data-track-name='set-group-viewer-permission'
-                        className={`
+                  ))}
+                  {selectedGroups.map(group => (
+                    <div
+                      key={group.id}
+                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
+                    >
+                      <div className='flex items-center gap-3 flex-1 min-w-0'>
+                        <div className='flex-shrink-0'>
+                          <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
+                            <UsersRound size={16} />
+                          </div>
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <div className='text-sm font-medium text-foreground truncate'>
+                            {group.name}
+                          </div>
+                          <div className='text-xs text-muted-foreground truncate'>Group</div>
+                        </div>
+                      </div>
+                      <div className='flex items-center gap-2 flex-shrink-0'>
+                        {allowedRoles.includes('VIEWER') && (
+                          <button
+                            type='button'
+                            onClick={() => handleGroupPermissionChange(group.id, 'VIEWER')}
+                            disabled={isLoading}
+                            data-track-category='knowledge-base'
+                            data-track-name='set-group-viewer-permission'
+                            className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
                             (groupPermissions[group.id] || 'VIEWER') === 'VIEWER'
@@ -718,18 +754,18 @@ export const ShareCollectionModal = ({
                           }
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
-                      >
-                        Viewer
-                      </button>
-                    )}
-                    {allowedRoles.includes('EDITOR') && (
-                      <button
-                        type='button'
-                        onClick={() => handleGroupPermissionChange(group.id, 'EDITOR')}
-                        disabled={isLoading}
-                        data-track-category='knowledge-base'
-                        data-track-name='set-group-editor-permission'
-                        className={`
+                          >
+                            Viewer
+                          </button>
+                        )}
+                        {allowedRoles.includes('EDITOR') && (
+                          <button
+                            type='button'
+                            onClick={() => handleGroupPermissionChange(group.id, 'EDITOR')}
+                            disabled={isLoading}
+                            data-track-category='knowledge-base'
+                            data-track-name='set-group-editor-permission'
+                            className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
                             groupPermissions[group.id] === 'EDITOR'
@@ -738,60 +774,64 @@ export const ShareCollectionModal = ({
                           }
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
-                      >
-                        Editor
-                      </button>
-                    )}
-                    <button
-                      type='button'
-                      onClick={() => removeGroup(group.id)}
-                      disabled={isLoading}
-                      aria-label={`Remove ${group.name}`}
-                      data-track-category='knowledge-base'
-                      data-track-name='remove-pending-group'
-                      className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {selectedChannels.map(channel => (
-                <div
-                  key={channel.id}
-                  className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
-                >
-                  <div className='flex items-center gap-3 flex-1 min-w-0'>
-                    <div className='flex-shrink-0'>
-                      <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
-                        <Hash size={16} />
+                          >
+                            Editor
+                          </button>
+                        )}
+                        <button
+                          type='button'
+                          onClick={() => removeGroup(group.id)}
+                          disabled={isLoading}
+                          aria-label={`Remove ${group.name}`}
+                          data-track-category='knowledge-base'
+                          data-track-name='remove-pending-group'
+                          className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                     </div>
-                    <div className='flex-1 min-w-0'>
-                      <div className='text-sm font-medium text-foreground truncate'>{channel.name}</div>
-                      <div className='text-xs text-muted-foreground truncate'>Channel</div>
-                    </div>
-                  </div>
-                  <div className='flex items-center gap-2 flex-shrink-0'>
-                    <span className='px-3 py-1.5 text-xs font-medium text-muted-foreground'>Viewer</span>
-                    <button
-                      type='button'
-                      onClick={() => removeChannel(channel.id)}
-                      disabled={isLoading}
-                      aria-label={`Remove ${channel.name}`}
-                      data-track-category='knowledge-base'
-                      data-track-name='remove-pending-channel'
-                      className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+                  ))}
+                  {selectedChannels.map(channel => (
+                    <div
+                      key={channel.id}
+                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
                     >
-                      <X size={14} />
-                    </button>
-                  </div>
+                      <div className='flex items-center gap-3 flex-1 min-w-0'>
+                        <div className='flex-shrink-0'>
+                          <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
+                            <Hash size={16} />
+                          </div>
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <div className='text-sm font-medium text-foreground truncate'>
+                            {channel.name}
+                          </div>
+                          <div className='text-xs text-muted-foreground truncate'>Channel</div>
+                        </div>
+                      </div>
+                      <div className='flex items-center gap-2 flex-shrink-0'>
+                        <span className='px-3 py-1.5 text-xs font-medium text-muted-foreground'>
+                          Viewer
+                        </span>
+                        <button
+                          type='button'
+                          onClick={() => removeChannel(channel.id)}
+                          disabled={isLoading}
+                          aria-label={`Remove ${channel.name}`}
+                          data-track-category='knowledge-base'
+                          data-track-name='remove-pending-channel'
+                          className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-        </>
+              </div>
+            )}
+          </>
         )}
 
         {/* Who has access — existing collaborators. OWNER is a real,
@@ -812,7 +852,10 @@ export const ShareCollectionModal = ({
                   const bIsCreator = b.userId === activeCollection?.ownerId;
                   if (aIsCreator !== bIsCreator) return aIsCreator ? -1 : 1;
                   const rank = { OWNER: 0, EDITOR: 1, VIEWER: 2 } as const;
-                  return (rank[a.role as keyof typeof rank] ?? 3) - (rank[b.role as keyof typeof rank] ?? 3);
+                  return (
+                    (rank[a.role as keyof typeof rank] ?? 3) -
+                    (rank[b.role as keyof typeof rank] ?? 3)
+                  );
                 })
                 .map(row => {
                   const isCreatorRow = !!row.userId && row.userId === activeCollection?.ownerId;
@@ -824,7 +867,11 @@ export const ShareCollectionModal = ({
                   // Reflect staged edits, if any, rather than the synced value.
                   const displayRole = (pendingAccessRoles[row.id] ?? row.role) as CollectionRole;
                   const roleLabel =
-                    displayRole === 'OWNER' ? 'Owner' : displayRole === 'EDITOR' ? 'Editor' : 'Viewer';
+                    displayRole === 'OWNER'
+                      ? 'Owner'
+                      : displayRole === 'EDITOR'
+                        ? 'Editor'
+                        : 'Viewer';
                   return (
                     <div
                       key={row.id}
@@ -927,7 +974,11 @@ export const ShareCollectionModal = ({
                             )}
                             {collectionRole === 'OWNER' && (
                               <>
-                                <div className='h-px bg-border my-1' role='separator' aria-hidden='true' />
+                                <div
+                                  className='h-px bg-border my-1'
+                                  role='separator'
+                                  aria-hidden='true'
+                                />
                                 <DropdownMenuItem
                                   onClick={() => handleRemoveAccess(row)}
                                   className='cursor-pointer text-red-600 focus:text-red-600'
