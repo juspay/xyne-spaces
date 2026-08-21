@@ -24,7 +24,7 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   MTLS_AUTH_URL: Joi.string().uri().allow('').default(''),
-  MTLS_AUTH_S2S_KEY: Joi.string().allow('').default(''),
+  MTLS_SERVICE_SECRET: Joi.string().allow('').default(''),
   MTLS_INGRESS_SHARED_SECRET: Joi.string().allow('').default(''),
   MTLS_AUTH_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).default(10000),
   CERTIFICATE_ROTATION_RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000),
@@ -499,6 +499,9 @@ export const config = {
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
+  // Shared s2s secret with mtls-auth, used both to validate inbound internal
+  // requests and for outbound spaces->mtls-auth calls (sent as x-s2s-key).
+  mtlsServiceSecret: envVars.MTLS_SERVICE_SECRET as string,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,
@@ -526,7 +529,6 @@ export const config = {
   },
   mtlsAuth: {
     url: envVars.MTLS_AUTH_URL as string,
-    s2sKey: envVars.MTLS_AUTH_S2S_KEY as string,
     ingressSharedSecret: envVars.MTLS_INGRESS_SHARED_SECRET as string,
     requestTimeoutMs: envVars.MTLS_AUTH_REQUEST_TIMEOUT_MS as number,
     rateLimitWindowMs: envVars.CERTIFICATE_ROTATION_RATE_LIMIT_WINDOW_MS as number,

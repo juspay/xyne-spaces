@@ -55,7 +55,7 @@ async function proxyRotation(
     sendError(res, 401, 'CLIENT_CERTIFICATE_REQUIRED', 'Verified client certificate is required');
     return;
   }
-  if (!req.user || !config.mtlsAuth.url || !config.mtlsAuth.s2sKey) {
+  if (!req.user || !config.mtlsAuth.url || !config.mtlsServiceSecret) {
     sendError(res, 503, 'CERTIFICATE_SERVICE_UNAVAILABLE', 'Certificate service is unavailable');
     return;
   }
@@ -65,7 +65,7 @@ async function proxyRotation(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-s2s-key': config.mtlsAuth.s2sKey,
+        'x-s2s-key': config.mtlsServiceSecret,
       },
       body: JSON.stringify({
         ...body,
