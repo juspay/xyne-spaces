@@ -1,3 +1,10 @@
+## [1.205.2](https://github.com/juspay/xyne-spaces/compare/v1.205.1...v1.205.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* acl fix for cross-app support ([#823](https://github.com/juspay/xyne-spaces/issues/823)) ([3c24739](https://github.com/juspay/xyne-spaces/commit/3c247391674f3027cf22ff119ba70984bacf570a))
+
 ## [1.205.1](https://github.com/juspay/xyne-spaces/compare/v1.205.0...v1.205.1) (2026-08-20)
 
 
