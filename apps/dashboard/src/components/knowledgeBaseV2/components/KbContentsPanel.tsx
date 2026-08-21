@@ -40,7 +40,7 @@ interface OutlineNode {
 function buildOutline(ids: string[], nodes: Record<string, CollectionTreeNode>): OutlineNode[] {
   return ids
     .map(id => nodes[id])
-    .filter((n): n is CollectionTreeNode => Boolean(n) && n.type === 'FOLDER')
+    .filter((n): n is CollectionTreeNode => n !== undefined && n.type === 'FOLDER')
     .map(n => ({
       id: n.id,
       name: n.name,
