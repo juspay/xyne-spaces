@@ -2,6 +2,7 @@ import type {
 	SlackConversationsHistoryRequest,
 	SlackConversationsListRequest,
 	SlackConversationsRepliesRequest,
+	SlackUsersConversationsRequest,
 } from "../types";
 
 export interface HistoryArgs {
@@ -69,5 +70,52 @@ export function transformList(
 		where,
 		limit: Math.min(slackReq.limit ?? 100, 1000),
 		cursor: slackReq.cursor,
+	};
+}
+
+export interface UsersConversationsArgs {
+	where: Record<string, unknown>;
+	limit: number;
+	cursor?: string;
+	unknownTypes: string[];
+}
+
+export function transformUsersConversations(
+	slackReq: SlackUsersConversationsRequest & { user: string },
+): UsersConversationsArgs {
+	const types = (slackReq.types ?? "public_channel")
+		.split(",")
+		.map((type) => type.trim())
+		.filter(Boolean);
+
+	const filters: Record<string, unknown>[] = [];
+	const unknownTypes: string[] = [];
+	for (const type of types) {
+		const filter = SLACK_TYPE_TO_XYNE[type];
+		if (filter) {
+			filters.push(filter);
+		} else {
+			unknownTypes.push(type);
+		}
+	}
+
+	const typeWhere =
+		filters.length === 1 ? { ...filters[0] } : { OR: filters };
+
+	const where: Record<string, unknown> = {
+		...typeWhere,
+		// Membership is what makes these "the user's" conversations
+		participants: { some: { userId: slackReq.user } },
+	};
+
+	if (slackReq.exclude_archived) {
+		where.isArchived = false;
+	}
+
+	return {
+		where,
+		limit: Math.min(slackReq.limit ?? 100, 1000),
+		cursor: slackReq.cursor,
+		unknownTypes,
 	};
 }
