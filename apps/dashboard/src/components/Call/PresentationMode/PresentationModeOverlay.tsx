@@ -50,6 +50,16 @@ export function PresentationModeOverlay({
     }
     if (fullscreenRequestedRef.current) return;
     fullscreenRequestedRef.current = true;
+
+    // The Fullscreen API requires transient user activation. When presentation
+    // mode is opened programmatically rather than by a click — an unattended wall
+    // launched with ?telepresence=1 — there is no activation and the request is
+    // guaranteed to reject, which would light up the "Failed to enter presentation
+    // mode" hint for something that isn't broken. Skip it instead: the overlay is
+    // `fixed inset-0` so it already covers the viewport, and such a display is
+    // normally run in a kiosk browser where the viewport is the whole screen.
+    if (navigator.userActivation && !navigator.userActivation.isActive) return;
+
     void overlayRef.current?.requestFullscreen()?.catch((err: Error) => {
       logger.error(Event.LIVEKIT_ROOM_EVENT, {
         callId,

@@ -1,0 +1,184 @@
+import { useEffect, useRef } from 'react';
+import { useSelector } from '@xstate/react';
+import { useSearchParams } from 'react-router-dom';
+import { ConnectionState } from 'livekit-client';
+import { roomActor } from '../machines/roomMachine';
+import { useCachedQuery } from './useCachedQuery';
+import { queries } from '../zero/queries';
+import { useCallJoinOrInitiate } from './useCallJoinOrInitiate';
+import { useAuth } from './useAuth';
+import { useCallAutoJoinEnabled } from './callAutoJoinCacConfig';
+import { CallOrigin } from '@xyne/shared';
+
+const RETRY_MIN_MS = 3000;
+const RETRY_MAX_MS = 30000;
+
+/**
+ * The call URL API's query-parameter names. Exported because this is a public
+ * contract — anything constructing these URLs (deep links, an unattended room
+ * station's launcher) should reference these rather than re-spelling them, since
+ * a typo here fails silently: the param is simply ignored.
+ */
+export const CALL_URL_PARAMS = {
+  autoJoin: 'autoJoin',
+  mic: 'mic',
+  camera: 'camera',
+  viewMode: 'viewMode',
+  telepresence: 'telepresence',
+} as const;
+
+/** Value that turns on the flag-style params. */
+const FLAG_ON = '1';
+
+interface AutoJoinCall {
+  externalId?: string;
+  callOrigin?: CallOrigin;
+}
+
+interface UseCallAutoJoinOptions {
+  channelId: string;
+  isMember: boolean;
+}
+
+/** `on`/`off` -> boolean; anything else (including absent) -> undefined = "not requested". */
+const parseOnOff = (value: string | null): boolean | undefined =>
+  value === 'on' ? true : value === 'off' ? false : undefined;
+
+/** Anything but the two known layouts -> undefined, leaving the app's own default. */
+const parseViewMode = (value: string | null): 'full' | 'mini' | undefined =>
+  value === 'full' || value === 'mini' ? value : undefined;
+
+/**
+ * Call URL API: lets an external system drive a call by navigating to a channel
+ * URL, with no bespoke integration on either side. Built for always-on room
+ * stations (a machine that should hold one channel's call open indefinitely and
+ * recover on its own), but nothing here is specific to that.
+ *
+ * Query params on the channel URL, all opt-in:
+ *
+ *   ?autoJoin=1            join this channel's active call, or start one if there
+ *                          isn't one, and keep retrying with backoff if dropped
+ *   &mic=on|off            initial mic state, overriding the saved join preference
+ *   &camera=on|off         initial camera state, likewise
+ *   &viewMode=full|mini    call UI layout (default: platform-derived, mini on desktop)
+ *   &telepresence=1        start the call already in presentation (telepresence)
+ *                          mode. Subject to its own existing gate — the call view
+ *                          honours it only for users the xyne_telepresence_config
+ *                          CAC flag already allows, so this param cannot be used
+ *                          to reach the feature without that permission.
+ *
+ * Deliberately no fullscreen param: the DOM Fullscreen API needs a user gesture,
+ * which an unattended display has nobody to provide. Filling the screen is the
+ * launcher's job instead — a browser started with `--kiosk`, or a window manager
+ * rule — and that hides the browser chrome too, which the DOM API cannot.
+ *
+ * Everything is gated on the `call_auto_join_config` CAC flag; while that is off
+ * these params are inert. No-ops entirely for URLs that don't carry them.
+ */
+export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions): void => {
+  const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+  const isFeatureEnabled = useCallAutoJoinEnabled(user?.email);
+
+  const autoJoinRequested = searchParams.get(CALL_URL_PARAMS.autoJoin) === FLAG_ON;
+  const autoJoin = isFeatureEnabled && isMember && autoJoinRequested;
+
+  const micParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.mic));
+  const cameraParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.camera));
+  const viewMode = parseViewMode(searchParams.get(CALL_URL_PARAMS.viewMode));
+  const presentationMode = searchParams.get(CALL_URL_PARAMS.telepresence) === FLAG_ON;
+
+  const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
+  const stateSnapshot = useSelector(roomActor, state => state);
+  const machineState = stateSnapshot.value;
+  const currentCallId = stateSnapshot.context.externalId;
+  const isInCall =
+    stateSnapshot.matches('initiating') ||
+    stateSnapshot.matches('joining') ||
+    stateSnapshot.matches('connecting') ||
+    stateSnapshot.matches('connected');
+
+  // roomMachine only leaves the 'connected' state for two specific LiveKit disconnect
+  // reasons (host ended call, evicted by another device) — a generic network-caused
+  // disconnect (signal close, reconnect timeout) leaves the machine reporting
+  // 'connected' indefinitely, since it's designed to let LiveKit's own client-side
+  // reconnection handle transient blips silently. Confirmed by testing: once
+  // LiveKit's own reconnect attempts exhaust, the machine gets stuck reporting
+  // 'connected' with a dead room forever.
+  //
+  // Read the LiveKit Room object's own `.state` directly rather than
+  // context.connectionState: that context field is only ever updated by the
+  // CONNECTION_STATE_CHANGED event handler (roomEventListener), which is registered
+  // *after* room.connect() has already resolved — essentially the same moment the
+  // first Connected event fires — so that first event is structurally missed and
+  // connectionState can stay stuck at its stale 'disconnected' default for the
+  // entire life of a healthy call that never has an intermediate reconnect blip
+  // (confirmed by testing). room.state has no such gap — it's a live property read,
+  // always accurate regardless of which events our listener did or didn't catch.
+  const isStuckAfterFailedReconnect =
+    stateSnapshot.matches('connected') &&
+    stateSnapshot.context.room?.state === ConnectionState.Disconnected;
+
+  const { joinCall, initiateCall } = useCallJoinOrInitiate();
+
+  const retryAttemptsRef = useRef(0);
+
+  useEffect(() => {
+    if (!autoJoin) return undefined;
+
+    if (isStuckAfterFailedReconnect) {
+      roomActor.send({ type: 'DISCONNECT' });
+      return undefined;
+    }
+
+    const calls = (activeCalls ?? []) as readonly AutoJoinCall[];
+    const channelCall = calls.find(call => call.callOrigin !== CallOrigin.CONVERSATION);
+
+    if (isInCall) {
+      if (channelCall && currentCallId === channelCall.externalId) {
+        retryAttemptsRef.current = 0;
+      }
+      return undefined;
+    }
+
+    const attempt = retryAttemptsRef.current;
+    const delay = attempt === 0 ? 0 : Math.min(RETRY_MIN_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
+
+    // The same setup is passed on every retry, not just the first join: each
+    // attempt is a fresh JOIN_CALL/INITIATE_CALL into a machine whose context was
+    // cleared on disconnect, so the station comes back with the mic, camera and
+    // layout it was asked for rather than drifting to defaults after one blip.
+    const callSetup = {
+      isUrlDrivenJoin: true,
+      ...(viewMode && { viewMode }),
+      ...(micParam !== undefined && { initialMicEnabled: micParam }),
+      ...(cameraParam !== undefined && { initialCameraEnabled: cameraParam }),
+      ...(presentationMode && { initialPresentationMode: true }),
+    };
+
+    const timer = setTimeout(() => {
+      retryAttemptsRef.current = attempt + 1;
+      if (channelCall?.externalId) {
+        joinCall({ callId: channelCall.externalId, ...callSetup });
+      } else {
+        initiateCall({ channelId, ...callSetup });
+      }
+    }, delay);
+
+    return (): void => clearTimeout(timer);
+  }, [
+    autoJoin,
+    activeCalls,
+    isInCall,
+    isStuckAfterFailedReconnect,
+    currentCallId,
+    channelId,
+    joinCall,
+    initiateCall,
+    machineState,
+    viewMode,
+    micParam,
+    cameraParam,
+    presentationMode,
+  ]);
+};

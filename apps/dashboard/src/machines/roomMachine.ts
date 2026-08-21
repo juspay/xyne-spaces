@@ -202,6 +202,23 @@ export interface RoomContext {
   hostControls: HostControls;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
+  // Explicit initial mic/camera state requested by whoever started the join
+  // (see useCallAutoJoin's ?mic=/?camera= URL params). `null` — the normal case
+  // for a human clicking Join — means "no request", and enableLocalTracks falls
+  // back to the user's saved join preferences. Host controls still win either way.
+  initialMicEnabled: boolean | null;
+  initialCameraEnabled: boolean | null;
+  // Start the call already in presentation (telepresence) mode — see
+  // useCallAutoJoin's ?telepresence= URL param. Carried here rather than read
+  // from the URL in the call views so it stays scoped to one call and clears
+  // with the rest of the context on disconnect. The views still apply their own
+  // xyne_telepresence_config gate before honouring it.
+  initialPresentationMode: boolean;
+  // Set when the join was driven by a URL rather than a person clicking Join.
+  // Such a join retries on its own (see useCallAutoJoin), and on an unattended
+  // display there is nobody to read or dismiss a toast — so failures stay in the
+  // logs instead of flashing on screen mid-recovery.
+  isUrlDrivenJoin: boolean;
 }
 
 // Events for Room operations
@@ -225,12 +242,22 @@ export type RoomMachineEvent =
       viewMode?: 'mini' | 'full';
       conversationId?: string; // Optional: for thread-initiated calls
       artifactMessageId?: string; // Exact slash-command artifact that owns the call
+      // Omit to use the user's saved join preferences (see RoomContext).
+      initialMicEnabled?: boolean;
+      initialCameraEnabled?: boolean;
+      initialPresentationMode?: boolean;
+      isUrlDrivenJoin?: boolean;
     }
   | {
       type: 'JOIN_CALL';
       callId: string;
       zero: Zero | null;
       viewMode?: 'mini' | 'full';
+      // Omit to use the user's saved join preferences (see RoomContext).
+      initialMicEnabled?: boolean;
+      initialCameraEnabled?: boolean;
+      initialPresentationMode?: boolean;
+      isUrlDrivenJoin?: boolean;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1321,6 +1348,10 @@ export const roomMachine = setup({
       unreadCallChatCount: () => 0,
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
+      initialMicEnabled: () => null,
+      initialCameraEnabled: () => null,
+      initialPresentationMode: () => false,
+      isUrlDrivenJoin: () => false,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1349,13 +1380,23 @@ export const roomMachine = setup({
               'turnOffCamera',
             );
 
-            // Respect user preference: if joinMuted is true, always mute
-            // If joinMuted is false, use the existing threshold logic
-            const enableMic = !audioTurnedOffByHost && !joinMuted && !shouldMuteByDefault;
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            // Precedence, strongest first:
+            //   1. host controls — never overridable by anyone but the host
+            //   2. an explicit request on the JOIN_CALL/INITIATE_CALL event
+            //      (context.initial*Enabled, e.g. an auto-join URL's ?mic=on)
+            //   3. the user's saved join preferences + the crowded-room mute threshold
+            // Applying (2) here rather than toggling after 'connected' is deliberate:
+            // this action is the single writer of the initial track state, so there is
+            // no window where a post-connect compare-and-toggle could read a value
+            // these very awaits are about to overwrite and end up inverted.
+            const enableMic =
+              !audioTurnedOffByHost &&
+              (context.initialMicEnabled ?? (!joinMuted && !shouldMuteByDefault));
 
-            // For video: respect user preference
-            const enableCamera = !cameraTurnedOffByHost && !joinWithoutVideo;
+            const enableCamera =
+              !cameraTurnedOffByHost && (context.initialCameraEnabled ?? !joinWithoutVideo);
+
+            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1372,7 +1413,8 @@ export const roomMachine = setup({
       }
     },
 
-    showJoinCallErrorToast: () => {
+    showJoinCallErrorToast: ({ context }) => {
+      if (context.isUrlDrivenJoin) return;
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
@@ -1486,6 +1528,10 @@ export const roomMachine = setup({
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
+    initialMicEnabled: null,
+    initialCameraEnabled: null,
+    initialPresentationMode: false,
+    isUrlDrivenJoin: false,
   },
   id: 'roomMachine',
   on: {
@@ -1540,6 +1586,14 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.conversationId ?? null) : null,
             artifactMessageId: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.artifactMessageId ?? null) : null,
+            initialMicEnabled: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.initialMicEnabled ?? null) : null,
+            initialCameraEnabled: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.initialCameraEnabled ?? null) : null,
+            initialPresentationMode: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.initialPresentationMode ?? false) : false,
+            isUrlDrivenJoin: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.isUrlDrivenJoin ?? false) : false,
             isInitiator: () => true,
           }),
         },
@@ -1555,6 +1609,14 @@ export const roomMachine = setup({
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
               viewMode: ({ event }) =>
                 event.type === 'JOIN_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+              initialMicEnabled: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.initialMicEnabled ?? null) : null,
+              initialCameraEnabled: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.initialCameraEnabled ?? null) : null,
+              initialPresentationMode: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.initialPresentationMode ?? false) : false,
+              isUrlDrivenJoin: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.isUrlDrivenJoin ?? false) : false,
               isInitiator: () => false,
             }),
           ],
