@@ -69,6 +69,7 @@ import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarnin
 import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallModal';
 import { IncomingCallDevHarness } from '../components/Call/IncomingCall/IncomingCallCard.dev';
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
+import { CallLinkInterceptor } from '../components/Call/CallLinkInterceptor/CallLinkInterceptor';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
@@ -784,6 +785,7 @@ const AppRoot = (): ReactElement => {
                             <IncomingCallDevHarness />
                           )}
                         <GlobalCallOverlay />
+                        <CallLinkInterceptor />
                         {recordingVersion === 'v2' ? (
                           <NoteTakerOverlayHost />
                         ) : (

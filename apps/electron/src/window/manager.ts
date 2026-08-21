@@ -8,6 +8,7 @@ import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
+import { isCallInviteUrl } from '../utils/callLink';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 
 import { keychain } from '../keychain';
@@ -129,6 +130,12 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     mainWindow?.webContents.send('link-opened-external', externalUrl);
   };
 
+  // Call invite links are hosted off the app origin, so the external-link rules
+  // below would bounce a workspace member out of Spaces. Keep them in the app.
+  const openCallInApp = (callUrl: string): void => {
+    mainWindow?.webContents.send('open-call-link', callUrl);
+  };
+
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {
      try {
@@ -153,6 +160,11 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       }
 
 
+
+      if (isCallInviteUrl(url)) {
+        openCallInApp(url);
+        return { action: 'deny' };
+      }
 
       if (!isInternalUrl) {
         const prefExternal = browserSettingsService.getSettings().openLinksExternally;
@@ -216,6 +228,11 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       }
 
       event.preventDefault();
+      if (isCallInviteUrl(navUrl)) {
+        openCallInApp(navUrl);
+        return;
+      }
+
       if (browserSettingsService.getSettings().openLinksExternally) {
         shell.openExternal(navUrl);
         notifyExternalOpen(navUrl);
