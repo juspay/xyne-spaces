@@ -30,6 +30,7 @@ import {
   Rocket,
   ScrollText,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -38,6 +39,10 @@ import { isFramedSdlcSurface, requestSdlcFrameReset } from './useSdlcFrameBridge
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
+import Input from '../../components/ui/Input';
+import Textarea from '../../components/ui/Textarea';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
 import {
   Select,
@@ -291,6 +296,15 @@ export default function SdlcScreen(): ReactElement {
   const prds = useMemo(
     () => canvases.filter(canvas => metadataOf(canvas.metadata)['artifactKind'] === 'PRD'),
     [canvases],
+  );
+  const prdOptions = useMemo<SelectorOption[]>(
+    () =>
+      prds.map(canvas => ({
+        value: canvas.id,
+        label: canvas.title,
+        icon: <ScrollText size={14} className='text-muted-foreground' />,
+      })),
+    [prds],
   );
   const techDocs = useMemo(
     () => canvases.filter(canvas => metadataOf(canvas.metadata)['artifactKind'] === 'TECH_DOC'),
@@ -916,7 +930,6 @@ export default function SdlcScreen(): ReactElement {
       return;
     const parentPrd =
       artifactDialog === 'TECH_DOC' ? prds.find(prd => prd.id === parentCanvasId) : undefined;
-    if (artifactDialog === 'TECH_DOC' && !parentPrd) return;
     const query = buildSdlcArtifactCreationPrompt({
       kind: artifactDialog,
       title: artifactTitle.trim(),
@@ -935,6 +948,26 @@ export default function SdlcScreen(): ReactElement {
     setArtifactTitle('');
     setArtifactAiPrompt('');
     setParentCanvasId('');
+  };
+
+  const createBlankArtifact = async (): Promise<void> => {
+    if (!repo || repo instanceof Error || !artifactDialog || !artifactTitle.trim()) return;
+    const title = artifactTitle.trim();
+    const response = await apiInstance.post<{ artifact: { canvasId: string } }>(
+      '/sdlc/claw/artifacts',
+      {
+        repoId: repo.id,
+        kind: artifactDialog,
+        title,
+        markdown: `# ${title}\n`,
+        ...(artifactDialog === 'TECH_DOC' && parentCanvasId ? { parentCanvasId } : {}),
+      },
+    );
+    setArtifactDialog(null);
+    setArtifactTitle('');
+    setArtifactAiPrompt('');
+    setParentCanvasId('');
+    openCanvas(response.data.artifact.canvasId);
   };
 
   const sendStartWork = useCallback(
@@ -1823,61 +1856,83 @@ export default function SdlcScreen(): ReactElement {
           <label htmlFor='sdlc-artifact-title' className='mt-5 block text-sm font-medium'>
             Title
           </label>
-          <input
+          <Input
             id='sdlc-artifact-title'
             autoFocus
             value={artifactTitle}
             onChange={event => setArtifactTitle(event.target.value)}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            className='mt-2 h-10'
             placeholder='Clear, outcome-focused title'
             data-track-category='SdlcHub'
             data-track-name='ArtifactTitleChanged'
           />
           {artifactDialog === 'TECH_DOC' && (
             <>
-              <label htmlFor='sdlc-techDoc-prd' className='mt-4 block text-sm font-medium'>
-                PRD
-              </label>
-              <select
-                id='sdlc-techDoc-prd'
-                value={parentCanvasId}
-                onChange={event => setParentCanvasId(event.target.value)}
-                className='mt-2 h-10 w-full rounded-md border bg-background px-3'
+              {/* Not a <label htmlFor>: EntitySelector owns its trigger internally */}
+              <span className='mt-4 block text-sm font-medium'>
+                PRD <span className='font-normal text-muted-foreground'>(optional)</span>
+              </span>
+              <div
+                className='mt-2'
                 data-track-category='SdlcHub'
                 data-track-name='TechDocPRDChanged'
               >
-                <option value=''>Select PRD</option>
-                {prds.map(item => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                  </option>
-                ))}
-              </select>
+                <EntitySelector
+                  options={prdOptions}
+                  selectedValue={parentCanvasId || null}
+                  onSelect={value => setParentCanvasId(value ?? '')}
+                  placeholder={prds.length === 0 ? 'No PRDs yet' : 'No PRD'}
+                  searchPlaceholder='Search PRDs...'
+                  width='100%'
+                  showUnassignOption
+                  unassignLabel='No PRD'
+                  virtualize
+                  testId='sdlc-techDoc-prd'
+                />
+              </div>
             </>
           )}
           <label htmlFor='sdlc-artifact-ai-prompt' className='mt-4 block text-sm font-medium'>
-            Direction <span className='font-normal text-muted-foreground'>(optional)</span>
+            Direction{' '}
+            <span className='font-normal text-muted-foreground'>(optional, used by Ask AI)</span>
           </label>
-          <textarea
+          <Textarea
             id='sdlc-artifact-ai-prompt'
             value={artifactAiPrompt}
             onChange={event => setArtifactAiPrompt(event.target.value)}
-            className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
+            className='mt-2 min-h-24'
             placeholder='What should Ask AI emphasize?'
             data-track-category='SdlcHub'
             data-track-name='ArtifactAiPromptChanged'
           />
-          <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => setArtifactDialog(null)}>
-              Cancel
-            </Button>
+          <div className='mt-6 flex items-center justify-between gap-2'>
             <Button
-              type='submit'
-              loading={busy === 'artifact'}
-              disabled={!artifactTitle.trim() || (artifactDialog === 'TECH_DOC' && !parentCanvasId)}
+              type='button'
+              variant='ghost'
+              loading={busy === 'artifact-blank'}
+              disabled={!artifactTitle.trim()}
+              title='Create an empty document with just the title — no AI'
+              onClick={() =>
+                void call(
+                  'artifact-blank',
+                  createBlankArtifact,
+                  `${artifactDialog === 'PRD' ? 'PRD' : 'Tech Doc'} created`,
+                )
+              }
+              data-track-category='SdlcHub'
+              data-track-name='BlankArtifactCreated'
             >
-              Ask AI to create
+              Write it myself
             </Button>
+            <div className='flex gap-2'>
+              <Button type='button' variant='outline' onClick={() => setArtifactDialog(null)}>
+                Cancel
+              </Button>
+              <Button type='submit' loading={busy === 'artifact'} disabled={!artifactTitle.trim()}>
+                <Sparkles />
+                Ask AI to create
+              </Button>
+            </div>
           </div>
         </form>
       </Dialog>

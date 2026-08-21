@@ -511,12 +511,6 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
-    if (value.kind === "TECH_DOC" && !value.parentCanvasId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Tech Doc artifacts require a parent PRD",
-      });
-    }
   });
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema

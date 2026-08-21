@@ -643,6 +643,7 @@ export class SdlcHubService implements SdlcHub {
     });
     if (!folder) throw new AppError(`${folderName} folder not found`, 409);
 
+    let baselineGenerationCommit: string | null = null;
     if (input.kind === 'BASELINE') {
       const execution = await this.prisma.workflowExecution.findFirst({
         where: {
@@ -665,6 +666,10 @@ export class SdlcHubService implements SdlcHub {
       if (executionContext.repoId !== repo.id) {
         throw new AppError('SDLC setup execution does not belong to this repository', 403);
       }
+      baselineGenerationCommit =
+        typeof executionContext.generationCommit === 'string'
+          ? executionContext.generationCommit
+          : null;
       const existing = await this.findSdlcCanvas(repo.channelId, {
         artifactKind: 'BASELINE',
         baselineKind: input.baselineKind,
@@ -683,19 +688,26 @@ export class SdlcHubService implements SdlcHub {
     let artifactMarkdown = input.markdown;
     let artifactGenerationCommit: string | undefined;
     let artifactSourceReferences: SdlcSourceReference[] = [];
-    if (input.kind !== 'BASELINE') {
-      artifactGenerationCommit = await sdlcVcs.resolveBaseBranchHead(repo.id);
+    const citesRepository =
+      (input.sourceReferences?.length ?? 0) > 0 || input.markdown.includes('[[source:');
+    if (citesRepository) {
+      const pinnedCommit =
+        input.kind === 'BASELINE'
+          ? baselineGenerationCommit
+          : await sdlcVcs.resolveBaseBranchHead(repo.id);
+      if (!pinnedCommit) {
+        throw new AppError('Structured SDLC references require a pinned artifact execution', 409);
+      }
+      artifactGenerationCommit = pinnedCommit;
       const resolved = await this.resolveSourceReferences({
         repoId: repo.id,
         repositoryUrl: repo.canonicalUrl || repo.url,
-        generationCommit: artifactGenerationCommit,
+        generationCommit: pinnedCommit,
         markdown: input.markdown,
         sourceReferences: input.sourceReferences,
       });
       artifactMarkdown = resolved.markdown;
       artifactSourceReferences = resolved.sourceReferences;
-    } else if (input.markdown.includes('[[source:')) {
-      throw new AppError('Structured SDLC references require a pinned artifact execution', 409);
     }
 
     const content = await convertMarkdownToBlockNote(artifactMarkdown);
