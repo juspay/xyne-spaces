@@ -7,6 +7,7 @@ import {
   ChannelScopeType,
   validateMessageContentLength,
 } from '@xyne/shared';
+import { matchesAllTokens } from '@xyne/shared/utils';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -330,11 +331,11 @@ export const ComposeDmPanel: React.FC = () => {
       searchResults && searchResults.length > 0
         ? searchResults
         : Array.from(usersById.values()).filter(u => {
-            const q = searchValue.toLowerCase();
+            // Token-AND on the name (out-of-order + partial); whole-query substring on email.
+            const nameHaystack = `${u.displayName ?? ''} ${u.name}`;
             return (
-              u.name.toLowerCase().includes(q) ||
-              u.email.toLowerCase().includes(q) ||
-              (u.displayName?.toLowerCase() || '').includes(q)
+              matchesAllTokens(nameHaystack, searchValue) ||
+              u.email.toLowerCase().includes(searchValue.toLowerCase())
             );
           });
 

@@ -1,5 +1,6 @@
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { User } from '@xyne/shared';
+import { matchesAllTokens } from '@xyne/shared/utils';
 import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
@@ -126,9 +127,10 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
           // Always pass through current user when "self" is searched
           if (currentUserId && opt.id === currentUserId && isSelfSearch) return true;
           const displayName = getUserDisplayName(opt);
+          // Token-AND on the name (out-of-order + partial); whole-query substring on email.
           return (
-            displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            opt.email?.toLowerCase().includes(searchQuery.toLowerCase())
+            matchesAllTokens(displayName, searchQuery) ||
+            (opt.email?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
           );
         })
       : options;
