@@ -452,8 +452,9 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get messages exchanged time-series data using optimized Prisma ORM aggregation
-   * Fetches all messages within date range and processes aggregation in application memory
+   * Get messages exchanged time-series data: per-bucket total plus channel / DM /
+   * group-DM breakdown, aggregated in Postgres and zero-filled against the
+   * generated bucket list.
    */
   async getMessagesExchanged(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
@@ -920,9 +921,10 @@ export class AnalyticsRepository {
    */
   private async getValidCalls(filters: AnalyticsFilters): Promise<{
     validCalls: { startedAt: Date; durationSeconds: number; isRecording: boolean }[];
-    dateCondition: { gte: Date; lte?: Date };
+    startDate: Date;
+    endDate: Date;
   }> {
-    const { workspaceId, dateCondition } = this.resolveScope(filters);
+    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
     const userIds = await this.getUsersId(workspaceId);
 
     // Get all calls in the date range
@@ -950,7 +952,7 @@ export class AnalyticsRepository {
       }];
     });
 
-    return { validCalls, dateCondition };
+    return { validCalls, startDate, endDate };
   }
 
   /**
@@ -972,8 +974,7 @@ export class AnalyticsRepository {
    * Each point carries the call and recording counts for its bucket
    */
   async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<CallsTimeSeriesPoint[]> {
-    const { validCalls, dateCondition } = await this.getValidCalls(filters);
-    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { validCalls, startDate, endDate } = await this.getValidCalls(filters);
 
     const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
@@ -1011,8 +1012,7 @@ export class AnalyticsRepository {
    * Only counts calls that lasted more than 60 seconds
    */
   async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const { validCalls, dateCondition } = await this.getValidCalls(filters);
-    const { startDate, endDate } = this.getDateRange(dateCondition);
+    const { validCalls, startDate, endDate } = await this.getValidCalls(filters);
 
     const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
 
