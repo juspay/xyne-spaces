@@ -5,7 +5,9 @@
 
 import express, { Router, Request, Response } from 'express';
 import { workspaceScopedRoute } from '@/database/tenant/context';
+import { authV2Middleware } from '@/middleware/authV2Middleware';
 import slackRoutes from './slack';
+import selfServeSlackRoutes from './self-serve';
 import jiraRoutes from './jira';
 import confluenceRoutes from './confluence';
 import whatsappRoutes from './whatsapp';
@@ -30,6 +32,9 @@ router.use(express.urlencoded({ extended: true, limit: '50mb', verify: rawBodyCa
 
 // Route to Slack migration
 router.use('/slack', workspaceScopedRoute, slackRoutes);
+
+// Self-serve Slack migration dashboard API (auth-gated, tenant-scoped) — migration pod at /migrate/api/migration/slack-migration/*.
+router.use('/slack-migration', authV2Middleware.authenticate, workspaceScopedRoute, selfServeSlackRoutes);
 
 // Route to Jira migration
 router.use('/jira', workspaceScopedRoute, jiraRoutes);

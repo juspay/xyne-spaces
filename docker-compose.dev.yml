@@ -118,7 +118,10 @@ services:
       - "-external-url"
       - "http://localhost:4443"
     volumes:
-      - fake_gcs_data:/data
+      # fake-gcs writes to its -filesystem-root (default /storage), NOT /data (which
+      # is only the seed-load dir). Mount the volume at /storage so objects persist
+      # across container recreation and are browsable on disk.
+      - fake_gcs_data:/storage
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
       interval: 5s
