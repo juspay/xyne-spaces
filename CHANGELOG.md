@@ -1,3 +1,10 @@
+## [1.208.3](https://github.com/juspay/xyne-spaces/compare/v1.208.2...v1.208.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* carry channel-send attachments through pending-message framework ([#862](https://github.com/juspay/xyne-spaces/issues/862)) ([28ad879](https://github.com/juspay/xyne-spaces/commit/28ad879a19eda0529609091c0f44196fe6b579d8)), closes [#281](https://github.com/juspay/xyne-spaces/issues/281)
+
 ## [1.208.2](https://github.com/juspay/xyne-spaces/compare/v1.208.1...v1.208.2) (2026-08-21)
 
 
