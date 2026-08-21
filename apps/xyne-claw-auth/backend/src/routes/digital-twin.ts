@@ -1570,3 +1570,160 @@ digitalTwinRouter.get("/pipeline/events/:id", requireUserAuth, async (req, res) 
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
+
+const SEED_SUBSYSTEMS: ReadonlyArray<{
+  subsystem: string;
+  sessions: readonly string[];
+  memories: readonly string[];
+}> = [
+  {
+    subsystem: "expertise",
+    sessions: ["seed-session-1", "seed-session-2"],
+    memories: [
+      "Owns the Digital Twin memory pipeline end to end — curation, HITL review, and Hindsight retention.",
+      "Debugs Vespa ranking issues by diffing the query plan before touching the schema.",
+      "Reviews every ACL change against the per-user privacy contract in digital-twin.ts.",
+    ],
+  },
+  {
+    subsystem: "projects",
+    sessions: ["seed-session-2", "seed-session-3"],
+    memories: [
+      "Leading the Xyne AI section migration — moving Claw surfaces onto the /ai route tree.",
+      "Tracking XYNE-56391 cross-app ACL support through to release.",
+      "Rebuilt the Digital Twin screen to match the Admin and Organization layout pattern.",
+    ],
+  },
+  {
+    subsystem: "style",
+    sessions: ["seed-session-3", "seed-session-4"],
+    memories: [
+      "Writes PR descriptions that lead with the failure mode, then the fix.",
+      "Prefers short review comments that point at a line rather than describing the problem abstractly.",
+      "Asks for the spacing and tokens to match an existing screen instead of inventing new values.",
+    ],
+  },
+  {
+    subsystem: "decisions",
+    sessions: ["seed-session-4", "seed-session-1"],
+    memories: [
+      "Chose to port the Digital Twin tabs as presentation-only, deferring the backend feature gaps.",
+      "Decided new /ai routes carry no ACL guard because the Twin backend is per-user by contract.",
+      "Standardised on @xyne/icons over lucide for new dashboard surfaces.",
+    ],
+  },
+];
+
+digitalTwinRouter.post("/dev-seed", requireUserAuth, async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    res.status(404).json({ success: false, error: "Not found" });
+    return;
+  }
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!user?.orgId) {
+      res.status(400).json({ success: false, error: "User has no orgId" });
+      return;
+    }
+
+    const userTag = `user:${userId}`;
+    const reset = (req.body ?? {}).reset === true;
+    if (reset) {
+      await memory.deleteByTag?.(TWIN_BANK_ID, userTag);
+      await prisma.memoryRecallHit.deleteMany({ where: { userId, agentSlug: TWIN_AGENT_SLUG } });
+    }
+
+    await ensureTwinBank();
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const retainedIds: string[] = [];
+    let index = 0;
+    for (const group of SEED_SUBSYSTEMS) {
+      for (const content of group.memories) {
+        const tags = [
+          userTag,
+          `subsystem:${group.subsystem}`,
+          "scope:user",
+          ...group.sessions.map((s) => `session:${s}`),
+        ];
+        const out = await memory.retain(TWIN_BANK_ID, [{
+          content,
+          tags,
+          timestamp: new Date(now - (index + 1) * 2 * dayMs).toISOString(),
+          observationScopes: twinObservationScopes(userId),
+        }]);
+        const id = out?.[0]?.id;
+        if (id) retainedIds.push(id);
+        index += 1;
+      }
+    }
+
+    const hits: Array<{
+      agentSlug: string;
+      orgId: string;
+      hindsightMemoryId: string;
+      userId: string;
+      sessionId: string;
+      scope: string;
+      rank: number;
+      recalledAt: Date;
+    }> = [];
+    const BUCKETS: ReadonlyArray<{ base: number; span: number; peak: number }> = [
+      { base: 0, span: 6, peak: 6 },
+      { base: 9, span: 18, peak: 4 },
+      { base: 34, span: 50, peak: 3 },
+    ];
+    retainedIds.forEach((memoryId, i) => {
+      let seq = 0;
+      for (const bucket of BUCKETS) {
+        const hitCount = Math.max(0, bucket.peak - i);
+        for (let h = 0; h < hitCount; h++) {
+          const dayOffset = bucket.base + ((h * 7 + i * 3) % bucket.span);
+          hits.push({
+            agentSlug: TWIN_AGENT_SLUG,
+            orgId: user.orgId as string,
+            hindsightMemoryId: memoryId,
+            userId,
+            sessionId: `seed-recall-${i}-${seq}`,
+            scope: "user",
+            rank: (seq % 5) + 1,
+            recalledAt: new Date(now - dayOffset * dayMs - (seq % 12) * 60 * 60 * 1000),
+          });
+          seq += 1;
+        }
+      }
+    });
+
+    const inserted = hits.length
+      ? await prisma.memoryRecallHit.createMany({ data: hits, skipDuplicates: true })
+      : { count: 0 };
+
+    logger.info("[digital-twin] dev-seed complete", {
+      userId,
+      memories: retainedIds.length,
+      recallHits: inserted.count,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        provider: memory.name,
+        reset,
+        memories: retainedIds.length,
+        subsystems: SEED_SUBSYSTEMS.length,
+        recallHits: inserted.count,
+      },
+    });
+  } catch (err) {
+    logger.error("[digital-twin] POST /dev-seed failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});

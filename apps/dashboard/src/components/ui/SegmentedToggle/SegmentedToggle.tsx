@@ -8,11 +8,19 @@ export interface SegmentedToggleOption<T extends string> {
   title?: string;
 }
 
+const TONE = {
+  accent: { pill: 'bg-action-primary', label: 'text-action-primary-foreground' },
+  primary: { pill: 'bg-primary', label: 'text-primary-foreground' },
+} as const;
+
 interface SegmentedToggleProps<T extends string> {
   options: SegmentedToggleOption<T>[];
   value: T;
   onChange: (value: T) => void;
   className?: string;
+  tone?: keyof typeof TONE;
+  trackCategory?: string;
+  trackPrefix?: string;
 }
 
 export function SegmentedToggle<T extends string>({
@@ -20,7 +28,11 @@ export function SegmentedToggle<T extends string>({
   value,
   onChange,
   className,
+  tone = 'accent',
+  trackCategory,
+  trackPrefix,
 }: SegmentedToggleProps<T>): React.ReactElement {
+  const toneClass = TONE[tone];
   const containerRef = useRef<HTMLDivElement>(null);
   const [pillStyle, setPillStyle] = useState<{ left: number; width: number }>({
     left: 0,
@@ -60,7 +72,10 @@ export function SegmentedToggle<T extends string>({
     >
       {/* Inline style required: pill position is dynamically measured from DOM via ResizeObserver */}
       <div
-        className='absolute top-0.5 bottom-0.5 rounded-full bg-action-primary transition-[left,width] duration-200 ease-in-out'
+        className={cn(
+          'absolute top-0.5 bottom-0.5 rounded-full transition-[left,width] duration-200 ease-in-out',
+          toneClass.pill,
+        )}
         style={{ left: pillStyle.left, width: pillStyle.width }}
       />
 
@@ -74,12 +89,14 @@ export function SegmentedToggle<T extends string>({
             data-slot='segmented-toggle-item'
             onClick={() => onChange(option.value)}
             title={option.title}
+            {...(trackCategory ? { 'data-track-category': trackCategory } : {})}
+            {...(trackPrefix
+              ? { 'data-track-name': `${trackPrefix}: ${option.label ?? option.value}` }
+              : {})}
             className={cn(
               'relative z-10 flex h-full items-center justify-center gap-1.5 rounded-full whitespace-nowrap',
               hasLabel ? 'px-2.5 text-sm font-normal' : 'size-8',
-              isActive
-                ? 'text-action-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground',
+              isActive ? toneClass.label : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {option.icon}
