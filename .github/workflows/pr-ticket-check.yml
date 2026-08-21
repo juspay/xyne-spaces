@@ -1,0 +1,75 @@
+name: PR Ticket Check
+
+# `edited` is required in the trigger list: without it a PR whose title is fixed
+# after the fact keeps its stale red check.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: >-
+    ${{ github.head_ref != 'main'
+        && github.head_ref != 'master'
+        && github.head_ref != 'staging'
+        && !startsWith(github.head_ref, 'release') }}
+
+env:
+  SPACES_HOST: https://spaces.xyne.ai
+  TICKET_PROJECT: TESTCORP
+  TICKET_WORKSPACE: ${{ vars.TICKET_WORKSPACE }}
+
+jobs:
+  ticket-id:
+    name: PR ticket ID
+    runs-on: ubuntu-latest
+    steps:
+      # PR titles are contributor-controlled: pass through env, never interpolate
+      # ${{ }} into the shell.
+      - name: Ticket ID in PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          TYPES: feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$PR_TITLE" | grep -qE "^($TYPES)(\([^)]*\))?!?: "; then
+            echo "::error::PR title must start with a conventional type, e.g. 'fix: TESTCORP-0002 reset filters when the space changes'"
+            exit 1
+          fi
+          KEYS="$(printf '%s' "$PR_TITLE" | grep -oE '\b[A-Z][A-Z0-9]{2,}-[0-9]+\b' | tr -d '\r' | sort -u | tr '\n' ' ' || true)"
+          KEYS="${KEYS% }"
+          if [ -z "$KEYS" ]; then
+            echo "::error::PR title needs a ticket ID, e.g. 'fix: TESTCORP-0002 reset filters when the space changes'"
+            exit 1
+          fi
+          printf 'TICKET_KEYS=%s\n' "$KEYS" >> "$GITHUB_ENV"
+          echo "Found: $KEYS"
+
+      - name: Ticket exists in community Spaces
+        run: |
+          set -euo pipefail
+          missing=""
+          for KEY in ${TICKET_KEYS:-}; do
+            if [ "${KEY%%-*}" != "$TICKET_PROJECT" ]; then
+              echo "::notice::${KEY} is not a ${TICKET_PROJECT} key — format check only."
+              continue
+            fi
+            if [ -z "${TICKET_WORKSPACE:-}" ]; then
+              echo "::warning::vars.TICKET_WORKSPACE is not set — existence check skipped for ${KEY}. Add it under Settings > Secrets and variables > Actions > Variables."
+              continue
+            fi
+            URL="$SPACES_HOST/api/webhooks/bitbucket/$TICKET_WORKSPACE/rest/api/2/issue/$KEY"
+            CODE="$(curl -sS --max-time 15 --retry 2 -o /dev/null -w '%{http_code}' "$URL" || echo 000)"
+            case "$CODE" in
+              200) echo "${KEY} exists in community Spaces" ;;
+              404) echo "::error::${KEY} does not exist in community Spaces (${SPACES_HOST})"; missing="${missing} ${KEY}" ;;
+              *)   echo "::warning::community Spaces returned ${CODE} for ${KEY} — existence check skipped" ;;
+            esac
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Unknown ticket(s) in PR title:${missing}"
+            exit 1
+          fi
