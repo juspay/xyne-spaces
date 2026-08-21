@@ -6836,11 +6836,16 @@ export function createMutators(
           if (mappedTicketId === ticketId) {
             throw new Error('A ticket cannot be linked as its own sub-ticket');
           }
-          
+
+          // The guards below are read-then-writes and Zero runs each mutation in its own
+          // READ COMMITTED transaction, so concurrent links race. Lock both endpoints
+          // (sorted, so the order is global and cannot deadlock) until COMMIT.
           if (tx.location === 'server') {
-            await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-              `link-subticket:${mappedTicketId}`,
-            ]);
+            for (const lockTicketId of [ticketId, mappedTicketId].sort()) {
+              await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+                `link-subticket:${lockTicketId}`,
+              ]);
+            }
           }
 
           const subTicketId = linkedSubTicketId(ticketId, mappedTicketId);
