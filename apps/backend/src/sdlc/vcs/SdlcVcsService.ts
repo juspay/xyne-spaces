@@ -2,7 +2,6 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcQueue } from '@/queues/sdlcQueue';
 import { logger } from '@/utils/logger';
 import type { SdlcActor } from '../types';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from '../sdlcRepositoryContext';
@@ -10,13 +9,13 @@ import { credentialFingerprint } from './credentialEnvelope';
 import { GitHubVcsAdapter } from './GitHubVcsAdapter';
 import { SdlcVcsCredentialStore, type StoredSdlcVcsCredential } from './SdlcVcsCredentialStore';
 import { classifyRuntimeAccessFailure } from './accessCheckPolicy';
+import { blockedCapabilities, deriveAccessStatus, readCapabilities } from './accessStatus';
 import {
   encryptSandboxCredentialEnvelope,
   parseSandboxPublicKey,
   type SandboxCredentialEnvelope,
 } from './sandboxCredentialEnvelope';
 import type {
-  CapabilityEvidence,
   RepositoryAccessCheckResult,
   SdlcVcs,
   VcsCapability,
@@ -29,6 +28,8 @@ import { verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
 const adapters: Record<VcsProvider, VcsProviderAdapter> = {
   GITHUB: new GitHubVcsAdapter(),
 };
+
+const ACCESS_REFRESH_CHUNK = 5;
 
 const activeExecutionStatuses = ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING', 'EXTERNAL_WAIT'];
 const SDLC_AGENT_SLUG = 'sdlc-agent';
@@ -111,7 +112,7 @@ export class SdlcVcsService implements SdlcVcs {
       return saved;
     });
     await this.audit(actor, row.id, row.revision === 1 ? 'created' : 'replaced');
-    await this.queueWorkspaceRepositoryChecks(actor, provider);
+    void this.refreshWorkspaceRepositories(actor, provider);
     return (await this.listCredentials(actor)).find(
       (value) => (value as { provider?: string }).provider === provider
     );
@@ -145,7 +146,7 @@ export class SdlcVcsService implements SdlcVcs {
         });
       });
       await this.audit(actor, row.id, 'validated');
-      await this.queueWorkspaceRepositoryChecks(actor, provider);
+      void this.refreshWorkspaceRepositories(actor, provider);
     } catch (error) {
       const mapped = this.providerError(error);
       await this.prisma.$transaction(async (tx) => {
@@ -200,31 +201,26 @@ export class SdlcVcsService implements SdlcVcs {
       return disconnected;
     });
     await this.audit(actor, row.id, 'disconnected');
-    await this.queueWorkspaceRepositoryChecks(actor, provider);
+    void this.refreshWorkspaceRepositories(actor, provider);
   }
 
-  async queueRepositoryCheck(
+  async checkRepositoryAccess(
     actor: SdlcActor,
     repoId: string,
     options: { force?: boolean } = {}
   ): Promise<RepositoryAccessCheckResult> {
     const repo = await this.requireRepositoryMember(actor, repoId);
-    if (!options.force && this.capabilities(repo.accessCapabilities).length > 0) {
-      return { queued: false, status: 'READY' };
+    // Only a proven read short-circuits: failures persist non-empty capabilities, so a
+    // length check here would leave a BLOCKED repository stuck forever.
+    const current = deriveAccessStatus(repo.accessCapabilities);
+    if (!options.force && current.status === 'READY') {
+      return { status: 'READY', errorMessage: null, capabilities: current.capabilities };
     }
-    return this.claimAndEnqueueRepositoryCheck({
+    return this.performRepositoryCheck({
       repoId: repo.id,
       workspaceId: actor.workspaceId,
       userId: actor.userId,
     });
-  }
-
-  private async claimAndEnqueueRepositoryCheck(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
-  }): Promise<RepositoryAccessCheckResult> {
-    return sdlcQueue.enqueueAccessCheck(input);
   }
 
   async markRuntimeFailure(
@@ -250,7 +246,7 @@ export class SdlcVcsService implements SdlcVcs {
       },
     });
     if (!repo) return;
-    const capabilities = this.capabilities(repo.accessCapabilities).map((item) =>
+    const capabilities = readCapabilities(repo.accessCapabilities).map((item) =>
       item.capability === capability
         ? {
             ...item,
@@ -282,7 +278,7 @@ export class SdlcVcsService implements SdlcVcs {
         401
       ),
     });
-    await this.queueWorkspaceRepositoryChecks(
+    void this.refreshWorkspaceRepositories(
       { workspaceId: repo.workspaceId, userId: repo.createdBy },
       'GITHUB'
     );
@@ -292,7 +288,7 @@ export class SdlcVcsService implements SdlcVcs {
     repoId: string;
     workspaceId: string;
     userId: string;
-  }): Promise<unknown> {
+  }): Promise<RepositoryAccessCheckResult> {
     const repo = await this.prisma.repo.findFirst({
       where: { id: input.repoId, workspaceId: input.workspaceId, projectId: { not: null } },
     });
@@ -300,19 +296,18 @@ export class SdlcVcsService implements SdlcVcs {
     const provider: VcsProvider = 'GITHUB';
     const adapter = this.adapter(provider);
     let credentialInvalidated = false;
+    let credentialState: string | null = null;
     try {
       const parsed = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
       const credential = await this.credentialStore.find(this.prisma, input.workspaceId, provider);
-      const credentialState = this.credentialState(credential);
+      credentialState = this.credentialState(credential);
       let token: string | undefined;
-      let identityLogin: string | null = null;
       if (
         credential?.status === 'CONNECTED' &&
         credential.validationStatus === 'VALID' &&
         credential.token
       ) {
         token = credential.token;
-        identityLogin = credential.identityLogin;
       }
       let inspection;
       let fallbackError: VcsProviderError | null = null;
@@ -359,7 +354,6 @@ export class SdlcVcsService implements SdlcVcs {
             throw fallbackError;
           }
           token = undefined;
-          identityLogin = null;
         }
       } else {
         inspection = await adapter.inspectRepository({
@@ -387,41 +381,63 @@ export class SdlcVcsService implements SdlcVcs {
         });
         await this.accessCheckAudit(input, repo.id, fallbackError?.code ?? 'READY', tx);
       });
-      if (credentialInvalidated) {
-        await this.queueWorkspaceRepositoryChecks(
-          { workspaceId: input.workspaceId, userId: input.userId },
-          provider,
-          repo.id
-        );
-      }
+      this.refreshAfterCredentialInvalidation(credentialInvalidated, input, provider, repo.id);
       return {
         status: 'READY',
+        errorMessage: null,
         capabilities: inspection.capabilities,
-        evidence: {
-          ...inspection.evidence,
-          repositoryVisibility: inspection.visibility,
-          identityLogin,
-          credentialErrorCode: fallbackError?.code ?? null,
-        },
       };
     } catch (error) {
       const mapped = this.providerError(error);
-      await this.prisma.$transaction([
-        this.prisma.repo.update({
-          where: { id: repo.id },
-          data: { accessCapabilities: [] },
-        }),
-        this.accessCheckAudit(input, repo.id, mapped.code),
-      ]);
-      if (credentialInvalidated) {
-        await this.queueWorkspaceRepositoryChecks(
-          { workspaceId: input.workspaceId, userId: input.userId },
-          provider,
-          repo.id
-        );
+      // Transient trouble is not evidence of missing access, and inline there is no Bull
+      // retry — leave stored capabilities alone rather than blanking on a 503.
+      if (mapped.retryable) {
+        await this.accessCheckAudit(input, repo.id, mapped.code);
+        this.refreshAfterCredentialInvalidation(credentialInvalidated, input, provider, repo.id);
+        return {
+          status: 'ERROR',
+          errorMessage: mapped.message,
+          capabilities: readCapabilities(repo.accessCapabilities),
+        };
       }
-      throw mapped;
+      const capabilities = blockedCapabilities(mapped);
+      // Bull's per-repo job id used to serialise checks; without it a slow failure can
+      // overwrite a newer success, so take the same guard as the success path.
+      const stale = await this.prisma.$transaction(async (tx) => {
+        await this.credentialStore.lock(tx, input.workspaceId, provider);
+        const currentCredential = await this.credentialStore.find(tx, input.workspaceId, provider);
+        if (this.credentialState(currentCredential) !== credentialState) return true;
+        await tx.repo.update({
+          where: { id: repo.id },
+          data: { accessCapabilities: capabilities as unknown as Prisma.InputJsonValue },
+        });
+        await this.accessCheckAudit(input, repo.id, mapped.code, tx);
+        return false;
+      });
+      this.refreshAfterCredentialInvalidation(credentialInvalidated, input, provider, repo.id);
+      if (stale) {
+        return {
+          status: 'ERROR',
+          errorMessage: 'Workspace credential changed during repository access check',
+          capabilities: readCapabilities(repo.accessCapabilities),
+        };
+      }
+      return { status: 'BLOCKED', errorMessage: mapped.message, capabilities };
     }
+  }
+
+  private refreshAfterCredentialInvalidation(
+    invalidated: boolean,
+    input: { workspaceId: string; userId: string },
+    provider: VcsProvider,
+    excludeRepoId: string
+  ): void {
+    if (!invalidated) return;
+    void this.refreshWorkspaceRepositories(
+      { workspaceId: input.workspaceId, userId: input.userId },
+      provider,
+      excludeRepoId
+    );
   }
 
   async requireCapabilities(
@@ -431,7 +447,7 @@ export class SdlcVcsService implements SdlcVcs {
   ): Promise<void> {
     const repo = await this.requireRepositoryMember(actor, repoId);
     const credential = await this.credentialStore.find(this.prisma, actor.workspaceId, 'GITHUB');
-    const evidence = this.capabilities(repo.accessCapabilities);
+    const evidence = readCapabilities(repo.accessCapabilities);
     const missing = required.filter((capability) => {
       const state = evidence.find((item) => item.capability === capability)?.state;
       return capability === 'READ_REPOSITORY'
@@ -771,7 +787,23 @@ export class SdlcVcsService implements SdlcVcs {
     return this.adapter(provider);
   }
 
-  private async queueWorkspaceRepositoryChecks(
+  /** Callers do not await this; the UI re-checks anything left unproven. */
+  private async refreshWorkspaceRepositories(
+    actor: SdlcActor,
+    provider: VcsProvider,
+    excludeRepoId?: string
+  ): Promise<void> {
+    try {
+      await this.runWorkspaceRefresh(actor, provider, excludeRepoId);
+    } catch (error) {
+      logger.warn('[SDLC] automatic repository access refresh could not start', {
+        workspaceId: actor.workspaceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async runWorkspaceRefresh(
     actor: SdlcActor,
     provider: VcsProvider,
     excludeRepoId?: string
@@ -787,22 +819,27 @@ export class SdlcVcsService implements SdlcVcs {
     const providerRepositories = repositories.filter((repository) =>
       this.repositoryMatchesProvider(repository, provider)
     );
-    const outcomes = await Promise.allSettled(
-      providerRepositories.map((repository) =>
-        this.claimAndEnqueueRepositoryCheck({
-          repoId: repository.id,
-          workspaceId: actor.workspaceId,
-          userId: actor.userId,
-        })
-      )
-    );
-    outcomes.forEach((outcome, index) => {
-      if (outcome.status !== 'rejected') return;
-      logger.warn('[SDLC] automatic repository access refresh could not be queued', {
-        repoId: providerRepositories[index]?.id,
-        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+    // ponytail: fixed chunk size to stay under GitHub's secondary rate limits; use a real
+    // limiter only if workspaces grow past a few dozen repositories.
+    for (let index = 0; index < providerRepositories.length; index += ACCESS_REFRESH_CHUNK) {
+      const chunk = providerRepositories.slice(index, index + ACCESS_REFRESH_CHUNK);
+      const outcomes = await Promise.allSettled(
+        chunk.map((repository) =>
+          this.performRepositoryCheck({
+            repoId: repository.id,
+            workspaceId: actor.workspaceId,
+            userId: actor.userId,
+          })
+        )
+      );
+      outcomes.forEach((outcome, offset) => {
+        if (outcome.status !== 'rejected') return;
+        logger.warn('[SDLC] automatic repository access refresh failed', {
+          repoId: chunk[offset]?.id,
+          error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+        });
       });
-    });
+    }
   }
 
   private async invalidateWorkspaceCredential(input: {
@@ -949,19 +986,6 @@ export class SdlcVcsService implements SdlcVcs {
       return null;
     }
     return row as StoredSdlcVcsCredential & { token: string; resourceOwner: string };
-  }
-
-  private capabilities(value: Prisma.JsonValue | null): CapabilityEvidence[] {
-    if (!Array.isArray(value)) return [];
-    const result: CapabilityEvidence[] = [];
-    for (const item of value) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-      const record = item as Record<string, unknown>;
-      if (typeof record.capability === 'string' && typeof record.state === 'string') {
-        result.push(record as unknown as CapabilityEvidence);
-      }
-    }
-    return result;
   }
 
   private credentialState(credential: StoredSdlcVcsCredential | null): string | null {

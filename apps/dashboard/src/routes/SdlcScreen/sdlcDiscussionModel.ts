@@ -48,7 +48,9 @@ export function resolveCanvasDiscussionOwner(
       link.targetType === 'CANVAS' &&
       link.targetId === canvas.id,
   );
-  return parentLink ? resolveCanvasDiscussionOwner(parentLink.sourceId, canvases, links) : null;
+  return parentLink
+    ? resolveCanvasDiscussionOwner(parentLink.sourceId, canvases, links)
+    : { canvasId: canvas.id, title: canvas.title, kind: 'PIPELINE' };
 }
 
 export function resolveSdlcDiscussionContext(input: {

@@ -66,7 +66,8 @@ export async function resolveSdlcDiscussionOwnerId(
       targetId: canvas.id,
       relationType: 'TECH_DOC',
     });
-    return link?.sourceType === 'CANVAS' ? canvasOwner(link.sourceId, visited) : null;
+    if (!link) return canvas.id;
+    return link.sourceType === 'CANVAS' ? canvasOwner(link.sourceId, visited) : null;
   };
 
   const ticketOwner = async (ticketId: string): Promise<string | null> => {
