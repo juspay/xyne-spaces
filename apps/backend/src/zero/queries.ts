@@ -3334,6 +3334,21 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  /** Pending agent suggestions for a canvas (with ordered changes), visible only to users who can see the canvas. */
+  canvasSuggestions: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ ctx, args: { canvasId } }) => {
+      return zql.canvas_suggestions
+        .where('canvasId', canvasId)
+        .where('status', 'PENDING')
+        .whereExists('canvas', canvas =>
+          applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
+        )
+        .related('changes', changes => changes.orderBy('orderIndex', 'asc'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) =>
     zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc')
   ),
