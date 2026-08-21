@@ -58,7 +58,7 @@ class AppDeskService {
     }
     const installedApp = await this.prisma.installedApps.findUnique({
       where: { id: installedAppId },
-      select: { webhookUrl: true, app: { select: { signingSecret: true, appType: true } }, user: { select: { workspaceId: true } } },
+      select: { webhookUrl: true, app: { select: { signingSecret: true } }, user: { select: { workspaceId: true } } },
     });
     if (!installedApp) {
       throw new Error(`The app backing this desk no longer exists (install ${installedAppId})`);
@@ -128,7 +128,7 @@ class AppDeskService {
     });
 
     const ack = outboundConfigured
-      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!), installedApp.app?.appType)
+      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!))
       : null;
 
     const ackExternalId =

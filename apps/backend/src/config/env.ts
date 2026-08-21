@@ -3,20 +3,22 @@ import Joi from 'joi';
 
 dotenv.config();
 
-/** Derive { externalHost -> internalBaseUrl } from the XYNE_CLAW_AUTH_URL / XYNE_CLAW_AUTH_INTERNAL_URL pair. */
-function buildInternalHostMap(
-  clawAuthExternalUrl: string,
-  clawAuthInternalUrl: string,
-): Record<string, string> {
-  if (!clawAuthExternalUrl || !clawAuthInternalUrl) return {};
+/** Parse INTERNAL_APP_HOST_MAP (stringified JSON) into { externalHost -> internalBaseUrl }. */
+function parseInternalAppHostMap(raw: string): Record<string, string> {
+  if (!raw) return {};
   try {
-    const externalHost = new URL(clawAuthExternalUrl).hostname.toLowerCase();
-    const internalBase = clawAuthInternalUrl.replace(/\/+$/, '');
-    if (externalHost && internalBase) return { [externalHost]: internalBase };
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [host, base] of Object.entries(parsed)) {
+      if (typeof host === 'string' && typeof base === 'string' && host && base) {
+        out[host.toLowerCase()] = base.replace(/\/+$/, '');
+      }
+    }
+    return out;
   } catch {
-    // Malformed XYNE_CLAW_AUTH_URL — empty map; resolver fails closed.
+    return {};
   }
-  return {};
 }
 
 
@@ -393,6 +395,9 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
+  // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
+  INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -936,10 +941,7 @@ export const config = {
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   apps: {
-    internalHostMap: buildInternalHostMap(
-      envVars.XYNE_CLAW_AUTH_URL as string,
-      envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
-    ),
+    internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',

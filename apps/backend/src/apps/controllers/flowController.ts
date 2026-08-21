@@ -135,7 +135,7 @@ export class FlowController {
       };
       let dispatchUrl: string;
       try {
-        const prepared = await prepareAppWebhookDispatch(app.appType, installedApp.webhookUrl, dispatchHeaders);
+        const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
         dispatchUrl = prepared.url;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {

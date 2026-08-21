@@ -632,7 +632,7 @@ export class CommandController {
       };
       let dispatchUrl: string;
       try {
-        const prepared = await prepareAppWebhookDispatch(match.appType, match.webhookUrl, dispatchHeaders);
+        const prepared = await prepareAppWebhookDispatch(match.webhookUrl, dispatchHeaders);
         dispatchUrl = prepared.url;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {

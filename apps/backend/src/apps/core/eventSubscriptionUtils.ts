@@ -20,13 +20,11 @@ export async function sendWebhookNotification(
     webhookUrl: string,
     event: BaseAppEvent,
     signingSecret: string,
-    appType?: string | null,
 ): Promise<{ status: number; body: unknown }> {
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
-    // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
-    const { url, headers } = await prepareAppWebhookDispatch(appType, webhookUrl, {
+    const { url, headers } = await prepareAppWebhookDispatch(webhookUrl, {
         'Content-Type': 'application/json',
         'X-Xyne-Signature': signature,
         'X-Source': 'XyneSpaces',
@@ -96,7 +94,7 @@ export async function handleEventSubscriptionsForUsers(
                 return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
             }
             const decryptedSigningSecret = decrypt(secretEnc);
-            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret, app.app?.appType);
+            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {
             logger.error(`Failed to send webhook notification`, {

@@ -317,7 +317,6 @@ export class AppCommandRepository {
       },
       include: {
         installedAppCommands: { where: { commandName, commandType }, take: 1 },
-        app: { select: { appType: true } },
       },
     });
 
@@ -330,7 +329,6 @@ export class AppCommandRepository {
       appId: installation.appId,
       appUserId: installation.userId,
       webhookUrl: installation.webhookUrl ?? null,
-      appType: installation.app?.appType ?? null,
       command,
     };
   }

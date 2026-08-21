@@ -42,9 +42,8 @@ interface PRCheckRequestedPayload {
 /**
  * Find Varys installed app by bot email (source of truth)
  */
-async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string; appType: string | null } | null> {
+async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string } | null> {
   try {
-    // Find the Varys bot user by email (source of truth)
     const botUser = await db.user.findFirst({
       where: { email: VARYS_BOT_EMAIL },
     });
@@ -54,10 +53,9 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
       return null;
     }
 
-    // Find installed app entry by userId
     const installedApp = await db.installedApps.findFirst({
       where: { userId: botUser.id },
-      select: { webhookUrl: true, userId: true, app: { select: { appType: true } } },
+      select: { webhookUrl: true, userId: true },
     });
 
     if (!installedApp || !installedApp.webhookUrl) {
@@ -68,7 +66,6 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
     return {
       webhookUrl: installedApp.webhookUrl,
       userId: installedApp.userId,
-      appType: installedApp.app?.appType ?? null,
     };
   } catch (error) {
     logger.error('[PR-Check-Callback] Error finding Varys installed app:', error);
@@ -82,10 +79,8 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
 async function sendVarysWebhook(
   webhookUrl: string,
   payload: PRCheckRequestedPayload,
-  appType: string | null,
 ): Promise<void> {
-  // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
-  const { url, headers } = await prepareAppWebhookDispatch(appType, webhookUrl, {
+  const { url, headers } = await prepareAppWebhookDispatch(webhookUrl, {
     'Content-Type': 'application/json',
     'X-Xyne-Event': 'PR_CHECK_REQUESTED',
   });
@@ -254,7 +249,7 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
 
     // Send webhook to Varys
     try {
-      await sendVarysWebhook(varysApp.webhookUrl, webhookPayload, varysApp.appType);
+      await sendVarysWebhook(varysApp.webhookUrl, webhookPayload);
       logger.info(`[PR-Check-Callback] Webhook sent successfully to Varys`);
       res.status(200).json({ success: true, message: 'PR check webhook sent to Varys' });
     } catch (webhookError) {

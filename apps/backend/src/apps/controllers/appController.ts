@@ -15,8 +15,6 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 const CreateAppBodySchema = z.object({
   name: z.string().min(1, 'App name cannot be empty').trim(),
   description: z.string().trim().optional(),
-  // Defaults to EXTERNAL; claw-auth sends 'INTERNAL' for claw agent apps.
-  appType: z.enum(['INTERNAL', 'EXTERNAL']).default('EXTERNAL'),
 });
 
 const AppIdParamsSchema = z.object({
@@ -57,7 +55,7 @@ export class AppController {
         return;
       }
 
-      const { name, description, appType } = bodyResult.data;
+      const { name, description } = bodyResult.data;
 
       const botName = name
       .toLowerCase()
@@ -102,7 +100,6 @@ export class AppController {
         description,
         createdBy: userId,
         orgId: workspace.orgId,
-        appType,
       };
 
       // Create the app
