@@ -83,6 +83,42 @@ export class GithubManager implements IGitProvider {
   }
 
   /**
+   * Post a commit status (the GitHub counterpart of Bitbucket's build status).
+   * Shows up on the PR checks list under `context`; branch protection can require it.
+   * Description is capped at 140 chars by the API.
+   */
+  async postCommitStatus(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    state: 'pending' | 'success' | 'failure' | 'error',
+    context: string,
+    description: string,
+    targetUrl?: string,
+  ): Promise<void> {
+    const url = `${this.config.apiUrl}/repos/${owner}/${repo}/statuses/${commitSha}`;
+    const payload = {
+      state,
+      context,
+      description: description.length > 140 ? `${description.slice(0, 137)}...` : description,
+      ...(targetUrl && { target_url: targetUrl }),
+    };
+    logger.debug('[GitHub-API] Posting commit status', { url, state, context, description });
+    try {
+      await axios.post(url, payload, { headers: this.getHeaders() });
+      logger.info(`[GitHub-API] Commit status posted: ${state} (${context}) - ${description}`);
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      logger.error('[GitHub-API] Error posting commit status:', {
+        status: axiosError.response?.status,
+        data: axiosError.response?.data,
+        message: axiosError.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Raise a pull request on GitHub
    */
   async raisePr(
