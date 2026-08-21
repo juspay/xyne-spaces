@@ -1,7 +1,9 @@
 import { createHash } from 'crypto';
 import { NextFunction, Request, RequestHandler, Response } from 'express';
-import rateLimit, { ipKeyGenerator, RateLimitRequestHandler } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, RateLimitRequestHandler, Store } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
 import { config } from '@/config/env';
+import { createRedisClient, connectWithRetryForever } from '@/services/redisFactory';
 import { logger } from '@/utils/logger';
 
 /**
@@ -39,10 +41,12 @@ import { logger } from '@/utils/logger';
  *
  * STORE
  * -----
- * Uses express-rate-limit's in-process store. With multiple backend replicas the
- * effective ceiling is `limit × replicaCount`. That is acceptable for a
- * protective default; a shared Redis store (rate-limit-redis over the existing
- * ioredis client) is the tracked follow-up to make the limit exact fleet-wide.
+ * Backed by a SHARED Redis store (rate-limit-redis over a dedicated ioredis
+ * client from redisFactory), so the ceiling is exact across all backend
+ * replicas — not `limit × replicaCount`. All limiter instances share one client
+ * (distinct key prefixes per window). If Redis is unreachable the limiter FAILS
+ * OPEN (`passOnStoreError: true`) so an outage never 500s live traffic, and it
+ * can be forced to the per-pod in-memory store with `RATE_LIMIT_STORE=memory`.
  */
 
 export interface RateLimitOverride {
@@ -162,6 +166,32 @@ const tooMany = (retryAfterMs: number) => ({
   timestamp: new Date().toISOString(),
 });
 
+const useRedis = config.rateLimit?.store !== 'memory';
+
+// One dedicated, lazily-connected client shared by every limiter instance.
+let redisClient: ReturnType<typeof createRedisClient> | undefined;
+function getRedisClient(): ReturnType<typeof createRedisClient> | undefined {
+  if (!useRedis) return undefined;
+  if (!redisClient) {
+    redisClient = createRedisClient('rate-limit');
+    // Fire-and-forget connect; commands also auto-connect (lazyConnect). On a
+    // hard outage the limiter fails open via passOnStoreError below.
+    void connectWithRetryForever(redisClient, 'rate-limit').catch(() => undefined);
+  }
+  return redisClient;
+}
+
+// A fresh RedisStore per window (own key prefix) so windows never collide.
+function makeStore(windowMs: number): Store | undefined {
+  const client = getRedisClient();
+  if (!client) return undefined; // undefined => express-rate-limit's memory store
+  return new RedisStore({
+    sendCommand: (command: string, ...args: string[]) =>
+      client.call(command, ...args) as Promise<never>,
+    prefix: `rl:${windowMs}:`,
+  });
+}
+
 // One express-rate-limit instance per distinct window length. The `limit` is
 // resolved per request from the registry, so a single instance serves every
 // endpoint group that shares a window.
@@ -173,6 +203,9 @@ function limiterFor(windowMs: number): RateLimitRequestHandler {
 
   const handler = rateLimit({
     windowMs,
+    store: makeStore(windowMs),
+    // Redis blip must never take down live traffic — allow the request through.
+    passOnStoreError: true,
     limit: (req: Request): number => {
       const o = resolveOverride(requestPath(req));
       return o?.limit ?? DEFAULT_LIMIT;
