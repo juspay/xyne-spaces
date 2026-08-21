@@ -612,6 +612,11 @@ export const NotificationHandler: React.FC = () => {
     return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
 
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
+    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForTeardown);
+  }, [isElectron]);
+
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
   const recordingPauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);

@@ -16,7 +16,7 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
-import { isRecordingInProgress } from '../services/recording-controller';
+import { isRecordingInProgress, stopRecordingForReload } from '../services/recording-controller';
 import type { Counter } from '@opentelemetry/api';
 
 async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boolean> {
@@ -33,7 +33,10 @@ async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boole
     detail: 'Everything captured so far is saved to your recordings.',
   });
 
-  return response === 1;
+  if (response !== 1) return false;
+
+  await stopRecordingForReload();
+  return true;
 }
 
 let mainWindow: BrowserWindow | null = null;
