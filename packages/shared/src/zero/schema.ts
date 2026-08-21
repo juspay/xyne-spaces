@@ -2222,6 +2222,9 @@ export const collectionPermissionTable = table('collection_permissions')
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    // Grants every current+future member of this channel access — always
+    // VIEWER, only offered for workspace-scoped collections in the UI.
+    channelId: string().optional(),
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -3141,6 +3144,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ['userGroupId'],
     destField: ['id'],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 

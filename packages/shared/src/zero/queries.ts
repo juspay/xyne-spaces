@@ -4505,6 +4505,19 @@ export const queries = defineQueries({
     },
   ),
 
+  // Every explicit grant (per-user or per-group) on a root collection — the
+  // "Who has access" list in ShareCollectionModal.
+  collectionPermissions: defineQuery(
+    z.object({ collectionId: z.string() }),
+    ({ args: { collectionId } }) => {
+      return zql.collection_permissions
+        .where('collectionId', collectionId)
+        .related('user')
+        .related('userGroup')
+        .related('channel');
+    },
+  ),
+
 
   // Stable single-arg query: keying on the project avoids both the
   // boards->applications request waterfall and re-registering a new IN-list

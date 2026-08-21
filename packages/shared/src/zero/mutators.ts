@@ -11718,33 +11718,37 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
 
-        const isOwner = collection.ownerId === ctx.userID;
+        // OWNER is a real, multi-holder role — the creator (ownerId) is a
+        // separate, permanent label, not the sole authority. Either grants
+        // full owner privilege here.
+        const isCreator = collection.ownerId === ctx.userID;
+        const permission = isCreator
+          ? null
+          : await tx.run(
+              zql.collection_permissions
+                .where('collectionId', id)
+                .where('userId', ctx.userID)
+                .one(),
+            );
+        const canActAsOwner = isCreator || permission?.role === CollectionRole.OWNER;
 
         // Visibility is owner-only: changing isPrivate flips who can see the
         // collection at all, so EDITOR permissions are not enough.
-        if (isPrivate !== undefined && !isOwner) {
-          throw new Error('Collection update failed: only the owner can change visibility');
+        if (isPrivate !== undefined && !canActAsOwner) {
+          throw new Error('Collection update failed: only an owner can change visibility');
         }
 
         // Rename is owner-only too: collection names are surfaced wherever the
         // collection is referenced (sidebar, breadcrumbs, share UI), so we
-        // treat the title the same as visibility — a property only the owner
-        // is allowed to change.
-        if (name !== undefined && !isOwner) {
-          throw new Error('Collection update failed: only the owner can rename the collection');
+        // treat the title the same as visibility — a property only owners
+        // are allowed to change.
+        if (name !== undefined && !canActAsOwner) {
+          throw new Error('Collection update failed: only an owner can rename the collection');
         }
 
         // Verify OWNER or EDITOR permission for name/description edits
-        if (!isOwner && collection.isPrivate) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', id)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
-            throw new Error('Collection update failed: requires EDITOR or OWNER permission');
-          }
+        if (!canActAsOwner && (!permission || permission.role === CollectionRole.VIEWER)) {
+          throw new Error('Collection update failed: requires EDITOR or OWNER permission');
         }
 
         await tx.mutate.collections.update({
@@ -11768,7 +11772,15 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          throw new Error('Collection deletion failed: only the owner can delete a collection');
+          const permission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', id)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (permission?.role !== CollectionRole.OWNER) {
+            throw new Error('Collection deletion failed: only an owner can delete a collection');
+          }
         }
 
         await tx.mutate.collections.update({
@@ -11803,7 +11815,7 @@ export const mutators = defineMutators({
         // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
         const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
         const isOwner = parentCollection.ownerId === ctx.userID;
-        if (!isOwner && parentCollection.isPrivate) {
+        if (!isOwner) {
           const permission = await tx.run(
             zql.collection_permissions
               .where('collectionId', rootCollectionId)
@@ -11845,7 +11857,7 @@ export const mutators = defineMutators({
 
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
-        if (!isOwner && collection.isPrivate) {
+        if (!isOwner) {
           const permission = await tx.run(
             zql.collection_permissions
               .where('collectionId', collectionId)
@@ -11882,7 +11894,7 @@ export const mutators = defineMutators({
 
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
-        if (!isOwner && collection.isPrivate) {
+        if (!isOwner) {
           const permission = await tx.run(
             zql.collection_permissions
               .where('collectionId', collectionId)
@@ -11910,30 +11922,40 @@ export const mutators = defineMutators({
         collectionId: z.string(),
         userId: z.string().optional(),
         userGroupId: z.string().optional(),
+        channelId: z.string().optional(),
         role: z.nativeEnum(CollectionRole),
         canShare: z.boolean(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, collectionId, userId, userGroupId, role, canShare, timestamp } }) => {
+      async ({ tx, ctx, args: { id, collectionId, userId, userGroupId, channelId, role, canShare, timestamp } }) => {
         const collection = await tx.run(zql.collections.where('id', collectionId).one());
         if (!collection) {
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
+          // Anyone with an explicit role (Viewer/Editor/Owner) can share —
+          // there's no separate delegated "canShare" permission.
           const granterPermission = await tx.run(
             zql.collection_permissions
               .where('collectionId', collectionId)
               .where('userId', ctx.userID)
               .one(),
           );
-          if (!granterPermission || !granterPermission.canShare) {
-            throw new Error('Permission grant failed: only owners or users with canShare can grant permissions');
+          if (!granterPermission) {
+            throw new Error('Permission grant failed: you do not have access to this collection');
           }
         }
 
         // Prevent sharing with the collection owner
         if (userId && userId === collection.ownerId) {
           throw new Error('Cannot share collection with its owner');
+        }
+
+        // A channel grant is always read-only — a channel can have many
+        // members, so defaulting all of them to write access is a bigger
+        // blast radius than a person or a curated group.
+        if (channelId && role !== CollectionRole.VIEWER) {
+          throw new Error('Permission grant failed: channel grants are read-only (Viewer)');
         }
 
         const existing = userId
@@ -11943,7 +11965,21 @@ export const mutators = defineMutators({
                 .where('userId', userId)
                 .one(),
             )
-          : null;
+          : userGroupId
+            ? await tx.run(
+                zql.collection_permissions
+                  .where('collectionId', collectionId)
+                  .where('userGroupId', userGroupId)
+                  .one(),
+              )
+            : channelId
+              ? await tx.run(
+                  zql.collection_permissions
+                    .where('collectionId', collectionId)
+                    .where('channelId', channelId)
+                    .one(),
+                )
+              : null;
 
         if (existing) {
           await tx.mutate.collection_permissions.update({
@@ -11959,6 +11995,7 @@ export const mutators = defineMutators({
             collectionId,
             userId,
             userGroupId,
+            channelId,
             role,
             canShare,
             grantedBy: ctx.userID,
@@ -11980,7 +12017,15 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          throw new Error('Permission revoke failed: only the owner can revoke permissions');
+          const granterPermission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', collectionId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (granterPermission?.role !== CollectionRole.OWNER) {
+            throw new Error('Permission revoke failed: only an owner can revoke permissions');
+          }
         }
 
         await tx.mutate.collection_permissions.delete({ id });
