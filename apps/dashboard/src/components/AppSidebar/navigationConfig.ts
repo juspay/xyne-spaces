@@ -30,6 +30,7 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  Tag,
   type PikaIconProps,
 } from '@xyne/icons';
 
@@ -84,6 +85,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/product-insights', label: 'Insights', icon: Piechart01 },
   { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook },
   { path: '/memory', label: 'Context', icon: Database },
+  { path: '/entities', label: 'Entities', icon: Tag },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01 },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault },
   { path: '/releaseManager', label: 'Release Manager', icon: RocketShip },
