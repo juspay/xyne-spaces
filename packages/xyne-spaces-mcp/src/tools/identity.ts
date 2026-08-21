@@ -6,6 +6,7 @@ import {
 	boundedLimit,
 	cleanText,
 	formatBytes,
+	indented,
 	offsetOf,
 	ok,
 	optionalBoolean,
@@ -123,7 +124,7 @@ function renderHit(row: SearchRow, index: number): string {
 	const title = `[${kind}] ${row.title ?? "(untitled)"}${row.subtitle ? ` — ${row.subtitle}` : ""}`;
 	const lines: string[] = [];
 
-	if (row.context) lines.push(`  ${cleanText(row.context)}`);
+	if (row.context) lines.push(indented(cleanText(row.context)));
 
 	const detail: string[] = [];
 	if (meta["timestamp"]) detail.push(`${toIST(meta["timestamp"] as string)} IST`);

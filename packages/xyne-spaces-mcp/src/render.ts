@@ -167,13 +167,29 @@ export function cleanText(text: unknown): string {
 		.replace(/<\/?(strong|b)\b[^>]*>/gi, "**")
 		.replace(/<\/?(em|i)\b[^>]*>/gi, "*")
 		.replace(/<br\s*\/?>/gi, "\n")
-		.replace(/<\/(p|div|h[1-6]|li|ul|ol|blockquote|tr)>/gi, "\n")
+		// `li` is deliberately absent: `<li>` already opens its own line, so
+		// closing it too would put a blank line between every bullet.
+		.replace(/<\/(p|div|h[1-6]|ul|ol|blockquote|tr)>/gi, "\n")
 		.replace(/<[^>]+>/g, "");
 	return decodeHtmlEntities(stripped)
 		.replace(/[ \t]+\n/g, "\n")
 		.replace(/[ \t]{2,}/g, " ")
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();
+}
+
+/**
+ * Indent every line of a possibly multi-line value.
+ *
+ * Message bodies and ticket descriptions run to many lines, and only the first
+ * would otherwise sit inside its record — the rest would start at column zero
+ * and read as though they belonged to the response rather than to the item.
+ */
+export function indented(text: string, pad = "  "): string {
+	return text
+		.split("\n")
+		.map((line) => (line.length > 0 ? pad + line : line))
+		.join("\n");
 }
 
 /** "2.4 MB". Empty for a missing or zero size, so the caller can skip the line. */

@@ -8,5 +8,8 @@
 
 import type { ToolDef } from "./shared.js";
 import { identityTools } from "./identity.js";
+import { channelTools } from "./channels.js";
+import { threadTools } from "./threads.js";
+import { messageTools } from "./messages.js";
 
-export const allTools: ToolDef[] = [...identityTools];
+export const allTools: ToolDef[] = [...identityTools, ...channelTools, ...threadTools, ...messageTools];
