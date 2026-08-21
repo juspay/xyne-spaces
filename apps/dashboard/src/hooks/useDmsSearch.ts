@@ -3,7 +3,7 @@ import { useAllChannels } from './useChannels';
 import { useUsers, searchUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
 import { useAffinityCallback } from './useAffinityCallback';
-import { rankChannelsByAffinity } from './useSearchMetrics';
+import { rankChannelsByAffinity, filterChannelsBySearchableNames } from './useSearchMetrics';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -63,31 +63,51 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     // Referenced so this memo re-runs when affinity weights land (read imperatively below).
     void affinityVersion;
 
-    // Support comma-separated keywords (same as cmd+k via useSearchMetrics)
-    const keywords = dmSearchQuery
-      .toLowerCase()
-      .split(',')
-      .map(k => k.trim())
-      .filter(Boolean);
-
+    const query = dmSearchQuery.trim().toLowerCase();
     const currentUserName = usersById.get(currentUserId)?.name?.toLowerCase() ?? '';
-    const shouldMatchSelfDm = keywords.some(k => k === 'self' || currentUserName.includes(k));
+    const shouldMatchSelfDm = query
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .some(t => t === 'self' || currentUserName.includes(t));
 
     const isSelfDm = (dm: Channel): boolean => {
       const ids = parseDMParticipantIds(dm);
       return ids.length > 0 && ids.every(id => id === currentUserId);
     };
 
+    // Match DMs with the SAME fuzzy, per-token, cross-participant matcher cmd+k uses
+    // (filterChannelsBySearchableNames → one Fuse over participant docs, AND across query tokens).
+    // Each participant contributes BOTH its displayName and raw name, so a full-name query matches
+    // even when the displayName is a short nickname — the same names getDMNames(...).search builds.
+    const dmItems = allChannels
+      .filter(channel => isDMChannel(channel.scopeType))
+      .map(channel => ({
+        channel,
+        searchableNames: parseDMParticipantIds(channel)
+          .filter(id => id !== currentUserId)
+          .flatMap(id => {
+            const u = usersById.get(id);
+            return u ? [u.displayName, u.name].filter((n): n is string => !!n) : [];
+          }),
+      }));
+    const nameMatchedIds = new Set(
+      filterChannelsBySearchableNames(dmItems, dmSearchQuery).map(item => item.channel.id),
+    );
+
     const matchedDms = allChannels.filter(channel => {
       if (!isDMChannel(channel.scopeType)) return false;
       if (shouldMatchSelfDm && isSelfDm(channel)) return true;
+      if (nameMatchedIds.has(channel.id)) return true;
 
-      const participantNames = parseDMParticipantIds(channel)
+      // Email isn't part of cmd+k's DM matcher (cmd+k finds emails via People, which the DM screen
+      // can't fall back to for existing contacts). Keep an exact-substring email match so an email
+      // query still surfaces an existing DM here.
+      const emailHaystack = parseDMParticipantIds(channel)
         .filter(id => id !== currentUserId)
-        .map(id => usersById.get(id)?.name?.toLowerCase())
-        .filter((name): name is string => !!name);
-
-      return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
+        .map(id => usersById.get(id)?.email ?? '')
+        .join(' ')
+        .toLowerCase();
+      return emailHaystack.includes(query);
     });
 
     // Flat recency (most recent first). rankChannelsByAffinity floats higher-weight DMs up while

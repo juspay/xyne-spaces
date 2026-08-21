@@ -18,6 +18,7 @@ import {
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
+import { matchesAllTokens } from '@xyne/shared/utils';
 import { useUserSearch } from './useUsers';
 import { searchChannelsWithScores } from './useChannels';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
@@ -267,11 +268,10 @@ export function rankUsersWithMfu<
   const inCandidates = new Set(candidates.map(u => u.id));
   const matchesQuery = (u: T): boolean => {
     if (!q) return true;
-    return (
-      (u.displayName || u.name).toLowerCase().includes(q) ||
-      u.name.toLowerCase().includes(q) ||
-      (u.email?.toLowerCase().includes(q) ?? false)
-    );
+    // Token-AND on the name (order-independent, partial) so reordered matches like "prasad siva"
+    // recover their MFU-weighted user; keep whole-query email substring as before.
+    const nameHaystack = `${u.displayName ?? ''} ${u.name}`;
+    return matchesAllTokens(nameHaystack, query) || (u.email?.toLowerCase().includes(q) ?? false);
   };
   const weightedExtras = allUsers.filter(
     u => !inCandidates.has(u.id) && affinityService.getUserWeight(u.id) > 0 && matchesQuery(u),
@@ -327,7 +327,7 @@ export function rankChannelsByAffinity<
  *   Slack-style quick switcher which should show only regular channels.
  */
 export function filterChannelsBySearchableNames<
-  T extends { channel: Channel; searchableNames?: string[] },
+  T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
 >(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
   const scoped = options.excludeDMs
     ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
@@ -351,7 +351,10 @@ export function filterChannelsBySearchableNames<
   // cached single construction + O(P) searches.
   const dmDocs: DmParticipantDoc[] = [];
   for (const item of dmItems) {
-    const names = item.searchableNames;
+    // Prefer the search-only superset (displayName + raw name) when present; regular channels and
+    // callers without it fall back to searchableNames. `??` (not `||`) so a caller can't accidentally
+    // blank the fallback with an empty array — searchNames is only ever set (non-empty) on DM items.
+    const names = item.searchNames ?? item.searchableNames;
     if (!names) continue;
     for (const name of names) dmDocs.push({ channelId: item.channel.id, name });
   }

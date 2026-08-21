@@ -36,7 +36,7 @@ import {
   isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
-  getDMSearchableNames,
+  getDMNames,
   formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -442,14 +442,17 @@ const ChannelCommandMenu = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
 
     // Add starred channels
     starred.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -464,10 +467,12 @@ const ChannelCommandMenu = ({
 
     // Add direct messages
     directMessages.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
