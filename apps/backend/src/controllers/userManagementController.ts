@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole, QuestionnaireType } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { DatabaseClient } from '@/database/client';
@@ -1043,7 +1043,7 @@ export class UserManagementController {
       const questionnairePayload = payload as Prisma.InputJsonValue;
       const prisma = DatabaseClient.getInstance();
       const normalizedEmail =
-        type === 'onboarding'
+        type === QuestionnaireType.ONBOARDING
           ? (
               await prisma.user.findUnique({
                 where: { id: userId },
@@ -1052,12 +1052,12 @@ export class UserManagementController {
             )?.email.toLowerCase().trim()
           : undefined;
 
-      if (type === 'onboarding' && !normalizedEmail) {
+      if (type === QuestionnaireType.ONBOARDING && !normalizedEmail) {
         res.status(400).json({ error: 'User email is required for onboarding questionnaire' });
         return;
       }
 
-      if (type === 'onboarding') {
+      if (type === QuestionnaireType.ONBOARDING) {
         const saved = await prisma.questionnaireResponse.upsert({
           where: {
             email_questionnaireType: {
