@@ -1,3 +1,10 @@
+## [1.205.4-release-20260821.4](https://github.com/juspay/xyne-spaces/compare/v1.205.4-release-20260821.3...v1.205.4-release-20260821.4) (2026-08-21)
+
+
+### Bug Fixes
+
+* XYNE channel-send attachments through pending framework (backport to release-20260821) ([#882](https://github.com/juspay/xyne-spaces/issues/882)) ([277e5cc](https://github.com/juspay/xyne-spaces/commit/277e5cc9afad97ec02c8b867f7380e62e033b3dc)), closes [#281](https://github.com/juspay/xyne-spaces/issues/281)
+
 ## [1.205.4-release-20260821.3](https://github.com/juspay/xyne-spaces/compare/v1.205.4-release-20260821.2...v1.205.4-release-20260821.3) (2026-08-21)
 
 
