@@ -11,10 +11,11 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, buildProviderConfigsTiered, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
@@ -488,16 +489,25 @@ function extractSpacesSessionId(req: Request): string | undefined {
 }
 
 function extractSpacesWorkspaceId(req: Request): string | undefined {
+  const verifiedHeader = req.headers["x-spaces-workspace-id"];
+  if (typeof verifiedHeader === "string" && verifiedHeader.trim()) return verifiedHeader.trim();
   const header = req.headers["x-workspace-id"];
   if (typeof header === "string" && header.trim()) return header.trim();
   return getCookieValue(req, "xyne_last_workspace");
 }
 
 async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAuthContext | undefined> {
+  // `userId` is canonical Claw identity. Spaces DB reads must use the raw
+  // workspace membership identity retained by requireAuth.
+  const spacesUserIdHeader = req.headers["x-spaces-user-id"];
+  const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
+    ? spacesUserIdHeader.trim()
+    : userId;
+  const verifiedWorkspaceId = extractSpacesWorkspaceId(req);
   // Prefer the live Spaces DB read when SPACES_DB_URL is configured — the
   // userMcpConnection cache below goes stale every time Spaces' middleware
   // refreshes the user's JWT, and that drift is the dominant 401 root cause.
-  const live = await getSpacesAuthForUser(userId, "agent-chat");
+  const live = await getSpacesAuthForUser(spacesUserId, "agent-chat", verifiedWorkspaceId);
   if (live) {
     return {
       token: live.token,
@@ -530,7 +540,10 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
         const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
         const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
         const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-        const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "agent-chat").catch(() => null) ?? undefined;
+        const workspaceId = verifiedWorkspaceId
+          ?? workspaceIdFromCreds
+          ?? await getWorkspaceIdForUser(spacesUserId, "agent-chat").catch(() => null)
+          ?? undefined;
         if (!workspaceIdFromCreds && workspaceId) {
           log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for cached Spaces auth userId=${userId}`);
         }
@@ -549,8 +562,8 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
   const token = extractSpacesUserToken(req);
   if (!token) return undefined;
   const sessionId = extractSpacesSessionId(req);
-  const workspaceIdFromRequest = extractSpacesWorkspaceId(req);
-  const workspaceId = workspaceIdFromRequest ?? await getWorkspaceIdForUser(userId, "agent-chat").catch(() => null) ?? undefined;
+  const workspaceIdFromRequest = verifiedWorkspaceId;
+  const workspaceId = workspaceIdFromRequest ?? await getWorkspaceIdForUser(spacesUserId, "agent-chat").catch(() => null) ?? undefined;
   if (!workspaceIdFromRequest && workspaceId) {
     log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for request Spaces auth userId=${userId}`);
   }
@@ -1303,7 +1316,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       : [];
     const userProvider = personalProvider ?? agentLevelProvider;
 
-    const allCreds = await userProviderCredentialsRepository.listByUser(userId).catch(() => []);
+    const allCreds = await userProviderCredentialsRepository.listByUser(userId, { includeSystem: true }).catch(() => []);
     const agentCreds = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
     const subagentConfigs = await userSubagentConfigRepository.listByUser(userId).catch(() => []);
     const subagentProviders: Record<string, string> = {};
@@ -1313,19 +1326,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // (lib/agent-provider-config.ts) — one source of truth for the per-provider
     // default models + OAuth-bundle extraction, so adding a provider is a
     // one-place change (this used to be an inline `buildCfg` copy).
-    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {};
-    const providerScope: Record<string, "user" | "agent"> = {};
-    // User-level wins.
-    for (const row of allCreds) {
-      const cfg = buildProviderConfig(row.provider, row);
-      if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "user"; }
-    }
-    // Agent-level fills in only what the user hasn't configured personally.
-    for (const row of agentCreds) {
-      if (providerConfigs[row.provider]) continue;
-      const cfg = buildProviderConfig(row.provider, row);
-      if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
-    }
+    // Build providerConfigs with the shared 3-tier precedence (personal USER >
+    // shared agent > system-managed) so the rule can't drift between the chat
+    // paths. agent-chat has no "defer to agent" opt-out, so all tiers apply.
+    const { providerConfigs, providerScope } = buildProviderConfigsTiered(allCreds, agentCreds);
 
     // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
     // rationale). Mutates the resolved config's apiKey and persists the rotated
@@ -1360,6 +1364,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
+    }
+    if (!resolvedParentProvider && providerConfigs["litellm"]) {
+      resolvedParentProvider = "litellm";
     }
     let runtimeProviderOrder: string[] = agentProviderOrder.length > 0
       ? agentProviderOrder
@@ -2775,7 +2782,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     }
     const requestedUserId = req.query["userId"] as string | undefined;
     let userId = requesterId;
-    if (requestedUserId && requestedUserId !== requesterId) {
+    if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
       if (!(await isClawAdmin(requesterId))) {
         res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
         return;
@@ -2842,8 +2849,8 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     // Only the intended user can approve an action (XYNE-12145 — same rule as
-    // the Spaces Flow UI flow in flow-action.ts).
-    if (callerUserId !== action.userId) {
+    // the Spaces Flow UI flow in flow-action.ts / legacy frontmatter in app-callback.ts).
+    if (callerUserId !== action.userId && !matchesAuthenticatedUserId(req, action.userId)) {
       res.status(403).json({ success: false, error: "Only the intended user can approve this action" });
       return;
     }

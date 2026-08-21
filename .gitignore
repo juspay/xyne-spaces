@@ -23,7 +23,7 @@ Backend/target/
 .gradle/
 # IDE files
 .vscode/
-
+prisma-common/
 .idea/
 *.swp
 *.swo

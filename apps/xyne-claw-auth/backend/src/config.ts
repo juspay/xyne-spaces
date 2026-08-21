@@ -71,6 +71,8 @@ export const CONFIG = {
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
   litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmModel: process.env["LITELLM_MODEL"]?.trim() || null,
+  litellmChangedBy: process.env["LITELLM_CHANGED_BY"] ?? "external-system:xyne-spaces-external",
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's

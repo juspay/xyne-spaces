@@ -17,6 +17,7 @@ import { baseRecordId } from "./userMemoryBatcher.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import type {
   ExistingUserMemory,
   UserMemoryCandidatePayload,
@@ -317,12 +318,18 @@ export async function curateAndPersistBatch(args: {
   });
   const existingMemories = await fetchExistingUserMemories(userId);
 
+  // Resolve the user's key (personal, else provisioned SYSTEM). The user-memory
+  // pipeline is always per-user, so the user — not the org — is the spend-owner.
+  // Miss → undefined → claw skips (no server-key fallback).
+  const userLitellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
+
   const { candidates, trace } = await distillUserMemoryViaClaw(
     {
       userId,
       window: { from: window.from.toISOString(), to: window.to.toISOString() },
       records,
       existingMemories,
+    ...(userLitellmApiKey ? { litellmApiKey: userLitellmApiKey } : {}),
     },
     // Surface each distill attempt/retry on the running event.
     (attempt, maxAttempts, prevError) => {

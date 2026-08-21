@@ -35,7 +35,7 @@ import {
 } from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, buildProviderConfigsTiered, agentCredRefreshTarget, userCredRefreshTarget, resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -85,7 +85,7 @@ import { htmlToPlainText } from "../lib/html-to-text.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
+import { ensureUserExists, orgIdForSpacesUser, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
@@ -287,6 +287,9 @@ async function judgeChainContinuation(
   taskTemplate?: string,
   userQuery?: string,
   judgeContext?: string,
+  /** Per-user LiteLLM key shipped to claw so the chain judge charges the user's
+   *  budget. Absent → claw fails-open (no server-key fallback). */
+  litellmApiKey?: string,
 ): Promise<"continue" | "stop"> {
   try {
     const res = await fetch(`${CONFIG.xyneClawUrl}/chain-judge`, {
@@ -295,7 +298,15 @@ async function judgeChainContinuation(
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ agentResult, sourceAgent, targetAgent, taskTemplate, userQuery, judgeContext }),
+      body: JSON.stringify({
+        agentResult,
+        sourceAgent,
+        targetAgent,
+        taskTemplate,
+        userQuery,
+        judgeContext,
+        ...(litellmApiKey ? { litellmApiKey } : {}),
+      }),
       signal: AbortSignal.timeout(20_000),
     });
 
@@ -440,6 +451,9 @@ async function selectNextWorkflowEdge(
   toolsUsed: string[],
   resultText: string,
   sourceTask: string,
+  /** Per-user LiteLLM key (provisioned or personal) forwarded to the chain
+   *  judge so it charges the user's budget. Resolved once by the caller. */
+  litellmApiKey?: string,
 ): Promise<{ edge: ChainWorkflowEdge; nextNode: ChainWorkflowNode } | null> {
   const currentNode = workflow.nodes.find((node) => node.agentSlug === currentAgentSlug);
   if (!currentNode) return null;
@@ -470,6 +484,7 @@ async function selectNextWorkflowEdge(
       edge.taskTemplate ?? nextNode.taskTemplate,
       sourceTask,
       edge.judgeContext,
+      litellmApiKey,
     );
     if (decision === "continue") return { edge, nextNode };
   }
@@ -1568,11 +1583,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
       if (!agent) {
-        let mentionedUser = await userRepository.findById(mentionedUserIds[0]!);
+        const mentionedSpacesUserId = mentionedUserIds[0]!;
+        const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
+        let mentionedUser = mentionedClawUserId ? await userRepository.findById(mentionedClawUserId) : null;
         if (!mentionedUser) {
           // JIT-mirror from Spaces — they may exist there but not here.
-          await ensureUserExists(mentionedUserIds[0]!, "webhook").catch(() => {});
-          mentionedUser = await userRepository.findById(mentionedUserIds[0]!);
+          await ensureUserExists(mentionedSpacesUserId, "webhook").catch(() => {});
+          const resolvedUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
+          mentionedUser = resolvedUserId ? await userRepository.findById(resolvedUserId) : null;
         }
         if (!mentionedUser) {
           log.info(`Ignoring USER_MENTIONED — user ${mentionedUserIds[0]} not registered in claw-auth`);
@@ -1597,10 +1615,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   // Verify the sender has an account in claw-auth — JIT-mirror from Spaces
   // first so a user who's never opened the dashboard still goes through.
-  let senderUser = await userRepository.findById(payload.userId);
+  let senderClawUserId = await resolveClawUserIdForSpacesIdentity(payload.userId).catch(() => undefined);
+  let senderUser = senderClawUserId ? await userRepository.findById(senderClawUserId) : null;
   if (!senderUser) {
     await ensureUserExists(payload.userId, "webhook", agent.orgId ?? undefined).catch(() => {});
-    senderUser = await userRepository.findById(payload.userId);
+    senderClawUserId = await resolveClawUserIdForSpacesIdentity(payload.userId).catch(() => undefined);
+    senderUser = senderClawUserId ? await userRepository.findById(senderClawUserId) : null;
   }
   if (!senderUser) {
     if (eventType === "DIRECT_MESSAGE") {
@@ -1623,6 +1643,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     }
     return;
   }
+
+  // Keep the raw sender id only for Spaces API/DB reads. Everything owned by
+  // Claw (runs, credentials, sessions, authorization) uses this canonical id.
+  const spacesSenderId = payload.userId;
+  const clawSenderId = senderUser.id;
 
   log.info(`${eventType} from user ${payload.userId} → agent ${agent.slug}`);
 
@@ -1727,7 +1752,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         await postExperimentReply("No active /experiment to stop.");
         return;
       }
-      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
+      const allowed = run.userId === clawSenderId || await isClawAdmin(clawSenderId);
       if (!allowed) {
         await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
         return;
@@ -1804,7 +1829,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           : "No /experiment has run in this thread.");
         return;
       }
-      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
+      if (experimentCommand.id && run.userId !== clawSenderId && !(await isClawAdmin(clawSenderId))) {
         await postExperimentReply("Not your experiment.");
         return;
       }
@@ -1838,10 +1863,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       try {
         // Reads the thread's attachments as the REQUESTER, so the bundle can
         // never contain a file they couldn't already open in the thread.
-        const bundleAuth = await resolveAuthForUser(payload.userId);
+        const bundleAuth = await resolveAuthForUser(clawSenderId);
         if (!bundleAuth) {
           log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
-            userId: payload.userId,
+            userId: clawSenderId,
           });
         } else {
           bundle = await buildExperimentProofBundle({
@@ -1907,7 +1932,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       conversationId: payload.conversationId,
       channelId: payload.channelId,
       agentSlug: agent.slug,
-      userId: payload.userId,
+      userId: clawSenderId,
       orgId: agent.orgId,
       focus: experimentCommand.focus ?? null,
       provider: experimentCommand.provider ?? null,
@@ -2073,7 +2098,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       const r = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/clear-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
-        body: JSON.stringify({ userId: payload.userId, conversationId: payload.conversationId, agentSlug: agent.slug }),
+        body: JSON.stringify({ userId: clawSenderId, conversationId: payload.conversationId, agentSlug: agent.slug }),
       });
       cleared = (r as unknown as { ok: boolean }).ok;
     } catch (err) {
@@ -2256,7 +2281,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // For USER_MENTIONED: run as the mentioned user (their tools, their twin).
   const allMentionedIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
   const targetUserId = eventType === "USER_MENTIONED" && allMentionedIds.length > 0
-    ? allMentionedIds[0]! : payload.userId;
+    ? (await resolveClawUserIdForSpacesIdentity(
+        allMentionedIds[0]!,
+        (payload as { workspaceId?: string }).workspaceId,
+      ).catch(() => undefined) ?? allMentionedIds[0]!)
+    : clawSenderId;
 
   // Twin dispatch uses the agent selected by the /webhook/digital-twin route.
   const runAgentSlug = agent.slug;
@@ -2383,7 +2412,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const userProvider = personalProvider ?? agentLevelProvider;
 
     // User-level: all provider credentials (copilot/claude) owned by this user
-    const allCreds = await userProviderCredentialsRepository.listByUser(targetUserId).catch(() => []);
+    const allCreds = await userProviderCredentialsRepository.listByUser(targetUserId, { includeSystem: true }).catch(() => []);
     const credsByProvider = new Map(allCreds.map((c) => [c.provider, c] as const));
 
     // Agent-level: all provider credentials configured on the agent itself
@@ -2409,36 +2438,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // default models + OAuth-bundle extraction, so adding a provider is a
     // one-place change (these inline copies used to drift).
 
-    // Build providerConfigs.
-    //
-    // Normally the user's personal credentials take preference, and agent-level
-    // creds fill any gaps. BUT if the user has explicitly picked "spaces" for
-    // this agent, they're opting OUT of their personal providers and deferring
-    // to the agent's configuration ENTIRELY — keys included. In that case we
-    // skip the user-level credential preference so the resolved (agent-level)
-    // provider runs on the AGENT's credentials, not the user's. Without this, a
-    // user who picked "spaces" but happens to have a personal codex key would
-    // still silently run on their own codex instead of the agent's.
+    // 3-tier providerConfigs via buildProviderConfigsTiered (single source of truth,
+    // shared with agent-chat.ts). If the user picked "spaces" (userDeferredToAgent),
+    // tier 1 is skipped → the run uses the agent's shared creds + system key, not the
+    // user's personal keys (else a "spaces" user with a personal codex key would run on codex).
     const userDeferredToAgent = rawPersonalProvider === "spaces";
-    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {};
-    const providerScope: Record<string, "user" | "agent"> = {};
-    if (!userDeferredToAgent) {
-      for (const [provider, row] of credsByProvider) {
-        const cfg = buildProviderConfig(provider, row);
-        if (cfg) {
-          providerConfigs[provider] = cfg;
-          providerScope[provider] = "user";
-        }
-      }
-    }
-    for (const [provider, row] of agentCredsByProvider) {
-      if (providerConfigs[provider]) continue; // user has personal — keep theirs
-      const cfg = buildProviderConfig(provider, row);
-      if (cfg) {
-        providerConfigs[provider] = cfg;
-        providerScope[provider] = "agent";
-      }
-    }
+    const { providerConfigs, providerScope } = buildProviderConfigsTiered(allCreds, agentCreds, { userDeferredToAgent });
 
     // Refresh the Claude OAuth token before use — it's short-lived. Codex
     // already stores+refreshes a bundle; Claude historically stored a raw token
@@ -2512,7 +2517,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     //      promote-provider prompt or by `/upgrade` in the user's message.
     //      Once set on SessionContext (convKey index), all subsequent turns
     //      in the same conversation use the escalated provider directly.
-    //   3. Undefined → claw falls through to spaces/LiteLLM (Kimi) default.
+    //   3. Provisioned LiteLLM credential — hidden per-user system key.
+    //   4. Undefined → claw falls through to spaces/LiteLLM (Kimi) default.
     //
     // Agent-level providers (agent.config.provider + agentProviderCredentials)
     // are NO LONGER consulted as a default. They are the escalation pool only:
@@ -2571,6 +2577,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       if (!resolvedParentProvider && personalProvider && providerConfigs[personalProvider]) {
         resolvedParentProvider = personalProvider;
       }
+      if (!resolvedParentProvider && providerConfigs["litellm"]) {
+        resolvedParentProvider = "litellm";
+      }
       if (!resolvedParentProvider) {
         const available = Object.keys(providerConfigs);
         if (available.length > 0) resolvedParentProvider = available[0];
@@ -2586,7 +2595,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       if (!resolvedParentProvider && escalatedProvider) {
         resolvedParentProvider = escalatedProvider;
       }
-      // No further fallback — leave undefined so claw uses spaces/LiteLLM.
+      if (!resolvedParentProvider && providerConfigs["litellm"]) {
+        resolvedParentProvider = "litellm";
+      }
+      // No further fallback beyond the provisioned LiteLLM key — leave
+      // undefined only when no personal/escalated/system credential exists.
       runtimeProviderOrder = resolvedParentProvider ? [resolvedParentProvider] : [];
     }
 
@@ -2618,8 +2631,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         const ackSessionId = `upgrade-ack-${createTraceId()}`;
           const ackContext: SessionContext = {
             mentionedUserId: agent.spacesAppUserId,
-            senderId: payload.userId,
-          senderName: payload.senderName ?? payload.userId,
+            senderId: clawSenderId,
+          senderName: payload.senderName ?? spacesSenderId,
           channelId: payload.channelId,
           channelName: payload.channelName ?? payload.channelId,
             conversationId: payload.conversationId,
@@ -2677,7 +2690,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // Prefer a live read from the Spaces DB (always fresh). Falls back to the
     // cached userMcpConnection copy when SPACES_DB_URL is unset or the user
     // has no active session row.
-    const liveSpaces = await getSpacesAuthForUser(payload.userId, "webhook");
+    const liveSpaces = await getSpacesAuthForUser(spacesSenderId, "webhook");
     if (liveSpaces) {
       userSpacesToken = liveSpaces.token;
       userSpacesSessionId = liveSpaces.sessionId;
@@ -2686,7 +2699,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     } else {
       try {
         const conn = await prisma.userMcpConnection.findFirst({
-          where: { userId: payload.userId, mcpServer: { type: "xyne-spaces" } },
+          where: { userId: clawSenderId, mcpServer: { type: "xyne-spaces" } },
         });
         if (conn) {
           const decrypted = decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey);
@@ -2700,7 +2713,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
     if (userSpacesToken && !userSpacesWorkspaceId) {
-      const workspaceId = await getWorkspaceIdForUser(payload.userId, "webhook").catch(() => null);
+      const workspaceId = await getWorkspaceIdForUser(spacesSenderId, "webhook").catch(() => null);
       if (workspaceId) {
         userSpacesWorkspaceId = workspaceId;
         log.info(`Resolved Spaces workspaceId=${workspaceId} from user row for cached webhook auth user ${payload.userId}`);
@@ -2995,8 +3008,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // (targetUserId) so the approve/decline DM + per-user conv index route right.
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
       targetUserId,
-      senderId: payload.userId,
-      senderName: payload.senderName ?? payload.userId,
+      senderId: clawSenderId,
+      senderName: payload.senderName ?? spacesSenderId,
       channelId: payload.channelId,
       channelName: payload.channelName ?? payload.channelId,
       conversationId: payload.conversationId,
@@ -3287,8 +3300,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       );
       const eligibleTwins: Array<{ userId: string; workspaceId: string; respondPolicy: string }> = [];
       for (const uid of mentioned) {
-        const u = await userRepository.findById(uid).catch(() => null);
-        if (!u) {
+        const clawTwinUserId = await resolveClawUserIdForSpacesIdentity(uid).catch(() => undefined);
+        const u = clawTwinUserId ? await userRepository.findById(clawTwinUserId).catch(() => null) : null;
+        if (!clawTwinUserId || !u) {
           log.info(`Twin: skipping ${uid} — not registered in claw-auth`);
           continue;
         }
@@ -3302,7 +3316,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           continue;
         }
         eligibleTwins.push({
-          userId: uid,
+          userId: clawTwinUserId,
           workspaceId: twinAuth.workspaceId,
           respondPolicy: (u as { digitalTwinRespondPolicy?: string }).digitalTwinRespondPolicy ?? "learned",
         });
@@ -3401,7 +3415,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         return;
       }
     }
-    await dispatchRunForTarget(payload.userId, undefined);
+    await dispatchRunForTarget(clawSenderId, (payload as { workspaceId?: string }).workspaceId);
   } catch (err) {
     log.error("Error forwarding:", { error: err instanceof Error ? err.message : String(err) });
     if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
@@ -3715,6 +3729,10 @@ export async function handleAutomationWebhook(
     conversationId?: string | null;
     channelId?: string | null;
     channelName?: string | null;
+    /** New Spaces contract; workspaceId remains accepted for older callers. */
+    spacesWorkspaceId?: string | null;
+    spacesOrgId?: string | null;
+    spacesOrgMemberId?: string | null;
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
@@ -3723,6 +3741,7 @@ export async function handleAutomationWebhook(
   };
 
   const { sessionId, userId, callbackUrl, callbackSecret, context } = payload;
+  const workspaceId = payload.spacesWorkspaceId ?? payload.workspaceId;
   let task = payload.task;
   const agentSlug = pathAgentSlug;
   if (payload.agentSlug && payload.agentSlug !== pathAgentSlug) {
@@ -3766,6 +3785,15 @@ export async function handleAutomationWebhook(
       `[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`,
     );
     res.status(400).json({ success: false, error: "orgId is required" });
+    return;
+  }
+  // `payload.userId` is the raw, workspace-scoped Spaces membership id. Use
+  // it only to resolve the tenant; every Claw-owned row and pod dispatch must
+  // use the canonical local user id.
+  const clawUserId = await resolveClawUserIdForSpacesIdentity(userId!, workspaceId).catch(() => undefined);
+  if (!clawUserId) {
+    clog.error(`[webhook/automation-run] canonical user miss spacesUserId=${userId} workspaceId=${workspaceId ?? "none"} sessionId=${sessionId}`);
+    res.status(400).json({ success: false, error: "user identity could not be resolved" });
     return;
   }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
@@ -3887,10 +3915,10 @@ export async function handleAutomationWebhook(
         conversationId: payload.conversationId,
         channelId: payload.channelId ?? "",
         ...(payload.channelName ? { channelName: payload.channelName } : {}),
-        userId: userId!,
+        userId: clawUserId,
         agentSlug,
         orgId: agent.orgId,
-        ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
         task: task!,
         eventType: "automation",
         ...(context ? { context } : {}),
@@ -3919,8 +3947,8 @@ export async function handleAutomationWebhook(
     const appToken = decryptStoredField(agent.spacesAppToken!);
     const sessionContext: SessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
-      senderId: userId!,
-      senderName: userId!,
+      senderId: clawUserId,
+      senderName: clawUserId,
       // conversationId/channelId may be absent for new-conversation automations.
       // The resolve-and-forward path doesn't read them; default to "" so the
       // typed context stays valid.
@@ -3932,7 +3960,7 @@ export async function handleAutomationWebhook(
       // THIS workspace instead of matching the same person across workspaces
       // (treated as ambiguous → mention left raw). The bot app-user has no
       // workspace, so this must come from the automation dispatch.
-      ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
       task: task!,
       agentId: agent.id,
       agentOrgId: agent.orgId,
@@ -4064,7 +4092,7 @@ export async function handleAutomationWebhook(
   const resultToken = interpose
     ? mintSessionToken({
         sessionId: sessionId!,
-        userId: userId!,
+        userId: clawUserId,
         agentSlug,
         ...(agent.spacesAppId ? { spacesAppId: agent.spacesAppId } : {}),
         ttlSeconds: 3600,
@@ -4119,7 +4147,7 @@ export async function handleAutomationWebhook(
         agentSlug,
         orgId: agent.orgId,
         task,
-        userId,
+        userId: clawUserId,
         ...(payload.userName ? { userName: payload.userName } : {}),
         ...(payload.userEmail ? { userEmail: payload.userEmail } : {}),
         eventType: "automation",
@@ -4201,7 +4229,7 @@ export async function handleAutomationWebhook(
   // automation engine, which owns its own retry; we deliberately don't layer on.
   if (interpose && status >= 200 && status < 300) {
     const recoveryPayload = {
-      userId: userId!,
+      userId: clawUserId,
       task: task!,
       conversationId: payload.conversationId ?? "",
       agentSlug,
@@ -4211,7 +4239,7 @@ export async function handleAutomationWebhook(
       callbackUrl: clawCallbackUrl!,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: payload.channelId ?? "",
-      ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
       ...(resultToken ? { sessionToken: resultToken } : {}),
       ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
       fastMode: fastModeEnabled,
@@ -4224,8 +4252,8 @@ export async function handleAutomationWebhook(
     };
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
-      senderId: userId!,
-      senderName: userId!,
+      senderId: clawUserId,
+      senderName: clawUserId,
       channelId: payload.channelId ?? "",
       channelName: payload.channelName ?? payload.channelId ?? "",
       conversationId: payload.conversationId ?? "",
@@ -6703,7 +6731,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
         // hop ctx.rootTask is unset and ctx.task IS the original request.
         const originalTask = ctx.rootTask ?? ctx.task;
-        const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask);
+        // Resolve the billable user's key once per chain step. For USER_MENTIONED
+        // it's the mentioned human (ctx.mentionedUserId); for automations that's the
+        // agent's BOT app user (no provisioned key), so fall back to ctx.senderId
+        // (the automation's creator, whom the main dispatch already bills). Miss → claw fails-open.
+        const billableUserId =
+          ctx.mentionedUserId && ctx.mentionedUserId !== ctx.spacesAppUserId
+            ? ctx.mentionedUserId
+            : ctx.senderId;
+        const chainLitellmApiKey = billableUserId
+          ? await resolveUserLitellmApiKey(billableUserId).catch(() => undefined)
+          : undefined;
+        clog.info(`[chain-judge] billableUser=${billableUserId ?? "none"} key=${chainLitellmApiKey ? "user" : "server"} workflow=${binding.workflowId}`);
+        const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, chainLitellmApiKey);
 
         if (!selected) {
           log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);

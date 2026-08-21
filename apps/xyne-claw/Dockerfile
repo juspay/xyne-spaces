@@ -85,7 +85,9 @@ RUN mkdir -p data /repos && chown claw:nodejs data /repos
 COPY apps/xyne-claw/infra/kata/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER root
+# Run the application as the image's existing UID 1001 user. Kubernetes may
+# also enforce this with runAsNonRoot/runAsUser in the deployment.
+USER claw
 
 EXPOSE 3002
 

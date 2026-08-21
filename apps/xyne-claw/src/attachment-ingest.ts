@@ -69,6 +69,7 @@ export interface IngestAttachmentOptions {
    * running ffmpeg in the xyne-claw pod. Ordinary attachment behavior is
    * unchanged when false/omitted. */
   deferVideoProcessing?: boolean;
+  litellmApiKey?: string;
 }
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
@@ -133,6 +134,10 @@ async function convertAll(
  * Run every per-type pipeline over the request's attachments. Pure aside from
  * `log` calls (video/zip ingest summaries) — no disk writes happen here; the
  * caller persists `derivedContextFiles` / `pdfBuffers` to the workspace.
+ *
+ * `opts.litellmApiKey`, when present, is forwarded to the video pipeline so its
+ * vision-model calls charge the user's per-key budget instead of the shared
+ * server key.
  */
 export async function ingestAttachments(
   attachments: AttachmentInput[] | undefined,
@@ -194,7 +199,7 @@ export async function ingestAttachments(
             `This recording is staged for the sandbox-backed \`analyze-skill-recording\` tool.\n`,
         };
       }
-      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName);
+      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName, options.litellmApiKey ? { litellmApiKey: options.litellmApiKey } : undefined);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),

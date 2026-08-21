@@ -20,7 +20,7 @@ const log = createLogger("settings");
 
 const router = Router();
 
-const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex"]);
+const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
 
 const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -36,7 +36,7 @@ router.get("/provider-credentials", async (req: Request, res: Response) => {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
     }
-    const rows = await userProviderCredentialsRepository.listByUser(userId);
+    const rows = await userProviderCredentialsRepository.listByUser(userId, {});
     const data = rows.map((r) => ({
       provider: r.provider,
       model: r.model,
@@ -169,7 +169,7 @@ router.post("/provider-credentials/:provider/share", async (req: Request<{ provi
 
     // RAW row (not materialized): sharing a binding just reuses its shared cred.
     const raw = await prisma.userProviderCredentials.findUnique({
-      where: { userId_provider: { userId, provider } },
+      where: { userId_provider_managedBy: { userId, provider, managedBy: "USER" } },
     });
     if (!raw) {
       res.status(404).json({ success: false, error: `Connect ${provider} in your settings first` });

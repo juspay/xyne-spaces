@@ -18,6 +18,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -201,7 +202,7 @@ router.post("/:userId/oauth/docusign/callback", async (req: Request<{ userId: st
       return;
     }
 
-    if (verified.userId !== userId) {
+    if (!matchesAuthenticatedUserId(req, verified.userId)) {
       res.status(403).json({ success: false, error: "State userId mismatch" });
       return;
     }

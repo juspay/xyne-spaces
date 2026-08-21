@@ -7,7 +7,7 @@ import { checkHealth } from "../health.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getCanonicalRequesterId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
@@ -17,9 +17,18 @@ const router = Router();
 
 router.use("/:userId", pinUserIdParam);
 
+// Route parameters may contain the verified raw Spaces membership ID. Never
+// use that ID for persistence: all Claw connection rows are keyed by the
+// canonical identity that requireAuth placed in x-user-id.
+function canonicalUserId(req: Request): string {
+  const userId = getCanonicalRequesterId(req);
+  if (!userId) throw new Error("authenticated user required after pinUserIdParam");
+  return userId;
+}
+
 router.get("/:userId/connections", async (req: Request<{ userId: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
 
     const connections = await prisma.userMcpConnection.findMany({
       where: { userId },
@@ -45,7 +54,7 @@ router.get("/:userId/connections", async (req: Request<{ userId: string }>, res:
 
 router.post("/:userId/connections", async (req: Request<{ userId: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
     const { mcpServerId, credentials } = req.body as {
       mcpServerId?: string;
       credentials?: Record<string, unknown>;
@@ -125,7 +134,7 @@ router.post("/:userId/connections", async (req: Request<{ userId: string }>, res
 
 router.delete("/:userId/connections/:id", async (req: Request<{ userId: string; id: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
     const id = req.params.id;
 
     const connection = await prisma.userMcpConnection.findFirst({
@@ -155,7 +164,7 @@ router.delete("/:userId/connections/:id", async (req: Request<{ userId: string; 
 
 router.get("/:userId/connections/:id/health", async (req: Request<{ userId: string; id: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
     const id = req.params.id;
 
     const connection = await prisma.userMcpConnection.findFirst({
@@ -276,7 +285,7 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
 
 router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ userId: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
     const { spacesToken: bodyToken } = req.body as { spacesToken?: string };
 
     // Accept token from body OR from httpOnly cookie (forwarded by proxy).

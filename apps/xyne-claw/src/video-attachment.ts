@@ -151,13 +151,15 @@ async function extractFrames(inputPath: string, outDir: string): Promise<string[
   return frames.slice(0, MAX_FRAMES);
 }
 
-/** One vision-model call: prior state + this window's frames → updated state. */
-async function rollWindow(
+/** One vision-model call: prior state + this window's frames → updated state. Exported for tests. */
+export async function rollWindow(
   priorState: string,
   windowFrames: VideoKeyframe[],
   windowIndex: number,
   totalWindows: number,
+  apiKey?: string,
 ): Promise<string> {
+  const bearer = apiKey ?? LITELLM.apiKey; // fall back to env server key
   const imageBlocks = windowFrames.map((f) => ({
     type: "image_url" as const,
     image_url: { url: `data:${f.mimeType};base64,${f.data}` },
@@ -180,7 +182,7 @@ async function rollWindow(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${LITELLM.apiKey}`,
+      Authorization: `Bearer ${bearer}`,
     },
     body: JSON.stringify({
       // Gateway's primary model (LITELLM_MODEL). MUST be vision-capable —
@@ -221,11 +223,18 @@ function pickSpread<T>(items: T[], count: number): T[] {
 /**
  * Convert a video buffer into a textual narrative + keyframes. Always
  * resolves; on any failure returns an error-stub narrative and no frames.
+ * `opts.litellmApiKey` charges the user's per-key budget for the vision calls.
  */
-export async function videoBufferToContext(buf: Buffer, fileName: string): Promise<VideoContextResult> {
+export async function videoBufferToContext(
+  buf: Buffer,
+  fileName: string,
+  opts?: { litellmApiKey?: string },
+): Promise<VideoContextResult> {
   if (buf.length > MAX_VIDEO_BYTES) {
     return errorStub(fileName, `file too large (${Math.round(buf.length / 1024 / 1024)}MB > ${MAX_VIDEO_BYTES / 1024 / 1024}MB cap)`);
   }
+
+  const apiKey = opts?.litellmApiKey;
 
   let workDir: string | null = null;
   try {
@@ -255,7 +264,7 @@ export async function videoBufferToContext(buf: Buffer, fileName: string): Promi
       windows.push(frames.slice(i, i + FRAMES_PER_WINDOW));
     }
     for (let w = 0; w < windows.length; w++) {
-      state = await rollWindow(state, windows[w]!, w + 1, windows.length);
+      state = await rollWindow(state, windows[w]!, w + 1, windows.length, apiKey);
     }
 
     let narrativeBody = state.trim() || "(the model produced no description — the video may have no discernible content)";

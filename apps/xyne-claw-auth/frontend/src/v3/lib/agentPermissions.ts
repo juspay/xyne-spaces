@@ -20,6 +20,11 @@ export function getAgentPermissions(
   shares: AgentShare[],
   isAdmin: boolean,
 ): AgentPermissions {
+  // Platform agents are read-only for everyone — duplicate to edit.
+  if (agent.scope === "platform") {
+    return { role: "viewer", canEdit: false, canShare: false, canViewPage: true };
+  }
+
   let role: AgentRole = "none";
 
   if (agent.ownerUserId === userId || isAdmin) {

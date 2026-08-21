@@ -36,6 +36,7 @@ import {
   MAX_FILE_CHARS,
 } from "../services/agentMemoryFiles.js";
 import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/userMemoryCuratorClient.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -1804,7 +1805,8 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       completedAt: now,
     };
 
-    const reviewIds = await curateApprovedTranscript(transcript, reviewDate);
+    const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId).catch(() => undefined);
+    const reviewIds = await curateApprovedTranscript(transcript, reviewDate, orgLitellmApiKey);
 
     logger.info("[memory] /upload-md curated agent document", {
       agentSlug, filename, candidatesCreated: reviewIds.length, by: userId,
@@ -2138,6 +2140,10 @@ async function approveBatch(batchId: string, sessionIds?: string[]): Promise<App
   const retainedByid: Record<string, string[]> = {};
   const failedSessions: string[] = [];
   let totalRetained = 0;
+  // Resolve the ORG's key once per batch so the distill calls bill the org
+  // (shared-agent memory curation is an org-identity task). A miss → undefined →
+  // claw skips (no server-key fallback).
+  const orgLitellmApiKey = await resolveOrgLitellmApiKey(batch.orgId).catch(() => undefined);
 
   for (const sid of targetSessionIds) {
     const transcript = await readSessionTranscript(sid);
@@ -2147,7 +2153,7 @@ async function approveBatch(batchId: string, sessionIds?: string[]): Promise<App
       continue;
     }
     try {
-      const reviewIds = await curateApprovedTranscript(transcript, batch.reviewDate);
+      const reviewIds = await curateApprovedTranscript(transcript, batch.reviewDate, orgLitellmApiKey);
       retainedByid[sid] = reviewIds;
       totalRetained += reviewIds.length;
     } catch (err) {
@@ -2669,6 +2675,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
 
     setImmediate(async () => {
       try {
+        const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId).catch(() => undefined);
         // Session-ingest path (2026-07-17, default ON): parse + clean on claw
         // (no LLM), then retain the transcript DIRECTLY — the uploader is the
         // owner/admin, so the upload itself is the approval, and the memory
@@ -2692,6 +2699,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
             agentName: agent.name,
             task: parsed.meta.task ?? `Uploaded session: ${filename}`,
             transcript: parsed.transcript,
+            ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}),
           });
           const tags = [
             "shared",
@@ -2733,7 +2741,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
           return;
         }
 
-        const candidates = await distillSessionFile({ sessionId, agentSlug, userId, filename, source, rawSession: content });
+        const candidates = await distillSessionFile({ sessionId, agentSlug, userId, filename, source, rawSession: content, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) });
         if (candidates.length === 0) {
           logger.info("[memory] /upload-session produced no candidates", { agentSlug, filename, by: userId });
           return;

@@ -456,7 +456,8 @@ export interface SubagentProviderResolution {
  * (e.g. for testing). User can still explicitly pin a subagent via
  * subagentProviders[def.name] regardless of this gate.
  */
-function resolveProviderForSubagent(
+/** Exported for direct unit testing of the subagent provider/key resolution. */
+export function resolveProviderForSubagent(
   def: SubagentDefinition,
   resolution: SubagentProviderResolution | undefined,
 ): { provider: string; config: CopilotConfig | ClaudeConfig | CodexConfig } | undefined {
@@ -484,6 +485,20 @@ function resolveProviderForSubagent(
       ...(cfg.authType ? { authType: cfg.authType } : {}),
     };
     return { provider: chosen, config: base };
+  }
+
+  // Spaces fallback: use the user's tier-resolved litellm key (personal USER >
+  // agent/shared > SYSTEM-provisioned) — the user's own or provisioned key, never
+  // the platform server key. No litellm providerConfig → undefined → shared server.
+  const litellmCfg = resolution?.providerConfigs?.litellm;
+  if (litellmCfg?.apiKey) {
+    const base: ClaudeConfig = {
+      apiKey: litellmCfg.apiKey,
+      model: litellmCfg.model,
+      ...(litellmCfg.baseUrl ? { baseUrl: litellmCfg.baseUrl } : {}),
+      ...(litellmCfg.authType ? { authType: litellmCfg.authType } : {}),
+    };
+    return { provider: "litellm", config: base };
   }
   return undefined;
 }

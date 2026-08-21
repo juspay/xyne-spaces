@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { listToolsForUser, callTool } from "../mcp/runner.js";
-import { agentRunRepository } from "../repositories/index.js";
+import { agentRepository, agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
@@ -1799,9 +1799,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
           ? (await prisma.agent.findUnique({ where: { spacesAppId }, select: { orgId: true } }))?.orgId
           : sessionAgentOrgId;
         const targetAgentRow = sourceAgentOrgId
-          ? await prisma.agent.findUnique({
-              where: { orgId_slug: { orgId: sourceAgentOrgId, slug: targetAgent } },
-            })
+          ? await agentRepository.findBySlug(targetAgent, sourceAgentOrgId)
           : null;
         if (!targetAgentRow) {
           log.warn(
