@@ -172,7 +172,8 @@ from the deployment (the same values `.env.sdlc` uses locally).
 
 **Run the API only — no worker.** The worker is a separate entrypoint
 (`start:worker`) consuming shared BullMQ queues. A second worker on the same
-Redis would double-process every job in the main lane.
+Redis would double-process every job in the main lane. Repository access checks
+run inline in the API process, so they do not need one.
 
 zero view-syncer — see the deployment step below; it consumes the existing
 change stream and points its mutate/query URLs at the SDLC backend.
@@ -254,7 +255,8 @@ starts from the second SDLC deploy onward.
 
    **API only — do not start the worker.** It is a separate entrypoint
    (`start:worker`); a second worker on the same Redis double-processes every job
-   in the main lane.
+   in the main lane. Repository access checks run inline in the API process, so
+   they do not need one.
 
 3. **Deploy the SDLC zero view-syncer** — see the phasing note below; you may be
    able to skip this on day one.

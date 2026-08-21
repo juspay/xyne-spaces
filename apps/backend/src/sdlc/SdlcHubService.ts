@@ -191,9 +191,9 @@ export class SdlcHubService implements SdlcHub {
         };
       });
       try {
-        await sdlcVcs.queueRepositoryCheck(actor, repository.id);
+        await sdlcVcs.checkRepositoryAccess(actor, repository.id);
       } catch (error) {
-        logger.error('[SDLC] automatic access-check dispatch failed', {
+        logger.error('[SDLC] automatic access check failed', {
           repoId: repository.id,
           error: error instanceof Error ? error.message : String(error),
         });

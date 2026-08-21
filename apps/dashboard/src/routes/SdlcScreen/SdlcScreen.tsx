@@ -577,15 +577,17 @@ export default function SdlcScreen(): ReactElement {
         description: 'Ask a workspace admin to restore GitHub access before continuing.',
       };
 
+  // Gates on the read being proven, not array length: a failed check stores UNAVAILABLE
+  // entries, so a length test would never re-check a repo after access is restored.
   useEffect(() => {
-    if (!accessRepoId || accessCapabilities.length > 0) return;
+    if (!accessRepoId || readReady) return;
     const fingerprint = accessRepoId;
     if (automaticAccessChecksRef.current.has(fingerprint)) return;
     automaticAccessChecksRef.current.add(fingerprint);
     void apiInstance
       .post(`/sdlc/repositories/${accessRepoId}/access-check`, { force: false })
       .catch(() => undefined);
-  }, [accessCapabilities.length, accessRepoId]);
+  }, [readReady, accessRepoId]);
   const isAdmin = Boolean(
     repo &&
     !(repo instanceof Error) &&
