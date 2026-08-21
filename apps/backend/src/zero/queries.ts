@@ -4488,6 +4488,10 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           }
           return devTicket;
         })
+        // MUST stay in sync with the shared copy.
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 

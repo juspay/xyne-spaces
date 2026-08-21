@@ -3946,6 +3946,9 @@ export const queries = defineQueries({
           }
           return devTicket;
         })
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 

@@ -8,6 +8,12 @@ interface ArtRowInput {
   readonly failureReason?: string | null | undefined;
   // Release-scoped: this dev ticket entered the release as a hotfix.
   readonly isHotfix?: boolean | null | undefined;
+  readonly subTicket?:
+    | {
+        readonly mappedTicket?: { readonly boardId?: string | null | undefined } | null | undefined;
+      }
+    | null
+    | undefined;
   devTicket?:
     | {
         readonly id: string;
@@ -70,6 +76,7 @@ export interface ReleaseDetailDevTicketRow extends ReleaseReportDevTicket {
   channelId: string | null;
   conversationId: string | null;
   boardId: string | null;
+  appReleaseBoardId: string | null;
   artId: string;
   failureReason: string | null;
   testedBy: string | null;
@@ -173,6 +180,7 @@ export function buildReleaseDetailDevTicketRows(
       channelId: devTicket?.channelId ?? null,
       conversationId: devTicket?.conversationId ?? null,
       boardId: devTicket?.boardId ?? null,
+      appReleaseBoardId: artRow.subTicket?.mappedTicket?.boardId ?? null,
       artId: artRow.id,
       failureReason: artRow.failureReason ?? null,
       testedBy: artRow.testedBy ?? null,
@@ -191,6 +199,91 @@ export function buildReleaseDetailDevTicketRows(
   }
 
   return rows;
+}
+
+export interface RepoRangeInput {
+  readonly mainReleaseBoardId: string;
+  readonly deployedCommit?: string | null | undefined;
+  readonly newCommit?: string | null | undefined;
+}
+
+export interface RepoApplicationInput {
+  readonly boardId: string;
+  readonly mainReleaseBoardId?: string | null | undefined;
+  readonly repoUrl?: string | null | undefined;
+  readonly name?: string | null | undefined;
+}
+
+export interface DevTicketRepoGroup {
+  key: string;
+  repoUrl: string | null;
+  fallbackName: string | null;
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  rows: ReleaseDetailDevTicketRow[];
+  testedCount: number;
+  totalCount: number;
+}
+
+function isRowTested(row: ReleaseDetailDevTicketRow): boolean {
+  return !!row.testedBy && !row.failureReason;
+}
+
+export function groupDevTicketRowsByRepo(
+  rows: readonly ReleaseDetailDevTicketRow[],
+  repos: readonly RepoRangeInput[] | null | undefined,
+  applications: readonly RepoApplicationInput[] | null | undefined,
+): { groups: DevTicketRepoGroup[]; unmapped: ReleaseDetailDevTicketRow[] } {
+  const boardToRepo = new Map<string, string>();
+  const repoMeta = new Map<string, { repoUrl: string | null; name: string | null }>();
+  for (const app of applications ?? []) {
+    if (app.mainReleaseBoardId) {
+      if (app.boardId) boardToRepo.set(app.boardId, app.mainReleaseBoardId);
+      if (!repoMeta.has(app.mainReleaseBoardId)) {
+        repoMeta.set(app.mainReleaseBoardId, {
+          repoUrl: app.repoUrl ?? null,
+          name: app.name ?? null,
+        });
+      }
+    }
+  }
+
+  const rowsByRepo = new Map<string, ReleaseDetailDevTicketRow[]>();
+  const unmapped: ReleaseDetailDevTicketRow[] = [];
+  for (const row of rows) {
+    const repoId = row.appReleaseBoardId ? boardToRepo.get(row.appReleaseBoardId) : undefined;
+    if (repoId) {
+      const bucket = rowsByRepo.get(repoId);
+      if (bucket) bucket.push(row);
+      else rowsByRepo.set(repoId, [row]);
+    } else {
+      unmapped.push(row);
+    }
+  }
+
+  const groups: DevTicketRepoGroup[] = [];
+  for (const repo of repos ?? []) {
+    const groupRows = rowsByRepo.get(repo.mainReleaseBoardId);
+    if (!groupRows || groupRows.length === 0) continue;
+    const meta = repoMeta.get(repo.mainReleaseBoardId);
+    groups.push({
+      key: repo.mainReleaseBoardId,
+      repoUrl: meta?.repoUrl ?? null,
+      fallbackName: meta?.name ?? null,
+      rangeFrom: repo.deployedCommit ?? null,
+      rangeTo: repo.newCommit ?? null,
+      rows: groupRows,
+      testedCount: groupRows.filter(isRowTested).length,
+      totalCount: groupRows.length,
+    });
+  }
+
+  return { groups, unmapped };
+}
+
+export function shortenRef(ref: string | null | undefined): string {
+  if (!ref) return '';
+  return /^[0-9a-f]{12,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 }
 
 export function buildDevTicketsCsv(

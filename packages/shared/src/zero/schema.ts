@@ -1956,7 +1956,6 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
-
 export const rcaTable = table('rcas')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)

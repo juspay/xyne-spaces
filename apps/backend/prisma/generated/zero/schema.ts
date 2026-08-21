@@ -2279,6 +2279,20 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
   })
   .primaryKey("id");
 
+export const releaseTicketRepoTable = table("release_ticket_repos")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    releaseId: string(),
+    mainReleaseBoardId: string(),
+    branch: string(),
+    deployedCommit: string(),
+    newCommit: string(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey("id");
+
 export const releaseEventTable = table("release_events")
   .columns({
     workspaceId: string(),
@@ -4964,6 +4978,7 @@ export const schema = createSchema(
       stageApproversTable,
       applicationTable,
       applicationReleaseTicketTable,
+      releaseTicketRepoTable,
       releaseEventTable,
       releaseChangeTable,
       releaseChangeTypeTable,
@@ -5257,6 +5272,7 @@ export type CollectionPermission = Row<typeof schema.tables.collection_permissio
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
+export type ReleaseTicketRepo = Row<typeof schema.tables.release_ticket_repos>;
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 export type ReleaseChange = Row<typeof schema.tables.release_changes>;
 export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;

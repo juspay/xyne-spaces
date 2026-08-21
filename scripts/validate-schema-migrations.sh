@@ -287,16 +287,16 @@ validate_prisma_zero_sync() {
                 log_info "  ⏭ Prisma model '$model' is excluded from the Zero generator — skipping Zero sync check"
                 continue
             fi
-            # Accept either the Prisma model name or its mapped SQL table name.
-            local mapped_model
-            mapped_model=$(get_mapped_model_name "$prisma_schema" "$model")
-            if ! grep -qi "table(.*${model}" "$zero_schema" && \
-                { [ -z "$mapped_model" ] || ! grep -qi "table(.*${mapped_model}" "$zero_schema"; }; then
+            # Match the PascalCase model name or its @@map'd snake_case table name.
+            local mapped_table
+            mapped_table=$(get_mapped_model_name "$prisma_schema" "$model")
+            if grep -qi "table(.*${model}" "$zero_schema" || \
+               { [ -n "$mapped_table" ] && grep -qiE "table\([\"']${mapped_table}[\"']" "$zero_schema"; }; then
+                log_info "  ✓ Prisma model '$model' found in $zero_schema"
+            else
                 log_error "Prisma model '$model' added to schema.prisma but no matching table() found in $zero_schema"
                 log_error "  → Add a corresponding table definition in $zero_schema"
                 has_errors=true
-            else
-                log_info "  ✓ Prisma model '$model' found in $zero_schema"
             fi
         done <<< "$new_prisma_models"
     fi

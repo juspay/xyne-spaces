@@ -106,19 +106,21 @@ export function buildGroupedByApp(
 
   for (const c of releaseChanges ?? []) {
     const appName = c.application?.name ?? '—';
+    const repoUrl = c.application?.repoUrl ?? null;
+    const groupKey = `${repoUrl ?? ''}|${appName}`;
     const filePath = c.filePath ?? '—';
     const fileKey = `${filePath}|${c.changeType}`;
     const createdAt = c.createdAt ?? 0;
 
-    let app = apps.get(appName);
+    let app = apps.get(groupKey);
     if (!app) {
       app = {
         appName,
-        repoUrl: c.application?.repoUrl ?? null,
+        repoUrl,
         files: new Map(),
         earliestAt: createdAt,
       };
-      apps.set(appName, app);
+      apps.set(groupKey, app);
     } else {
       app.earliestAt = Math.min(app.earliestAt, createdAt);
     }
