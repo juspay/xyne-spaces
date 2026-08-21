@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
-import { Sparkles, Bug, X } from 'lucide-react';
+import { PencilEditAi, Bug, MultipleCrossCancelDefault } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
+import { Tooltip } from '../../ui/Tooltip';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
 import {
@@ -47,7 +48,7 @@ export function TwinReasoningDrawer({
           <TabButton
             active={tab === 'reasoning'}
             onClick={() => setTab('reasoning')}
-            icon={<Sparkles size={13} />}
+            icon={<PencilEditAi size={13} />}
             label='Reasoning'
           />
           <TabButton
@@ -57,15 +58,17 @@ export function TwinReasoningDrawer({
             label='Debug'
           />
         </div>
-        <button
-          onClick={onClose}
-          aria-label='Close'
-          data-track-category='twin-reasoning'
-          data-track-name='close'
-          className='ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-        >
-          <X size={16} />
-        </button>
+        <Tooltip content='Close' side='bottom'>
+          <button
+            onClick={onClose}
+            aria-label='Close'
+            data-track-category='twin-reasoning'
+            data-track-name='close'
+            className='ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+          >
+            <MultipleCrossCancelDefault size={16} />
+          </button>
+        </Tooltip>
       </div>
 
       {tab === 'reasoning' ? (
@@ -155,7 +158,7 @@ function ReasoningBody({
   return (
     <>
       <div className='mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
-        <Sparkles size={12} /> Why this reply
+        <PencilEditAi size={12} /> Why this reply
       </div>
       <div className='text-sm leading-relaxed text-foreground'>
         <MarkdownMessageRenderer

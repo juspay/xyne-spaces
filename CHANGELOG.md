@@ -1,3 +1,31 @@
+## [1.207.1](https://github.com/juspay/xyne-spaces/compare/v1.207.0...v1.207.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* guest user acl fix ([#872](https://github.com/juspay/xyne-spaces/issues/872)) ([977a3b4](https://github.com/juspay/xyne-spaces/commit/977a3b42202efc3c3b8db6d576c83ee2ea8006b5))
+
+## [1.207.0](https://github.com/juspay/xyne-spaces/compare/v1.206.1...v1.207.0) (2026-08-21)
+
+
+### Features
+
+* added slack adapter api to fetch user conversation ([#675](https://github.com/juspay/xyne-spaces/issues/675)) ([2d818ba](https://github.com/juspay/xyne-spaces/commit/2d818baeb2a80abe50107978f0518f29eec8e41f))
+
+## [1.206.1](https://github.com/juspay/xyne-spaces/compare/v1.206.0...v1.206.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes show more button overlay issue for code block ([#859](https://github.com/juspay/xyne-spaces/issues/859)) ([917f073](https://github.com/juspay/xyne-spaces/commit/917f0735ebc4896de37037487951fae16f934d5d))
+
+## [1.206.0](https://github.com/juspay/xyne-spaces/compare/v1.205.3...v1.206.0) (2026-08-21)
+
+
+### Features
+
+* digital twin response ui ([#844](https://github.com/juspay/xyne-spaces/issues/844)) ([dadd153](https://github.com/juspay/xyne-spaces/commit/dadd1536f2b4eee5e2901f23eddf0e3208af8621))
+
 ## [1.205.3](https://github.com/juspay/xyne-spaces/compare/v1.205.2...v1.205.3) (2026-08-21)
 
 ## [1.205.2](https://github.com/juspay/xyne-spaces/compare/v1.205.1...v1.205.2) (2026-08-21)

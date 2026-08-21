@@ -4433,6 +4433,29 @@ export const queries = defineQueries({
     },
   ),
 
+  // Every latest, non-deleted file across a whole collection (matched on
+  // rootCollectionId, so it spans subfolders). Powers the root "collection
+  // status" drawer, which lists each file's ingestion status + size.
+  collectionFilesByRoot: defineQuery(
+    z.object({ rootCollectionId: z.string() }),
+    ({ args: { rootCollectionId } }) => {
+      return zql.collection_items
+        .where('rootCollectionId', rootCollectionId)
+        .where('isLatest', true)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc')
+        // The attachment joins on entityId only; a collection_item's id (a globally
+        // unique cuid) never keys a non-COLLECTION attachment, so an entityType
+        // filter would be redundant. Only isDeleted matters — skip soft-deleted rows.
+        .related('attachment', a => a.where('isDeleted', false));
+    },
+  ),
+
+  // Single collection by id (e.g. to resolve its name for an Activity row).
+  collectionById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.collections.where('id', id).where('deletedAt', 'IS', null);
+  }),
+
   // Collections filtered by generic scope (scopeType + scopeId).
   // For channel-scoped collections pass { scopeType: 'CHANNEL', scopeId: channelId }.
   // Future scopes (THREAD, TICKET, …) just use a different scopeType — no schema change needed.
@@ -4451,6 +4474,24 @@ export const queries = defineQueries({
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // Like `scopedCollections`, but also relates every latest, non-deleted file
+  // in each collection (via rootCollectionId) so the KB root view can show a
+  // per-collection "X / Y ingested" rollup. Kept separate from
+  // `scopedCollections` so the Ask-AI collection pickers don't pay to sync all
+  // item rows.
+  scopedCollectionsWithItems: defineQuery(
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
+    ({ ctx, args: { scopeType, scopeId } }) => {
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
+        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('allItems', i => i.where('isLatest', true).where('deletedAt', 'IS', null))
         .orderBy('createdAt', 'asc');
     },
   ),

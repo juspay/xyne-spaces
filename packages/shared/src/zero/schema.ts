@@ -3065,6 +3065,13 @@ export const collectionTableRelationships = relationships(collectionTable, ({ ma
     destField: ['collectionId'],
     destSchema: collectionItemTable,
   }),
+  // Every file anywhere under this root collection (keyed on rootCollectionId, so it
+  // spans subfolders) — powers the KB root per-collection ingestion rollup.
+  allItems: many({
+    sourceField: ['id'],
+    destField: ['rootCollectionId'],
+    destSchema: collectionItemTable,
+  }),
   permissions: many({
     sourceField: ['rootCollectionId'],
     destField: ['collectionId'],
