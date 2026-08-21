@@ -45,6 +45,7 @@ import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
+  TAB_TO_DOC_TYPE,
   MentionType,
   type MentionData,
   ChannelCommandMenuProps,
@@ -1098,8 +1099,12 @@ const ChannelCommandMenu = ({
     }
 
     onOpenChange(false);
+    // Land on the tab the user was already filtering by — Messages stays on Messages,
+    // Files on Files, and so on. Tabs with no results-page docType (and plain All) fall
+    // through to undefined, which leaves the page on its own default.
+    const docType = TAB_TO_DOC_TYPE[activeTab as keyof typeof TAB_TO_DOC_TYPE];
     void navigate(
-      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, docType).toString()}`,
     );
   };
 

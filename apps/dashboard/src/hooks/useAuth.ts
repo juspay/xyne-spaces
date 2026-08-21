@@ -41,6 +41,7 @@ export interface UseAuthReturn {
     password: string,
     name: string,
     workspaceId?: string,
+    invitationId?: string,
   ) => Promise<{ success: boolean; message?: string; error?: string }>;
   verifyEmailCode: (
     email: string,
@@ -172,12 +173,19 @@ export const useAuth = (): UseAuthReturn => {
       password: string,
       name: string,
       workspaceId?: string,
+      invitationId?: string,
     ): Promise<{ success: boolean; message?: string; error?: string }> => {
       try {
         const hashedPassword = await hashPasswordForAuth(password);
         const response = await apiInstance.post(
           '/v2/auth/email/register',
-          { email, hashedPassword, name, ...(workspaceId ? { workspaceId } : {}) },
+          {
+            email,
+            hashedPassword,
+            name,
+            ...(workspaceId ? { workspaceId } : {}),
+            ...(invitationId ? { invitationId } : {}),
+          },
           { timeout: 30000 },
         );
         const data = response.data as { success: boolean; message?: string };
@@ -217,6 +225,8 @@ export const useAuth = (): UseAuthReturn => {
           pendingUserData?: { email: string; name: string; picture?: string };
           userExistsButRemoved?: boolean;
           autoLoginWorkspace?: string;
+          invitationPending?: boolean;
+          invitationId?: string;
           domainConflictError?: string;
           publicEmailDomainError?: string;
           enterpriseJoinOrgName?: string;
@@ -225,6 +235,16 @@ export const useAuth = (): UseAuthReturn => {
 
         if (!data.success) {
           return { success: false, error: 'Verification failed' };
+        }
+
+        if (data.invitationPending && data.invitationId) {
+          const emailForRedirect = data.pendingUserData?.email ?? email;
+          window.location.replace(
+            `/invite?invitationId=${encodeURIComponent(data.invitationId)}` +
+              `&loginComplete=true` +
+              `&loggedInEmail=${encodeURIComponent(emailForRedirect)}`,
+          );
+          return { success: true, status: data.status ?? 'INVITATION_PENDING' };
         }
 
         // Dispatch to auth machine — same as OAuth callback.

@@ -136,15 +136,28 @@ export interface RegenerateRecordingSummaryResult {
   detailedSummaryReady: boolean;
 }
 
+/** A Google Doc created from this recording's summary, as stored on call metadata. */
+export interface RecordingGoogleDocLink {
+  documentId: string;
+  title: string;
+  url: string;
+  /** ISO timestamp of when the doc was created. */
+  createdAt: string;
+  createdByUserId: string;
+}
+
 export interface ExportRecordingGoogleDocResult {
   documentId: string;
   documentUrl: string;
+  document: RecordingGoogleDocLink;
 }
 
 export interface RecordingGoogleDocComposeContext {
   canExport: boolean;
   unavailableReason?: string;
   summary: string | null;
+  /** Docs already exported from this recording, newest first. */
+  documents?: RecordingGoogleDocLink[];
 }
 
 interface GoogleRecordingDocConnectionResponse {
@@ -178,6 +191,8 @@ export interface RecordingDetail extends Recording {
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
+  /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
+  googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
@@ -328,9 +343,11 @@ class RecordingService {
     return response.data;
   }
 
-  async exportGoogleDoc(callId: string): Promise<ExportRecordingGoogleDocResult> {
+  /** `title` names the new doc; omitted, the backend falls back to the recording title. */
+  async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
       `/calls/recordings/${callId}/export-google-doc`,
+      title ? { title } : {},
     );
     return response.data;
   }

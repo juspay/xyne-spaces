@@ -15,6 +15,25 @@ import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
 import {
+    parseDriveTarget,
+    getMetadata,
+    listFolderRecursive,
+    DriveNotAccessibleError,
+    DriveInvalidLinkError,
+    DriveRateLimitedError,
+    DriveUnauthorizedError,
+    type DriveFile,
+} from '@/services/googleDriveImportService';
+import { getDriveAccessToken, clearDriveCredentials } from '@/services/driveTokenService';
+import { randomUUID } from 'crypto';
+import {
+    enqueueDriveImport,
+    processDriveImportJob,
+    writeDriveImportProgress,
+    readDriveImportProgress,
+} from '@/services/driveImport/driveImportWorker';
+import { config } from '@/config/env';
+import {
     resolveCollectionAccess,
     listAccessibleRootCollections,
     expandCollectionTrees,
@@ -264,6 +283,162 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
     };
 
     /**
+     * POST /api/collections/:collectionId/upload-drive-link
+     *
+     * Imports a Google Drive file OR folder into the collection using the user's
+     * connected Drive OAuth token (drive.readonly). Downloads bytes server-side via
+     * the Drive API, stores them, and enqueues ingestion — identical to a normal
+     * upload from that point on. Folders are imported recursively, recreating their
+     * structure. Requires a connected Drive; responds needsDriveAuth otherwise.
+     */
+    uploadFromDriveLink = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const { collectionId } = req.params;
+            const user = req.user;
+
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+            if (!collectionId || typeof collectionId !== 'string' || collectionId.trim() === '') {
+                res.status(400).json({ error: 'Collection ID is required' });
+                return;
+            }
+
+            const { role } = await this.getCollectionOrRole(collectionId, user.id, user.workspaceId);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
+                return;
+            }
+            if (role === CollectionRole.VIEWER) {
+                res.status(403).json({ error: 'Forbidden: You do not have edit access to this collection' });
+                return;
+            }
+
+            const driveUrl = z.string().min(1).parse(req.body?.driveUrl);
+            const validated = uploadFilesSchema.parse({
+                duplicateStrategy: req.body.duplicateStrategy || 'rename',
+                parentId: req.body.parentId || null,
+                sessionId: req.body.sessionId,
+            });
+
+            // Imports are OAuth-only: the user must have connected Google Drive so we
+            // can read the file as them. No token → prompt the UI to connect.
+            const driveToken = await getDriveAccessToken(user.id);
+            if (!driveToken) {
+                res.status(400).json({
+                    error: 'Connect Google Drive to import files.',
+                    needsDriveAuth: true,
+                });
+                return;
+            }
+
+            const target = parseDriveTarget(driveUrl);
+            let workList: DriveFile[];
+            if (target.kind === 'folder') {
+                // Probe the folder first: files.list returns an empty set (not an error)
+                // for a folder we can't read, which would silently import nothing;
+                // files.get 404s, surfacing DriveNotAccessibleError instead of "0 imported".
+                await getMetadata(target.id, driveToken);
+                workList = await listFolderRecursive(target.id, driveToken);
+            } else {
+                workList = [await getMetadata(target.id, driveToken)];
+            }
+
+            const baseParentFolderId = validated.parentId ?? collectionId;
+
+            if (workList.length === 0) {
+                res.status(200).json({ sessionId: null, total: 0, files: [] });
+                return;
+            }
+
+            // The download loop moves to the background worker so a big folder never
+            // blocks (or times out) this request. We list synchronously (fast, and it
+            // surfaces access errors early), then hand off and let the client poll.
+            const sessionId = randomUUID();
+            await writeDriveImportProgress(sessionId, {
+                collectionId,
+                userId: user.id,
+                total: workList.length,
+                processed: 0,
+                done: false,
+                files: workList.map(f => ({ name: f.name, status: 'pending' as const })),
+            });
+            const jobData = {
+                collectionId,
+                baseParentFolderId,
+                files: workList,
+                userId: user.id,
+                workspaceId: user.workspaceId,
+                sessionId,
+                duplicateStrategy: validated.duplicateStrategy,
+            };
+            if (config.enableDriveImportWorker) {
+                // Dedicated worker (worker.ts) picks the job up and downloads off-process.
+                await enqueueDriveImport(jobData);
+            } else {
+                // Fallback: no worker running — download in this (API) process. Still
+                // fire-and-forget + Redis progress, so the client polls the same way.
+                void processDriveImportJob(jobData).catch(err =>
+                    logger.error('[DRIVE_IMPORT] In-process import failed', err),
+                );
+            }
+
+            res.status(202).json({
+                sessionId,
+                total: workList.length,
+                files: workList.map(f => ({ name: f.name })),
+            });
+        } catch (error) {
+            if (error instanceof z.ZodError) {
+                res.status(400).json({ error: 'Validation failed', details: error.errors });
+                return;
+            }
+            if (error instanceof DriveRateLimitedError) {
+                res.status(429).json({ error: error.message });
+                return;
+            }
+            if (error instanceof DriveUnauthorizedError) {
+                // Connected token was rejected (revoked/expired). Clear the stale row
+                // so the DB matches Google, and prompt a reconnect.
+                if (req.user) await clearDriveCredentials(req.user.id);
+                res.status(400).json({ error: error.message, needsDriveAuth: true });
+                return;
+            }
+            if (error instanceof DriveNotAccessibleError) {
+                // Connected, but the account can't see this file (wrong account / no
+                // access). Not a reconnect case — just surface the error.
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            if (error instanceof DriveInvalidLinkError) {
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            logger.error('[DRIVE_IMPORT] Error in uploadFromDriveLink:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+
+    /**
+     * GET /api/collections/:collectionId/drive-import/:sessionId
+     *
+     * Poll the progress of a background Drive import started by uploadFromDriveLink.
+     * The client polls this to fill the upload card live and know when it's done.
+     */
+    getDriveImportStatus = async (req: Request, res: Response): Promise<void> => {
+        const user = req.user;
+        if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+        const { sessionId } = req.params;
+        if (!sessionId) { res.status(400).json({ error: 'sessionId is required' }); return; }
+
+        const progress = await readDriveImportProgress(sessionId);
+        // Scope to the owner so one user can't read another's import session.
+        if (!progress || progress.userId !== user.id) {
+            res.status(404).json({ error: 'Unknown or expired import session' });
+            return;
+        }
+        res.json(progress);
+    };
+
+    /**
      * Check user role on a root collection (collectionId must be a root Collection.id).
      *
      * Delegates to services/collectionAccess.resolveCollectionAccess so that owner,
@@ -350,7 +525,10 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
                 });
                 currentFolderId = newFolder.id;
                 logger.info(`[UPLOAD] Auto-created folder: ${folderName}`);
-                await vespaQueue.addJob({ schema: 'file', docId: newFolder.id, jobType: 'feed', userId: ownerId, app: SubApp.COLLECTIONS });
+                // Folders are `collections` rows (structural), not `collection_items`
+                // file documents — so they are NOT indexed in Vespa. Enqueuing a folder
+                // as a `file` feed job made the mapper look it up by fileId, always miss,
+                // and log "Data not found for file/<id>". Files inside are fed on their own.
             }
         }
 
