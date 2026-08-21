@@ -20,38 +20,6 @@ export const DEFAULT_PLAN_MODE_PROMPT = [
   'Set `trivial: true` ONLY for a genuinely simple, low-risk ask where an approval prompt would just be noise; then it starts immediately. When unsure, use `trivial: false`.',
 ].join('\n');
 
-/**
- * Bounds for the per-agent delegation budget (config.maxDelegationsPerRun).
- * MUST stay in sync with MAX_DELEGATIONS_PER_RUN_BOUNDS in
- * xyne-claw/src/agent-delegation.ts — the runtime clamps to the same range and
- * treats the DEFAULT as "unset" (falls back to its own default).
- */
-export const MAX_DELEGATIONS_PER_RUN_BOUNDS = {
-  MIN: 1,
-  MAX: 25,
-  DEFAULT: 3,
-} as const;
-
-/** Discrete options offered in the Behaviour screen. DEFAULT is rendered as
- *  "Default (N)"; the rest are explicit higher budgets. */
-export const MAX_DELEGATIONS_PER_RUN_OPTIONS = [3, 5, 6, 8, 10, 15, 20, 25] as const;
-
-/** Coerce an untrusted config value into a valid budget, mirroring the runtime
- *  clamp. Missing / non-integer / out-of-range ⇒ DEFAULT. */
-export function clampMaxDelegationsPerRun(value: unknown): number {
-  const n =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && value.trim() !== ''
-        ? Number(value)
-        : NaN;
-  if (!Number.isFinite(n) || !Number.isInteger(n)) return MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT;
-  return Math.min(
-    MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX,
-    Math.max(MAX_DELEGATIONS_PER_RUN_BOUNDS.MIN, n),
-  );
-}
-
 export interface BehaviourDraft {
   /** Extra instructions injected on every turn (config.promptInjection). */
   promptInjection: string;
@@ -61,12 +29,6 @@ export interface BehaviourDraft {
   autoGoal: boolean;
   /** Propose a plan and wait for approval before multi-step work (config.planMode). */
   planMode: boolean;
-  /**
-   * Max number of sub-agent delegations allowed per run (config.maxDelegationsPerRun).
-   * DEFAULT (3) means "unset" — the runtime uses its built-in default. Raise it for
-   * orchestrator agents that fan out to several sub-agents in one workflow.
-   */
-  maxDelegationsPerRun: number;
   /**
    * The plan-mode system prompt (config.planModePrompt). Pre-filled with
    * DEFAULT_PLAN_MODE_PROMPT; only persisted when the user customizes it (differs
@@ -118,7 +80,6 @@ interface BehaviourConfigShape {
   autoGoal?: unknown;
   planMode?: unknown;
   planModePrompt?: unknown;
-  maxDelegationsPerRun?: unknown;
   verifyResponses?: unknown;
   verifyResponseCriteria?: unknown;
   citationReflection?: unknown;
@@ -139,7 +100,6 @@ export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
     suggestGoal: c.suggestGoal === true,
     autoGoal: c.autoGoal === true,
     planMode: c.planMode === true,
-    maxDelegationsPerRun: clampMaxDelegationsPerRun(c.maxDelegationsPerRun),
     planModePrompt:
       typeof c.planModePrompt === 'string' && c.planModePrompt.trim()
         ? c.planModePrompt
@@ -217,13 +177,6 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
   setOrDelete('suggestGoal', draft.suggestGoal);
   setOrDelete('autoGoal', draft.autoGoal);
   setOrDelete('planMode', draft.planMode);
-  // Delegation budget: DEFAULT ⇒ drop the key so the runtime uses its own
-  // default; any other in-range value is persisted (clamped defensively).
-  {
-    const budget = clampMaxDelegationsPerRun(draft.maxDelegationsPerRun);
-    if (budget !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT) next['maxDelegationsPerRun'] = budget;
-    else delete next['maxDelegationsPerRun'];
-  }
   // Privacy: "everyone" is the absence of the key; "whitelist" stores the
   // canonical { mode, whitelist } block (server re-normalizes on save).
   setOrDelete('privacy', draft.privacyMode === 'whitelist', {
