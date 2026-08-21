@@ -96,6 +96,7 @@ export function useDeskSettingsForm(
   const isApp = channelType === ChannelType.APP;
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
+  const isSocialMedia = channelType === ChannelType.SOCIAL_MEDIA;
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
     queries.channelParticipants({ channelId: channelId ?? '' }),
@@ -426,6 +427,7 @@ export function useDeskSettingsForm(
     isApp,
     isSocial,
     isCall,
+    isSocialMedia,
     isDirty,
     saving,
     save,

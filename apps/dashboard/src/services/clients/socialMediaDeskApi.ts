@@ -1,5 +1,20 @@
 import { apiInstance } from './apiClient';
 
+export async function startInstagramOAuth(input: {
+  name: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authUrl: string }>(
+    '/integrations/social-media/instagram/oauth/start',
+    input,
+  );
+  return response.data.authUrl;
+}
+
 export async function startGooglePlayOAuth(input: {
   channelName: string;
   applications: Array<{
@@ -71,4 +86,15 @@ export async function reconnectSocialMediaDesk(
     { platform },
   );
   return response.data.authorizationUrl;
+}
+
+export async function reconnectInstagramDesk(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/reconnect`,
+    { platform },
+  );
+  return response.data.authUrl;
 }

@@ -6,6 +6,7 @@ import { config } from '@/config/env';
 import { runReclusteringFlow } from '@/services/productInsightsPipeline';
 import { db } from '@/database/client';
 import { recapWorker } from './recapWorker';
+import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
 
 /**
  * Worker Scheduler
@@ -18,6 +19,7 @@ export class WorkerScheduler {
     private productInsightsQueue: Bull.Queue | null = null;
     private recapGenerationQueue: Bull.Queue | null = null;
     private recapCleanupQueue: Bull.Queue | null = null;
+    private instagramTokenRefreshQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -226,6 +228,34 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Recap scheduler is disabled (ENABLE_RECAP_SCHEDULER=false)');
         }
 
+        // Instagram long-lived token refresh — runs daily at 03:17 UTC
+        if (config.enableInstagramTokenRefreshWorker) {
+            this.instagramTokenRefreshQueue = new Bull('instagram-token-refresh', { redis: workerRedisConfig });
+            this.instagramTokenRefreshQueue.process(async (job) => {
+                logger.info(`[WORKER_SCHEDULER] Processing Instagram token refresh job ${job.id}...`);
+                try {
+                    await instagramTokenRefreshWorker.run();
+                    logger.info(`[WORKER_SCHEDULER] Instagram token refresh job ${job.id} completed`);
+                } catch (error) {
+                    logger.error(`[WORKER_SCHEDULER] Instagram token refresh job ${job.id} failed:`, error);
+                    throw error;
+                }
+            });
+            await this.instagramTokenRefreshQueue.add(
+                {},
+                {
+                    repeat: { cron: '17 3 * * *' },
+                    jobId: 'instagram-token-refresh-repeatable',
+                    attempts: 3,
+                    backoff: { type: 'exponential', delay: 5000 },
+                    removeOnComplete: true,
+                },
+            );
+            logger.info('[WORKER_SCHEDULER] Instagram token refresh scheduled via Bull (daily at 03:17 UTC)');
+        } else {
+            logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
+        }
+
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
@@ -260,6 +290,11 @@ export class WorkerScheduler {
         if (this.recapCleanupQueue) {
             await this.recapCleanupQueue.close();
             this.recapCleanupQueue = null;
+        }
+
+        if (this.instagramTokenRefreshQueue) {
+            await this.instagramTokenRefreshQueue.close();
+            this.instagramTokenRefreshQueue = null;
         }
 
         this.isRunning = false;

@@ -39,8 +39,7 @@ export class AdapterFactory {
       refetch: refetcher?.refetch.bind(refetcher),
       sendMailReply: mailReplySender?.sendReply.bind(mailReplySender),
       sendMailNew: mailReplySender?.sendNew.bind(mailReplySender),
-      sendInteractionReply:
-        interactionReplySender?.sendReply.bind(interactionReplySender),
+      sendInteractionReply: interactionReplySender?.sendReply.bind(interactionReplySender),
     };
 
     adapterRegistry.register(platform, adapter);
