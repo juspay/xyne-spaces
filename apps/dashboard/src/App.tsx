@@ -23,6 +23,7 @@ import Wallpaper from './components/Wallpaper/Wallpaper';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
+import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
 import {
@@ -110,6 +111,7 @@ const App = (): ReactElement => {
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />
+                    <RecordingInterruptGuard />
                     <Toaster
                       position='top-right'
                       richColors
