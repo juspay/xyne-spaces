@@ -10,6 +10,7 @@ import {
   IHeaderParams,
   RowClickedEvent,
   GridReadyEvent,
+  ValueGetterParams,
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { BoardType, isDeskChannelType } from '@xyne/shared';
@@ -39,6 +40,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -411,6 +413,27 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             </Tooltip>
           );
         },
+      },
+
+      {
+        key: 'age',
+        colId: 'age',
+        headerName: 'Age',
+        minWidth: 80,
+        // Sorts on days elapsed, not createdAt — that would invert the order.
+        valueGetter: (params: ValueGetterParams<Ticket>) => {
+          const createdAt = params.data?.createdAt;
+          if (!createdAt) return null;
+          const created = new Date(createdAt);
+          if (Number.isNaN(created.getTime())) return null;
+          return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
+        },
+        cellRenderer: (params: ICellRendererParams<Ticket>) =>
+          typeof params.value === 'number' ? (
+            <span className='text-sm text-muted-foreground whitespace-nowrap'>{params.value}d</span>
+          ) : (
+            <span className='text-muted-foreground'>—</span>
+          ),
       },
 
       {
@@ -840,7 +863,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
     <div className='flex items-center h-full'>
       {assignedUser ? (
         <div className='flex items-center gap-3'>
-          <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+          <Tooltip content={getUserDisplayName(assignedUser)}>
             <Avatar
               userId={assignedUser.id}
               className='rounded-full size-6 flex items-center justify-center'
@@ -848,7 +871,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
             />
           </Tooltip>
           <span className='text-muted-foreground truncate font-medium'>
-            {assignedUser.name || assignedUser.email}
+            {getUserDisplayName(assignedUser)}
           </span>
         </div>
       ) : assignedGroup ? (

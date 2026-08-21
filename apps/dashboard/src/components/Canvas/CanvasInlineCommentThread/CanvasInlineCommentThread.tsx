@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, RotateCcw, X } from 'lucide-react';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
@@ -127,14 +127,51 @@ const renderCommentBody = (
   return nodes.length > 0 ? nodes : [body];
 };
 
-const getPopoverStyle = (rect: DOMRect): React.CSSProperties => {
-  const width = 520;
-  const top = Math.min(rect.bottom + 12, window.innerHeight - 260);
-  const preferredLeft = rect.width === 0 ? rect.left : rect.right + 16;
-  const left = Math.min(Math.max(preferredLeft, 16), Math.max(window.innerWidth - width - 16, 16));
-  const maxHeight = Math.max(260, window.innerHeight - top - 24);
-  return { position: 'fixed', top, left, width, maxHeight, zIndex: 80 };
+const CARD_MAX_WIDTH = 470;
+const CARD_GAP = 10;
+const VIEWPORT_PADDING = 16;
+const CARD_TOP_BOUND = 68;
+const CARD_BOTTOM_PADDING = 14;
+const CARD_MIN_HEIGHT = 140;
+
+const getCardPlacement = (
+  rect: DOMRect,
+  cardHeight: number,
+): { left: number; top: number; width: number; maxHeight: number } => {
+  const width = Math.min(CARD_MAX_WIDTH, window.innerWidth - VIEWPORT_PADDING * 2);
+  const bottomBound = window.innerHeight - CARD_BOTTOM_PADDING;
+  const anchorTop = Math.min(Math.max(rect.top, CARD_TOP_BOUND), bottomBound);
+  const anchorBottom = Math.min(Math.max(rect.bottom, CARD_TOP_BOUND), bottomBound);
+  const spaceAbove = anchorTop - CARD_GAP - CARD_TOP_BOUND;
+  const spaceBelow = bottomBound - (anchorBottom + CARD_GAP);
+  const placeAbove =
+    cardHeight > spaceBelow && (cardHeight <= spaceAbove || spaceAbove > spaceBelow);
+  const maxHeight = Math.max(CARD_MIN_HEIGHT, placeAbove ? spaceAbove : spaceBelow);
+  const preferredTop = placeAbove
+    ? Math.max(CARD_TOP_BOUND, anchorTop - CARD_GAP - Math.min(cardHeight, spaceAbove))
+    : anchorBottom + CARD_GAP;
+  const top = Math.max(
+    CARD_TOP_BOUND,
+    Math.min(preferredTop, bottomBound - Math.min(cardHeight, maxHeight)),
+  );
+  const maxLeft = Math.max(VIEWPORT_PADDING, window.innerWidth - width - VIEWPORT_PADDING);
+  const left = Math.min(Math.max(rect.left, VIEWPORT_PADDING), maxLeft);
+  return { left, top, width, maxHeight };
 };
+
+const getAnchorUnionRect = (element: HTMLElement): DOMRect | null => {
+  const rects = [...element.getClientRects()];
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map(rect => rect.left));
+  const top = Math.min(...rects.map(rect => rect.top));
+  const bottom = Math.max(...rects.map(rect => rect.bottom));
+  return new DOMRect(left, top, 0, bottom - top);
+};
+
+const escapeSelectorValue = (value: string): string =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
 
 export function CanvasInlineCommentThread({
   canvasId,
@@ -154,6 +191,10 @@ export function CanvasInlineCommentThread({
   const allUsers = useUsers();
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
   const commentsScrollRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [cardHeight, setCardHeight] = useState(220);
+  const [anchorLiveRect, setAnchorLiveRect] = useState<DOMRect>(anchorRect);
+  const [hasEntered, setHasEntered] = useState(false);
   const [createdThread, setCreatedThread] = useState<CanvasCommentHighlightThread | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
   const {
@@ -186,6 +227,56 @@ export function CanvasInlineCommentThread({
     if (!scrollElement) return;
     scrollElement.scrollTop = scrollElement.scrollHeight;
   }, [currentThreadId, initialComment?.id, replies.length]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setHasEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    setAnchorLiveRect(anchorRect);
+  }, [anchorRect]);
+
+  useLayoutEffect(() => {
+    const cardElement = cardRef.current;
+    if (!cardElement) return;
+
+    const measure = (): void => {
+      const nextHeight = Math.max(cardElement.scrollHeight, cardElement.offsetHeight);
+      setCardHeight(previous => (Math.abs(nextHeight - previous) > 2 ? nextHeight : previous));
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(cardElement);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!currentThreadId) return;
+
+    const selector = `[data-canvas-comment-thread-id="${escapeSelectorValue(currentThreadId)}"]`;
+    const syncAnchorRect = (): void => {
+      const anchorElement = document.querySelector<HTMLElement>(selector);
+      if (!anchorElement) return;
+      const nextRect = getAnchorUnionRect(anchorElement);
+      if (!nextRect) return;
+      setAnchorLiveRect(previous =>
+        Math.abs(previous.top - nextRect.top) < 0.5 && Math.abs(previous.left - nextRect.left) < 0.5
+          ? previous
+          : nextRect,
+      );
+    };
+
+    syncAnchorRect();
+    window.addEventListener('scroll', syncAnchorRect, true);
+    window.addEventListener('resize', syncAnchorRect);
+    return () => {
+      window.removeEventListener('scroll', syncAnchorRect, true);
+      window.removeEventListener('resize', syncAnchorRect);
+    };
+  }, [currentThreadId]);
 
   const mentionItems = useMemo<MentionResult[]>(() => {
     const fallbackMentionItems: MentionResult[] = [
@@ -343,37 +434,103 @@ export function CanvasInlineCommentThread({
     );
   };
 
+  const placement = getCardPlacement(anchorLiveRect, cardHeight);
+  const anchorQuote = currentThread?.anchorText ?? activeAnchor?.anchorText;
+  const isDraft = !currentThread;
+
+  const renderAnchorQuote = (): React.JSX.Element => (
+    <div className='ml-[33px] mt-1.5 flex min-w-0'>
+      <span className='w-[3px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
+      <span className='min-w-0 flex-1 whitespace-pre-wrap break-words pl-[9px] text-[12.5px] leading-[1.5] text-muted-foreground'>
+        {anchorQuote}
+      </span>
+    </div>
+  );
+
+  const threadActions = (
+    <span className='flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/card:opacity-100'>
+      {editable && currentThread?.status === CanvasCommentThreadStatus.OPEN && (
+        <Button
+          variant='ghost'
+          size='iconSm'
+          className='size-6 text-muted-foreground hover:text-emerald-600'
+          onClick={() => setThreadStatus(CanvasCommentThreadStatus.RESOLVED)}
+          aria-label='Resolve comment'
+          title='Resolve comment'
+        >
+          <Check className='size-[15px]' />
+        </Button>
+      )}
+      {editable && currentThread?.status === CanvasCommentThreadStatus.RESOLVED && (
+        <Button
+          variant='ghost'
+          size='iconSm'
+          className='size-6 text-muted-foreground'
+          onClick={() => setThreadStatus(CanvasCommentThreadStatus.OPEN)}
+          aria-label='Reopen comment'
+          title='Reopen comment'
+        >
+          <RotateCcw className='size-[15px]' />
+        </Button>
+      )}
+      <Button
+        variant='ghost'
+        size='iconSm'
+        className='size-6 text-muted-foreground'
+        onClick={onClose}
+        aria-label='Close comment'
+      >
+        <X className='size-[15px]' />
+      </Button>
+    </span>
+  );
+
   return (
     <div
+      ref={cardRef}
       data-canvas-inline-comment-thread='true'
-      className='flex flex-col overflow-hidden rounded-[18px] border border-input bg-background shadow-[0_18px_60px_rgba(15,23,42,0.16)]'
-      style={getPopoverStyle(anchorRect)}
+      className='group/card flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-[0_10px_30px_hsl(var(--foreground)/0.12)]'
+      style={{
+        position: 'fixed',
+        top: placement.top,
+        left: placement.left,
+        width: placement.width,
+        maxHeight: placement.maxHeight,
+        zIndex: 80,
+        opacity: hasEntered ? 1 : 0,
+        transform: hasEntered ? 'none' : 'translateY(-6px) scale(0.985)',
+        transition: 'opacity 180ms ease, transform 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
     >
-      <div
-        ref={commentsScrollRef}
-        className='thin-scrollbar relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pr-12'
-      >
-        {visibleComments.map(comment => {
-          const isInitialComment = comment.id === initialComment?.id;
-          const commentAuthor = getCommentAuthor(comment, allUsers);
-          return (
-            <div key={comment.id} className='flex gap-3'>
-              <Avatar userId={comment.createdBy} size='sm' rounded showActiveStatus={false} />
-              <div className='min-w-0 flex-1'>
-                <div className='flex items-center gap-2 text-sm'>
-                  <span className='font-semibold text-foreground'>
+      {!isDraft && (
+        <div
+          ref={commentsScrollRef}
+          className='thin-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-3'
+        >
+          {visibleComments.map((comment, index) => {
+            const isInitialComment = comment.id === initialComment?.id;
+            const commentAuthor = getCommentAuthor(comment, allUsers);
+            return (
+              <div key={comment.id} className='mb-2.5'>
+                <div className='flex min-w-0 items-center gap-2'>
+                  <Avatar
+                    userId={comment.createdBy}
+                    size='sm'
+                    rounded
+                    showActiveStatus={false}
+                    className='size-[25px]'
+                  />
+                  <span className='truncate text-[13px] font-semibold leading-none text-foreground'>
                     {comment.createdBy === user?.id ? 'You' : getDisplayName(commentAuthor)}
                   </span>
-                  <span className='text-muted-foreground'>
+                  <span className='shrink-0 text-[11.5px] leading-none text-muted-foreground'>
                     {formatRelativeCommentTime(comment.createdAt)}
                   </span>
+                  <span className='flex-1' />
+                  {index === 0 && threadActions}
                 </div>
-                {isInitialComment && (currentThread?.anchorText || activeAnchor?.anchorText) && (
-                  <blockquote className='mt-3 border-l-2 border-amber-400 pl-3 text-sm text-muted-foreground'>
-                    {currentThread?.anchorText ?? activeAnchor?.anchorText}
-                  </blockquote>
-                )}
-                <p className='mt-1 whitespace-pre-wrap break-words text-sm text-foreground'>
+                {isInitialComment && anchorQuote && renderAnchorQuote()}
+                <p className='ml-[33px] mt-[3px] whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] text-foreground [text-wrap:pretty]'>
                   {renderCommentBody(
                     comment.body,
                     parseMentionedUserIds(comment.mentionedUserIds),
@@ -381,56 +538,44 @@ export function CanvasInlineCommentThread({
                   )}
                 </p>
               </div>
-            </div>
-          );
-        })}
-        {!initialComment && (
-          <div className='flex gap-3'>
-            <Avatar userId={user?.id ?? null} size='sm' rounded showActiveStatus={false} />
-            <div className='min-w-0 flex-1'>
-              <div className='flex items-center gap-2 text-sm'>
-                <span className='font-semibold text-foreground'>You</span>
+            );
+          })}
+          {!initialComment && (
+            <div className='mb-2.5'>
+              <div className='flex min-w-0 items-center gap-2'>
+                <Avatar
+                  userId={user?.id ?? null}
+                  size='sm'
+                  rounded
+                  showActiveStatus={false}
+                  className='size-[25px]'
+                />
+                <span className='truncate text-[13px] font-semibold leading-none text-foreground'>
+                  You
+                </span>
+                <span className='flex-1' />
+                {threadActions}
               </div>
-              {(currentThread?.anchorText || activeAnchor?.anchorText) && (
-                <blockquote className='mt-3 border-l-2 border-amber-400 pl-3 text-sm text-muted-foreground'>
-                  {currentThread?.anchorText ?? activeAnchor?.anchorText}
-                </blockquote>
-              )}
+              {anchorQuote && renderAnchorQuote()}
             </div>
-          </div>
-        )}
-        <div className='absolute right-3 top-3 flex shrink-0 items-center gap-1'>
-          {editable && currentThread?.status === CanvasCommentThreadStatus.OPEN && (
-            <Button
-              variant='ghost'
-              size='iconSm'
-              onClick={() => setThreadStatus(CanvasCommentThreadStatus.RESOLVED)}
-              aria-label='Resolve comment'
-              title='Resolve comment'
-            >
-              <Check className='size-4' />
-            </Button>
           )}
-          {editable && currentThread?.status === CanvasCommentThreadStatus.RESOLVED && (
-            <Button
-              variant='ghost'
-              size='iconSm'
-              onClick={() => setThreadStatus(CanvasCommentThreadStatus.OPEN)}
-              aria-label='Reopen comment'
-              title='Reopen comment'
-            >
-              <RotateCcw className='size-4' />
-            </Button>
-          )}
-          <Button variant='ghost' size='iconSm' onClick={onClose} aria-label='Close comment'>
-            <X className='size-4' />
-          </Button>
         </div>
-      </div>
+      )}
 
       {editable && (
-        <div className='flex items-center gap-3 border-t border-border bg-background px-6 py-4'>
-          <Avatar userId={user?.id ?? null} size='sm' rounded showActiveStatus={false} />
+        <div
+          className={cn(
+            'flex items-center bg-background',
+            isDraft ? 'gap-[9px] px-[11px] py-2.5' : 'gap-2 border-t border-border/70 px-3 py-2',
+          )}
+        >
+          <Avatar
+            userId={user?.id ?? null}
+            size='sm'
+            rounded
+            showActiveStatus={false}
+            className={isDraft ? 'size-[26px]' : 'size-[22px]'}
+          />
           <OverlayZIndexContext.Provider value='z-[100]'>
             <InputBox
               id={`canvas-inline-comment-${currentThreadId ?? activeAnchor?.blockId ?? canvasId}`}
@@ -444,9 +589,12 @@ export function CanvasInlineCommentThread({
               onMentionSelect={mention => {
                 if (mention.type === 'user') selectedMentionIdsRef.current.add(mention.id);
               }}
-              placeholder={`${currentThread ? 'Reply' : 'Comment'} — @AI to edit...`}
+              placeholder={
+                isDraft ? 'Comment — @AI to edit the selection…' : 'Reply — @AI to edit…'
+              }
+              {...(isDraft && { autoFocus: 'end' as const })}
               className={cn(
-                'canvas-inline-comment-composer min-h-[40px] flex-1 rounded-[22px] border border-input bg-background shadow-sm',
+                'canvas-inline-comment-composer min-h-[32px] flex-1 rounded-lg border-0 bg-transparent shadow-none',
               )}
               features={{
                 richText: false,

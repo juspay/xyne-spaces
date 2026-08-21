@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { type CSSProperties, type ReactElement, useCallback, useEffect } from 'react';
 import { Square } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,7 +62,11 @@ export function AgentProgressIndicator({
         new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
       );
     } catch (err) {
-      console.error('[AgentProgressIndicator] cancel failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AgentProgressIndicator] cancel failed:'),
+        error: err,
+      });
       toast.error('Failed to stop agent', {
         description: 'Only the person who started it can stop.',
       });

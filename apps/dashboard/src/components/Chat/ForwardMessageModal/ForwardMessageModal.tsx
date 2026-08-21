@@ -148,7 +148,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
         } catch (error) {
-          console.error('Failed to forward message via mutator:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to forward message via mutator:'),
+            error: error,
+          });
           logger.error(Event.MESSAGE_FORWARD_FAILED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
@@ -209,7 +213,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         // Navigate to the DM channel
         void navigate(`/chat/dir/${response.id}`);
       } catch (error) {
-        console.error('Failed to create DM with forwarded message:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to create DM with forwarded message:'),
+          error: error,
+        });
         logger.error(Event.MESSAGE_FORWARD_FAILED, {
           originalMessageId: message.messageId,
           targetType: 'users',
@@ -345,23 +353,25 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const getGroupDMParticipants = (channel: { name: string; scopeType: ChannelScopeType }) => {
     const otherIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
-    return otherIds.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as {
-      name: string;
-    }[];
+    return otherIds
+      .map(id => allUsers.find(u => u.id === id))
+      .filter((user): user is (typeof allUsers)[number] => user !== undefined);
   };
 
   const getGroupDMLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
     const participants = getGroupDMParticipants(channel);
-    return participants.map(u => u.name).join(', ');
+    return participants.map(user => getUserDisplayName(user)).join(', ');
   };
 
   const getGroupDMBadgeLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
     const MAX_SHOWN = 3;
     const participants = getGroupDMParticipants(channel);
-    if (participants.length <= MAX_SHOWN) return participants.map(u => u.name).join(', ');
+    if (participants.length <= MAX_SHOWN) {
+      return participants.map(user => getUserDisplayName(user)).join(', ');
+    }
     const shown = participants
       .slice(0, MAX_SHOWN)
-      .map(u => u.name)
+      .map(user => getUserDisplayName(user))
       .join(', ');
     return `${shown} +${participants.length - MAX_SHOWN} more`;
   };
@@ -391,8 +401,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     return (
       <div className='max-w-[200px] flex flex-wrap gap-x-1 gap-y-0.5'>
         {participants.map((u, i) => (
-          <span key={i}>
-            {u.name}
+          <span key={u.id}>
+            {getUserDisplayName(u)}
             {i < participants.length - 1 ? ',' : ''}
           </span>
         ))}
@@ -554,8 +564,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       .filter(channel => {
         const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
         const participants = allUsers.filter(u => participantIds.includes(u.id));
+        const query = trimmedInputValue.toLowerCase();
         return participants.some(u =>
-          u.name.toLowerCase().includes(trimmedInputValue.toLowerCase()),
+          [u.displayName, u.name, u.email].some(value => value?.toLowerCase().includes(query)),
         );
       })
       .slice(0, 5)

@@ -32,6 +32,9 @@ export interface ComposerContext {
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
   createCanvasEnabled: boolean;
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
+  instant: boolean;
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -46,6 +49,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   webSearchEnabled: false,
   deepResearchEnabled: false,
   createCanvasEnabled: false,
+  instant: false,
 };
 
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
@@ -61,7 +65,8 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.research !== null ||
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
-    ctx.createCanvasEnabled
+    ctx.createCanvasEnabled ||
+    ctx.instant
   );
 }
 
@@ -89,6 +94,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     webSearchEnabled: ctx.webSearchEnabled,
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
+    instant: ctx.instant,
     researchContext: ctx.research,
   };
 }

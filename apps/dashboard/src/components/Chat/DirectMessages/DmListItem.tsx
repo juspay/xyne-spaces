@@ -22,6 +22,8 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
 
 interface DmListItemProps {
   channel: Channel;
@@ -98,6 +100,10 @@ export const DmListItem = ({
     () => (lastMessage?.content ? getFlowJsonPreviewText(lastMessage.content) : null),
     [lastMessage?.content],
   );
+  const slashCommandArtifactPreviewText = useMemo(
+    () => (lastMessage?.content ? getSlashCommandArtifactPreviewText(lastMessage.content) : null),
+    [lastMessage?.content],
+  );
 
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {
@@ -106,17 +112,19 @@ export const DmListItem = ({
     const senderFirstName = getSenderLabel(
       lastMessage.senderId === context.userID,
       isDM,
-      lastMessageSender?.name,
+      lastMessageSender ? getUserDisplayName(lastMessageSender) : undefined,
     );
 
     const prefix = senderFirstName ? `${senderFirstName}: ` : '';
 
     // Flow message: render the extracted plain-text summary, never the flow card.
-    if (flowPreviewText) {
+    if (slashCommandArtifactPreviewText || flowPreviewText) {
       return (
         <>
           {prefix}
-          <span data-message-preview='true'>{flowPreviewText}</span>
+          <span data-message-preview='true'>
+            {slashCommandArtifactPreviewText ?? flowPreviewText}
+          </span>
         </>
       );
     }
@@ -129,7 +137,15 @@ export const DmListItem = ({
         </span>
       </>
     );
-  }, [sanitizedHtml, flowPreviewText, lastMessage, lastMessageSender, context.userID, isDM]);
+  }, [
+    sanitizedHtml,
+    slashCommandArtifactPreviewText,
+    flowPreviewText,
+    lastMessage,
+    lastMessageSender,
+    context.userID,
+    isDM,
+  ]);
 
   // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {

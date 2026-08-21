@@ -1,4 +1,10 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import {
+  BROWSE_CARD,
+  BROWSE_CARD_IDLE,
+  BROWSE_CARD_SELECTED,
+} from '../../../shared/primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { BrowseDialog, type FilterOption } from '../../../shared/primitives/BrowseDialog';
 import { Pill } from '../../../shared/primitives/Pill';
@@ -40,7 +46,7 @@ const GroupCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create subagent v2: open tool group detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>

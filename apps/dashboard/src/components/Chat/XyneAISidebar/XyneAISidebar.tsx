@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -83,6 +84,7 @@ import {
   type XyneAIContext,
   type AskAIInitialContextSelections,
   type SelectionInfo,
+  type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
@@ -117,6 +119,10 @@ interface XyneAISidebarProps {
   contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
+  preserveStreamingOnClose?: boolean;
+  hideHeaderClose?: boolean;
+  denseHeader?: boolean;
+  debuggerPresentation?: 'split' | 'replace';
   onDebuggerOpenChange?: (open: boolean) => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
@@ -131,8 +137,9 @@ interface XyneAISidebarProps {
   // Locks the sidebar to one Claw agent instead of the app-wide selected-agent store (for embedded/isolated instances).
   forcedAgentSlug?: string | null;
   // Seed text for the input box; bump autoSendNonce to submit it as a real message.
-  initialQuery?: string;
+  initialQuery?: string | undefined;
   autoSendNonce?: number;
+  researchContext?: XyneAIResearchContext | null;
   // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
@@ -148,6 +155,10 @@ const XyneAISidebar = ({
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
+  preserveStreamingOnClose = false,
+  hideHeaderClose = false,
+  denseHeader = false,
+  debuggerPresentation = 'split',
   onDebuggerOpenChange,
   initialConversationId,
   onConversationChange,
@@ -159,6 +170,7 @@ const XyneAISidebar = ({
   forcedAgentSlug,
   initialQuery,
   autoSendNonce,
+  researchContext,
   onStreamingChange,
   onFinalResponse,
 }: XyneAISidebarProps): ReactElement => {
@@ -281,6 +293,7 @@ const XyneAISidebar = ({
   useEffect(() => {
     if (!initialContextSelections) return;
     setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
@@ -592,6 +605,37 @@ const XyneAISidebar = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Repository-scoped SDLC chat is stricter than global Ask AI: entering the
+  // hub or switching its repository must replace the primary channel instead
+  // of preserving the channel chip from the previously-open global chat.
+  useEffect(() => {
+    if (researchContext?.type !== 'repository') return;
+    if (
+      !channelId ||
+      !channelName ||
+      scopeType === (ChannelScopeType.DM as string) ||
+      scopeType === (ChannelScopeType.GROUP_DM as string)
+    ) {
+      setSelectedChannels([]);
+      return;
+    }
+    const channel = allChannels.find(item => item.id === channelId);
+    const nextChannel: SelectedChannel = {
+      id: channelId,
+      name: channelName,
+      isPrivate: channel ? String(channel.visibility) === 'PRIVATE' : false,
+    };
+    setSelectedChannels(previous => {
+      const current = previous[0];
+      return previous.length === 1 &&
+        current?.id === nextChannel.id &&
+        current.name === nextChannel.name &&
+        current.isPrivate === nextChannel.isPrivate
+        ? previous
+        : [nextChannel];
+    });
+  }, [allChannels, channelId, channelName, researchContext, scopeType]);
+
   // Fetch web search configuration from backend
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -627,7 +671,6 @@ const XyneAISidebar = ({
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
-
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
@@ -704,6 +747,7 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
+    researchContext: researchContext ?? null,
     createCanvasEnabled,
     isV2,
     suppressCompletionToast: isAgentForced,
@@ -759,22 +803,30 @@ const XyneAISidebar = ({
             ...(channelId && { channelId }),
             ...(threadInfo && { threadInfo }),
             ...(canvasInfo && { canvasInfo }),
+            ...(researchContext && { researchContext }),
             startFreshChat: false,
           });
         }
       }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen, isAgentForced]);
+  }, [
+    startFreshChat,
+    channelId,
+    threadInfo,
+    canvasInfo,
+    researchContext,
+    isFullscreen,
+    isAgentForced,
+  ]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
-    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    // `block: 'nearest'` ALWAYS — not just for forced/embedded instances.
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth',
-      ...(isAgentForced && { block: 'nearest' }),
+      block: 'nearest',
     });
-  }, [isAgentForced]);
+  }, []);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -936,8 +988,11 @@ const XyneAISidebar = ({
           scrollToBottom();
         }, 100);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[XyneAISidebar] Failed to load most recent conversation:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAISidebar] Failed to load most recent conversation:'),
+          error: error,
+        });
       } finally {
         setIsLoadingConversation(false);
       }
@@ -1072,7 +1127,11 @@ const XyneAISidebar = ({
         }, 100);
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to load conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to load conversation:'),
+        error: error,
+      });
     } finally {
       setLoadingHistorySessionId(null);
     }
@@ -1102,7 +1161,11 @@ const XyneAISidebar = ({
         usesDraftStreamKeyRef.current = true;
       }
     } catch (error) {
-      console.error('[XyneAISidebar] Failed to delete conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAISidebar] Failed to delete conversation:'),
+        error: error,
+      });
     }
   };
 
@@ -1355,7 +1418,11 @@ const XyneAISidebar = ({
             }),
           });
         } catch (error) {
-          console.error('[XyneAISidebar] Failed to submit feedback:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[XyneAISidebar] Failed to submit feedback:'),
+            error: error,
+          });
           // Revert UI state on error
           setFeedbackMap(prev => ({
             ...prev,
@@ -1462,7 +1529,11 @@ const XyneAISidebar = ({
       const url = buildCitationUrl(citation);
 
       if (!url) {
-        console.warn('[XyneAI] Cannot build URL for citation:', citation);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAI] Cannot build URL for citation:'),
+          context: [citation],
+        });
         return;
       }
 
@@ -1823,7 +1894,8 @@ const XyneAISidebar = ({
     onUserTagsChange: setCurrentUserTags,
   };
 
-  const showInlineDebugger = showDebugger && isV2;
+  const showInlineDebugger = showDebugger && isV2 && debuggerPresentation === 'split';
+  const showReplacingDebugger = showDebugger && isV2 && debuggerPresentation === 'replace';
   const isCompactSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 760;
   const isTightSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 640;
 
@@ -1873,6 +1945,7 @@ const XyneAISidebar = ({
           'relative flex min-h-0 min-w-0 flex-1 flex-col',
           isMobile && 'bg-background',
           showInlineDebugger && 'border-r border-border/70',
+          showReplacingDebugger && 'hidden',
         )}
       >
         {/* Drag and Drop Overlay */}
@@ -1927,6 +2000,8 @@ const XyneAISidebar = ({
                 isTight={isTightSidebar}
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
+                hideClose={hideHeaderClose}
+                dense={denseHeader}
                 onShowDebugger={
                   isV2 && !isAgentForced
                     ? () => {
@@ -1948,7 +2023,7 @@ const XyneAISidebar = ({
                 {...(onClose !== undefined
                   ? {
                       onClose: () => {
-                        abortCurrentRequest();
+                        if (!preserveStreamingOnClose) abortCurrentRequest();
                         onClose();
                       },
                     }
@@ -2259,6 +2334,23 @@ const XyneAISidebar = ({
           </div>
         )}
       </div>
+
+      {showReplacingDebugger && (
+        <AskAIDebugPanel
+          open
+          fill
+          conversationId={conversationId || streamThreadKey}
+          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          liveEvents={debugEvents}
+          running={isActiveSessionStreaming}
+          artifactsReadyVersion={debugArtifactsReadyVersion}
+          selectedTurnIndex={debugTurnIndex}
+          selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+          selectedSessionId={debugSessionId}
+          focusToolCallId={debugFocusToolCallId}
+          onClose={() => setShowDebugger(false)}
+        />
+      )}
 
       {showInlineDebugger && (
         <>

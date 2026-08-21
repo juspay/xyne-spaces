@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef } from 'react';
 import { apiInstance } from '../services/clients/apiClient';
 import type { UserActivity, UserActivityResponse } from '@xyne/shared';
@@ -51,7 +52,11 @@ export const useUserActivity = (): UseUserActivityReturn => {
       setHasMore(response.pagination.hasMore);
       cursorRef.current = response.pagination.nextCursor;
     } catch (error) {
-      console.error('Error fetching user activities:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error fetching user activities:'),
+        error: error,
+      });
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;
@@ -73,7 +78,11 @@ export const useUserActivity = (): UseUserActivityReturn => {
       setHasMore(response.pagination.hasMore);
       cursorRef.current = response.pagination.nextCursor;
     } catch (error) {
-      console.error('Error refreshing user activities:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error refreshing user activities:'),
+        error: error,
+      });
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
@@ -577,7 +578,11 @@ export const CreateFormModal = ({
       }
     } catch (error) {
       // Handle file upload failures and other API errors
-      console.error('Failed to create/update form:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to create/update form:'),
+        error: error,
+      });
       toast.error(isEditMode ? 'Form Update Failed' : 'Form Creation Failed', {
         description: error instanceof Error ? error.message : 'Operation failed. Please try again.',
       });

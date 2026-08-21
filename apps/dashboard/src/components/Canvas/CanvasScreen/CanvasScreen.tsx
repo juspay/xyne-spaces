@@ -32,6 +32,7 @@ import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
   ArrowLeft,
+  Archive,
   CheckCircle,
   GitCompare,
   Loader2,
@@ -101,6 +102,7 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -115,6 +117,7 @@ interface CanvasScreenProps {
   canvasId?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  showAskAiAction?: boolean;
 }
 
 const getCanvasRolePriority = (role: CanvasRole): number => {
@@ -140,6 +143,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
   onToggleFullscreen,
+  showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -175,6 +179,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const canvasParticipants = canvasWithParticipants?.participants;
 
   const currentUserGroupIds = useCurrentUserGroupIds();
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const adminChannelIds = useMemo(
+    () => new Set((adminParticipations ?? []).map(participant => participant.channelId)),
+    [adminParticipations],
+  );
   const visibleChannels = useAllVisibleChannels();
   const currentUserChannelIds = useMemo(
     () => new Set(visibleChannels.map(channel => channel.id).filter(Boolean)),
@@ -295,6 +304,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
+      const sdlcMetadata = canvasData.metadata as Record<string, unknown> | null | undefined;
+      const isAdminEditableSdlcBaseline =
+        sdlcMetadata?.['surface'] === 'SDLC' &&
+        sdlcMetadata['artifactKind'] === 'BASELINE' &&
+        Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
+
+      if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
 
       if (!accessLevel) {
         const inheritedRoles = [
@@ -365,6 +381,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     state,
     currentUserGroupIds,
     currentUserChannelIds,
+    adminChannelIds,
     queryClient,
   ]);
 
@@ -447,6 +464,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             createdBy: user?.id || '',
             visibility: CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: true,
             isStarred: false,
             createdAt: now,
@@ -577,12 +595,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const canEdit =
-    isCreating ||
-    isEditingMessage ||
-    isCreatingMessage ||
-    selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
-    selectedCanvas?.accessLevel === CanvasRole.OWNER ||
-    selectedCanvas?.createdBy === user?.id;
+    !selectedCanvas?.isArchived &&
+    (isCreating ||
+      isEditingMessage ||
+      isCreatingMessage ||
+      selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
+      selectedCanvas?.accessLevel === CanvasRole.OWNER ||
+      selectedCanvas?.createdBy === user?.id);
+  const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -617,6 +637,18 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     canvas: selectedCanvas,
     onCreated: handleVersionCopyCreated,
   });
+
+  const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
+    setSelectedCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
+  }, []);
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle({
+    onArchivedStateChange: handleArchivedStateChange,
+  });
+
+  const handleUnarchiveSelectedCanvas = useCallback((): void => {
+    if (!selectedCanvas) return;
+    handleArchiveToggleCanvas({ ...selectedCanvas, isArchived: true });
+  }, [handleArchiveToggleCanvas, selectedCanvas]);
 
   useEffect(() => {
     canEditRef.current = canEdit;
@@ -1217,24 +1249,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
-                          {/* Ask AI */}
-                          <button
-                            type='button'
-                            onClick={handleAskAI}
-                            className={headerIconButtonClass}
-                            title='Ask AI'
-                            aria-label='Ask AI'
-                            data-track-category='CANVAS'
-                            data-track-name='Ask_AI_From_Canvas'
-                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                          >
-                            <img
-                              alt='AI'
-                              width='16'
-                              height='16'
-                              src='/svgs/icons/ai-bot-gradient-star.svg'
-                            />
-                          </button>
+                          {showAskAiAction && (
+                            <button
+                              type='button'
+                              onClick={handleAskAI}
+                              className={headerIconButtonClass}
+                              title='Ask AI'
+                              aria-label='Ask AI'
+                              data-track-category='CANVAS'
+                              data-track-name='Ask_AI_From_Canvas'
+                              data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                            >
+                              <img
+                                alt='AI'
+                                width='16'
+                                height='16'
+                                src='/svgs/icons/ai-bot-gradient-star.svg'
+                              />
+                            </button>
+                          )}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -1390,6 +1423,30 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
             {baseRoute === '/chat/activity' && (
               <div className='hidden h-[27px] shrink-0 bg-background md:block' />
+            )}
+
+            {selectedCanvas?.isArchived && (
+              <div
+                className='flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:px-4'
+                data-testid='canvas-archived-banner'
+              >
+                <div className='flex min-w-0 items-center gap-2'>
+                  <Archive size={16} className='shrink-0 text-amber-700' />
+                  <span className='truncate font-medium'>This canvas is archived</span>
+                </div>
+                {canArchiveSelectedCanvas && (
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={handleUnarchiveSelectedCanvas}
+                    data-track-category='CANVAS'
+                    data-track-name='UNARCHIVE_CANVAS_FROM_BANNER'
+                    data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                  >
+                    Unarchive
+                  </Button>
+                )}
+              </div>
             )}
 
             {previewVersion && (
@@ -1569,6 +1626,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 };
                 void deleteCanvas();
               }}
+              onArchiveToggle={handleArchiveToggleCanvas}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               paginated={true}

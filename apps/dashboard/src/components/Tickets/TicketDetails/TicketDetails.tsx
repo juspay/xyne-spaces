@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
@@ -23,6 +24,7 @@ import {
   ArrowRight,
   Archive,
   GitBranch,
+  Lock,
 } from 'lucide-react';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -113,7 +115,9 @@ import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   resolveBoardAdditionalFields,
+  resolveLeftoverFieldValues,
   type ResolvedBoardAdditionalField,
+  type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
@@ -312,6 +316,40 @@ const getFormEntityFieldEnum = (
   return options.length > 0 ? options : undefined;
 };
 
+/** Plain-text formatting for a retired field's read-only value — no edit affordance, so no need for the richer per-type widgets EditableFormField uses. */
+const formatLeftoverFieldValue = (
+  field: LeftoverFieldValue,
+  userById: ReadonlyMap<string, { id: string; name?: string | null; email?: string | null }>,
+): string => {
+  const raw = field.actualFieldValue ?? field.fieldValue;
+  if (raw === null || raw === undefined || raw === '') return '—';
+
+  if (field.fieldType === FormFieldType.BOOLEAN) {
+    if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
+    if (typeof raw === 'string') {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'yes') return 'Yes';
+      if (normalized === 'false' || normalized === 'no') return 'No';
+    }
+  }
+
+  if (field.fieldType === FormFieldType.USER) {
+    const ids = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    if (ids.length === 0) return '—';
+    return ids
+      .map(id => {
+        const normalizedId = id.startsWith('user:') ? id.slice('user:'.length) : id;
+        const user = userById.get(normalizedId);
+        return user ? getUserDisplayName(user) : id;
+      })
+      .join(', ');
+  }
+
+  if (Array.isArray(raw)) return raw.map(String).join(', ') || '—';
+  if (typeof raw === 'object') return JSON.stringify(raw);
+  return String(raw);
+};
+
 // ── Stage Form Submissions Component ──────────────────────────────────────────
 interface StageFormSubmissionsProps {
   stageVisitFormValues: Array<{
@@ -411,6 +449,8 @@ interface TicketDetailsProps {
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
   onFillRCA?: () => void;
+  /** Display the current stage without exposing manual lifecycle transitions. */
+  stageReadOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -524,6 +564,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   onNavigateToTicket,
   expandedView = false,
   onFillRCA,
+  stageReadOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -1115,11 +1156,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           return;
         }
 
-        console.warn('[TicketDetails] Failed to load Vespa project tickets', {
-          projectId: ticket.projectId,
-          offset,
-          query: normalizedQuery || '*',
-          error,
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[TicketDetails] Failed to load Vespa project tickets'),
+          context: [
+            {
+              projectId: ticket.projectId,
+              offset,
+              query: normalizedQuery || '*',
+              error,
+            },
+          ],
         });
 
         if (replace) {
@@ -1400,6 +1447,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       return isFieldActive({ parentOptionId }, allFieldDefs, getFieldEffectiveValue);
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
+
+  // Values this ticket has saved for fields no longer part of the board's current form —
+  // e.g. left behind by a "Copy Board Configuration" run that swapped in another board's
+  // form. Never deleted, just unreachable through the lookup above; shown separately and
+  // read-only rather than silently dropped.
+  const leftoverFieldValues = useMemo(
+    () =>
+      resolveLeftoverFieldValues({
+        formMapping: formMapping ?? undefined,
+        formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
+        boardId: ticket?.boardId,
+      }),
+    [formMapping, formEntityValues, ticket?.boardId],
+  );
+
+  const leftoverFieldUserById = useMemo(() => {
+    const list = Array.isArray(users) ? users : [];
+    return new Map(list.map(user => [user.id, user]));
+  }, [users]);
 
   // Group form values by stage+version — shared with the Messages thread (StageMoveFormBlock)
   // so both surfaces render the exact same "Form submission" block.
@@ -3480,15 +3546,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     currentStatus: ticket.stageName,
                   })}
                 >
-                  <Selector
-                    items={selectorStages}
-                    selectedValue={ticket.stageName}
-                    onValueChange={handleStageChange}
-                    placeholder='Set Status'
-                    icon={<TicketStatusIcon size={14} />}
-                    noBorder={true}
-                    isItemDisabled={item => item.name === ticket.stageName}
-                  />
+                  {stageReadOnly ? (
+                    <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
+                      <TicketStatusIcon size={14} />
+                      {ticket.stageName || 'Not set'}
+                    </span>
+                  ) : (
+                    <Selector
+                      items={selectorStages}
+                      selectedValue={ticket.stageName}
+                      onValueChange={handleStageChange}
+                      placeholder='Set Status'
+                      icon={<TicketStatusIcon size={14} />}
+                      noBorder={true}
+                      isItemDisabled={item => item.name === ticket.stageName}
+                    />
+                  )}
                   {/* Show alert icon if there's a pending request for the next stage */}
                   {((): React.ReactElement | null => {
                     if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
@@ -3823,8 +3896,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
-        {/* Additional Form Fields */}
-        {allFormFields && allFormFields.length > 0 && (
+        {/* Additional Form Fields — current, editable fields plus (marked with a trailing
+            "*") any values the ticket has for fields no longer part of the board's current
+            configuration (e.g. left behind by a config copy from another board). Those are
+            read-only rather than editable, since the field itself no longer exists in the
+            board's schema. */}
+        {(allFormFields.length > 0 || leftoverFieldValues.length > 0) && (
           <div className='border border-border bg-muted rounded-lg p-4 my-4'>
             <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
             <div className='space-y-4'>
@@ -3844,6 +3921,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     )
                   }
                 />
+              ))}
+              {leftoverFieldValues.map(field => (
+                <div key={field.resolvedFieldId} className='flex items-start gap-2 w-full'>
+                  <span
+                    className='flex items-center gap-1 text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
+                    title={`${field.fieldName} — no longer part of this board's configuration, read-only`}
+                  >
+                    {field.fieldName}
+                    <Lock size={11} className='flex-shrink-0 text-muted-foreground' />
+                  </span>
+                  <span className='flex-1 text-sm text-foreground break-all pt-0.5'>
+                    {formatLeftoverFieldValue(field, leftoverFieldUserById)}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
@@ -3882,7 +3973,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             />
           ))}
 
-        {nextStageDetailsConfig &&
+        {!stageReadOnly &&
+          nextStageDetailsConfig &&
           (nextStageDetailsConfig.formId ? (
             <StageFormInlinePanel
               ticket={ticket}

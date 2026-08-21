@@ -70,10 +70,12 @@ function isSafeRelativePath(p: string): boolean {
 
 /**
  * Allow only conversation IDs that look like ULIDs / UUIDs / similar.
- * Conservative: alphanumerics + hyphens + underscores, 8-100 chars.
+ * Keep this aligned with xyne-claw's isSafeId: store keys append the agent
+ * slug to a valid conversation id and may therefore exceed 100 characters.
+ * The runtime accepts these filesystem/GCS-safe identifiers through 128.
  */
-function isSafeConversationId(id: string): boolean {
-  return /^[A-Za-z0-9_-]{8,100}$/.test(id);
+export function isSafeConversationId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{8,128}$/.test(id);
 }
 
 export const sessionsArchiveRouter = Router();

@@ -149,14 +149,22 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       provider === "codex" ? extractCodexBearer(decrypted) :
       provider === "claude" ? extractClaudeBearer(decrypted) :
       decrypted;
+    // Keep in sync with defaultModelForProvider() in services/providerCredentials.ts,
+    // which documents the measured ok-rates behind these choices. A stale id here
+    // fails silently — ~300ms error, read as an empty completion, fallback to
+    // spaces, no ERROR logged.
     const defaultModel =
-      provider === "copilot" ? "gpt-4o" :
+      // gpt-4o is NOT servable through Copilot OAuth here (0 ok / 21 fail over
+      // 72h) — every defaulted call fell back to spaces.
+      provider === "copilot" ? "claude-sonnet-4.6" :
       // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (OpenAI
       // 400s "model is not supported when using Codex with a ChatGPT
       // account") — every defaulted call failed and fell back to spaces.
       provider === "codex" ? "gpt-5.5" :
       provider === "litellm" ? "private-large" :
-      "claude-sonnet-4-5";
+      // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth
+      // path (0 ok / 1425 fail over 72h).
+      "claude-opus-4-8";
     return {
       apiKey,
       model: row.model ?? defaultModel,

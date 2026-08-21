@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, {
   ReactElement,
   useCallback,
@@ -415,13 +416,18 @@ export const EmailComposer = ({
 
   const lastLoadedContentRef = React.useRef<string>('');
   const justLoadedDraftRef = React.useRef(false);
+  const isDirty = emailContent !== lastLoadedContentRef.current;
+  const hydratedConversationRef = React.useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (isComposeMode) return;
+    const draftKey = conversationId ?? null;
+    if (hydratedConversationRef.current === draftKey && isDirty) return;
     const next = draft?.draftContent ?? '';
     setEmailContent(next);
     lastLoadedContentRef.current = next;
     justLoadedDraftRef.current = true;
-  }, [draft?.draftContent, conversationId, isComposeMode]);
+    hydratedConversationRef.current = draftKey;
+  }, [draft?.draftContent, conversationId, isComposeMode, isDirty]);
 
   const handleEditorChange = useCallback((html: string): void => {
     setEmailContent(html);
@@ -432,7 +438,6 @@ export const EmailComposer = ({
   }, []);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
-  const isDirty = emailContent !== lastLoadedContentRef.current;
   const hasInlineImages = useMemo(
     () =>
       /\sdata-att-id=["']/i.test(emailContent) ||
@@ -462,8 +467,8 @@ export const EmailComposer = ({
   const [isToExpanded, setIsToExpanded] = useState(false);
   const [isCcExpanded, setIsCcExpanded] = useState(false);
   const [isBccExpanded, setIsBccExpanded] = useState(false);
-  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
-  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
+  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => undefined);
+  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => undefined);
 
   const applyRecipients = useCallback(
     (next: { to: string[]; cc: string[]; bcc: string[] }): void => {
@@ -1532,7 +1537,11 @@ export const EmailComposer = ({
         (error instanceof Error ? error.message : null) ||
         (isComposeMode ? 'Failed to send email' : 'Failed to send reply');
       toast.error(message);
-      console.warn('Failed to send email:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to send email:'),
+        context: [error],
+      });
     } finally {
       setIsSending(false);
     }
@@ -1545,7 +1554,11 @@ export const EmailComposer = ({
   const runSendEmail = (): void => {
     handleSendEmail().catch(error => {
       toast.error('Failed to send');
-      console.error('Failed to send email:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to send email:'),
+        error: error,
+      });
     });
   };
 

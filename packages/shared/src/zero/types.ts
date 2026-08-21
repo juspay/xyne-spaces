@@ -175,6 +175,14 @@ export enum ChannelSortOrder {
 }
 
 // @ts-ignore TS1294
+export enum ChannelFilterMode {
+  ACTIVE = 'ACTIVE',
+  UNREADS = 'UNREADS',
+  MENTIONS = 'MENTIONS',
+  ALL = 'ALL',
+}
+
+// @ts-ignore TS1294
 export enum MessageType {
   USER = 'USER',
   BOT = 'BOT',
@@ -376,6 +384,17 @@ export enum ActivityClassificationJobType {
   SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
 }
 
+// Lifecycle of a structured message whose state drives UI outside the message
+// bubble. Stored as a string in Postgres so adding a future lifecycle state
+// does not require altering a database enum.
+// @ts-ignore TS1294
+export enum MessageArtifactStatus {
+  ACTIVE = 'active',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
+}
+
 // @ts-ignore TS1294
 export enum CallType {
   AUDIO = 'AUDIO',
@@ -464,6 +483,9 @@ export enum UserType {
 export enum AppIncomingWebhookType {
   SLACK = 'SLACK',
   SENTINELONE = 'SENTINELONE',
+  AMAZON_SNS = 'AMAZON_SNS',
+  PINGDOM = 'PINGDOM',
+  GCP = 'GCP',
 }
 
 // @ts-ignore TS1294
@@ -609,6 +631,7 @@ export enum NotificationType {
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
+  SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
 }
 
 // @ts-ignore TS1294
@@ -1134,9 +1157,19 @@ export enum WorkflowMappingEntityType {
 // valid values; import them everywhere instead of hardcoding string literals.
 export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
+  SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
+
+export const SummaryTemplateVisibility = {
+  PRIVATE: 'PRIVATE',
+  WAITING_FOR_APPROVAL: 'WAITING_FOR_APPROVAL',
+  PUBLIC: 'PUBLIC',
+} as const;
+
+export type SummaryTemplateVisibility =
+  typeof SummaryTemplateVisibility[keyof typeof SummaryTemplateVisibility];
 
 export const EntityUserAccess = {
   VIEW: 'VIEW',

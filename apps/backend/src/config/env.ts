@@ -24,7 +24,12 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE_PATH: Joi.string().default('logs/app.log'),
+  // Streams error-level logs to Fluent Bit's forward input (see docker/fluent-bit/).
+  // Off by default so envs without a Fluent Bit endpoint (e.g. prod, until one
+  // is provisioned there) don't try to connect anywhere.
+  LOG_FLUENT_ENABLED: Joi.boolean().default(false),
+  LOG_FLUENT_HOST: Joi.string().default('localhost'),
+  LOG_FLUENT_PORT: Joi.number().default(24224),
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
@@ -58,7 +63,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -90,6 +95,8 @@ const envSchema = Joi.object({
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+
+  DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
@@ -97,6 +104,18 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
+  SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
+  SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(24 * 60 * 60 * 1000),
+  SDLC_CAPACITY_RETRY_DELAY_MS: Joi.number().integer().min(1000).default(30_000),
+  SDLC_CLAW_RUN_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(60_000)
+    .default(3 * 60 * 60 * 1000),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -142,8 +161,15 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  // The development key pair ships in LiveKit's own published sample config, so a
+  // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
+  // deployments without calls do not configure LiveKit at all.
+  LIVEKIT_API_KEY: Joi.string().allow('').invalid('devkey').default('').messages({
+    'any.invalid': 'LIVEKIT_API_KEY must not be the published development key',
+  }),
+  LIVEKIT_API_SECRET: Joi.string().allow('').invalid('devsecret').default('').messages({
+    'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+  }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
@@ -182,7 +208,7 @@ const envSchema = Joi.object({
         'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
         'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
         'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.'
     ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
@@ -327,7 +353,14 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
+  ENC_ORG_PROVISION: Joi.boolean().default(false),
+  ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -366,6 +399,9 @@ const envSchema = Joi.object({
   ENABLE_CANVAS_SUGGESTIONS: Joi.boolean().default(false),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  ENC_S2S_KEY: Joi.string().allow(''),
+  ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
+  ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -467,6 +503,7 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -507,7 +544,11 @@ export const config = {
   },
   logging: {
     level: envVars.LOG_LEVEL,
-    filePath: envVars.LOG_FILE_PATH,
+    fluent: {
+      enabled: envVars.LOG_FLUENT_ENABLED,
+      host: envVars.LOG_FLUENT_HOST,
+      port: envVars.LOG_FLUENT_PORT,
+    },
     logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
@@ -578,6 +619,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
@@ -585,6 +627,12 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
+  sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
+  sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
+  sdlcCapacityRetryDelayMs: envVars.SDLC_CAPACITY_RETRY_DELAY_MS as number,
+  sdlcClawRunTimeoutMs: envVars.SDLC_CLAW_RUN_TIMEOUT_MS as number,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
@@ -869,6 +917,13 @@ export const config = {
     importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
     importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
   },
+  enc: {
+    clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
+    apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
+    enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
+    orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
+    workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
+  },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
@@ -898,6 +953,10 @@ export const config = {
   },
   canvasSuggestions: {
     enabled: envVars.ENABLE_CANVAS_SUGGESTIONS as boolean,
+  internal: {
+    encryptionS2sKey: envVars.ENC_S2S_KEY as string,
+    encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    encryptionRequestTimeoutMs: envVars.ENCRYPTION_REQUEST_TIMEOUT_MS as number,
   },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,

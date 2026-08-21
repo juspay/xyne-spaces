@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown } from 'lucide-react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { MaximizeTwoArrow } from '@xyne/icons';
 import useMeasure from '../../../hooks/useMeasure';
 
 interface ExpandableMessageProps {
@@ -11,6 +11,12 @@ interface ExpandableMessageProps {
   isSystemMessage?: boolean;
   messageId?: string;
   conversationId?: string;
+  slashCommandArtifactContext?: {
+    channelId?: string;
+    senderId?: string;
+    createdAt?: number;
+    surface?: 'channel' | 'thread';
+  };
 }
 
 export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
@@ -21,6 +27,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   isSystemMessage = false,
   messageId,
   conversationId,
+  slashCommandArtifactContext,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldShowButton, setShouldShowButton] = useState(false);
@@ -42,7 +49,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   };
 
   return (
-    <div className={`expandable-message ${className}`}>
+    <div className={`expandable-message relative ${className}`}>
       <div
         ref={contentRef}
         className='transition-all duration-300 ease-in-out overflow-hidden'
@@ -57,26 +64,39 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             isSystemMessage={isSystemMessage}
             {...(messageId !== undefined && { messageId })}
             {...(conversationId !== undefined && { conversationId })}
+            {...(slashCommandArtifactContext !== undefined && { slashCommandArtifactContext })}
           />
         </div>
       </div>
 
       {shouldShowButton && (
-        <button
-          type='button'
-          onClick={toggleExpanded}
-          className='flex items-center gap-1 mt-1 text-sm text-primary hover:text-primary/80 font-medium cursor-pointer bg-none border-none p-0 transition-colors duration-150'
-          data-track-category='ChatMessage'
-          data-track-name='TOGGLE_EXPAND_MESSAGE'
-          data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}
+        <div
+          className={
+            isExpanded
+              ? 'flex justify-center pt-2'
+              : 'pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pt-8 pb-3'
+          }
+          style={
+            isExpanded
+              ? undefined
+              : {
+                  backgroundImage:
+                    'linear-gradient(to bottom, transparent, hsl(var(--background)))',
+                }
+          }
         >
-          <span>{isExpanded ? 'View Less' : 'View More'}</span>
-          <ChevronDown
-            className={`w-4 h-4 transition-transform duration-200 ${
-              isExpanded ? 'rotate-180' : ''
-            }`}
-          />
-        </button>
+          <button
+            type='button'
+            onClick={toggleExpanded}
+            className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
+            data-track-category='ChatMessage'
+            data-track-name='TOGGLE_EXPAND_MESSAGE'
+            data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}
+          >
+            <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
+            <span>{isExpanded ? 'Show less' : 'Show more'}</span>
+          </button>
+        </div>
       )}
     </div>
   );

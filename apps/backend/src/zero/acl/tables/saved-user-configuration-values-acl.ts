@@ -42,6 +42,8 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
 function validateTicketValue(fieldName: string, fieldValue: string): void {
   const table = 'saved_user_configuration_values' as const;
 
+  if (fieldName === '__columns') return;
+
   if (!fieldValue) {
     throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
   }
@@ -205,10 +207,30 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
     super(ctx, 'saved_user_configuration_values');
   }
 
+  /**
+   * A value belongs to whoever owns its saved view. Mutators address these rows by their own
+   * id, never through the parent, so the parent's rule has to be restated here rather than
+   * assumed — it is the only thing tying a value to a person.
+   */
+  private async assertOwnsConfig(configId: string, tx: Transaction<Schema>): Promise<void> {
+    const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
+    if (!config || config.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Saved view value failed: view not found', 'saved_user_configuration_values');
+    }
+    if (config.userId !== this.ctx.userID) {
+      throw new MutationACLError(
+        'Saved view value failed: you can only change values on your own saved views',
+        'saved_user_configuration_values',
+      );
+    }
+  }
+
   async canInsert(
     args: InsertValue<TableSchema<'saved_user_configuration_values'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    await this.assertOwnsConfig(args.configId, tx);
+
     switch (args.entityName) {
       case SavedConfigEntityName.TICKET:
         validateTicketValue(args.fieldName, args.fieldValue);
@@ -228,6 +250,16 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
     args: UpdateValue<TableSchema<'saved_user_configuration_values'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    const existing = await tx.run(zql.saved_user_configuration_values.where('id', args.id).one());
+    if (!existing) {
+      throw new MutationACLError('Saved view value failed: value not found', 'saved_user_configuration_values');
+    }
+    await this.assertOwnsConfig(existing.configId, tx);
+    // Re-pointing a value at someone else's view would move it out of reach of the check above.
+    if (args.configId !== undefined && args.configId !== existing.configId) {
+      await this.assertOwnsConfig(args.configId, tx);
+    }
+
     if (args.entityName !== undefined && args.fieldName !== undefined && args.fieldValue !== undefined) {
       switch (args.entityName) {
         case SavedConfigEntityName.TICKET:
@@ -246,9 +278,13 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
   }
 
   async canDelete(
-    _args: DeleteID<TableSchema<'saved_user_configuration_values'>>,
-    _tx: Transaction<Schema>,
+    args: DeleteID<TableSchema<'saved_user_configuration_values'>>,
+    tx: Transaction<Schema>,
   ): Promise<void> {
-    // Delete is allowed — ownership is enforced at the parent config level
+    const existing = await tx.run(zql.saved_user_configuration_values.where('id', args.id).one());
+    if (!existing) {
+      throw new MutationACLError('Saved view value failed: value not found', 'saved_user_configuration_values');
+    }
+    await this.assertOwnsConfig(existing.configId, tx);
   }
 }

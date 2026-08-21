@@ -12,6 +12,7 @@ import {
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
+  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -80,6 +81,10 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import {
+  createSdlcLinkSchema,
+  sdlcDiscussionSchema,
+} from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -398,6 +403,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -1289,6 +1304,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           sectionId,
           sectionPosition: sectionId ? position : null,
+          ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
       },
@@ -1645,11 +1661,21 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
+        sdlcDiscussion: sdlcDiscussionSchema.optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
+        args: {
+          channelId,
+          content,
+          type,
+          conversationId,
+          messageId,
+          timestamp,
+          attachmentIds,
+          sdlcDiscussion,
+        },
       }) => {
         if (content === '') {
           throw new Error('Message content or files are required to start a conversation');
@@ -1740,6 +1766,21 @@ export const mutators = defineMutators({
             createdAt: now,
           }),
         });
+
+        if (sdlcDiscussion) {
+          await tx.mutate.sdlc_entity_links.insert({
+            id: sdlcDiscussion.linkId,
+            workspaceId: ctx.workspaceId,
+            repoId: sdlcDiscussion.repoId,
+            sourceType: 'CANVAS',
+            sourceId: sdlcDiscussion.ownerCanvasId,
+            targetType: 'CONVERSATION',
+            targetId: conversationId,
+            relationType: 'DISCUSSION',
+            createdBy: ctx.userID,
+            createdAt: now,
+          });
+        }
 
         await tx.mutate.messages.insert({
           messageId,
@@ -4077,6 +4118,8 @@ export const mutators = defineMutators({
           kanbanPosition?: string | null;
         }
 
+        const currentTicket = await tx.run(zql.tickets.where('id', id).one());
+        if (!currentTicket) throw new Error('Ticket not found');
         const updateData: TicketUpdateData = {
           updatedBy: ctx.userID,
           updatedAt: updatedAt,
@@ -5595,6 +5638,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           visibility: visibility || CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isArchived: false,
           isCollaborative: false,
           docType: DocType.Canvas,
           lastEditedBy: ctx.userID,
@@ -5665,8 +5709,11 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
+        const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
+        const isSdlcBaseline =
+          canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
 
-        if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');
         }
         const {
@@ -5732,8 +5779,58 @@ export const mutators = defineMutators({
         throw new Error('Only the creator can delete the canvas');
       }
 
+      const discussionLinks = await tx.run(
+        zql.sdlc_entity_links
+          .where('sourceType', 'CANVAS')
+          .where('sourceId', id)
+          .where('relationType', 'DISCUSSION'),
+      );
+      await Promise.all(
+        discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+      );
+
       await tx.mutate.canvases.delete({ id });
     }),
+    archiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can archive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can unarchive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: false,
+        });
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         canvasId: z.string(),
@@ -6912,9 +7009,14 @@ export const mutators = defineMutators({
         isCollapsed: z.boolean().optional(),
         position: z.string().optional(),
         sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
+        filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
+      }) => {
         const section = await tx.run(
           zql.channel_sections.where('id', id).where('userId', ctx.userID).where('isDeleted', false).one(),
         );
@@ -6941,6 +7043,7 @@ export const mutators = defineMutators({
           ...(isCollapsed !== undefined && { isCollapsed }),
           ...(position !== undefined && { position }),
           ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
+          ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
           updatedAt: timestamp,
         });
       },
@@ -7761,6 +7864,81 @@ export const mutators = defineMutators({
             baseBranch: newBaseBranch,
           });
         }
+      },
+    ),
+  },
+  sdlc: {
+    createLink: defineMutator(
+      createSdlcLinkSchema.extend({
+        id: z.string(),
+        repoId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const sourceExists = args.sourceType === 'CANVAS'
+          ? Boolean(await tx.run(
+              zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+            ))
+          : args.sourceType === 'TICKET'
+            ? Boolean(await tx.run(
+                zql.tickets.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+              ))
+            : args.sourceType === 'CHANNEL'
+              ? args.sourceId === repo.channelId
+              : false;
+        if (!sourceExists) {
+          throw new Error('Relationship source does not belong to this SDLC repository');
+        }
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          sourceType: args.sourceType,
+          sourceId: args.sourceId,
+          targetType: args.targetType,
+          targetId: args.targetId,
+          relationType: args.relationType,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+    deleteLink: defineMutator(
+      z.object({ repoId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { repoId, linkId } }) => {
+        const repo = await tx.run(zql.repos.where('id', repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const link = await tx.run(
+          zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one(),
+        );
+        if (!link) {
+          throw new Error('SDLC relationship not found');
+        }
+        await tx.mutate.sdlc_entity_links.delete({ id: linkId });
       },
     ),
   },
@@ -8952,24 +9130,6 @@ export const mutators = defineMutators({
         }
       },
     ),
-    // Delete a label from the catalog and cascade-remove all its conversation mappings.
-    // Only the owner (createdBy) may delete their label.
-    deleteLabel: defineMutator(
-      z.object({ labelId: z.string() }),
-      async ({ tx, ctx, args: { labelId } }) => {
-        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-        if (!label) throw new Error('Label not found');
-        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-        const mappings = await tx.run(
-          zql.conversation_label_mappings.where('labelId', labelId),
-        );
-        for (const mapping of mappings) {
-          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-        }
-        await tx.mutate.conversation_labels.delete({ id: labelId });
-      },
-    ),
   },
   // Thread types — what kind of thread this is, as a stringified JSON array on the
   // conversation row. The caller sends the FULL desired set: the column is one value, so a
@@ -9096,6 +9256,54 @@ export const mutators = defineMutators({
     ),
   },
   userPreference: {
+    setSidebarGroupPreference: defineMutator(
+      z.object({
+        id: z.string(),
+        group: z.enum(['starred', 'channels', 'dms']),
+        filterMode: z.nativeEnum(ChannelFilterMode).optional(),
+        sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
+        const filterField = {
+          starred: 'starredFilterMode',
+          channels: 'channelFilterMode',
+          dms: 'dmFilterMode',
+        }[group];
+        const sortField = {
+          starred: 'starredSortOrder',
+          channels: 'channelSortOrder',
+          dms: 'dmSortOrder',
+        }[group];
+        const fields = {
+          ...(filterMode !== undefined && { [filterField]: filterMode }),
+          ...(sortOrder !== undefined && { [sortField]: sortOrder }),
+        };
+        const existing = await tx.run(zql.user_preferences.where('userId', ctx.userID).one());
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            ...fields,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            showThreadTags: false,
+            ...fields,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
     setChannelSortOrder: defineMutator(
       z.object({
         id: z.string(),
@@ -11422,7 +11630,11 @@ export const mutators = defineMutators({
       },
     ),
     disable: defineMutator(
-      z.object({ id: z.string(), timestamp: z.number() }),
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+        cancelQueued: z.boolean().optional(),
+      }),
       async ({ tx, args: { id, timestamp } }) => {
         const existing = await tx.run(zql.workflows.where('id', id).one());
         if (!existing || existing.workflowType !== 'Automations') {

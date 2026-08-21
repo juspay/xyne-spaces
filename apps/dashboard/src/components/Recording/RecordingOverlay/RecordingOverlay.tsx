@@ -15,7 +15,11 @@ import {
   useTranscriptStream,
 } from '../../../hooks/useRecordingStore';
 import { useAudioAmplitude } from '../../../hooks/useAudioAmplitude';
-import { formatRecordingDuration, generateRecordingTitle } from '../../../utils/recordingUtils';
+import {
+  calculateRecordingElapsedMs,
+  formatRecordingDuration,
+  generateRecordingTitle,
+} from '../../../utils/recordingUtils';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { SaveTitleModal } from '../../../routes/RecordingsScreen/components/SaveTitleModal';
 import Button from '../../../components/ui/Button';
@@ -27,25 +31,33 @@ import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
  * Custom hook for elapsed time tracking
  * Updates every second while recording is active
  */
-const useElapsedTime = (isActive: boolean, isPaused: boolean, startTime: number | null): number => {
+const useElapsedTime = (
+  isActive: boolean,
+  isPaused: boolean,
+  startTime: number | null,
+  pauseStartedAt: number | null,
+  accumulatedPausedMs: number,
+): number => {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   useEffect(() => {
-    if (!isActive || !startTime || isPaused) {
+    if (!isActive || !startTime) {
       // No active timer — clear the stale value so the next recording doesn't flash the previous
-      // one's duration. Skip on pause so the paused reading stays put.
-      if (!isActive || !startTime) setElapsedTime(0);
+      // one's duration.
+      setElapsedTime(0);
       return;
     }
 
     // Recompute immediately (don't wait up to 1s for the first tick), matching RecordingControlBar.
-    setElapsedTime(Date.now() - startTime);
+    setElapsedTime(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+    if (isPaused) return;
+
     const interval = setInterval(() => {
-      setElapsedTime(Date.now() - startTime);
+      setElapsedTime(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
     }, 1000);
 
     return (): void => clearInterval(interval);
-  }, [isActive, isPaused, startTime]);
+  }, [isActive, isPaused, startTime, pauseStartedAt, accumulatedPausedMs]);
 
   return elapsedTime;
 };
@@ -57,6 +69,8 @@ export function RecordingOverlay(): React.ReactElement | null {
 
   const status = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
+  const pauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
+  const accumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
@@ -71,7 +85,13 @@ export function RecordingOverlay(): React.ReactElement | null {
   const isOnRecordingsPage = location.pathname.split('/').includes('recordings');
 
   // Use custom hooks
-  const elapsedTime = useElapsedTime(isActive, isPaused, startTime);
+  const elapsedTime = useElapsedTime(
+    isActive,
+    isPaused,
+    startTime,
+    pauseStartedAt,
+    accumulatedPausedMs,
+  );
   const { position, isDragging, handleMouseDown, handleTouchStart } = useDraggableOverlay(
     containerRef,
     { x: 64, y: 32 },

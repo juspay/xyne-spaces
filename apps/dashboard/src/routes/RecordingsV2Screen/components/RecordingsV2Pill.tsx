@@ -74,19 +74,19 @@ export const RecordingsV2LivePill = ({
   return (
     <section
       className={cn(
-        'flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background px-4 py-3 shadow-sm',
-        'transition-[border-color,box-shadow] duration-200 hover:border-foreground/15 hover:shadow-[0_5px_20px_rgb(0,0,0,0.08)]',
+        'flex w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-sm',
+        'transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-[0_5px_20px_rgb(0,0,0,0.08)]',
       )}
       aria-label={`${displayTitle}, recording in progress`}
     >
-      <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-status-success'>
+      <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary'>
         <MicOn size={16} strokeWidth={2} variant='Contrast' />
       </span>
 
       <span className='min-w-0 flex-1'>
         <span className='block truncate text-sm font-semibold text-foreground'>{displayTitle}</span>
-        <span className='mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-          <span className='size-2 shrink-0 rounded-full bg-status-success' aria-hidden='true' />
+        <span className='mt-0.5 flex min-w-0 items-center gap-2 text-xs text-primary'>
+          <span className='size-2 shrink-0 rounded-full bg-primary' aria-hidden='true' />
           <span>{isPaused ? 'Recording paused' : 'Recording in progress'}</span>
           <span aria-hidden='true'>·</span>
           <span className='font-mono tabular-nums'>{formatElapsedTime(elapsedMs)}</span>
@@ -95,12 +95,9 @@ export const RecordingsV2LivePill = ({
 
       <Button
         type='button'
-        variant='outline'
+        variant='ghost'
         onClick={onOpenWindow}
-        className={cn(
-          'h-9 shrink-0 rounded-xl border-border px-3 text-sm text-foreground shadow-none',
-          'hover:bg-muted/60 hover:border-foreground/30 hover:text-foreground',
-        )}
+        className='h-9 shrink-0 rounded-xl bg-foreground px-3 text-sm text-background hover:bg-foreground/90 hover:text-background'
         data-track-category='RecordingsV2'
         data-track-name='open_live_recording_window'
       >

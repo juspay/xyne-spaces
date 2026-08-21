@@ -105,11 +105,13 @@ export async function resolveCollectionAccess(
 
 /**
  * Return every root collection (parentId IS NULL) the user can access — owner,
- * direct grant, group grant, or public (non-private). Returns the row PLUS the
- * resolved `effectiveRole` so the caller doesn't need to re-derive it.
+ * direct grant, group grant, or public (non-private), scoped to the caller's
+ * workspace. Returns the row PLUS the resolved `effectiveRole` so the caller
+ * doesn't need to re-derive it.
  */
 export async function listAccessibleRootCollections(
     userId: string,
+    workspaceId: string,
     options?: { scopeType?: string; scopeId?: string }
 ): Promise<Array<AccessibleCollectionNode>> {
     const db = DatabaseClient.getInstance();
@@ -119,6 +121,7 @@ export async function listAccessibleRootCollections(
         where: {
             parentId: null,
             deletedAt: null,
+            workspaceId,
             ...(options?.scopeType ? { scopeType: options.scopeType } : {}),
             ...(options?.scopeId ? { scopeId: options.scopeId } : {}),
             OR: [

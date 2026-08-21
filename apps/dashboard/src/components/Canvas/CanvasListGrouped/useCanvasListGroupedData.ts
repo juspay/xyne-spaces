@@ -15,6 +15,7 @@ import {
   type CanvasHierarchySections,
 } from './CanvasListGrouped.utils';
 import {
+  filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
@@ -25,6 +26,8 @@ interface UseCanvasListGroupedDataParams {
   collapsedProjects: ReadonlySet<string>;
   excludeCallGeneratedCanvases: boolean;
   showStarredOnly: boolean;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   forceExpandProjects?: boolean;
 }
 
@@ -51,6 +54,8 @@ export function useCanvasListGroupedData({
   collapsedProjects,
   excludeCallGeneratedCanvases,
   showStarredOnly,
+  includeArchived,
+  onlyArchived,
   forceExpandProjects = false,
 }: UseCanvasListGroupedDataParams): UseCanvasListGroupedDataResult {
   const allUsers = useUsers();
@@ -90,6 +95,8 @@ export function useCanvasListGroupedData({
   const [personalCanvasesResult, personalCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'personal_root',
+      includeArchived,
+      onlyArchived,
     }),
     {
       enabled: true,
@@ -104,12 +111,23 @@ export function useCanvasListGroupedData({
     () =>
       filterStarredCanvases(
         filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(toArray<Canvas>(personalCanvasesResult)),
+          withStarredCanvasState(
+            filterArchivedCanvases(toArray<Canvas>(personalCanvasesResult), {
+              includeArchived,
+              onlyArchived,
+            }),
+          ),
           excludeCallGeneratedCanvases,
         ),
         showStarredOnly,
       ),
-    [excludeCallGeneratedCanvases, personalCanvasesResult, showStarredOnly],
+    [
+      excludeCallGeneratedCanvases,
+      includeArchived,
+      onlyArchived,
+      personalCanvasesResult,
+      showStarredOnly,
+    ],
   );
   const expandedProjectIds = useMemo(
     () =>

@@ -50,19 +50,27 @@ jobs:
           pnpm --filter xyne-spaces-backend run db:generate
           pnpm --filter xyne-spaces-backend run db:common:generate
 
-      # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
-      - name: Typecheck
-        run: pnpm --filter xyne-spaces-backend run typecheck
+      # The hand-maintained Zero client schema must not declare a column that
+      # schema.prisma does not have (the drift that caused a runtime mismatch).
+      - name: Validate Zero <> Prisma column parity
+        run: node scripts/validate-zero-column-parity.mjs --ci-mode
 
-      - name: Build
+      # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
+      - name: Typecheck + build
         run: pnpm --filter xyne-spaces-backend run build
 
   # ---------------------------------------------------------------------------
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: Dashboard lint + typecheck + build
+    name: Dashboard ${{ matrix.task }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, build]
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
       - uses: actions/checkout@v5
 
@@ -79,22 +87,32 @@ jobs:
       - name: Build workspace libraries
         run: pnpm --filter @xyne/shared --filter @xyne/icons run build
 
-      - name: Format check
-        run: pnpm --filter xyne-spaces-dashboard run format:check
-
-      # errors-only (warnings ignored); heap bump avoids OOM on type-aware lint.
+      # --- lint leg ---------------------------------------------------------
+      # errors-only (warnings ignored).
       - name: Lint (errors only)
-        env:
-          NODE_OPTIONS: "--max-old-space-size=8192"
+        if: matrix.task == 'lint'
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
+      # --- typecheck leg ----------------------------------------------------
+      - name: Format check
+        if: matrix.task == 'typecheck'
+        run: pnpm --filter xyne-spaces-dashboard run format:check
+
+      - name: Restore tsc incremental state
+        if: matrix.task == 'typecheck'
+        uses: actions/cache@v4
+        with:
+          path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
+          key: dashboard-tsbuildinfo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            dashboard-tsbuildinfo-${{ runner.os }}-
+
       - name: Typecheck
+        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
-        # Matches apps/dashboard/Dockerfile — vite build needs a larger V8 heap.
-        env:
-          NODE_OPTIONS: "--max-old-space-size=6144"
+        if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
   # Framework lint — self-contained (no workspace deps).

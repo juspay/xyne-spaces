@@ -37,6 +37,7 @@ import {
   CanvasRole,
   CanvasVisibility,
   ChannelAddUserPolicy,
+  ChannelFilterMode,
   ChannelRole,
   ChannelScopeType,
   ChannelSortOrder,
@@ -58,6 +59,7 @@ import {
   LinkVisibility,
   LookupType,
   MailboxState,
+  MessageArtifactStatus,
   MeetingStatus,
   MessageType,
   NotificationLevel,
@@ -611,6 +613,11 @@ export const userPreferenceTable = table('user_preferences')
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
+    starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
+    starredSortOrder: enumeration<ChannelSortOrder>().optional(),   // Starred group sort
+    dmFilterMode: enumeration<ChannelFilterMode>().optional(),      // DM group filter
+    dmSortOrder: enumeration<ChannelSortOrder>().optional(),        // DM group sort
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
@@ -778,6 +785,19 @@ export const channelTable = table('channels')
   })
   .primaryKey('id');
 
+export const channelBoardMappingTable = table('channel_board_mappings' /* ChannelBoardMapping */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const channelStatsTable = table('channel_stats')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -847,6 +867,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     createdAt: number(),
     updatedAt: number().optional(),
     sortOrder: enumeration<ChannelSortOrder>().optional(),
+    filterMode: enumeration<ChannelFilterMode>().optional(),
   })
   .primaryKey('id');
 
@@ -912,6 +933,33 @@ export const messageTable = table('messages')
     messageActs: string().optional(),
   })
   .primaryKey('messageId');
+
+// Deliberately self-contained: the global artifact subscription must not relate
+// to `messages`, or every message delta in the workspace would flow through its
+// IVM pipeline. Each column below is either lifecycle state or the minimum
+// needed to route to the artifact without that join.
+export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    // Whether the artifact is the conversation's initial message decides
+    // between the channel route and the thread route. It cannot be derived
+    // without joining messages/conversations, so it is projected here.
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    // The source message's createdAt — drives the banner's age label and the
+    // channel-list load anchor. Equal to the conversation's createdAt when the
+    // artifact is the initial message, which is the case the anchor is used for.
+    messageCreatedAt: number(),
+    command: string(),
+    status: enumeration<MessageArtifactStatus>(),
+    callExternalId: string().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
 
 export const messageAttachmentTable = table('message_attachments')
   .columns({
@@ -1145,6 +1193,7 @@ export const callTable = table('calls')
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
   })
   .primaryKey('id');
 
@@ -1175,6 +1224,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey('id');
 
@@ -1264,6 +1314,7 @@ export const canvasTable = table('canvases')
     editAccessId: string().optional(),
     visibility: enumeration<CanvasVisibility>(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     isCollaborative: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
@@ -1426,11 +1477,31 @@ export const repoTable = table('repos')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(),                     // e.g., "xyne-spaces"
-    url: string(),                      // SSH or HTTPS URL
-    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
-    prefix: string(),                   // Branch prefix: "feature"
+    name: string(), // e.g., "xyne-spaces"
+    url: string(), // SSH or HTTPS URL
+    canonicalUrl: string().optional(),
+    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
+    prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
+    projectId: string().optional(),
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCapabilities: json().optional(),
+  })
+  .primaryKey('id');
+
+export const sdlcEntityLinkTable = table('sdlc_entity_links')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    repoId: string(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -1861,6 +1932,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(), // release-scoped: dev ticket entered as a hotfix
     createdAt: number(),
     updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
@@ -2048,7 +2120,8 @@ export const appsTable = table('apps')
     scope: string(),
     version: number(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    // signingSecret intentionally NOT synced to clients (XYNE-56394): the app HMAC secret
+    // is read server-side via Prisma; the client never needs it. Kept in Postgres/Prisma only.
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2590,6 +2663,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: canvasTable,
   }),
+  repos: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: repoTable,
+  }),
   projectTags: many({
     sourceField: ['id'],
     destField: ['projectId'],
@@ -2652,6 +2730,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ['id'],
     destField: ['boardId'],
     destSchema: boardSlaPolicyTable,
+  }),
+  channelMappings: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: channelBoardMappingTable,
   }),
 }));
 
@@ -3237,10 +3320,67 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
+  sdlcRepos: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: repoTable,
+  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
+  }),
+  boardMappings: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelBoardMappingTable,
+  }),
+}));
+
+export const channelBoardMappingTableRelationships = relationships(
+  channelBoardMappingTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    board: one({
+      sourceField: ['boardId'],
+      destField: ['id'],
+      destSchema: boardTable,
+    }),
+  }),
+);
+
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  setupExecution: one({
+    sourceField: ['sdlcSetupExecutionId'],
+    destField: ['id'],
+    destSchema: workflowExecutionTable,
+  }),
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['repoId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 
@@ -3298,6 +3438,23 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destSchema: surfaceNudgeCountTable,
   }),
 }));
+
+export const messageArtifactTableRelationships = relationships(
+  messageArtifactTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    // Used by the artifact subscription to keep banner delivery participant-only.
+    channelParticipants: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+  }),
+);
 
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({
@@ -3591,7 +3748,7 @@ export const entityAccessTableRelationships = relationships(
 
 export const summaryTemplateTableRelationships = relationships(
   summaryTemplateTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
@@ -3601,6 +3758,16 @@ export const summaryTemplateTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    shares: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: entityAccessTable,
+    }),
+    workspaceResourceAccess: many({
+      sourceField: ['workspaceId'],
+      destField: ['workspaceId'],
+      destSchema: resourceAccessTable,
     }),
   }),
 );
@@ -4579,6 +4746,7 @@ export const schema = createSchema({
     invitationTable,
     guestAccessTable,
     channelTable,
+    channelBoardMappingTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -4586,6 +4754,7 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
     delayedMessageTable,
@@ -4616,6 +4785,7 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
+    sdlcEntityLinkTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4709,8 +4879,12 @@ export const schema = createSchema({
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
+    channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
+    repoTableRelationships,
+    sdlcEntityLinkTableRelationships,
     messageTableRelationships,
+    messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
     channelParticipantTableRelationships,
@@ -4844,6 +5018,7 @@ export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizat
 export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
@@ -4878,6 +5053,7 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
@@ -4888,8 +5064,8 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
-export type FormFields = Row<typeof schema.tables.form_fields>;
 export type GlobalField = Row<typeof schema.tables.global_fields>;
+export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;

@@ -1,17 +1,22 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Hash } from 'lucide-react';
-import { MessageType } from '@xyne/shared';
-import { useChannelSearch } from '@xyne/shared/hooks';
+import { ChannelScopeType, ChannelVisibility, MessageType } from '@xyne/shared';
+import type { MentionResult } from '@xyne/shared';
+import { useChannelSearch, useUserGroupSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
+import { InputBox } from '../../../components/ui/InputBox';
+import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
-import { useActiveUsers } from '../../../hooks/useUsers';
+import { useActiveUsers, useActiveUserSearch } from '../../../hooks/useUsers';
+import { useAuth } from '../../../hooks/useAuth';
+import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { channelService } from '../../../services/Chat/channelService';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, userToMentionResult } from '../../../utils/userDisplayName';
 import { logRecordingError } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -25,6 +30,9 @@ export interface PostRecordingToChannelModalProps {
   recording: RecordingDetail;
   onClose?: () => void;
 }
+
+const MENTION_USER_LIMIT = 20;
+const MENTION_GROUP_LIMIT = 10;
 
 const escapeHtml = (value: string): string =>
   value
@@ -50,15 +58,83 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
   onClose,
 }) => {
   const zero = useZero();
+  const { user: currentUser } = useAuth();
   const activeUsers = useActiveUsers();
   const shareableOrigin = useShareableOrigin();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const [note, setNote] = useState('');
+  const [noteHtml, setNoteHtml] = useState('');
+  const [noteText, setNoteText] = useState('');
   const [posting, setPosting] = useState(false);
+  const inputBoxRef = useRef<InputBoxHandle>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   const channels = useChannelSearch(searchQuery, 10);
+  const selectedChannelId = useMemo(
+    () =>
+      selectedValues.find(value => value.startsWith('channel:'))?.replace('channel:', '') ??
+      undefined,
+    [selectedValues],
+  );
+
+  const { results: channelScopedMentions, searchMentions: searchChannelScopedMentions } =
+    useMentionSearch(selectedChannelId);
+
+  // Fall back to a plain workspace search for DM targets — the same
+  // pattern SendMessageRichTextField uses for a non-concrete channel.
+  const [mentionQuery, setMentionQuery] = useState('');
+  const mentionUsers = useActiveUserSearch(mentionQuery, MENTION_USER_LIMIT);
+  const mentionGroups = useUserGroupSearch(mentionQuery, MENTION_GROUP_LIMIT);
+  const workspaceMentions = useMemo<MentionResult[]>(
+    () => [
+      ...mentionUsers.map(u => userToMentionResult(u, u.id === currentUser?.id)),
+      ...mentionGroups.map(
+        (g): MentionResult => ({
+          id: g.id,
+          name: g.name,
+          type: 'group',
+          ...(g.alias && { alias: g.alias }),
+          ...(g.description && { description: g.description }),
+          memberCount: 0,
+          isDeactivated: g.isActive === false,
+        }),
+      ),
+    ],
+    [mentionUsers, mentionGroups, currentUser?.id],
+  );
+
+  const mentionResults = selectedChannelId ? channelScopedMentions : workspaceMentions;
+  const handleMentionSearch = useCallback(
+    (query: string) => {
+      if (selectedChannelId) {
+        searchChannelScopedMentions(query);
+      } else {
+        setMentionQuery(query);
+      }
+    },
+    [selectedChannelId, searchChannelScopedMentions],
+  );
+
+  // #-channel search for the optional note.
+  const [channelMentionQuery, setChannelMentionQuery] = useState('');
+  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+
+  const channelMentionItems = useMemo(
+    () =>
+      channelMentionResults
+        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+        })),
+    [channelMentionResults],
+  );
 
   // Combined target search — active workspace users (for DM) and channels.
   // Selecting a channel is exclusive (SearchParticipants default behavior);
@@ -90,8 +166,9 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
     // (the /recordings/:id route only exists nested under /:workspaceId).
     const link = `${shareableOrigin}/recordings/${recording.externalId}`;
     const parts: string[] = [];
-    if (note.trim()) {
-      parts.push(`<p>${escapeHtml(note.trim())}</p>`);
+    // noteHtml is already rich-text markup from InputBox — don't escape it.
+    if (noteText.trim()) {
+      parts.push(noteHtml);
     }
     parts.push(
       `<p>\uD83C\uDFA5 <strong>${escapeHtml(title)}</strong><br/><a href="${link}">View recording</a></p>`,
@@ -158,7 +235,8 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
         toast.success('Recording shared');
         setSelectedValues([]);
         setSearchQuery('');
-        setNote('');
+        setNoteHtml('');
+        setNoteText('');
         onClose?.();
       }
     } catch (error) {
@@ -178,6 +256,7 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
           Post this recording to a channel, or send it to people
         </p>
         <SearchParticipants
+          ref={searchInputRef}
           options={options}
           selectedValues={selectedValues}
           onMultiSelect={setSelectedValues}
@@ -186,19 +265,46 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
         />
       </div>
 
-      <div className='space-y-1.5'>
+      <div
+        className='space-y-1.5'
+        data-track-category='RecordingDetailV2'
+        data-track-name='post_recording_note_input'
+        onKeyDownCapture={event => {
+          if (event.key === 'Enter' && !event.shiftKey && selectedValues.length > 0) {
+            if (inputBoxRef.current?.isSuggestionOpen()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void handlePost();
+          }
+        }}
+      >
         <label htmlFor='post-recording-note' className='text-muted-foreground text-[13px]'>
           Add a message (optional)
         </label>
-        <textarea
+        <InputBox
+          ref={inputBoxRef}
           id='post-recording-note'
-          value={note}
-          onChange={event => setNote(event.target.value)}
           placeholder='Say something about this recording...'
-          rows={3}
-          className='w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
-          data-track-category='RecordingDetailV2'
-          data-track-name='post_recording_note_input'
+          onSendMessage={() => {}}
+          onContentChange={(html, text) => {
+            setNoteHtml(html);
+            setNoteText(text);
+          }}
+          mentionItems={mentionResults}
+          onMentionSearch={handleMentionSearch}
+          channelItems={channelMentionItems}
+          onChannelSearch={setChannelMentionQuery}
+          features={{
+            richText: true,
+            mentions: true,
+            commands: false,
+            fileAttachments: false,
+            emojiPicker: true,
+          }}
+          showTypingIndicator={false}
+          disabled={posting}
+          disableEnterToSend
+          hideSendButton
         />
       </div>
 

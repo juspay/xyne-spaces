@@ -8,11 +8,13 @@ import { ChevronUp } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '../../../components/ui/Button';
 import type { RecordingStatus, TranscriptEntry } from '../../../stores/recordingStore';
-import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 
 interface MinimizedTranscriptViewProps {
   status: RecordingStatus;
   startTime: number | null;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
   onMaximize: () => void;
   /** Whether to show the scrim/blur effect (default: true). Disable when embedded in a workspace. */
@@ -25,6 +27,8 @@ const OPACITY_RAMP = [0.34, 0.62, 1.0];
 export function MinimizedTranscriptView({
   status,
   startTime,
+  pauseStartedAt,
+  accumulatedPausedMs,
   transcripts,
   onMaximize,
   showScrim = true,
@@ -38,10 +42,10 @@ export function MinimizedTranscriptView({
 
   useEffect(() => {
     if ((isRecording || isPaused) && startTime) {
-      setElapsed(Date.now() - startTime);
+      setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
       if (!isPaused) {
         intervalRef.current = setInterval(() => {
-          setElapsed(Date.now() - startTime);
+          setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
         }, 1000);
       }
     }
@@ -52,7 +56,7 @@ export function MinimizedTranscriptView({
         intervalRef.current = null;
       }
     };
-  }, [isRecording, isPaused, startTime]);
+  }, [isRecording, isPaused, startTime, pauseStartedAt, accumulatedPausedMs]);
 
   const lastLineRef = useRef<HTMLDivElement>(null);
 

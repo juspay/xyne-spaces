@@ -160,6 +160,11 @@ function McpItemCard({
           className="line-clamp-1 flex w-fit items-center gap-2 text-sm font-medium leading-snug text-xyne-fg-primary"
         >
           {server.name}
+          {server.oauth && (
+            <span className="shrink-0 rounded bg-xyne-surface px-1.5 py-0.5 text-[10px] font-semibold text-xyne-fg-tertiary shadow-sm">
+              OAuth
+            </span>
+          )}
         </div>
         {hasDescription && (
           <p
@@ -491,6 +496,13 @@ export function MCPPageV3({ userId }: Props) {
   const handleCreateServer = useCallback(
     async (payload: Parameters<typeof createServer>[0]) => {
       const created = await createServer(payload, userId);
+      // Make a newly-created connector's form immediately available to the
+      // reconnect dialog instead of waiting for the page-level credential map
+      // (which is fetched only on mount).
+      setCredentialFields((current) => ({
+        ...current,
+        [created.type]: created.credentialForm?.fields ?? payload.credentialForm?.fields ?? [],
+      }));
       reload();
       return created;
     },

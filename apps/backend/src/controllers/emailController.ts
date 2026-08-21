@@ -332,12 +332,10 @@ export class EmailController {
             ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
           });
         } catch (sendErr: any) {
-          if (fileAttachments.length > 0) {
-            const reason = sendErr instanceof Error ? sendErr.message : String(sendErr);
-            throw new AttachmentUploadError(
-              fileAttachments.map(a => ({ name: a.name, reason })),
-            );
-          }
+          logger.error('[EmailController] Google replyToConversation failed', {
+            conversationId,
+            message: sendErr?.message,
+          });
           throw sendErr;
         }
       } else {
