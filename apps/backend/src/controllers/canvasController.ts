@@ -15,6 +15,14 @@ import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, validateAgentResponse, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
+import { matchBlocks } from '@/services/canvas/blockMatch.js';
+import { createBlockRenderer } from '@/services/canvas/blockRender.js';
+import { hashBlocks } from '@/services/canvas/blockHash.js';
+import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
+import { isCanvasContentEmpty } from '@xyne/shared';
+import { readFromYSweet as readFromYSweetBlocks } from '../utils/ysweetUtils.js';
+import { createSuggestion } from '@/services/canvas/suggestionStore.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 
 export class CanvasController {
@@ -439,6 +447,28 @@ export class CanvasController {
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
       const blocks = await readFromYSweet(canvas.id);
+
+      // Suggestion mode: return a labelled document and record which blocks the agent saw.
+      if (config.canvasSuggestions.enabled && blocks.length > 0) {
+        const renderer = await createBlockRenderer(blocks);
+        const { markdown: labelled } = labelBlocks(blocks, renderer.render);
+        await saveReadReceipt(canvas.id, userId, {
+          blockIds: blocks
+            .map(b => (b as { id?: string }).id)
+            .filter((id): id is string => Boolean(id)),
+          contentHash: hashBlocks(blocks),
+          readAt: Date.now(),
+        });
+        res.status(200).json({
+          id: canvas.id,
+          title: canvas.title,
+          markdown: labelled,
+          labelInstruction: LABEL_INSTRUCTION,
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
@@ -489,12 +519,91 @@ export class CanvasController {
         return;
       }
 
-      const blocks = await convertMarkdownToBlockNote(markdown);
+      // Only read the document when suggestion mode can actually gate this write.
+      const current = config.canvasSuggestions.enabled
+        ? await readFromYSweetBlocks(canvas.id)
+        : [];
 
-      // Sync content to Y-Sweet for collaborative editing
+      // Suggestion mode: this route only receives agent writes (S2S, spaces-edit-canvas);
+      // park block-level changes for review unless the canvas is empty. Nothing reaches Y-Sweet here.
+      if (config.canvasSuggestions.enabled && !isCanvasContentEmpty(current)) {
+        const renderer = await createBlockRenderer(current);
+        const entries = parseLabelledMarkdown(markdown);
+        const handleMap = buildHandleMap(current);
+
+        const validation = validateAgentResponse(entries, handleMap, current.length);
+        if (!validation.ok) {
+          logger.warn(`[CANVAS-UPDATE] Rejected agent proposal for ${canvas.id}: ${validation.reason}`);
+          res.status(422).json({ error: 'Proposal rejected', message: validation.reason });
+          return;
+        }
+
+        const receipt = await getReadReceipt(canvas.id, userId);
+        const { changes, relabelled, labelMatched } = matchBlocks({
+          current,
+          entries,
+          handleMap,
+          render: renderer.render,
+          ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
+        });
+
+        // Batch guardrail: mostly-implausible label matches mean the agent renumbered the document — refuse.
+        const labelClaims = relabelled + labelMatched;
+        if (labelClaims >= 4 && relabelled > labelClaims / 2) {
+          logger.warn(
+            `[CANVAS-UPDATE] Rejected proposal for ${canvas.id}: ${relabelled}/${labelClaims} labels attached to unrelated content`
+          );
+          res.status(422).json({
+            error: 'Proposal rejected',
+            message:
+              `${relabelled} of ${labelClaims} paragraph labels were attached to unrelated content. ` +
+              'A label identifies one specific paragraph — to replace a section, omit the labelled ' +
+              'paragraphs and add the new ones with [new] instead of reusing their labels.',
+          });
+          return;
+        }
+
+        if (changes.length === 0) {
+          res.status(200).json({
+            id: canvas.id,
+            title: canvas.title,
+            status: 'no-changes',
+            message: 'The proposed content matches the canvas; nothing to review.',
+            url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+          });
+          return;
+        }
+
+        const suggestion = await createSuggestion({
+          workspaceId: canvas.workspaceId,
+          canvasId: canvas.id,
+          createdBy: userId,
+          currentBlocks: current,
+          changes,
+        });
+
+        res.status(202).json({
+          id: canvas.id,
+          title: canvas.title,
+          status: 'pending-review',
+          suggestionId: suggestion.id,
+          changeCount: suggestion.changeCount,
+          message: `${suggestion.changeCount} change(s) proposed and awaiting approval.`,
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
+      // ── direct write (unchanged behaviour) ─────────────────────────────
+      const blocks = await convertMarkdownToBlockNote(markdown);
       const ysweetSynced = await syncToYSweet(canvas.id, blocks);
       if (!ysweetSynced) {
-        logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
+        logger.error(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
+        res.status(502).json({
+          error: 'Canvas update failed',
+          message: 'The collaborative document could not be updated. Try again.',
+        });
+        return;
       }
 
       // Update DB timestamp
