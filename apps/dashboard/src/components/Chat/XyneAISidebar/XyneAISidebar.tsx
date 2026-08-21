@@ -334,36 +334,49 @@ const XyneAISidebar = ({
   // out the main thread on long conversations. They only depend on the two
   // message lists, so memoize and let React skip the work when nothing
   // actually changed since the last frame.
-  const { lastBotIndex, lastUserIndex, siblingIndexById, siblingCountById } = useMemo(() => {
-    let botIdx = -1;
-    let userIdx = -1;
-    for (let i = displayMessages.length - 1; i >= 0; i--) {
-      if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
-      if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
-      if (botIdx !== -1 && userIdx !== -1) break;
-    }
-    const indexById = new Map<string, number>();
-    const countById = new Map<string, number>();
-    const groups = new Map<string, string[]>();
-    for (const m of messages) {
-      const key = m.parentId ?? BRANCH_ROOT_KEY;
-      const group = groups.get(key);
-      if (group) group.push(m.id);
-      else groups.set(key, [m.id]);
-    }
-    for (const [, group] of groups) {
-      group.forEach((id, i) => {
-        indexById.set(id, i);
-        countById.set(id, group.length);
-      });
-    }
-    return {
-      lastBotIndex: botIdx,
-      lastUserIndex: userIdx,
-      siblingIndexById: indexById,
-      siblingCountById: countById,
-    };
-  }, [messages, displayMessages]);
+  const { lastBotIndex, lastUserIndex, siblingIndexById, siblingCountById, botTurnIndexById } =
+    useMemo(() => {
+      let botIdx = -1;
+      let userIdx = -1;
+      for (let i = displayMessages.length - 1; i >= 0; i--) {
+        if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
+        if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
+        if (botIdx !== -1 && userIdx !== -1) break;
+      }
+      // Single O(n) pass: map each bot message id -> its 0-based bot-turn
+      // ordinal. Replaces the previous O(n^2) per-render slice().filter()
+      // that ran inside the render .map() for every bot message.
+      const botTurnById = new Map<string, number>();
+      let botTurnCounter = 0;
+      for (const m of displayMessages) {
+        if (m.type === 'bot') {
+          botTurnById.set(m.id, botTurnCounter);
+          botTurnCounter++;
+        }
+      }
+      const indexById = new Map<string, number>();
+      const countById = new Map<string, number>();
+      const groups = new Map<string, string[]>();
+      for (const m of messages) {
+        const key = m.parentId ?? BRANCH_ROOT_KEY;
+        const group = groups.get(key);
+        if (group) group.push(m.id);
+        else groups.set(key, [m.id]);
+      }
+      for (const [, group] of groups) {
+        group.forEach((id, i) => {
+          indexById.set(id, i);
+          countById.set(id, group.length);
+        });
+      }
+      return {
+        lastBotIndex: botIdx,
+        lastUserIndex: userIdx,
+        siblingIndexById: indexById,
+        siblingCountById: countById,
+        botTurnIndexById: botTurnById,
+      };
+    }, [messages, displayMessages]);
   const streamingBotTurnIndex = useMemo(() => {
     const index = displayMessages.findIndex(
       message => message.type === 'bot' && message.isStreaming,
@@ -1449,6 +1462,16 @@ const XyneAISidebar = ({
     [feedbackMap, currentTraceId],
   );
 
+  // Stable, void-returning wrapper so `onFeedback` keeps a constant
+  // reference across renders. An inline arrow here defeats MessageItem's
+  // React.memo, forcing every row to rerender on each streaming token.
+  const handleFeedbackVoid = useCallback(
+    (id: string, type: 'LIKE' | 'DISLIKE'): void => {
+      void handleFeedback(id, type);
+    },
+    [handleFeedback],
+  );
+
   // v2 (claw) rating change — AskAiRatingButtons already persisted to
   // agent_runs; reflect the new feedback in local message state AND in the
   // stream manager's cache so the thumb survives a soft nav-away-and-back within
@@ -2180,9 +2203,7 @@ const XyneAISidebar = ({
                               const hasBranches = siblingCount > 1;
                               const botTurnIndex =
                                 message.type === 'bot'
-                                  ? displayMessages
-                                      .slice(0, index + 1)
-                                      .filter(item => item.type === 'bot').length - 1
+                                  ? (botTurnIndexById.get(message.id) ?? -1)
                                   : -1;
                               const showFollowUps =
                                 isV2 &&
@@ -2196,7 +2217,7 @@ const XyneAISidebar = ({
                                   // would kill the activity block's transition).
                                   key={message.stableKey ?? message.id}
                                   message={message}
-                                  onFeedback={(id, type) => void handleFeedback(id, type)}
+                                  onFeedback={handleFeedbackVoid}
                                   onCitationClick={handleCitationClick}
                                   onSummarizerCitationClick={handleSummarizerCitationClick}
                                   feedbackValue={feedbackMap[message.id] || null}
