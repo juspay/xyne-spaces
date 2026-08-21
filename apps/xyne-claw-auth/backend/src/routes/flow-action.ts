@@ -1901,11 +1901,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const planUserId = priorCtx.senderId;
       const serverTodos = activePlan.todos;
 
-      // Only the user the server recorded for this plan can approve/reject it.
-      if (!callerUserId || callerUserId !== planUserId) {
-        log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != plan owner ${planUserId}`);
+      if (!callerUserId) {
+        log.error(`[flow-action] plan-approval: unauthorized — no callerUserId (plan owner ${planUserId})`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
+      }
+      if (callerUserId !== planUserId) {
+        log.info(`[flow-action] plan-approval: decided by ${callerUserId} on behalf of plan owner ${planUserId}`);
       }
 
       // ── Reject ────────────────────────────────────────────────────────────
@@ -2056,7 +2058,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             approved.map((t, i) => `${i + 1}. ${t.title}`).join("\n");
           const fastModeEnabled = await resolveFastMode(planConversationId, planAgentSlug, agent.config);
           const dispatchPayload: Record<string, unknown> = {
-            userId: planUserId,
+            userId: callerUserId,
             task,
             conversationId: planConversationId,
             ...(planChannelId ? { channelId: planChannelId } : {}),
