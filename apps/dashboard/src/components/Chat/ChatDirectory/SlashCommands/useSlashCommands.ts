@@ -20,6 +20,7 @@ import {
   CMDK_USER_LIMIT,
   rankUsersWithMfu,
   rankChannelsByAffinity,
+  filterChannelsBySearchableNames,
 } from '../../../../hooks/useSearchMetrics';
 import { useAffinityCallback } from '../../../../hooks/useAffinityCallback';
 import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
@@ -27,7 +28,7 @@ import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { sendRecordingEvent, getRecordingStatus } from '../../../../hooks/useRecordingStore';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
-import { getDMSearchableNames, isOneToOneDMChannel } from '../ChatDirectory.utils';
+import { getDMNames, isOneToOneDMChannel } from '../ChatDirectory.utils';
 import type { CommandTarget } from './QuickDmComposer';
 
 /**
@@ -292,20 +293,21 @@ export function useSlashCommands({
   const commandGroupDmResults = useMemo<CommandGroupDm[]>(() => {
     if (!isPickerCommand || !showChannelResults) return [];
     void affinityVersion;
-    const query = commandQuery.trim().toLowerCase();
     const groups = visibleChannels
       .filter(c => c.scopeType === ChannelScopeType.GROUP_DM)
-      .map(channel => ({
-        channel,
-        label: getDMSearchableNames(channel, currentUserID, usersById).join(', '),
-      }))
+      .map(channel => {
+        const dmNames = getDMNames(channel, currentUserID, usersById);
+        return { channel, label: dmNames.display.join(', '), searchNames: dmNames.search };
+      })
       .filter(g => g.label);
-    if (query) {
-      return groups.filter(g => g.label.toLowerCase().includes(query)).slice(0, CMDK_USER_LIMIT);
-    }
-    // Empty query → order by affinity-then-recency (same as the Cmd+K browse list), re-pairing the
-    // ranked channels with their resolved participant labels.
     const labelByChannelId = new Map(groups.map(g => [g.channel.id, g.label]));
+    // Typed query → the same token-AND participant matcher as Cmd+K, so full names match (not just
+    // the nickname label). Empty query → affinity-then-recency, matching the Cmd+K browse order.
+    if (commandQuery.trim()) {
+      return filterChannelsBySearchableNames(groups, commandQuery)
+        .map(g => ({ channel: g.channel, label: labelByChannelId.get(g.channel.id) ?? '' }))
+        .slice(0, CMDK_USER_LIMIT);
+    }
     return rankChannelsByAffinity(groups.map(g => g.channel))
       .map(channel => ({ channel, label: labelByChannelId.get(channel.id) ?? '' }))
       .slice(0, CMDK_USER_LIMIT);
