@@ -6028,21 +6028,11 @@ export function createMutators(
               }
             }
             if (params.assignedTo || progression) {
-              // Best-effort mirror: a throw here would abort the ticket update itself.
-              // The ACL runs before any SQL is issued, so catching is safe.
-              try {
-                await tx.mutate.sub_tickets.update({
-                  id: subTickets.id,
-                  assignedTo: params.assignedTo ? params.assignedTo : subTickets.assignedTo,
-                  stageProgression: progression ? progression : subTickets.stageProgression
-                });
-              } catch (error) {
-                logger.warn('[Mutator] Failed to mirror ticket update onto sub-ticket', {
-                  ticketId: params.id,
-                  subTicketId: subTickets.id,
-                  error,
-                });
-              }
+              await tx.mutate.sub_tickets.update({
+                id: subTickets.id,
+                assignedTo: params.assignedTo ? params.assignedTo : subTickets.assignedTo,
+                stageProgression: progression ? progression : subTickets.stageProgression
+              });
             }
           }
 
