@@ -260,6 +260,39 @@ export class AnalyticsRepository {
   }
 
   /**
+   * USER-type member ids of a workspace as a scalar subquery. Mirrors
+   * getUsersId() so raw-SQL callers can enforce "real users only" without
+   * round-tripping the id list through Node.
+   */
+  private workspaceUserIdsSql(workspaceId: string): Prisma.Sql {
+    return Prisma.sql`SELECT u."id" FROM "public"."users" u WHERE u."userType" = ${UserType.USER} AND u."workspaceId" = ${workspaceId}`;
+  }
+
+  /**
+   * Per-bucket COUNT(*) over an arbitrary table, filtered by a caller WHERE
+   * fragment plus inclusive IST date bounds on `column`, grouped by the shared
+   * bucket ordinal. Replaces the old findMany + bucketCounts pass for the
+   * non-message sources; only non-empty buckets are returned, so callers
+   * zero-fill against the generated bucket list.
+   */
+  private async bucketedCount(
+    fromTable: Prisma.Sql,
+    column: Prisma.Sql,
+    where: Prisma.Sql,
+    gte: string | null,
+    lte: string | null,
+    groupBy: 'day' | 'hour',
+  ): Promise<{ bucket: bigint; value: number }[]> {
+    return this.prisma.$queryRaw<{ bucket: bigint; value: number }[]>(Prisma.sql`
+      SELECT ${this.bucketOrdinalSql(groupBy, column)} AS bucket, COUNT(*)::int AS value
+      FROM ${fromTable}
+      WHERE ${where}
+        ${this.dateBoundsSql(column, gte, lte)}
+      GROUP BY 1
+    `);
+  }
+
+  /**
    * Zero-fill a single-value bucketed aggregate into the ordered bucket list,
    * reconstructing each row's key from its ordinal and sorting by date - the
    * same shape the old bucketCounts and distinct-user passes returned.
@@ -627,10 +660,7 @@ export class AnalyticsRepository {
     groupBy: 'day' | 'hour',
   ): Prisma.Sql {
     // USER-type members of the workspace; mirrors getUsersId()'s `userId IN (...)`.
-    const workspaceUsers = Prisma.sql`
-      SELECT u."id" FROM "public"."users" u
-      WHERE u."userType" = 'USER' AND u."workspaceId" = ${workspaceId}
-    `;
+    const workspaceUsers = this.workspaceUserIdsSql(workspaceId);
     const bucketOf = (column: Prisma.Sql) => this.bucketOrdinalSql(groupBy, column);
 
     return Prisma.sql`
@@ -745,22 +775,19 @@ export class AnalyticsRepository {
    * Get users onboarded time-series data
    */
   async getUsersOnboardedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
-    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
-    // Get user presence records
-    const userPresenceRecords = await this.prisma.userPresence.findMany({
-      where: { createdAt: dateCondition, workspaceId },
-      select: { createdAt: true },
-    });
-
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
-
-    return this.bucketCounts(
-      userPresenceRecords,
-      timeBuckets,
-      record => this.getBucketKey(record.createdAt, 'day'),
+    // Count onboarded users per IST day in Postgres instead of materializing
+    // every user_presence row and bucketing on the Node heap.
+    const rows = await this.bucketedCount(
+      Prisma.sql`"public"."user_presence" up`,
+      Prisma.sql`up."createdAt"`,
+      Prisma.sql`up."workspaceId" = ${workspaceId}`,
+      gte, lte, 'day',
     );
+
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    return this.zeroFillSingle(rows, timeBuckets, 'day');
   }
 
   /**
@@ -826,28 +853,19 @@ export class AnalyticsRepository {
    * Only counts tickets created by real users (userType: 'USER'), excludes bot-created tickets
    */
   async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Get tickets created by real users only
-    const tickets = await this.prisma.ticket.findMany({
-      where: {
-        createdAt: dateCondition,
-        workspaceId,
-        createdBy: { in: userIds }
-      },
-      select: { createdAt: true },
-    });
-
-    // Generate time buckets based on groupBy
-    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
-
-    return this.bucketCounts(
-      tickets,
-      timeBuckets,
-      ticket => this.getBucketKey(ticket.createdAt, groupBy),
+    // Count tickets per bucket in Postgres. "Real users only" is enforced by the
+    // same USER-type membership set getUsersId() used, inlined as a subquery.
+    const rows = await this.bucketedCount(
+      Prisma.sql`"public"."tickets" t`,
+      Prisma.sql`t."createdAt"`,
+      Prisma.sql`t."workspaceId" = ${workspaceId} AND t."createdBy" IN (${this.workspaceUserIdsSql(workspaceId)})`,
+      gte, lte, groupBy,
     );
+
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
+    return this.zeroFillSingle(rows, timeBuckets, groupBy);
   }
 
   /**
@@ -876,27 +894,21 @@ export class AnalyticsRepository {
    * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
    */
   async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const { workspaceId, dateCondition, startDate, endDate } = this.resolveScope(filters);
+    const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Get canvases created by real users only
-    const canvases = await this.prisma.canvas.findMany({
-      where: {
-        lastEditedAt: dateCondition,
-        createdBy: { in: userIds }
-      },
-      select: { lastEditedAt: true },
-    });
-
-    // Generate time buckets based on groupBy
-    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
-
-    return this.bucketCounts(
-      canvases,
-      timeBuckets,
-      canvas => canvas.lastEditedAt ? this.getBucketKey(canvas.lastEditedAt, groupBy) : null,
+    // Count canvases edited per bucket in Postgres. Matches getNumberOfCanvases:
+    // filter on lastEditedAt within range and real-user authorship, with NO
+    // workspaceId filter on the canvas row. The date bounds exclude NULL
+    // lastEditedAt, matching the old null-key skip.
+    const rows = await this.bucketedCount(
+      Prisma.sql`"public"."canvases" cv`,
+      Prisma.sql`cv."lastEditedAt"`,
+      Prisma.sql`cv."createdBy" IN (${this.workspaceUserIdsSql(workspaceId)})`,
+      gte, lte, groupBy,
     );
+
+    const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
+    return this.zeroFillSingle(rows, timeBuckets, groupBy);
   }
 
   /**
@@ -1068,25 +1080,20 @@ export class AnalyticsRepository {
   async getFilesSharedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const { workspaceId, startDate, endDate, gte, lte } = this.resolveScope(filters);
 
-    // Get file attachments for valid (non-migrated) messages only, joining the
-    // valid-message set as a CTE instead of round-tripping message ids.
-    const attachments = await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
+    // Count chat attachments per bucket in Postgres, joining the valid-message
+    // set as a CTE instead of round-tripping every attachment's createdAt.
+    const rows = await this.prisma.$queryRaw<{ bucket: bigint; value: number }[]>(Prisma.sql`
       WITH valid_messages AS (
         SELECT m."messageId"
         ${this.validMessagesFrom(gte, lte, workspaceId)}
       )
-      SELECT a."createdAt"
+      SELECT ${this.bucketOrdinalSql(groupBy, Prisma.sql`a."createdAt"`)} AS bucket, COUNT(*)::int AS value
       ${this.chatAttachmentsJoin(workspaceId)}
+      GROUP BY 1
     `);
 
-    // Generate time buckets based on groupBy
     const timeBuckets = this.generateTimeBuckets(groupBy, startDate, endDate);
-
-    return this.bucketCounts(
-      attachments,
-      timeBuckets,
-      attachment => this.getBucketKey(attachment.createdAt, groupBy),
-    );
+    return this.zeroFillSingle(rows, timeBuckets, groupBy);
   }
 
 }
