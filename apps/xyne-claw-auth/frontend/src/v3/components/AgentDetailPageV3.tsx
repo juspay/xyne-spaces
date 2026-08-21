@@ -46,6 +46,10 @@ import {
 import { ADMIN_REQUEST_FORWARDED_MESSAGE } from "../../lib/admin-request-notice";
 import type { AgentProvider } from "../hooks/useAgents";
 import { getAgentPermissions } from "../lib/agentPermissions";
+import {
+  MAX_DELEGATIONS_PER_RUN_BOUNDS,
+  clampMaxDelegationsPerRun,
+} from "../lib/delegationBudget";
 import { useSnackbar } from "./ui/Snackbar";
 import { AgentDetailHeader } from "./agent-detail/AgentDetailHeader";
 import { AgentDetailLeftColumn } from "./agent-detail/AgentDetailLeftColumn";
@@ -200,6 +204,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
   const [draftPlanModePrompt, setDraftPlanModePrompt] = useState(DEFAULT_PLAN_MODE_PROMPT);
+  // Per-run delegation budget (agent.config.maxDelegationsPerRun). Bounds how
+  // many child-agent delegations one top-level run may make. Only persisted
+  // when non-default; the runtime re-clamps to [1,25]. Default 3.
+  const [draftMaxDelegations, setDraftMaxDelegations] = useState<number>(MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT);
   // Opt-in response verification (agent.config.verifyResponses). When on, the
   // agent delivers its final answer via submit-response, which checks factual
   // claims against gathered tool evidence before posting. Default false.
@@ -325,6 +333,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
         }
+        setDraftMaxDelegations(clampMaxDelegationsPerRun((agentData.config as { maxDelegationsPerRun?: unknown }).maxDelegationsPerRun));
         setDraftVerifyResponses((agentData.config as { verifyResponses?: boolean }).verifyResponses === true);
         setDraftCitationReflection((agentData.config as { citationReflection?: boolean }).citationReflection === true);
         setDraftAutoToolCitations((agentData.config as { autoToolCitations?: boolean }).autoToolCitations === true);
@@ -434,6 +443,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
         ? basePlanModePromptRaw
         : DEFAULT_PLAN_MODE_PROMPT;
+    const baseMaxDelegations = clampMaxDelegationsPerRun((agent.config as { maxDelegationsPerRun?: unknown }).maxDelegationsPerRun);
     const baseVerifyResponses = (agent.config as { verifyResponses?: boolean }).verifyResponses === true;
     const baseCitationReflection = (agent.config as { citationReflection?: boolean }).citationReflection === true;
     const baseAutoToolCitations = (agent.config as { autoToolCitations?: boolean }).autoToolCitations === true;
@@ -476,6 +486,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
+      draftMaxDelegations !== baseMaxDelegations ||
       draftVerifyResponses !== baseVerifyResponses ||
       draftCitationReflection !== baseCitationReflection ||
       draftAutoToolCitations !== baseAutoToolCitations ||
@@ -487,7 +498,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -624,6 +635,14 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         delete nextConfig.planMode;
         delete nextConfig.planModePrompt;
       }
+      // Per-run delegation budget. Persist only a non-default value; DEFAULT
+      // drops the key so the runtime falls back to its own default (kept in
+      // sync in xyne-claw/src/agent-delegation.ts).
+      if (draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT) {
+        nextConfig.maxDelegationsPerRun = clampMaxDelegationsPerRun(draftMaxDelegations);
+      } else {
+        delete nextConfig.maxDelegationsPerRun;
+      }
       // Structured output. Parse + lightly validate here so the user gets an
       // inline error instead of a backend 400 on save (the backend re-validates
       // in agent-config-validation.ts).
@@ -709,7 +728,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1112,6 +1131,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftPlanModeChange={setDraftPlanMode}
             draftPlanModePrompt={draftPlanModePrompt}
             onDraftPlanModePromptChange={setDraftPlanModePrompt}
+            draftMaxDelegations={draftMaxDelegations}
+            onDraftMaxDelegationsChange={setDraftMaxDelegations}
             draftOutputFormatEnabled={draftOutputFormatEnabled}
             onDraftOutputFormatEnabledChange={setDraftOutputFormatEnabled}
             draftOutputType={draftOutputType}
