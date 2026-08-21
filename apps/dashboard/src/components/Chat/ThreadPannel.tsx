@@ -473,6 +473,7 @@ export const ThreadMessages = ({
             }
           : undefined;
       return {
+        ...(draft.senderId ? { userId: draft.senderId } : {}),
         ...(draft.senderName ? { name: draft.senderName } : {}),
         ...(text ? { text } : {}),
         ...(onJump ? { onJump } : {}),
