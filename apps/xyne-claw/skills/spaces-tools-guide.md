@@ -29,6 +29,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Resolving a person's name → ID | `spaces-users` |
 | A specific topic/keyword across messages, files, tickets | `spaces-search` |
 | Tickets — status, assignee, priority, board, stage, dates | `spaces-tickets` — NOT spaces-search |
+| Desk metrics — response/resolution times, CSAT, ticket volumes, per-agent/priority/stage/tag breakdowns, opened-vs-closed trends | `spaces-desk-metrics` — NOT spaces-tickets |
 | Reading a specific thread | `spaces-messages` |
 | One message's reactions / attachments / metadata | `spaces-message-detail` |
 | Finding a channel | `spaces-channels` |
@@ -240,7 +241,9 @@ User: "Show me the latest files shared in #design."
 
 ## spaces-tickets
 
-**The** tool for any ticket question — lists, status, assignee, board, stage, dates. Returns structured rows including `conversationId` (use with `spaces-messages` to read the thread).
+**The** tool for ticket LOOKUPS — lists, status, assignee, board, stage, dates. Returns structured rows including `conversationId` (use with `spaces-messages` to read the thread).
+
+**Not** the tool for support-desk metrics. Response/resolution times, CSAT, ticket volumes, per-agent performance, priority/stage/tag breakdowns and opened-vs-closed trends belong to `spaces-desk-metrics`, which aggregates them in the database across the whole desk. Rule of thumb: reach here when the asker wants the TICKETS, reach there when they want a NUMBER about the desk.
 
 **Required:** none — all filters optional.
 
@@ -261,7 +264,7 @@ User: "Show me the latest files shared in #design."
 - **limit** (number, 1–500, default 20) — Bump high for team reports.
 - **offset** (number, ≥0, default 0) — Pagination.
 - **classifyActionable** (boolean) — When `true`, server tags each ticket with `actionReason` ∈ `critical | overdue | no-assignee | stale | null`. Use for daily reports / triage. Never classify tickets yourself — it does it wrong.
-- **summary** (boolean) — When `true`, appends aggregate counts: `total`, `byStatus`, `byPriority`, `byUser`. Lets you skip arithmetic for reports.
+- **summary** (boolean) — When `true`, appends aggregate counts: `total`, `byStatus`, `byPriority`, `byUser`. Lets you skip arithmetic for reports. **Page-bounded — read this before trusting it:** the counts cover only the rows THIS call returned (`limit`, default 20, max 500), not everything that matched your filters. They answer "of the tickets I pulled, how many are HIGH?" — never "how many did the desk get?". For desk-wide totals, averages, CSAT or trends use `spaces-desk-metrics`, which aggregates in the database with no page cap.
 - **expectedUserGroup** (array of strings) — Emails/userIDs you expected to see. Combined with `summary=true`, the summary's `byUser` keeps members with 0 tickets — so you can show "Members with No Tickets" without doing set difference yourself.
 
 **Multi-select & UI-parity filters** (these mirror the dashboard's ticket filters — each array matches ANY of its values):

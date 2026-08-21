@@ -1,25 +1,17 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { ChevronRight, MultipleCrossCancelDefault, UserCheck } from '@xyne/icons';
+import { ChevronRight, MultipleCrossCancelDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbCollectionNode, KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
 import { BrowseDialog } from '../../primitives/BrowseDialog';
-import { DetailEmptyState } from '../../primitives/DetailPrimitives';
 import { BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { KbCollectionMeta, KbFolderTile } from './KnowledgeTiles';
 import { KnowledgeCollectionBrowser } from './KnowledgeCollectionBrowser';
-import { MatchUserAccessToggle } from './MatchUserAccessToggle';
-import type { KbScope } from './knowledgeCatalog';
 import { countGrantedFiles, grantsUnder, matchesQuery } from './knowledgeTree';
-
-const USER_SCOPE_NOTE =
-  'This agent reads whatever the person running it can already see in Spaces, so there are no collections to pick. Turn this off to attach a fixed set instead.';
 
 interface BrowseKnowledgeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  scope: KbScope;
-  onScopeChange: (next: KbScope) => void;
   grants: KbSelection[];
   onGrantsChange: (next: KbSelection[]) => void;
 }
@@ -27,8 +19,6 @@ interface BrowseKnowledgeDialogProps {
 export function BrowseKnowledgeDialog({
   open,
   onOpenChange,
-  scope,
-  onScopeChange,
   grants,
   onGrantsChange,
 }: BrowseKnowledgeDialogProps): ReactElement {
@@ -64,16 +54,13 @@ export function BrowseKnowledgeDialog({
   const openCollection = openId ? (tree.find(root => root.id === openId) ?? null) : null;
   const noSpacesSession = kb.data?.noSpacesSession ?? false;
 
-  const emptyMessage =
-    scope === 'USER'
-      ? null
-      : noSpacesSession
-        ? 'Sign in to Spaces to attach Knowledge Base documents to this agent.'
-        : tree.length === 0
-          ? "You don't have access to any Knowledge Base collections yet. Create one in Spaces, or ask a teammate to share theirs."
-          : results.length === 0
-            ? 'No collections match your search.'
-            : null;
+  const emptyMessage = noSpacesSession
+    ? 'Sign in to Spaces to attach Knowledge Base documents to this agent.'
+    : tree.length === 0
+      ? "You don't have access to any Knowledge Base collections yet. Create one in Spaces, or ask a teammate to share theirs."
+      : results.length === 0
+        ? 'No collections match your search.'
+        : null;
 
   return (
     <BrowseDialog
@@ -107,8 +94,7 @@ export function BrowseKnowledgeDialog({
             },
           }
         : {})}
-      toolbar={<MatchUserAccessToggle scope={scope} onScopeChange={onScopeChange} />}
-      {...(scope === 'COLLECTIONS' && selected.length > 0
+      {...(selected.length > 0
         ? {
             chips: (
               <div className='flex flex-col gap-4 px-2'>
@@ -152,29 +138,16 @@ export function BrowseKnowledgeDialog({
           }
         : {})}
     >
-      {scope === 'USER' ? (
-        <div className='flex min-h-0 flex-1 items-center justify-center'>
-          <div className='max-w-[380px]'>
-            <DetailEmptyState
-              icon={<UserCheck className='size-6' aria-hidden />}
-              title='Following the running user'
-              description={USER_SCOPE_NOTE}
-              className='pt-0'
-            />
-          </div>
-        </div>
-      ) : (
-        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-          {results.map(root => (
-            <CollectionCard
-              key={root.id}
-              node={root}
-              selected={grantsUnder(root, grants).length > 0}
-              onOpen={() => setOpenId(root.id)}
-            />
-          ))}
-        </div>
-      )}
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        {results.map(root => (
+          <CollectionCard
+            key={root.id}
+            node={root}
+            selected={grantsUnder(root, grants).length > 0}
+            onOpen={() => setOpenId(root.id)}
+          />
+        ))}
+      </div>
     </BrowseDialog>
   );
 }
