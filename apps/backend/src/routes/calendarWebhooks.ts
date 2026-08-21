@@ -170,9 +170,9 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
 // ============================================================================
 
 router.get('/microsoft-calendar', (req: Request, res: Response) => {
-  const validationToken = req.query.validationToken as string;
+  const validationToken = req.query.validationToken;
 
-  if (validationToken) {
+  if (typeof validationToken === 'string' && validationToken.length > 0) {
     logger.info(`${MICROSOFT_TAG} Webhook validation (GET)`);
     res.status(200).type('text/plain').send(validationToken);
   } else {
@@ -182,14 +182,14 @@ router.get('/microsoft-calendar', (req: Request, res: Response) => {
 
 router.post('/microsoft-calendar', async (req: Request, res: Response) => {
   try {
-    const validationToken = req.query.validationToken as string;
-    if (validationToken) {
+    const validationToken = req.query.validationToken;
+    if (typeof validationToken === 'string' && validationToken.length > 0) {
       logger.info(`${MICROSOFT_TAG} Webhook validation (POST)`);
       res.status(200).type('text/plain').send(validationToken);
       return;
     }
 
-    let payload = req.body;
+    let payload: unknown = req.body;
 
     if (Buffer.isBuffer(payload)) {
       // Keep a Buffer-typed reference: `payload` is reassigned to the parsed JSON below, which
@@ -208,19 +208,29 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
       }
     }
 
-    if (!payload || !Array.isArray(payload.value)) {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      Array.isArray(payload) ||
+      !Array.isArray((payload as { value?: unknown }).value)
+    ) {
       logger.error(`${MICROSOFT_TAG} Invalid notification payload`, {
         bodyType: typeof req.body,
         isBuffer: Buffer.isBuffer(req.body),
-        bodyKeys: payload ? Object.keys(payload).slice(0, 10) : 'null',
+        bodyKeys:
+          payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? Object.keys(payload).slice(0, 10)
+            : 'null',
       });
       res.status(202).send('Accepted');
       return;
     }
 
+    const notifications = (payload as { value: unknown[] }).value;
+
     res.status(202).send('Accepted');
 
-    for (const notification of payload.value) {
+    for (const notification of notifications) {
       await processMicrosoftNotification(notification);
     }
   } catch (error) {
