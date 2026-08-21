@@ -105,8 +105,6 @@ class DelayedMessageWorker {
             channelId: record.channelId,
             conversationId: record.conversationId,
             senderId: record.senderId,
-            content: record.content,
-            hasAttachment: record.hasAttachment,
             scheduledFor,
           },
           { jobId: record.id, delay: delayMs }
@@ -120,8 +118,6 @@ class DelayedMessageWorker {
             channelId: record.channelId,
             conversationId: record.conversationId,
             senderId: record.senderId,
-            content: record.content,
-            hasAttachment: record.hasAttachment,
             scheduledFor,
           },
           { jobId: record.id, delay: 0 }
@@ -167,7 +163,7 @@ class DelayedMessageWorker {
   }
 
   private async processJob(job: Bull.Job<DelayedMessageJobData>): Promise<void> {
-    const { delayedMessageId, channelId, conversationId, senderId, content } = job.data;
+    const { delayedMessageId, channelId, conversationId, senderId } = job.data;
 
     logger.info(
       `[DelayedMessageWorker] Processing job ${job.id} delayedMessageId=${delayedMessageId}`
@@ -180,7 +176,7 @@ class DelayedMessageWorker {
       | { kind: 'missing' }
       | { kind: 'terminal'; status: string }
       | { kind: 'delivery_blocked'; failureReason: string; log: string }
-      | { kind: 'ready' };
+      | { kind: 'ready'; content: string; hasAttachment: boolean };
 
     const preflight: Preflight = await prisma.$transaction(async (ptx: any) => {
       const msg = await ptx.delayedMessage.findUnique({ where: { id: delayedMessageId } });
@@ -226,7 +222,7 @@ class DelayedMessageWorker {
         };
       }
 
-      return { kind: 'ready' as const };
+      return { kind: 'ready' as const, content: msg.content, hasAttachment: msg.hasAttachment };
     });
 
     if (preflight.kind === 'missing') {
@@ -274,8 +270,8 @@ class DelayedMessageWorker {
         channelId,
         conversationId,
         senderId,
-        content,
-        hasAttachment: job.data.hasAttachment,
+        content: preflight.content,
+        hasAttachment: preflight.hasAttachment,
       });
 
       if (!result.success) {

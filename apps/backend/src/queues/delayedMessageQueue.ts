@@ -7,8 +7,6 @@ export interface DelayedMessageJobData {
   channelId: string;
   conversationId?: string | null;
   senderId: string;
-  content: string;
-  hasAttachment: boolean;
   scheduledFor: number;
 }
 

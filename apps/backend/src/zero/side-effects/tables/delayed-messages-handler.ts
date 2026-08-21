@@ -34,8 +34,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
       channelId: record.channelId,
       conversationId: record.conversationId,
       senderId: record.senderId,
-      content: record.content,
-      hasAttachment: record.hasAttachment,
       scheduledFor: record.scheduledFor,
     });
 
@@ -95,8 +93,6 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
           channelId: record.channelId,
           conversationId: record.conversationId,
           senderId: record.senderId,
-          content: record.content,
-          hasAttachment: record.hasAttachment,
           scheduledFor: record.scheduledFor,
         });
 
