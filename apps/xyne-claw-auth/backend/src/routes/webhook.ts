@@ -106,25 +106,7 @@ import {
   filterToApprovedTitles,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
-import JSZip from "jszip";
-import {
-  buildSdlcAgentToolProfile,
-  buildWriteApprovalFlow,
-  buildTwinApprovalFlow,
-  buildUserQuestionFlow,
-  buildPromoteProviderFlow,
-  buildCapacityRetryFlow,
-  buildGoalSuggestionFlow,
-  buildPlanFlow,
-  buildAgentCardFlow,
-  hashSkillContent,
-  buildPrFlow,
-  prScreenId,
-  isTwinDelivery,
-  SDLC_REQUIRED_TOOLS,
-  type PrProvider,
-  type PrStatus,
-} from "xyne-claw-shared";
+import {   buildSdlcAgentToolProfile,SDLC_REQUIRED_TOOLS, buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, MAX_AGENT_LIST_CARDS, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
@@ -575,6 +557,18 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+/** Owner display name + id for an agent's card chin ("Created by @x"). */
+async function agentOwnerCredit(
+  ownerUserId: string | null | undefined,
+): Promise<{ name?: string | null; id?: string | null } | undefined> {
+  if (!ownerUserId) return undefined;
+  const owner = await prisma.user
+    .findUnique({ where: { id: ownerUserId }, select: { id: true, name: true } })
+    .catch(() => null);
+  return owner?.name ? { name: owner.name, id: owner.id } : undefined;
+}
+
 
 function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
   return {
@@ -4427,7 +4421,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // the same card serves other agent surfaces (a read-only profile next).
     pendingAgentCard?:
       | { variant: "draft"; agent: DraftAgentSpec }
-      | { variant: "profile"; slug?: string };
+      | { variant: "profile"; slug?: string }
+      // "which agents can do X?" — a stack of read-only cards, capped server-side.
+      | { variant: "profile-list"; slugs: string[] }
+      // "list all my agents" — counts only, with a link into the library.
+      | { variant: "summary" };
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -5595,9 +5593,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           catalog,
           ctx.senderId,
         );
+        const ownerCredit = await agentOwnerCredit(row.ownerUserId);
         const flow = withSpacesAppId(
           buildAgentCardFlow(
-            { variant: "profile", agent: identityFromAgentRow(row, resolved) },
+            { variant: "profile", agent: identityFromAgentRow(row, resolved, undefined, ownerCredit) },
             {
               agentSlug: ctx.agentSlug!,
               targetSlug,
@@ -5624,6 +5623,103 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       });
     }
   }
+  if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const [total, globalCount] = await Promise.all([
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true } }),
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true, scope: "global" } }),
+      ]);
+
+      if (total === 0) {
+        log.info(`[agent-card] summary skipped — no agents in org ${ctx.agentOrgId}`);
+      } else {
+        const flow = withSpacesAppId(
+          buildAgentSummaryFlow(
+            { total, global: globalCount, personal: total - globalCount },
+            {
+              agentSlug: ctx.agentSlug!,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted roster summary (${total}) conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      log.warn("Failed to post agent summary card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (pendingAgentCard?.variant === "profile-list" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const requested = pendingAgentCard.slugs
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .slice(0, MAX_AGENT_LIST_CARDS * 4);
+      const unique = [...new Set(requested)];
+      const capped = unique.slice(0, MAX_AGENT_LIST_CARDS);
+
+      const catalog = await buildAvailableToolsCatalog(undefined, ctx.agentOrgId);
+      const identities = [];
+      for (const slug of capped) {
+        const row = await agentRepository.findBySlug(slug, ctx.agentOrgId);
+        if (!row) {
+          log.info(`[agent-card] list card skipped — no agent "${slug}" in org ${ctx.agentOrgId}`);
+          continue;
+        }
+        const resolved = await resolveAgentCapabilities(
+          toolIdsFromConfig(row.config),
+          catalog,
+          ctx.senderId,
+        );
+        const ownerCredit = await agentOwnerCredit(row.ownerUserId);
+        identities.push(identityFromAgentRow(row, resolved, undefined, ownerCredit));
+      }
+
+      if (identities.length === 0) {
+        log.info(`[agent-card] list card skipped — none of ${unique.length} slugs resolved`);
+      } else {
+        // Count only slugs that actually resolved, so "+N more" never promises
+        // agents that do not exist in this org.
+        const resolvedTotal = identities.length + Math.max(0, unique.length - capped.length);
+        const flow = withSpacesAppId(
+          buildAgentListFlow(identities, {
+            agentSlug: ctx.agentSlug!,
+            userId: ctx.senderId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+            totalMatches: resolvedTotal,
+          }),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted ${identities.length} list cards conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      // Non-fatal: the reply itself still posts below.
+      log.warn("Failed to post agent list cards (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (
     pendingAgentCard?.variant === "draft" &&
     ctx.responseMode === "conversation" &&

@@ -25,7 +25,7 @@ export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, 
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
-export { buildAgentCardFlow, agentIdentity, AGENT_COMPONENT_ID } from "./flow/agent-card.js";
+export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
 export { validateMcpProposal } from "./flow/mcp-proposal.js";
 export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
