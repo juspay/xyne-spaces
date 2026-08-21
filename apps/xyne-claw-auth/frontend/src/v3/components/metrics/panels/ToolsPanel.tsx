@@ -21,7 +21,7 @@
  * differ by orders of magnitude and lead to opposite decisions.
  */
 
-import { useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 import {
   Bar,
   BarChart,
@@ -33,7 +33,9 @@ import {
   YAxis,
 } from "recharts";
 import type {
-  ToolChartPoint,
+  ChartAggregation,
+  ChartMeasure,
+  ChartRequest,
   ToolFailuresResponse,
   ToolMetrics,
   ToolSortKey,
@@ -67,54 +69,124 @@ import {
 
 const CHART_HEIGHT = 280;
 
-/** The three "which tool is worst" questions, each with its own unit. */
-const CHART_METRICS = [
+/** What the bars measure. The server ranks for the pair, so switching refetches. */
+const CHART_MEASURES = [
   { id: "bytes", label: "Context returned" },
   { id: "time", label: "Time in tool" },
   { id: "errors", label: "Errors" },
+  { id: "calls", label: "Calls" },
 ] as const;
 
-type ChartMetric = (typeof CHART_METRICS)[number]["id"];
+const AGG_LABEL: Record<ChartAggregation, string> = {
+  total: "Cumulative",
+  perCall: "Per call",
+  perSession: "Per session",
+};
 
-const CHART_SPEC: Record<
-  ChartMetric,
-  {
-    title: string;
-    description: string;
-    aggregation: Aggregation;
-    unit: string;
-    format: (value: number) => string;
-    pick: (charts: ToolMetrics["charts"]) => ToolChartPoint[];
-  }
-> = {
+/**
+ * Every (measure, aggregation) pair, spelled out.
+ *
+ * Composing a description from two generic halves produced sentences like
+ * "mean calls for a single call" and attached a duration-specific caveat to a
+ * byte count. Each cell is written for the thing it actually describes, and a
+ * pair that has no meaning simply is not offered — calls-per-call is 1 by
+ * definition, so `calls` has no `perCall` entry and the control hides it.
+ */
+interface ChartSpec {
+  /** Completes "Tools by …". */
+  noun: string;
+  description: string;
+  badge: Aggregation;
+  unit: string;
+  format: (v: number) => string;
+}
+
+const roundedCount = (v: number): string => formatCount(Math.round(v * 100) / 100);
+
+const CHART_SPECS: Record<ChartMeasure, Partial<Record<ChartAggregation, ChartSpec>>> = {
   bytes: {
-    title: "Which tools consume the context budget",
-    description:
-      "Total bytes of tool output fed back into the model, summed over every call in the window. The biggest bar is usually the best compaction target.",
-    aggregation: "cumulative",
-    unit: "bytes",
-    format: formatBytes,
-    pick: (c) => c.byBytes,
+    total: {
+      noun: "context returned",
+      description: "Total bytes of tool output fed back into the model, summed over every call in the window. The biggest bar is usually the best compaction target.",
+      badge: "cumulative", unit: "bytes", format: formatBytes,
+    },
+    perCall: {
+      noun: "context per call",
+      description: "Mean bytes a single call returns. A tool can be cheap per call and still dominate the budget on volume — compare against the cumulative view.",
+      badge: "average", unit: "bytes / call", format: formatBytes,
+    },
+    perSession: {
+      noun: "context per session",
+      description: "Mean bytes a run gets from this tool, across runs that use it at all. Runs that never call it are not in the denominator.",
+      badge: "average", unit: "bytes / session", format: formatBytes,
+    },
   },
   time: {
-    title: "Which tools consume wall-clock",
-    description:
-      "Total time spent inside each tool, summed over every call — not the time of a typical call. A tool can lead here on volume alone, so read it beside p50 and p95 in the table.",
-    aggregation: "cumulative",
-    unit: "ms",
-    format: formatMs,
-    pick: (c) => c.byTime,
+    total: {
+      noun: "time in tool",
+      description: "Total time spent inside this tool, summed over every call — not the time of a typical call. A tool can lead here on volume alone, so read it beside p50 and p95 in the table.",
+      badge: "cumulative", unit: "ms", format: formatMs,
+    },
+    perCall: {
+      noun: "time per call",
+      description: "Mean duration of a single call. Divides by TIMED calls — a call whose end event never arrived has no duration and would drag the mean toward zero.",
+      badge: "average", unit: "ms / call", format: formatMs,
+    },
+    perSession: {
+      noun: "time per session",
+      description: "Mean time a run spends inside this tool, across runs that use it at all.",
+      badge: "average", unit: "ms / session", format: formatMs,
+    },
   },
   errors: {
-    title: "Which tools fail most",
-    description:
-      "Errored calls per tool, counted over the window. Absolute counts, not rates — a rare tool with a 100% error rate is a smaller problem than a common one at 5%.",
-    aggregation: "cumulative",
-    unit: "calls",
-    format: formatCount,
-    pick: (c) => c.byErrors,
+    total: {
+      noun: "errored calls",
+      description: "Errored calls per tool, counted over the window. Absolute counts, not rates — a rare tool at a 100% error rate is a smaller problem than a common one at 5%.",
+      badge: "cumulative", unit: "calls", format: roundedCount,
+    },
+    perCall: {
+      noun: "error rate",
+      description: "Share of this tool's calls that errored. The rate view: it surfaces unreliable tools regardless of how often they are used, so read it beside the cumulative count.",
+      badge: "rate", unit: "of calls", format: (v) => formatPct(v),
+    },
+    perSession: {
+      noun: "errors per session",
+      description: "Mean errored calls a run hits from this tool, across runs that use it at all.",
+      badge: "average", unit: "errors / session", format: roundedCount,
+    },
+  },
+  calls: {
+    total: {
+      noun: "call volume",
+      description: "Calls per tool, counted over the window.",
+      badge: "cumulative", unit: "calls", format: roundedCount,
+    },
+    // No perCall: calls-per-call is 1 by definition.
+    perSession: {
+      noun: "calls per session",
+      description: "Mean calls a run makes to this tool, across runs that use it at all. High means a few runs call it repeatedly — a loop; near 1 means many runs call it once — a broad dependency.",
+      badge: "average", unit: "calls / session", format: roundedCount,
+    },
   },
 };
+
+/** Only the aggregations that mean something for this measure. */
+function aggregationsFor(measure: ChartMeasure): Array<{ id: ChartAggregation; label: string }> {
+  return (Object.keys(CHART_SPECS[measure]) as ChartAggregation[]).map((id) => ({
+    id,
+    label: AGG_LABEL[id],
+  }));
+}
+
+/** Falls back to the measure's cumulative view when a pair has no meaning. */
+function specFor(measure: ChartMeasure, aggregation: ChartAggregation): { spec: ChartSpec; aggregation: ChartAggregation } {
+  const exact = CHART_SPECS[measure][aggregation];
+  if (exact) return { spec: exact, aggregation };
+  return { spec: CHART_SPECS[measure].total!, aggregation: "total" };
+}
+
+/** Below this, an average rests on too little evidence to rank confidently. */
+const THIN_EVIDENCE_CALLS = 3;
 
 export function ToolsPanel({
   data,
@@ -124,6 +196,8 @@ export function ToolsPanel({
   paging,
   failures,
   onDrillFailures,
+  chart,
+  onChartChange,
 }: {
   data: ToolMetrics | undefined;
   loading: boolean;
@@ -140,8 +214,10 @@ export function ToolsPanel({
     onOffset: (offset: number) => void;
   } | null;
   onDrillFailures: (tool: string | null) => void;
+  /** Owned by the page: the pair is a request parameter, not local view state. */
+  chart: ChartRequest;
+  onChartChange: (next: ChartRequest) => void;
 }): ReactElement {
-  const [chartMetric, setChartMetric] = useState<ChartMetric>("bytes");
 
   if (error) return <PanelError error={error} />;
   if (loading && !data) return <PanelMessage title="Loading tool metrics…" />;
@@ -159,6 +235,7 @@ export function ToolsPanel({
   // truthful reading of what arrived, and it beats a blank tab.
   const totals: ToolWindowTotals = data?.totals ?? {
     distinctTools: rows.length,
+    sessions: 0,
     calls: rows.reduce((a, r) => a + r.calls, 0),
     errors: rows.reduce((a, r) => a + r.errors, 0),
     droppedEnd: rows.reduce((a, r) => a + r.droppedEnd, 0),
@@ -181,8 +258,11 @@ export function ToolsPanel({
   }
   const errorRate = totals.calls > 0 ? totals.errors / totals.calls : 0;
   const droppedRate = totals.calls > 0 ? totals.droppedEnd / totals.calls : 0;
-  const spec = CHART_SPEC[chartMetric];
-  const series = data.charts ? spec.pick(data.charts) : [];
+  // Prefer what the server actually computed: it coerces a pair it cannot
+  // honour, and the labels must describe the bars on screen, not the request.
+  const requested = data.chartRequest ?? chart;
+  const { spec, aggregation } = specFor(requested.measure, requested.aggregation);
+  const series = data.chart ?? [];
 
   const columns: Array<Column<ToolStatsRow>> = [
     {
@@ -208,6 +288,29 @@ export function ToolsPanel({
       ),
     },
     { key: "calls", header: "Calls", numeric: true, sortValue: (r) => r.calls, hint: "Cumulative calls in the window", render: (r) => formatCount(r.calls) },
+    {
+      key: "sessions",
+      header: "Sessions",
+      numeric: true,
+      sortValue: (r) => r.sessions,
+      hint: "Distinct runs that called this tool at least once",
+      render: (r) => formatCount(r.sessions),
+    },
+    {
+      key: "callsPerSession",
+      header: "Calls / session",
+      numeric: true,
+      sortValue: (r) => r.callsPerSession,
+      hint: "Calls ÷ sessions. High means a few runs call it repeatedly; near 1 means many runs call it once.",
+      render: (r) =>
+        r.callsPerSession === null ? (
+          <span className="text-xyne-fg-muted">n/a</span>
+        ) : (
+          <span style={r.callsPerSession >= 5 ? { color: STATUS.warning } : undefined}>
+            {r.callsPerSession.toFixed(1)}×
+          </span>
+        ),
+    },
     {
       key: "errorRate",
       header: "Errors",
@@ -312,8 +415,16 @@ export function ToolsPanel({
         remedy="Run the tool-stats backfill to close the gap."
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <StatTile label="Tool calls" value={formatCount(totals.calls)} detail={`${formatCount(totals.distinctTools)} distinct tools`} aggregation="cumulative" unit="calls" />
+        <StatTile
+          label="Calls per session"
+          value={totals.sessions > 0 ? `${(totals.calls / totals.sessions).toFixed(1)}×` : "—"}
+          detail={`${formatCount(totals.sessions)} sessions used tools`}
+          aggregation="average"
+          unit="calls / session"
+          hint="Across runs that made at least one tool call. Runs that used no tools are not in the denominator."
+        />
         <StatTile
           label="Error rate"
           value={formatPct(errorRate)}
@@ -392,16 +503,28 @@ export function ToolsPanel({
       )}
 
       <MetricsCard
-        title={spec.title}
-        description={spec.description}
+        title={`Tools by ${spec.noun}`}
+        description={`${spec.description} Ranked across every tool in the window, not the rows on this page.`}
         action={
-          <div className="flex items-center gap-2">
-            <UnitBadge aggregation={spec.aggregation} unit={spec.unit} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <UnitBadge aggregation={spec.badge} unit={spec.unit} />
             <SegmentedControl
               ariaLabel="Chart measure"
-              options={CHART_METRICS}
-              value={chartMetric}
-              onChange={setChartMetric}
+              options={CHART_MEASURES}
+              value={requested.measure}
+              onChange={(measureId) =>
+                // Keep the aggregation only if the new measure supports it.
+                onChartChange({
+                  measure: measureId,
+                  aggregation: specFor(measureId, aggregation).aggregation,
+                })
+              }
+            />
+            <SegmentedControl
+              ariaLabel="Chart aggregation"
+              options={aggregationsFor(requested.measure)}
+              value={aggregation}
+              onChange={(aggId) => onChartChange({ measure: requested.measure, aggregation: aggId })}
             />
           </div>
         }
@@ -409,42 +532,67 @@ export function ToolsPanel({
         {series.length === 0 ? (
           <p className="py-6 text-[13px] text-xyne-fg-muted">Nothing recorded for this measure.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-            <BarChart data={series} layout="vertical" margin={{ top: 4, right: 56, bottom: 16, left: 8 }}>
-              <CartesianGrid stroke={NEUTRAL.grid} horizontal={false} />
-              <XAxis
-                type="number"
-                tick={AXIS_TICK}
-                tickLine={false}
-                axisLine={AXIS_LINE}
-                tickFormatter={(v) => spec.format(Number(v))}
-                label={{
-                  value: `${spec.aggregation === "cumulative" ? "cumulative" : spec.aggregation} ${spec.unit}`,
-                  position: "insideBottom",
-                  offset: -8,
-                  fontSize: 10,
-                  fill: "currentColor",
-                  opacity: 0.5,
-                }}
-              />
-              <YAxis type="category" dataKey="tool" tick={AXIS_TICK} tickLine={false} axisLine={AXIS_LINE} width={160} />
-              <Tooltip
-                cursor={{ fill: "currentColor", opacity: 0.05 }}
-                content={
-                  <MetricsTooltip
-                    format={(value, _n, item) =>
-                      `${spec.format(Number(value))} · ${formatPct((item?.["share"] as number) ?? 0)} of window`
-                    }
-                  />
-                }
-              />
-              <Bar dataKey="value" name={spec.unit} radius={[0, 4, 4, 0]} barSize={18} isAnimationActive={false}>
-                {series.map((entry) => (
-                  <Cell key={entry.tool} fill={entry.share >= 0.25 ? STATUS.serious : SEQUENTIAL.mid} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <BarChart data={series} layout="vertical" margin={{ top: 4, right: 56, bottom: 16, left: 8 }}>
+                <CartesianGrid stroke={NEUTRAL.grid} horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={AXIS_LINE}
+                  tickFormatter={(v) => spec.format(Number(v))}
+                  label={{
+                    value: spec.unit,
+                    position: "insideBottom",
+                    offset: -8,
+                    fontSize: 10,
+                    fill: "currentColor",
+                    opacity: 0.5,
+                  }}
+                />
+                <YAxis type="category" dataKey="tool" tick={AXIS_TICK} tickLine={false} axisLine={AXIS_LINE} width={160} />
+                <Tooltip
+                  cursor={{ fill: "currentColor", opacity: 0.05 }}
+                  content={
+                    <MetricsTooltip
+                      format={(value, _n, item) => {
+                        const share = item?.["share"] as number | null | undefined;
+                        const calls = (item?.["calls"] as number) ?? 0;
+                        const sessions = (item?.["sessions"] as number) ?? 0;
+                        const evidence = `${formatCount(calls)} call${calls === 1 ? "" : "s"} across ${formatCount(sessions)} session${sessions === 1 ? "" : "s"}`;
+                        return share == null
+                          ? `${spec.format(Number(value))} · ${evidence}`
+                          : `${spec.format(Number(value))} · ${formatPct(share)} of window · ${evidence}`;
+                      }}
+                    />
+                  }
+                />
+                <Bar dataKey="value" name={spec.unit} radius={[0, 4, 4, 0]} barSize={18} isAnimationActive={false}>
+                  {series.map((entry) => (
+                    <Cell
+                      key={entry.tool}
+                      fill={
+                        // An average over a handful of calls can top the chart on
+                        // noise. Muted rather than hidden — the reader decides.
+                        aggregation !== "total" && entry.calls < THIN_EVIDENCE_CALLS
+                          ? NEUTRAL.muted
+                          : (entry.share ?? 0) >= 0.25
+                            ? STATUS.serious
+                            : SEQUENTIAL.mid
+                      }
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {aggregation !== "total" && series.some((s) => s.calls < THIN_EVIDENCE_CALLS) && (
+              <p className="mt-2 text-[11px] text-xyne-fg-muted">
+                Greyed bars rest on fewer than {THIN_EVIDENCE_CALLS} calls — a high average there is
+                thin evidence, not a finding.
+              </p>
+            )}
+          </>
         )}
       </MetricsCard>
 

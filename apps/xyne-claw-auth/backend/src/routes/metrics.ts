@@ -25,6 +25,9 @@ import {
   fetchToolStats,
   fetchToolStatsCoverage,
   TOOL_SORT_KEYS,
+  type ChartAggregation,
+  type ChartMeasure,
+  type ChartRequest,
   type PageRequest,
   type ToolSortKey,
 } from "../lib/tool-stats-read.js";
@@ -83,6 +86,106 @@ const TRIGGER_GROUPS: TriggerGroup[] = ["user", "automation", "scheduled", "api"
 function parseDays(req: Request): number {
   const raw = Number(req.query["days"]);
   return ALLOWED_DAYS.has(raw) ? raw : DEFAULT_DAYS;
+}
+
+/** Bounds the scan a hand-written URL can ask for. */
+const MAX_WINDOW_DAYS = 366;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface ResolvedWindow {
+  windowStart: Date;
+  windowEnd: Date;
+  /** Same length immediately before the window — the denominator for deltas. */
+  prevWindowStart: Date;
+  /** Window length in days, echoed to the client. Fractional for sub-day ranges. */
+  days: number;
+  /** True when the caller gave explicit dates rather than a preset. */
+  explicit: boolean;
+}
+
+/**
+ * Parses `?from=&to=`, falling back to the `?days=` preset.
+ *
+ * A DATE-ONLY value means the whole UTC day — `from=2026-08-15` starts at
+ * 00:00:00Z and `to=2026-08-15` ends at 23:59:59.999Z, so a single date selects
+ * that day rather than a zero-length window. Callers that care about a local
+ * calendar day should send full ISO instants; those are used verbatim.
+ *
+ * Shared by the run-level and the deep endpoints so a date range cannot mean
+ * one thing on the overview and another on the tool tabs.
+ */
+function parseWindow(req: Request): ResolvedWindow {
+  const rawFrom = typeof req.query["from"] === "string" ? req.query["from"].trim() : "";
+  const rawTo = typeof req.query["to"] === "string" ? req.query["to"].trim() : "";
+
+  const dateOnly = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const parse = (v: string, edge: "start" | "end"): Date | null => {
+    if (!v) return null;
+    const iso = dateOnly(v) ? `${v}T${edge === "start" ? "00:00:00.000" : "23:59:59.999"}Z` : v;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  // Order the RAW values before applying edges. Swapping parsed instants would
+  // hand day-END to `from` and day-START to `to`, so a reversed range came out
+  // narrower than the identical range typed forward.
+  let lo = rawFrom;
+  let hi = rawTo;
+  if (lo && hi) {
+    const cmp = (v: string): number => new Date(dateOnly(v) ? `${v}T00:00:00.000Z` : v).getTime();
+    if (cmp(lo) > cmp(hi)) [lo, hi] = [hi, lo];
+  }
+
+  const from = parse(lo, "start");
+  const to = parse(hi, "end");
+
+  if (from || to) {
+    const now = Date.now();
+    // Never let the window end in the future: a `to` past now would otherwise
+    // slide the whole clamped span into a period that cannot contain any runs.
+    let endMs = Math.min((to ?? new Date()).getTime(), now);
+    // `from` missing but `to` present → the preset length ending at `to`.
+    const fallbackDays = parseDays(req);
+    let startMs = (from ?? new Date(endMs - fallbackDays * DAY_MS)).getTime();
+    // Raw values were ordered above; this only catches a `from` later than a
+    // clamped `to` (a future `to` pulled back to now).
+    if (startMs > endMs) startMs = endMs;
+
+    const span = Math.min(endMs - startMs, MAX_WINDOW_DAYS * DAY_MS);
+    const windowEnd = new Date(endMs);
+    const clampedStart = new Date(endMs - span);
+    return {
+      windowStart: clampedStart,
+      windowEnd,
+      prevWindowStart: new Date(clampedStart.getTime() - span),
+      days: Math.max(1, Math.round(span / DAY_MS)),
+      explicit: true,
+    };
+  }
+
+  const days = parseDays(req);
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - days * DAY_MS);
+  return {
+    windowStart,
+    windowEnd,
+    prevWindowStart: new Date(windowStart.getTime() - days * DAY_MS),
+    days,
+    explicit: false,
+  };
+}
+
+/**
+ * Optional single-session scope.
+ *
+ * `agent_runs.sessionId` is unique, so this collapses every query to one run —
+ * the cheapest filter available and the one that turns these dashboards into a
+ * per-session forensic view.
+ */
+function parseSessionId(req: Request): string | undefined {
+  const raw = req.query["sessionId"];
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return value ? value : undefined;
 }
 
 interface DayBucket {
@@ -454,10 +557,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
   try {
     const { userFilter, orgFilter, scopeUserId, scopeOrgId } = await resolveMetricsScope(req, "/metrics/agent");
     const slug = req.params.slug;
-    const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const { windowStart, windowEnd, prevWindowStart, days } = parseWindow(req);
 
     const perDayRaw = await prisma.$queryRaw<Array<{
       day: Date;
@@ -648,10 +748,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
 metricsRouter.get("/global", async (req: Request, res: Response) => {
   try {
     const { userFilter, orgFilter, scopeUserId, scopeOrgId, allOrgs } = await resolveMetricsScope(req, "/metrics/global");
-    const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const { windowStart, windowEnd, prevWindowStart, days } = parseWindow(req);
 
     // Per-day rollup. PostgreSQL handles the percentile + grouping in one pass.
     // Using $queryRawUnsafe is unnecessary — parameterise the interval via a
@@ -1224,21 +1321,26 @@ async function buildAnalyticsWindow(req: Request, endpoint: string): Promise<{
   window: AnalyticsWindow;
   days: number;
   agentSlugs: string[];
+  sessionId: string | undefined;
 }> {
   const { userFilter, orgFilter } = await resolveMetricsScope(req, endpoint);
-  const days = parseDays(req);
-  const windowEnd = new Date();
-  const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
+  const { windowStart, windowEnd, days } = parseWindow(req);
   const agentSlugs = parseAgentSlugs(req);
+  const sessionId = parseSessionId(req);
 
   return {
     days,
     agentSlugs,
+    sessionId,
     window: {
       windowStart,
       windowEnd,
+      // A session is one run, so the window column no longer decides the plan —
+      // the unique index on sessionId does. Keep the agent-scoped choice for
+      // consistency with the un-filtered case.
       windowColumn: agentSlugs.length > 0 ? "startedAt" : "completedAt",
       agentSlugs,
+      ...(sessionId ? { sessionId } : {}),
       userFilter,
       orgFilter,
     },
@@ -1271,6 +1373,26 @@ function parseIntParam(raw: unknown, fallback: number, min: number, max: number)
  * `sort` is validated against the whitelist rather than passed through — the
  * value reaches an ORDER BY, and only a known key may.
  */
+/**
+ * Which series the tools chart should plot.
+ *
+ * Validated against the known sets rather than passed through — both values
+ * select a SQL expression, so only a known key may reach the query.
+ */
+const CHART_MEASURES: readonly ChartMeasure[] = ["bytes", "time", "errors", "calls"];
+const CHART_AGGREGATIONS: readonly ChartAggregation[] = ["total", "perCall", "perSession"];
+
+function parseChartRequest(req: Request): ChartRequest {
+  const measure = String(req.query["chartMeasure"] ?? "");
+  const aggregation = String(req.query["chartAgg"] ?? "");
+  return {
+    measure: CHART_MEASURES.includes(measure as ChartMeasure) ? (measure as ChartMeasure) : "bytes",
+    aggregation: CHART_AGGREGATIONS.includes(aggregation as ChartAggregation)
+      ? (aggregation as ChartAggregation)
+      : "total",
+  };
+}
+
 function parseToolPage(req: Request): PageRequest {
   const rawSort = String(req.query["sort"] ?? "");
   const sort = (TOOL_SORT_KEYS as string[]).includes(rawSort) ? (rawSort as ToolSortKey) : "calls";
@@ -1296,6 +1418,98 @@ function parseAgentSlugs(req: Request): string[] {
 }
 
 /**
+ * GET /api/v1/metrics/session/:sessionId
+ *
+ * The one run behind a session filter.
+ *
+ * The window rollups are aggregates and have no single-run form — a p95 over
+ * one value is that value. So rather than telling the reader the filter does
+ * not apply, this returns the run itself: what it did, how long it took, what
+ * it spent, and whether the deep tabs will have anything to show for it.
+ *
+ * Scoped by `resolveMetricsScope`, so a non-admin sees only their own runs.
+ */
+metricsRouter.get("/session/:sessionId", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const { userFilter, orgFilter } = await resolveMetricsScope(req, "/metrics/session");
+    const sessionId = req.params.sessionId?.trim();
+    if (!sessionId) {
+      res.status(400).json({ error: "sessionId is required" });
+      return;
+    }
+
+    const [row] = await prisma.$queryRaw<Array<{
+      session_id: string; agent_slug: string; status: string; trigger_source: string;
+      provider: string | null; model: string | null; task: string | null; error: string | null;
+      started_at: Date; completed_at: Date | null;
+      total_ms: number | null; llm_total_ms: number | null; tool_ms: number | null;
+      llm_turns: number | null; llm_retries: number | null; ttft_ms: number | null;
+      tokens_in: number | null; tokens_out: number | null;
+      tokens_cache_read: number | null; tokens_cache_write: number | null;
+      tools_used: string[] | null; rating: string | null;
+      tool_calls: number | null; llm_calls: number | null;
+    }>>(Prisma.sql`
+      SELECT
+        r."sessionId" AS session_id, r."agentSlug" AS agent_slug, r.status,
+        r."triggerSource" AS trigger_source, r.provider, r.model,
+        left(r.task, 400) AS task, left(r.error, 400) AS error,
+        r."startedAt" AS started_at, r."completedAt" AS completed_at,
+        r."totalMs" AS total_ms, r."llmTotalMs" AS llm_total_ms, r."toolMs" AS tool_ms,
+        r."llmTurns" AS llm_turns, r."llmRetries" AS llm_retries, r."ttftMs" AS ttft_ms,
+        r."tokensIn" AS tokens_in, r."tokensOut" AS tokens_out,
+        r."tokensCacheRead" AS tokens_cache_read, r."tokensCacheWrite" AS tokens_cache_write,
+        r."toolsUsed" AS tools_used, r.rating,
+        CASE WHEN jsonb_typeof(r."toolInvocations") = 'array'
+             THEN jsonb_array_length(r."toolInvocations") END AS tool_calls,
+        CASE WHEN jsonb_typeof(r."llmTurnStats") = 'array'
+             THEN jsonb_array_length(r."llmTurnStats") END AS llm_calls
+      FROM "agent_runs" r
+      WHERE r."sessionId" = ${sessionId} ${userFilter} ${orgFilter}
+      LIMIT 1
+    `);
+
+    if (!row) {
+      res.status(404).json({ error: "Session not found, or not visible to you" });
+      return;
+    }
+
+    res.json({
+      sessionId: row.session_id,
+      agentSlug: row.agent_slug,
+      status: row.status,
+      trigger: row.trigger_source,
+      provider: row.provider,
+      model: row.model,
+      task: row.task,
+      error: row.error,
+      startedAt: row.started_at.toISOString(),
+      completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+      totalMs: row.total_ms,
+      llmTotalMs: row.llm_total_ms,
+      toolMs: row.tool_ms,
+      llmTurns: row.llm_turns,
+      llmRetries: row.llm_retries,
+      ttftMs: row.ttft_ms,
+      tokens: {
+        in: row.tokens_in ?? 0,
+        out: row.tokens_out ?? 0,
+        cacheRead: row.tokens_cache_read ?? 0,
+        cacheWrite: row.tokens_cache_write ?? 0,
+      },
+      toolsUsed: row.tools_used ?? [],
+      toolCalls: row.tool_calls,
+      rating: row.rating,
+      // Null means the run predates the column — the matching tab will be empty
+      // for it, and the UI says so rather than showing a bare zero.
+      llmCallsRecorded: row.llm_calls,
+    });
+  } catch (err) {
+    log.error("[metrics/session] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
  * GET /api/v1/metrics/tools?days=7&agentSlug=euler
  *
  * Per-tool volume, reliability, latency and context burn, plus the top failure
@@ -1310,7 +1524,7 @@ metricsRouter.get("/tools", async (req: Request, res: Response) => {
     // the raw error text, which no fixed-shape summary can carry.
     const pageReq = parseToolPage(req);
     const [tools, coverage, errorClasses] = await Promise.all([
-      fetchToolStats(window, pageReq),
+      fetchToolStats(window, pageReq, parseChartRequest(req)),
       fetchToolStatsCoverage(window),
       fetchToolErrorClasses(window),
     ]);
@@ -1327,8 +1541,10 @@ metricsRouter.get("/tools", async (req: Request, res: Response) => {
       // Window-wide, never derived from the page — see ToolWindowTotals.
       totals: tools.totals,
       page: tools.page,
-      // Top-N over the whole window, so a chart never ranks one page of rows.
-      charts: tools.charts,
+      // Top-N over the whole window, ranked for the requested measure and
+      // aggregation, so a chart never ranks one page of rows.
+      chart: tools.chart,
+      chartRequest: tools.chartRequest,
       errorClasses,
     });
   } catch (err) {

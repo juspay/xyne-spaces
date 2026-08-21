@@ -37,6 +37,16 @@ const TOOLSTATS_IS_ARRAY = Prisma.sql`r."toolStats" IS NOT NULL AND jsonb_typeof
 export interface ToolStatsRow {
   tool: string;
   calls: number;
+  /** Distinct runs that called this tool at all. */
+  sessions: number;
+  /**
+   * calls ÷ sessions — how many times a run that uses this tool calls it.
+   *
+   * Separates "used by many runs once" from "hammered by a few runs", which the
+   * raw call count cannot distinguish and which point at different problems: a
+   * broad dependency versus a loop.
+   */
+  callsPerSession: number | null;
   topLevelCalls: number;
   childCalls: number;
   errors: number;
@@ -77,6 +87,8 @@ const rate = (n: number, d: number): number => (d > 0 ? n / d : 0);
 const TOOL_SORTS = {
   tool: Prisma.sql`j.tool`,
   calls: Prisma.sql`j.calls`,
+  sessions: Prisma.sql`j.sessions`,
+  callsPerSession: Prisma.sql`(j.calls::float8 / NULLIF(j.sessions, 0))`,
   errors: Prisma.sql`j.errors`,
   errorRate: Prisma.sql`(j.errors::float8 / NULLIF(j.calls, 0))`,
   duplicateRate: Prisma.sql`(j.duplicate_calls::float8 / NULLIF(j.calls, 0))`,
@@ -125,6 +137,8 @@ export interface PageInfo {
  */
 export interface ToolWindowTotals {
   distinctTools: number;
+  /** Distinct runs that made at least one tool call in the window. */
+  sessions: number;
   calls: number;
   errors: number;
   droppedEnd: number;
@@ -140,32 +154,79 @@ export interface ToolWindowTotals {
 /**
  * A chart series computed over the WHOLE window, independent of the page.
  *
- * The charts must not be derived from the loaded rows: "top 8 tools by context
- * burn" drawn from page 3 of a name-sorted table is not a ranking, it is eight
- * arbitrary tools. Computed here from the same aggregate, so it costs nothing
- * extra and stays correct no matter where the reader is in the table.
+ * Ranked SERVER-SIDE per (measure, aggregation) rather than returning one
+ * series the client re-sorts: the top 8 by cumulative bytes and the top 8 by
+ * bytes-per-call are different sets, so re-ranking a fixed top-8 would silently
+ * answer a different question than the one on screen.
  */
 export interface ToolChartPoint {
   tool: string;
   value: number;
-  /** Share of the window total for this measure, 0..1. */
-  share: number;
+  /**
+   * Share of the window total. Only meaningful for a `total` aggregation —
+   * null otherwise, because an average is not a share of anything.
+   */
+  share: number | null;
+  /** Sample size behind the value, so a thin average is visible as thin. */
+  calls: number;
+  sessions: number;
 }
 
-export interface ToolCharts {
-  /** Cumulative result bytes returned to the model. */
-  byBytes: ToolChartPoint[];
-  /** Cumulative wall-clock inside the tool. */
-  byTime: ToolChartPoint[];
-  /** Errored calls. */
-  byErrors: ToolChartPoint[];
+export type ChartMeasure = "bytes" | "time" | "errors" | "calls";
+export type ChartAggregation = "total" | "perCall" | "perSession";
+
+export interface ChartRequest {
+  measure: ChartMeasure;
+  aggregation: ChartAggregation;
 }
+
+/**
+ * What each (measure, aggregation) pair plots.
+ *
+ * Duration divides by TIMED calls, not all calls — a call whose end event never
+ * arrived has no duration and would drag a mean toward zero. Byte and error
+ * measures divide by all calls, where every call contributes.
+ */
+const CHART_VALUE: Record<ChartMeasure, Partial<Record<ChartAggregation, Prisma.Sql>>> = {
+  bytes: {
+    total: Prisma.sql`j.result_bytes::float8`,
+    perCall: Prisma.sql`(j.result_bytes::float8 / NULLIF(j.calls, 0))`,
+    perSession: Prisma.sql`(j.result_bytes::float8 / NULLIF(j.sessions, 0))`,
+  },
+  time: {
+    total: Prisma.sql`j.total_ms::float8`,
+    perCall: Prisma.sql`(j.total_ms::float8 / NULLIF(j.timed, 0))`,
+    perSession: Prisma.sql`(j.total_ms::float8 / NULLIF(j.sessions, 0))`,
+  },
+  errors: {
+    total: Prisma.sql`j.errors::float8`,
+    perCall: Prisma.sql`(j.errors::float8 / NULLIF(j.calls, 0))`,
+    perSession: Prisma.sql`(j.errors::float8 / NULLIF(j.sessions, 0))`,
+  },
+  calls: {
+    total: Prisma.sql`j.calls::float8`,
+    // No perCall: calls-per-call is 1 by definition. An API caller asking for it
+    // is coerced to `total` and told so via the echoed chartRequest, rather than
+    // being silently served a different measure.
+    perSession: Prisma.sql`(j.calls::float8 / NULLIF(j.sessions, 0))`,
+  },
+};
+
+/** Window total for a measure, used as the denominator of `share`. */
+const CHART_WINDOW_TOTAL: Record<ChartMeasure, (t: ToolWindowTotals) => number> = {
+  bytes: (t) => t.resultBytes,
+  time: (t) => t.totalMs,
+  errors: (t) => t.errors,
+  calls: (t) => t.calls,
+};
 
 export interface ToolStatsPage {
   rows: ToolStatsRow[];
   page: PageInfo;
   totals: ToolWindowTotals;
-  charts: ToolCharts;
+  /** The single series matching the requested measure and aggregation. */
+  chart: ToolChartPoint[];
+  chartRequest: ChartRequest;
 }
 
 const CHART_TOP_N = 8;
@@ -173,6 +234,7 @@ const CHART_TOP_N = 8;
 interface RawToolRow {
   tool: string | null;
   calls: number;
+  sessions: number;
   top_level_calls: number;
   errors: number;
   dropped_end: number;
@@ -205,8 +267,19 @@ function edgeFromIndex(idx: number | null): number | null {
  * Returns one row containing the page, the match count and the window totals,
  * so paging never costs a second scan of the window.
  */
-export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Promise<ToolStatsPage> {
+export async function fetchToolStats(
+  w: AnalyticsWindow,
+  page: PageRequest,
+  chart: ChartRequest = { measure: "bytes", aggregation: "total" },
+): Promise<ToolStatsPage> {
   const sortExpr = TOOL_SORTS[page.sort] ?? TOOL_SORTS.calls;
+  // Coerce a pair that has no meaning, and report the pair actually used — the
+  // caller's labels have to describe the bars, not the request.
+  const resolvedChart: ChartRequest = CHART_VALUE[chart.measure]?.[chart.aggregation]
+    ? chart
+    : { measure: chart.measure, aggregation: "total" };
+  const chartValue = CHART_VALUE[resolvedChart.measure]?.[resolvedChart.aggregation]
+    ?? CHART_VALUE.bytes.total!;
   const dir = page.dir === "asc" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
   const search = page.search?.trim();
   // NULLS LAST in both directions: an unknown latency is never "the worst".
@@ -221,12 +294,10 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
     rows: RawToolRow[] | null;
     match_count: number;
     totals: ToolWindowTotals | null;
-    by_bytes: Array<{ tool: string; value: number }> | null;
-    by_time: Array<{ tool: string; value: number }> | null;
-    by_errors: Array<{ tool: string; value: number }> | null;
+    chart: Array<{ tool: string; value: number; calls: number; sessions: number }> | null;
   }>(Prisma.sql`
     WITH stat AS (
-      SELECT s AS v
+      SELECT s AS v, r."sessionId" AS session_id
       FROM "agent_runs" r, LATERAL jsonb_array_elements(r."toolStats") s
       WHERE ${windowPredicate(w)}
         AND ${TOOLSTATS_IS_ARRAY}
@@ -234,6 +305,9 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
       SELECT
         v->>'t'                    AS tool,
         sum((v->>'c')::bigint)     AS calls,
+        -- One toolStats entry per (run, tool), so a distinct count of runs is
+        -- exactly "how many sessions used this tool".
+        count(DISTINCT session_id) AS sessions,
         sum((v->>'tl')::bigint)    AS top_level_calls,
         sum((v->>'e')::bigint)     AS errors,
         sum((v->>'d')::bigint)     AS dropped_end,
@@ -300,26 +374,18 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
       (SELECT count(*) FROM matched)::int AS match_count,
       COALESCE((
         SELECT json_agg(x) FROM (
-          SELECT tool, result_bytes::bigint AS value FROM agg
-          WHERE result_bytes > 0 ORDER BY result_bytes DESC, tool ASC LIMIT ${CHART_TOP_N}
+          SELECT j.tool, ${chartValue} AS value, j.calls::int AS calls, j.sessions::int AS sessions
+          FROM j
+          WHERE ${chartValue} IS NOT NULL AND ${chartValue} > 0
+          ORDER BY ${chartValue} DESC, j.tool ASC
+          LIMIT ${CHART_TOP_N}
         ) x
-      ), '[]'::json) AS by_bytes,
-      COALESCE((
-        SELECT json_agg(x) FROM (
-          SELECT tool, total_ms::bigint AS value FROM agg
-          WHERE total_ms > 0 ORDER BY total_ms DESC, tool ASC LIMIT ${CHART_TOP_N}
-        ) x
-      ), '[]'::json) AS by_time,
-      COALESCE((
-        SELECT json_agg(x) FROM (
-          SELECT tool, errors::bigint AS value FROM agg
-          WHERE errors > 0 ORDER BY errors DESC, tool ASC LIMIT ${CHART_TOP_N}
-        ) x
-      ), '[]'::json) AS by_errors,
+      ), '[]'::json) AS chart,
       (
         SELECT json_build_object(
           'distinctTools', count(*)::int,
           'calls',         COALESCE(sum(calls), 0)::int,
+          'sessions',      (SELECT count(DISTINCT session_id) FROM stat)::int,
           'errors',        COALESCE(sum(errors), 0)::int,
           'droppedEnd',    COALESCE(sum(dropped_end), 0)::int,
           'duplicateCalls',COALESCE(sum(duplicate_calls), 0)::int,
@@ -334,7 +400,7 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
   `);
 
   const totals: ToolWindowTotals = result?.totals ?? {
-    distinctTools: 0, calls: 0, errors: 0, droppedEnd: 0, duplicateCalls: 0,
+    distinctTools: 0, sessions: 0, calls: 0, errors: 0, droppedEnd: 0, duplicateCalls: 0,
     emptyResults: 0, citeableCalls: 0, citedCalls: 0, recoveredCalls: 0,
     resultBytes: 0, totalMs: 0,
   };
@@ -350,9 +416,12 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
     const totalMs = Number(r.total_ms);
     const bytes = Number(r.result_bytes);
     const timed = Number(r.timed);
+    const sessions = Number(r.sessions);
     return {
       tool: r.tool ?? "(unknown)",
       calls,
+      sessions,
+      callsPerSession: sessions > 0 ? calls / sessions : null,
       topLevelCalls: Number(r.top_level_calls),
       childCalls: calls - Number(r.top_level_calls),
       errors,
@@ -379,23 +448,20 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
     };
   });
 
-  const series = (
-    points: Array<{ tool: string; value: number }> | null | undefined,
-    windowTotal: number,
-  ): ToolChartPoint[] =>
-    (points ?? []).map((pt) => ({
-      tool: pt.tool,
-      value: Number(pt.value),
-      share: rate(Number(pt.value), windowTotal),
-    }));
+  const windowTotal = CHART_WINDOW_TOTAL[resolvedChart.measure](totals);
+  const chartPoints: ToolChartPoint[] = (result?.chart ?? []).map((pt) => ({
+    tool: pt.tool,
+    value: Number(pt.value),
+    // A share only means something for a total; an average is not a share.
+    share: resolvedChart.aggregation === "total" ? rate(Number(pt.value), windowTotal) : null,
+    calls: Number(pt.calls),
+    sessions: Number(pt.sessions),
+  }));
 
   return {
     rows,
-    charts: {
-      byBytes: series(result?.by_bytes, windowBytes),
-      byTime: series(result?.by_time, Number(totals.totalMs)),
-      byErrors: series(result?.by_errors, Number(totals.errors)),
-    },
+    chart: chartPoints,
+    chartRequest: resolvedChart,
     page: {
       limit: page.limit,
       offset: page.offset,
@@ -405,6 +471,7 @@ export async function fetchToolStats(w: AnalyticsWindow, page: PageRequest): Pro
     },
     totals: {
       distinctTools: Number(totals.distinctTools),
+      sessions: Number(totals.sessions),
       calls: Number(totals.calls),
       errors: Number(totals.errors),
       droppedEnd: Number(totals.droppedEnd),

@@ -5,30 +5,31 @@
  * open. The page has four detail tabs; loading all of them on mount would
  * quadruple the request cost for data the reader may never look at.
  *
- * The agent selection is a multi-select; the key joins it so widening or
- * narrowing the selection refetches, and an unchanged selection does not.
- *
- * Requests are keyed by their full parameter set. The key — not the callback
- * identity — drives the effect, so an inline `() => fetchX(...)` at the call
- * site cannot cause a refetch loop. In-flight responses for a stale key are
- * discarded rather than applied, and the previous data is held while a refetch
- * runs so a filter change does not blank the panel.
+ * Requests are keyed by their full parameter set — window, scope, page, chart.
+ * The key, not the callback identity, drives the effect, so an inline
+ * `() => fetchX(...)` at the call site cannot cause a refetch loop. In-flight
+ * responses for a stale key are discarded rather than applied, and the previous
+ * data is held while a refetch runs so a filter change does not blank the panel.
  */
 
 import { useEffect, useRef, useState } from "react";
 import {
   fetchLlmCallMetrics,
-  fetchToolFailures,
   fetchToolCoverageMetrics,
+  fetchToolFailures,
   fetchToolMetrics,
   fetchToolQualityMetrics,
+  fetchSessionSummary,
   type AdminOrgScope,
+  type ChartRequest,
+  type DeepMetricsFilters,
   type LlmCallMetrics,
   type ToolCoverageMetrics,
   type ToolFailuresResponse,
   type ToolMetrics,
   type ToolPageRequest,
   type ToolQualityMetrics,
+  type SessionSummary,
 } from "../../lib/api";
 
 export type MetricsDays = 1 | 7 | 30;
@@ -79,22 +80,72 @@ function useDeepMetric<T>(
   return state;
 }
 
-/** Serialises a page request into the cache key so sort/page/search refetch. */
+/** Every filter that changes the answer, flattened into a cache key. */
+function filterKey(userId: string, f: DeepMetricsFilters): string {
+  return [
+    userId,
+    f.days,
+    f.from ?? "",
+    f.to ?? "",
+    f.orgScope ?? "org",
+    (f.agentSlugs ?? []).join("+"),
+    f.sessionId ?? "",
+  ].join("|");
+}
+
 function pageKey(page: ToolPageRequest): string {
   return `${page.limit}|${page.offset}|${page.sort}|${page.dir}|${page.search ?? ""}`;
 }
 
 export function useToolMetrics(
   userId: string,
-  days: MetricsDays,
-  orgScope: AdminOrgScope,
-  agentSlugs: readonly string[],
+  filters: DeepMetricsFilters,
   page: ToolPageRequest,
+  chart: ChartRequest,
   enabled: boolean,
 ): DeepMetricState<ToolMetrics> {
   return useDeepMetric(
-    `tools|${userId}|${days}|${orgScope}|${agentSlugs.join(",")}|${pageKey(page)}`,
-    () => fetchToolMetrics(userId, days, orgScope, agentSlugs, page),
+    `tools|${filterKey(userId, filters)}|${pageKey(page)}|${chart.measure}|${chart.aggregation}`,
+    () => fetchToolMetrics(userId, filters, page, chart),
+    enabled,
+  );
+}
+
+export function useToolQualityMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  exact: boolean,
+  page: ToolPageRequest,
+  enabled: boolean,
+): DeepMetricState<ToolQualityMetrics> {
+  return useDeepMetric(
+    `quality|${filterKey(userId, filters)}|${exact}|${pageKey(page)}`,
+    () => fetchToolQualityMetrics(userId, filters, exact, page),
+    enabled,
+  );
+}
+
+export function useToolCoverageMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  enabled: boolean,
+): DeepMetricState<ToolCoverageMetrics> {
+  return useDeepMetric(
+    `coverage|${filterKey(userId, filters)}`,
+    () => fetchToolCoverageMetrics(userId, filters),
+    enabled,
+  );
+}
+
+export function useLlmCallMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  includeSubagents: boolean,
+  enabled: boolean,
+): DeepMetricState<LlmCallMetrics> {
+  return useDeepMetric(
+    `llm|${filterKey(userId, filters)}|${includeSubagents}`,
+    () => fetchLlmCallMetrics(userId, filters, { includeSubagents }),
     enabled,
   );
 }
@@ -108,59 +159,25 @@ export function useToolMetrics(
 export function useToolFailures(
   userId: string,
   tool: string | null,
-  days: MetricsDays,
-  orgScope: AdminOrgScope,
-  agentSlugs: readonly string[],
+  filters: DeepMetricsFilters,
   page: { limit: number; offset: number },
 ): DeepMetricState<ToolFailuresResponse> {
   return useDeepMetric(
-    `failures|${userId}|${tool ?? ""}|${days}|${orgScope}|${agentSlugs.join(",")}|${page.limit}|${page.offset}`,
-    () => fetchToolFailures(userId, tool ?? "", days, orgScope, agentSlugs, page),
+    `failures|${tool ?? ""}|${filterKey(userId, filters)}|${page.limit}|${page.offset}`,
+    () => fetchToolFailures(userId, tool ?? "", filters, page),
     tool !== null,
   );
 }
 
-export function useToolQualityMetrics(
+/** The run behind a session filter. Not fetched until one is entered. */
+export function useSessionSummary(
   userId: string,
-  days: MetricsDays,
+  sessionId: string,
   orgScope: AdminOrgScope,
-  agentSlugs: readonly string[],
-  exact: boolean,
-  page: ToolPageRequest,
-  enabled: boolean,
-): DeepMetricState<ToolQualityMetrics> {
+): DeepMetricState<SessionSummary> {
   return useDeepMetric(
-    `quality|${userId}|${days}|${orgScope}|${agentSlugs.join(",")}|${exact}|${pageKey(page)}`,
-    () => fetchToolQualityMetrics(userId, days, orgScope, agentSlugs, exact, page),
-    enabled,
-  );
-}
-
-export function useToolCoverageMetrics(
-  userId: string,
-  days: MetricsDays,
-  orgScope: AdminOrgScope,
-  agentSlugs: readonly string[],
-  enabled: boolean,
-): DeepMetricState<ToolCoverageMetrics> {
-  return useDeepMetric(
-    `coverage|${userId}|${days}|${orgScope}|${agentSlugs.join(",")}`,
-    () => fetchToolCoverageMetrics(userId, days, orgScope, agentSlugs),
-    enabled,
-  );
-}
-
-export function useLlmCallMetrics(
-  userId: string,
-  days: MetricsDays,
-  orgScope: AdminOrgScope,
-  agentSlugs: readonly string[],
-  includeSubagents: boolean,
-  enabled: boolean,
-): DeepMetricState<LlmCallMetrics> {
-  return useDeepMetric(
-    `llm|${userId}|${days}|${orgScope}|${agentSlugs.join(",")}|${includeSubagents}`,
-    () => fetchLlmCallMetrics(userId, days, orgScope, agentSlugs, { includeSubagents }),
-    enabled,
+    `session|${userId}|${sessionId}|${orgScope}`,
+    () => fetchSessionSummary(userId, sessionId, orgScope),
+    sessionId.length > 0,
   );
 }

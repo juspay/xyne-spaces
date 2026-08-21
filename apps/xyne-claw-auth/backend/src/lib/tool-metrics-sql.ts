@@ -100,6 +100,8 @@ export interface AnalyticsWindow {
    * single-agent plan is unchanged.
    */
   agentSlugs?: readonly string[] | undefined;
+  /** Single-session scope. `sessionId` is unique, so this selects exactly one run. */
+  sessionId?: string | undefined;
   userFilter: Prisma.Sql;
   orgFilter: Prisma.Sql;
 }
@@ -124,7 +126,8 @@ export function agentPredicate(slugs: readonly string[] | undefined): Prisma.Sql
 export function windowPredicate(w: AnalyticsWindow): Prisma.Sql {
   const col = w.windowColumn === "startedAt" ? Prisma.sql`r."startedAt"` : Prisma.sql`r."completedAt"`;
   const agent = agentPredicate(w.agentSlugs);
-  return Prisma.sql`${col} >= ${w.windowStart} AND ${col} < ${w.windowEnd} ${agent} ${w.userFilter} ${w.orgFilter}`;
+  const session = w.sessionId ? Prisma.sql`AND r."sessionId" = ${w.sessionId}` : Prisma.empty;
+  return Prisma.sql`${col} >= ${w.windowStart} AND ${col} < ${w.windowEnd} ${agent} ${session} ${w.userFilter} ${w.orgFilter}`;
 }
 
 /**

@@ -5603,10 +5603,22 @@ export interface GlobalMetrics {
   slowSessions: SlowSession[];
 }
 
-export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<GlobalMetrics> {
+/** ISO instants. Present → they define the window and `days` is ignored server-side. */
+export interface MetricsRange {
+  from?: string | undefined;
+  to?: string | undefined;
+}
+
+function applyRange(params: URLSearchParams, range?: MetricsRange): void {
+  if (range?.from) params.set("from", range.from);
+  if (range?.to) params.set("to", range.to);
+}
+
+export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope, range?: MetricsRange): Promise<GlobalMetrics> {
   const qs = new URLSearchParams();
   qs.set("days", String(days));
   applyAdminOrgScope(qs, orgScope);
+  applyRange(qs, range);
   return request<GlobalMetrics>(
     `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
@@ -5710,10 +5722,11 @@ export async function dismissImprovement(userId: string, id: string, reason?: st
   );
 }
 
-export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<AgentMetrics> {
+export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope, range?: MetricsRange): Promise<AgentMetrics> {
   const qs = new URLSearchParams();
   qs.set("days", String(days));
   applyAdminOrgScope(qs, orgScope);
+  applyRange(qs, range);
   return request<AgentMetrics>(
     `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
@@ -5746,6 +5759,15 @@ export interface ToolStatsCoverage {
 export interface ToolStatsRow {
   tool: string;
   calls: number;
+  /** Distinct runs that called this tool at all. */
+  sessions: number;
+  /**
+   * calls ÷ sessions — how often a run that uses this tool calls it.
+   *
+   * Separates "used once by many runs" from "hammered by a few", which the raw
+   * call count cannot distinguish and which point at different problems.
+   */
+  callsPerSession: number | null;
   topLevelCalls: number;
   childCalls: number;
   errors: number;
@@ -5796,9 +5818,9 @@ export interface ToolErrorClassRow {
  * anything else is rejected there and falls back to `calls`.
  */
 export type ToolSortKey =
-  | "tool" | "calls" | "errors" | "errorRate" | "duplicateRate" | "droppedEnd"
-  | "emptyResults" | "recoveryRate" | "citeRate" | "avgMs" | "p50Ms" | "p95Ms"
-  | "maxMs" | "totalMs" | "resultBytes";
+  | "tool" | "calls" | "sessions" | "callsPerSession" | "errors" | "errorRate"
+  | "duplicateRate" | "droppedEnd" | "emptyResults" | "recoveryRate" | "citeRate"
+  | "avgMs" | "p50Ms" | "p95Ms" | "maxMs" | "totalMs" | "resultBytes";
 
 export interface ToolPageRequest {
   limit: number;
@@ -5827,6 +5849,8 @@ export interface ToolPageInfo {
  */
 export interface ToolWindowTotals {
   distinctTools: number;
+  /** Distinct runs that made at least one tool call in the window. */
+  sessions: number;
   calls: number;
   errors: number;
   droppedEnd: number;
@@ -5842,24 +5866,26 @@ export interface ToolWindowTotals {
 /**
  * A chart series computed over the WHOLE window, independent of the page.
  *
- * Sent separately because the charts must not be derived from the loaded rows:
- * "top 8 tools by context burn" drawn from page 3 of a name-sorted table is not
- * a ranking, it is eight arbitrary tools.
+ * Ranked server-side per (measure, aggregation): the top 8 by cumulative bytes
+ * and the top 8 by bytes-per-call are different sets, so re-ranking a fixed
+ * top-8 client-side would answer a different question than the one on screen.
  */
 export interface ToolChartPoint {
   tool: string;
   value: number;
-  /** Share of the window total for this measure, 0..1. */
-  share: number;
+  /** Only meaningful for a `total` aggregation — null otherwise. */
+  share: number | null;
+  /** Sample size behind the value, so a thin average is visible as thin. */
+  calls: number;
+  sessions: number;
 }
 
-export interface ToolCharts {
-  /** Cumulative result bytes returned to the model. */
-  byBytes: ToolChartPoint[];
-  /** Cumulative wall-clock inside the tool. */
-  byTime: ToolChartPoint[];
-  /** Errored calls. */
-  byErrors: ToolChartPoint[];
+export type ChartMeasure = "bytes" | "time" | "errors" | "calls";
+export type ChartAggregation = "total" | "perCall" | "perSession";
+
+export interface ChartRequest {
+  measure: ChartMeasure;
+  aggregation: ChartAggregation;
 }
 
 export interface ToolMetrics {
@@ -5875,7 +5901,8 @@ export interface ToolMetrics {
   tools: ToolStatsRow[];
   totals: ToolWindowTotals;
   page: ToolPageInfo;
-  charts: ToolCharts;
+  chart: ToolChartPoint[];
+  chartRequest: ChartRequest;
   errorClasses: ToolErrorClassRow[];
 }
 
@@ -6073,22 +6100,37 @@ export interface ToolStatsBackfillReport {
 }
 
 /**
+ * The window and scope every deep endpoint shares.
+ *
+ * `from`/`to` are ISO instants and take precedence over `days`; sending them is
+ * how the UI expresses an exact date or a custom range. `sessionId` collapses
+ * every query to one run.
+ */
+export interface DeepMetricsFilters {
+  days: 1 | 7 | 30;
+  /** ISO instant. Overrides `days` when present. */
+  from?: string | undefined;
+  to?: string | undefined;
+  orgScope?: AdminOrgScope | undefined;
+  agentSlugs?: readonly string[] | undefined;
+  sessionId?: string | undefined;
+}
+
+/**
  * Shared query string for every deep endpoint — same window and scope rules.
  *
  * The agent selection is sent as a REPEATED `agentSlug` param rather than a
  * comma-joined value, so a slug containing a comma can never split into two.
  * The backend accepts either form.
  */
-function deepMetricsQuery(
-  days: 1 | 7 | 30,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
-  extra?: Record<string, string>,
-): string {
+function deepMetricsQuery(f: DeepMetricsFilters, extra?: Record<string, string>): string {
   const qs = new URLSearchParams();
-  qs.set("days", String(days));
-  applyAdminOrgScope(qs, orgScope);
-  for (const slug of agentSlugs ?? []) if (slug) qs.append("agentSlug", slug);
+  qs.set("days", String(f.days));
+  if (f.from) qs.set("from", f.from);
+  if (f.to) qs.set("to", f.to);
+  if (f.sessionId) qs.set("sessionId", f.sessionId);
+  applyAdminOrgScope(qs, f.orgScope);
+  for (const slug of f.agentSlugs ?? []) if (slug) qs.append("agentSlug", slug);
   for (const [key, value] of Object.entries(extra ?? {})) qs.set(key, value);
   return qs.toString();
 }
@@ -6107,13 +6149,16 @@ function pageParams(page?: ToolPageRequest): Record<string, string> {
 
 export async function fetchToolMetrics(
   userId: string,
-  days: 1 | 7 | 30 = 7,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
+  filters: DeepMetricsFilters,
   page?: ToolPageRequest,
+  chart?: ChartRequest,
 ): Promise<ToolMetrics> {
+  const extra = {
+    ...pageParams(page),
+    ...(chart ? { chartMeasure: chart.measure, chartAgg: chart.aggregation } : {}),
+  };
   return request<ToolMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/tools?${deepMetricsQuery(days, orgScope, agentSlugs, pageParams(page))}`,
+    `${AUTH_API_URL}/api/v1/metrics/tools?${deepMetricsQuery(filters, extra)}`,
     { headers: { "x-user-id": userId } },
   );
 }
@@ -6125,15 +6170,13 @@ export async function fetchToolMetrics(
  */
 export async function fetchToolQualityMetrics(
   userId: string,
-  days: 1 | 7 | 30 = 7,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
+  filters: DeepMetricsFilters,
   exact = false,
   page?: ToolPageRequest,
 ): Promise<ToolQualityMetrics> {
   const extra = { ...pageParams(page), ...(exact ? { exact: "1" } : {}) };
   return request<ToolQualityMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/tools/quality?${deepMetricsQuery(days, orgScope, agentSlugs, extra)}`,
+    `${AUTH_API_URL}/api/v1/metrics/tools/quality?${deepMetricsQuery(filters, extra)}`,
     { headers: { "x-user-id": userId } },
   );
 }
@@ -6142,9 +6185,7 @@ export async function fetchToolQualityMetrics(
 export async function fetchToolFailures(
   userId: string,
   tool: string,
-  days: 1 | 7 | 30 = 7,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
+  filters: DeepMetricsFilters,
   page?: { limit: number; offset: number },
 ): Promise<ToolFailuresResponse> {
   const extra: Record<string, string> = { tool };
@@ -6153,19 +6194,17 @@ export async function fetchToolFailures(
     extra["offset"] = String(page.offset);
   }
   return request<ToolFailuresResponse>(
-    `${AUTH_API_URL}/api/v1/metrics/tools/failures?${deepMetricsQuery(days, orgScope, agentSlugs, extra)}`,
+    `${AUTH_API_URL}/api/v1/metrics/tools/failures?${deepMetricsQuery(filters, extra)}`,
     { headers: { "x-user-id": userId } },
   );
 }
 
 export async function fetchToolCoverageMetrics(
   userId: string,
-  days: 1 | 7 | 30 = 7,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
+  filters: DeepMetricsFilters,
 ): Promise<ToolCoverageMetrics> {
   return request<ToolCoverageMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/tools/coverage?${deepMetricsQuery(days, orgScope, agentSlugs)}`,
+    `${AUTH_API_URL}/api/v1/metrics/tools/coverage?${deepMetricsQuery(filters)}`,
     { headers: { "x-user-id": userId } },
   );
 }
@@ -6176,16 +6215,59 @@ export async function fetchToolCoverageMetrics(
  */
 export async function fetchLlmCallMetrics(
   userId: string,
-  days: 1 | 7 | 30 = 7,
-  orgScope?: AdminOrgScope,
-  agentSlugs?: readonly string[],
+  filters: DeepMetricsFilters,
   opts?: { includeSubagents?: boolean; points?: boolean },
 ): Promise<LlmCallMetrics> {
   const extra: Record<string, string> = {};
   if (opts?.includeSubagents) extra["includeSubagents"] = "1";
   if (opts?.points) extra["points"] = "1";
   return request<LlmCallMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/llm-calls?${deepMetricsQuery(days, orgScope, agentSlugs, extra)}`,
+    `${AUTH_API_URL}/api/v1/metrics/llm-calls?${deepMetricsQuery(filters, extra)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/**
+ * The one run behind a session filter.
+ *
+ * The window rollups are aggregates with no single-run form, so this is what
+ * the overview shows when a session is selected: the run itself.
+ */
+export interface SessionSummary {
+  sessionId: string;
+  agentSlug: string;
+  status: string;
+  trigger: string;
+  provider: string | null;
+  model: string | null;
+  task: string | null;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  totalMs: number | null;
+  llmTotalMs: number | null;
+  toolMs: number | null;
+  llmTurns: number | null;
+  llmRetries: number | null;
+  ttftMs: number | null;
+  tokens: { in: number; out: number; cacheRead: number; cacheWrite: number };
+  toolsUsed: string[];
+  /** Null when the run recorded no invocation array at all. */
+  toolCalls: number | null;
+  rating: string | null;
+  /** Null when the run predates the per-call series — the LLM tab will be empty. */
+  llmCallsRecorded: number | null;
+}
+
+export async function fetchSessionSummary(
+  userId: string,
+  sessionId: string,
+  orgScope?: AdminOrgScope,
+): Promise<SessionSummary> {
+  const qs = new URLSearchParams();
+  applyAdminOrgScope(qs, orgScope);
+  return request<SessionSummary>(
+    `${AUTH_API_URL}/api/v1/metrics/session/${encodeURIComponent(sessionId)}?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
 }

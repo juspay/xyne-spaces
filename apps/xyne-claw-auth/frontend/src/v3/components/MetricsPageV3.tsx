@@ -39,7 +39,7 @@ import {
   type GlobalMetrics, type GlobalMetricsDayBucket, type AgentMetrics,
   type SlowSession, type ToolLatencyRow, type AgentSentiment, type GlobalMetricsProviderRow,
   type ImprovementCandidate, type ImprovementBucket, type AdminOrgScope,
-  type ToolPageRequest, type ToolSortKey,
+  type ChartRequest, type DeepMetricsFilters, type ToolPageRequest, type ToolSortKey,
 } from "../../lib/api";
 import { Skeleton } from "./ui/Skeleton";
 import { Switch } from "./ui/Switch";
@@ -51,10 +51,14 @@ import {
   useToolFailures,
   useToolMetrics,
   useToolQualityMetrics,
+  useSessionSummary,
   type MetricsDays,
 } from "../hooks/useDeepMetrics";
 import { HeadlineKpis } from "./metrics/HeadlineKpis";
 import { MultiSelect } from "./metrics/MultiSelect";
+import { DateRangePicker, type WindowSelection } from "./metrics/DateRangePicker";
+import { SessionFilter } from "./metrics/SessionFilter";
+import { SessionSummaryCard } from "./metrics/SessionSummaryCard";
 import { ChartLegend, MetricsCard, UnitBadge, type ServerPaging } from "./metrics/MetricsPrimitives";
 import { MetricsTooltip } from "./metrics/MetricsTooltip";
 import {
@@ -74,11 +78,6 @@ interface MetricsPageV3Props {
   userId: string;
 }
 
-const DAY_OPTIONS: Array<{ label: string; days: MetricsDays }> = [
-  { label: "1d", days: 1 },
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-];
 
 type MetricsTab = "overview" | "tools" | "llm" | "quality" | "coverage";
 
@@ -289,6 +288,12 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   // view. `agent` null = workspace-wide; the leaderboard writes it so a row
   // click pivots without scrolling back to the dropdown.
   const days = parseDays(params.get("range"));
+  const windowSelection: WindowSelection = {
+    days,
+    ...(params.get("from") ? { from: params.get("from")! } : {}),
+    ...(params.get("to") ? { to: params.get("to")! } : {}),
+  };
+  const sessionId = params.get("session") ?? "";
   const selectedAgents = parseList(params.get("agent"));
   const selectedTools = parseList(params.get("tool"));
   // The run-level rollup endpoints are single-agent, so the overview and the
@@ -301,6 +306,22 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   const includeSubagents = params.get("subagents") === "1";
   const exactCitations = params.get("exact") === "1";
   const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
+
+  // One object threaded to every deep hook, so a window or scope change can
+  // never reach one panel and miss another.
+  const filters: DeepMetricsFilters = {
+    days,
+    ...(windowSelection.from ? { from: windowSelection.from } : {}),
+    ...(windowSelection.to ? { to: windowSelection.to } : {}),
+    orgScope: adminOrgScope,
+    agentSlugs: selectedAgents,
+    ...(sessionId ? { sessionId } : {}),
+  };
+
+  const chart: ChartRequest = {
+    measure: parseChartMeasure(params.get("cm")),
+    aggregation: parseChartAgg(params.get("ca")),
+  };
 
   const setParam = useCallback(
     (key: string, value: string | null) => {
@@ -316,6 +337,11 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
     },
     [setParams],
   );
+
+  const windowRange = {
+    from: windowSelection.from,
+    to: windowSelection.to,
+  };
 
   const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
   const [data, setData] = useState<GlobalMetrics | AgentMetrics | null>(null);
@@ -351,15 +377,17 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // The legacy rollup endpoints take the same from/to the deep ones do, so a
+    // custom range means one thing across every tab.
     const load = selectedAgent
-      ? fetchAgentMetrics(userId, selectedAgent, days, adminOrgScope)
-      : fetchGlobalMetrics(userId, days, adminOrgScope);
+      ? fetchAgentMetrics(userId, selectedAgent, days, adminOrgScope, windowRange)
+      : fetchGlobalMetrics(userId, days, adminOrgScope, windowRange);
     load
       .then((d) => { if (!cancelled) setData(d); })
       .catch((e) => { if (!cancelled) { setData(null); setError(e instanceof Error ? e.message : String(e)); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [userId, selectedAgent, days, adminOrgScope]);
+  }, [userId, selectedAgent, days, adminOrgScope, windowRange.from, windowRange.to]);
 
   // MultiSelect unions in any selected value the roster has not loaded yet, so
   // the raw roster is enough here.
@@ -377,9 +405,9 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   const failuresTool = params.get("failures");
   const failuresOffset = parseIntParam(params.get("foffset"), 0);
 
-  const tools = useToolMetrics(userId, days, adminOrgScope, selectedAgents, toolPage, tab === "tools");
-  const quality = useToolQualityMetrics(userId, days, adminOrgScope, selectedAgents, exactCitations, toolPage, tab === "quality");
-  const failures = useToolFailures(userId, tab === "tools" ? failuresTool : null, days, adminOrgScope, selectedAgents, {
+  const tools = useToolMetrics(userId, filters, toolPage, chart, tab === "tools");
+  const quality = useToolQualityMetrics(userId, filters, exactCitations, toolPage, tab === "quality");
+  const failures = useToolFailures(userId, tab === "tools" ? failuresTool : null, filters, {
     limit: PAGE_LIMIT,
     offset: failuresOffset,
   });
@@ -429,8 +457,9 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
     searchPlaceholder: "Filter tools by name…",
     unit: "tools",
   });
-  const coverage = useToolCoverageMetrics(userId, days, adminOrgScope, selectedAgents, tab === "coverage");
-  const llm = useLlmCallMetrics(userId, days, adminOrgScope, selectedAgents, includeSubagents, tab === "llm");
+  const coverage = useToolCoverageMetrics(userId, filters, tab === "coverage");
+  const session = useSessionSummary(userId, sessionId, adminOrgScope);
+  const llm = useLlmCallMetrics(userId, filters, includeSubagents, tab === "llm");
 
   // Tool options come from whichever response the open tab already fetched, so
   // the list only ever offers tools that exist in the current window and scope.
@@ -486,22 +515,40 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
               />
             )}
 
-            <div className="flex items-center gap-1 rounded-full bg-xyne-surface-sunken p-1">
-              {DAY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.days}
-                  onClick={() => setParam("range", String(opt.days))}
-                  className={
-                    "px-3 py-1 rounded-full text-[12px] font-medium transition-colors " +
-                    (days === opt.days
-                      ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                      : "text-xyne-fg-muted hover:text-xyne-fg-primary")
-                  }
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <SessionFilter
+              value={sessionId}
+              onChange={(next) => {
+                setParams(
+                  (prev) => {
+                    const q = new URLSearchParams(prev);
+                    if (next) q.set("session", next);
+                    else q.delete("session");
+                    q.delete("offset");
+                    return q;
+                  },
+                  { replace: true },
+                );
+              }}
+            />
+
+            <DateRangePicker
+              value={windowSelection}
+              onChange={(next) => {
+                setParams(
+                  (prev) => {
+                    const q = new URLSearchParams(prev);
+                    q.set("range", String(next.days));
+                    if (next.from) q.set("from", next.from);
+                    else q.delete("from");
+                    if (next.to) q.set("to", next.to);
+                    else q.delete("to");
+                    q.delete("offset");
+                    return q;
+                  },
+                  { replace: true },
+                );
+              }}
+            />
 
             {isAdmin && (
               <label className="flex shrink-0 items-center gap-2 text-[12px] text-xyne-fg-muted">
@@ -539,8 +586,9 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
           </div>
         ) : (
           <div className="flex flex-col gap-[20px]">
-            {/* Headline health, above the tabs — answerable without a choice. */}
-            <HeadlineKpis data={data} />
+            {/* Headline health, above the tabs — answerable without a choice.
+                Hidden under a session filter: a p95 over one run is that run. */}
+            {!sessionId && <HeadlineKpis data={data} />}
 
             {tab === "overview" && selectedAgents.length > 1 && (
               <div className="rounded-xl border border-xyne-info-border bg-xyne-info-bg px-4 py-3 text-[12px] text-xyne-info-fg">
@@ -550,7 +598,19 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
                 {selectedAgents.length} selected agents.
               </div>
             )}
-            {tab === "overview" && (
+            {/* A session filter replaces the window rollup rather than sitting
+                beside it: an aggregate over one run is that run's own numbers,
+                reported as if they were a distribution. */}
+            {tab === "overview" && sessionId && (
+              <SessionSummaryCard
+                sessionId={sessionId}
+                data={session.data}
+                loading={session.loading}
+                error={session.error}
+              />
+            )}
+
+            {tab === "overview" && !sessionId && (
               <OverviewTab
                 userId={userId}
                 data={data}
@@ -576,6 +636,18 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
                       }
                     : null
                 }
+                chart={chart}
+                onChartChange={(next) => {
+                  setParams(
+                    (prev) => {
+                      const q = new URLSearchParams(prev);
+                      q.set("cm", next.measure);
+                      q.set("ca", next.aggregation);
+                      return q;
+                    },
+                    { replace: true },
+                  );
+                }}
                 onDrillFailures={(tool) => {
                   setParams(
                     (prev) => {
@@ -642,6 +714,21 @@ function parseSort(raw: string | null): ToolSortKey {
 function parseIntParam(raw: string | null, fallback: number): number {
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : fallback;
+}
+
+const CHART_MEASURES = ["bytes", "time", "errors", "calls"] as const;
+const CHART_AGGS = ["total", "perCall", "perSession"] as const;
+
+function parseChartMeasure(raw: string | null): ChartRequest["measure"] {
+  return (CHART_MEASURES as readonly string[]).includes(raw ?? "")
+    ? (raw as ChartRequest["measure"])
+    : "bytes";
+}
+
+function parseChartAgg(raw: string | null): ChartRequest["aggregation"] {
+  return (CHART_AGGS as readonly string[]).includes(raw ?? "")
+    ? (raw as ChartRequest["aggregation"])
+    : "total";
 }
 
 /** Comma-separated URL list → deduped values. Empty string yields []. */
