@@ -1,3 +1,10 @@
+## [1.208.0](https://github.com/juspay/xyne-spaces/compare/v1.207.2...v1.208.0) (2026-08-21)
+
+
+### Features
+
+* setup internal claw calls ([#778](https://github.com/juspay/xyne-spaces/issues/778)) ([cf6f5e0](https://github.com/juspay/xyne-spaces/commit/cf6f5e009a9dbbf23e752af74c1edf0e2414e4a7))
+
 ## [1.207.2](https://github.com/juspay/xyne-spaces/compare/v1.207.1...v1.207.2) (2026-08-21)
 
 
