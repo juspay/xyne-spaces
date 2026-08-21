@@ -1,20 +1,37 @@
 /**
- * MetricsPageV3 — workspace-wide latency & throughput dashboard.
+ * MetricsPageV3 — workspace-wide agent observability.
  *
- * Purpose: a single page where the operator can see whether changes are
- * improving things — sessions per day, p50/p95 of totalMs, LLM vs Tool
- * split, error rate, and a per-agent leaderboard.
+ * ── Structure ─────────────────────────────────────────────────────────────
+ * A single flat scroll could not hold the per-tool and per-LLM-call data
+ * without burying the run-level numbers, so the page is:
  *
- * All charts are inline SVG with no library dependency, sized for a
- * 1180px max-width column matching the rest of v3.
+ *   filters (sticky) → headline KPIs (always visible) → tabbed detail
+ *
+ * The KPI row sits ABOVE the tabs deliberately: "is anything wrong right now"
+ * must be answerable without first choosing a tab, and it stays on screen while
+ * the reader is deep inside a detail panel.
+ *
+ * The Overview tab keeps every card this page previously had, in the same
+ * order. Only the status banner and the two hero durations moved — up into the
+ * headline, where they are visible from every tab. The other four tabs are
+ * additive and read the precomputed toolStats / llmTurnStats columns.
+ *
+ * ── Filters ───────────────────────────────────────────────────────────────
+ * Range, agent, org scope and tab live in the URL. They used to be local state,
+ * so a refresh or a shared link lost the view — the one thing a metrics page
+ * gets asked for most ("send me what you're looking at").
+ *
+ * Each detail tab fetches only while it is open. Loading all five on mount
+ * would multiply the request cost for panels the reader may never open.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ResponsiveContainer,
   BarChart, Bar,
   LineChart, Line,
-  XAxis, YAxis as RcYAxis, CartesianGrid, Tooltip, Legend as RcLegend,
+  XAxis, YAxis as RcYAxis, CartesianGrid, Tooltip,
 } from "recharts";
 import {
   fetchGlobalMetrics, fetchAgentMetrics, listAgents,
@@ -22,19 +39,54 @@ import {
   type GlobalMetrics, type GlobalMetricsDayBucket, type AgentMetrics,
   type SlowSession, type ToolLatencyRow, type AgentSentiment, type GlobalMetricsProviderRow,
   type ImprovementCandidate, type ImprovementBucket, type AdminOrgScope,
+  type ChartRequest, type DeepMetricsFilters, type ToolPageRequest, type ToolSortKey,
 } from "../../lib/api";
 import { Skeleton } from "./ui/Skeleton";
 import { Switch } from "./ui/Switch";
+import { Tabs, type TabItem } from "./ui/Tabs";
 import { useAdminStatus } from "../hooks/useAdminStatus";
+import {
+  useLlmCallMetrics,
+  useToolCoverageMetrics,
+  useToolFailures,
+  useToolMetrics,
+  useToolQualityMetrics,
+  useSessionSummary,
+  type MetricsDays,
+} from "../hooks/useDeepMetrics";
+import { HeadlineKpis } from "./metrics/HeadlineKpis";
+import { MultiSelect } from "./metrics/MultiSelect";
+import { DateRangePicker, type WindowSelection } from "./metrics/DateRangePicker";
+import { SessionFilter } from "./metrics/SessionFilter";
+import { SessionSummaryCard } from "./metrics/SessionSummaryCard";
+import { ChartLegend, MetricsCard, UnitBadge, type ServerPaging } from "./metrics/MetricsPrimitives";
+import { MetricsTooltip } from "./metrics/MetricsTooltip";
+import {
+  AXIS_LINE,
+  AXIS_TICK,
+  MetricsVizTokens,
+  NEUTRAL,
+  OUTCOME,
+  SERIES,
+} from "./metrics/metricsPalette";
+import { ToolsPanel } from "./metrics/panels/ToolsPanel";
+import { LlmCallsPanel } from "./metrics/panels/LlmCallsPanel";
+import { QualityPanel } from "./metrics/panels/QualityPanel";
+import { CoveragePanel } from "./metrics/panels/CoveragePanel";
 
 interface MetricsPageV3Props {
   userId: string;
 }
 
-const DAY_OPTIONS: Array<{ label: string; days: 1 | 7 | 30 }> = [
-  { label: "1d", days: 1 },
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
+
+type MetricsTab = "overview" | "tools" | "llm" | "quality" | "coverage";
+
+const TABS: Array<TabItem<MetricsTab>> = [
+  { id: "overview", label: "Overview" },
+  { id: "tools", label: "Tools" },
+  { id: "llm", label: "LLM calls" },
+  { id: "quality", label: "Quality" },
+  { id: "coverage", label: "Coverage" },
 ];
 
 function fmtMs(ms: number | null | undefined): string {
@@ -49,16 +101,6 @@ function fmtPct(p: number | null | undefined): string {
   return `${(p * 100).toFixed(1)}%`;
 }
 
-function fmtSignedMs(ms: number | null | undefined): { label: string; tone: "good" | "bad" | "flat" } {
-  if (ms == null) return { label: "—", tone: "flat" };
-  if (Math.abs(ms) < 50) return { label: "≈0", tone: "flat" };
-  const sign = ms > 0 ? "+" : "";
-  return {
-    label: `${sign}${fmtMs(Math.abs(ms))}${ms > 0 ? " slower" : " faster"}`,
-    tone: ms > 0 ? "bad" : "good",
-  };
-}
-
 function fmtSignedPct(p: number | null | undefined): { label: string; tone: "good" | "bad" | "flat" } {
   if (p == null || Number.isNaN(p)) return { label: "—", tone: "flat" };
   if (Math.abs(p) < 0.001) return { label: "≈0", tone: "flat" };
@@ -67,140 +109,85 @@ function fmtSignedPct(p: number | null | undefined): { label: string; tone: "goo
 }
 
 /**
- * Reusable metrics panel — used by both MetricsPageV3 (workspace-wide) and
- * AgentDetailPageV3 (single agent). Accepts a `fetcher` so the parent
- * decides which endpoint to hit; charts and tiles render the same shape.
- *
- * Pass `showLeaderboard=true` to render the top-agents table (only valid
- * when the data has a `topAgents` field — i.e. global mode).
+ * The run-level view — every card this page carried before the tabs existed,
+ * in the same order. Rendering only; the page owns the fetch so the headline
+ * KPIs above the tabs can read the same response.
  */
-export function MetricsPanel({
+function OverviewTab({
   userId,
-  fetcher,
-  showLeaderboard = false,
+  data,
+  showLeaderboard,
   onAgentClick,
 }: {
   userId: string;
-  fetcher: (userId: string, days: 1 | 7 | 30) => Promise<GlobalMetrics | AgentMetrics>;
-  showLeaderboard?: boolean;
-  /** When the workspace leaderboard renders an agent, clicking it bubbles up
-   *  so the parent page can pivot to that agent's view. */
+  data: GlobalMetrics | AgentMetrics;
+  showLeaderboard: boolean;
+  /** Renders leaderboard agents as clickable so the page can pivot to one. */
   onAgentClick?: (agentSlug: string) => void;
 }) {
-  const [days, setDays] = useState<1 | 7 | 30>(7);
-  const [data, setData] = useState<GlobalMetrics | AgentMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetcher(userId, days)
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [userId, days, fetcher]);
-
   return (
     <div className="flex flex-col gap-[20px]">
-      <div className="flex items-center justify-end">
-        <div className="flex items-center gap-1 rounded-full bg-xyne-bg-secondary p-1">
-          {DAY_OPTIONS.map((opt) => (
-            <button
-              key={opt.days}
-              onClick={() => setDays(opt.days)}
-              className={
-                "px-3 py-1 rounded-full text-[12px] font-medium transition-colors " +
-                (days === opt.days
-                  ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                  : "text-xyne-fg-muted hover:text-xyne-fg-primary")
-              }
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-xl bg-red-500/10 text-red-500 p-4 text-[13px]">
-          Failed to load metrics: {error}
-        </div>
+      {showLeaderboard && "byTrigger" in data && (
+        <Card title="By trigger" subtitle="User combines Spaces mentions, DMs, and dashboard chat. CLI is API-triggered runs." unit={<UnitBadge aggregation="cumulative" unit="runs" />}>
+          <TriggerTiles rows={data.byTrigger} />
+        </Card>
       )}
-
-      {loading || !data ? (
-        <>
-          <Skeleton className="h-[120px] w-full" />
-          <Skeleton className="h-[260px] w-full" />
-          <Skeleton className="h-[260px] w-full" />
-        </>
-      ) : (
-        <>
-          <TotalsStrip data={data} />
-          {showLeaderboard && "byTrigger" in data && (
-            <Card title="By trigger" subtitle="User combines Spaces mentions, DMs, and dashboard chat. CLI is API-triggered runs.">
-              <TriggerTiles rows={data.byTrigger} />
-            </Card>
-          )}
-          {showLeaderboard && "byTrigger" in data ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
-              <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
-                <SessionsBarChart perDay={data.perDay} />
-              </Card>
-              <Card title="Daily runs by trigger" subtitle="Same run volume, grouped by how the run started.">
-                <TriggerBarChart perDay={data.perDay} />
-              </Card>
-            </div>
-          ) : (
-            <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
-              <SessionsBarChart perDay={data.perDay} />
-            </Card>
-          )}
-          {/* Two charts side-by-side so each line gets its own y-axis. When
-              p50 and p95 share a scale (p95 is 10-20× larger), the p50 line
-              flattens to the baseline and looks broken. */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
-            <Card title="Typical run time over time" subtitle="p50 — half of runs finished faster than this each day. Watch for upward drift.">
-              <SingleLineChart perDay={data.perDay} valueKey="p50TotalMs" color="#3b82f6" displayName="Typical run (p50)" />
-            </Card>
-            <Card title="Slow-tail over time" subtitle="p95 — the slowest 5% each day. This is where pain lives.">
-              <SingleLineChart perDay={data.perDay} valueKey="p95TotalMs" color="#ef4444" displayName="Slow tail (p95)" />
-            </Card>
-          </div>
-          <Card title="LLM time vs Tool time" subtitle="If the orange grows, tools are dragging things. If the blue grows, the LLM itself is slow.">
-            <SplitChart perDay={data.perDay} />
+      <TotalsStrip data={data} />
+      {showLeaderboard && "byTrigger" in data ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
+          <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome." unit={<UnitBadge aggregation="cumulative" unit="runs / day" />}>
+            <SessionsBarChart perDay={data.perDay} />
           </Card>
-          {showLeaderboard && "byProvider" in data && (
-            <Card title="LLM latency by provider/model" subtitle="Compare provider+model pairs using the same window. Sort by any column to isolate slow tails or unstable providers.">
-              <ProviderLatencyTable rows={data.byProvider} />
-            </Card>
-          )}
-          {showLeaderboard && "topAgents" in data && (
-            <Card title="Agents leaderboard" subtitle={`Top ${data.topAgents.length} by run count — click a row to drill into one agent`}>
-              <AgentTable rows={data.topAgents} onAgentClick={onAgentClick} />
-            </Card>
-          )}
-          {"sentiment" in data && data.sentiment.totalRuns > 0 && (
-            <Card title="User sentiment & feedback" subtitle="Explicit ratings + behavioural signals from the same window. Lower bars are better.">
-              <SentimentPanel sentiment={data.sentiment} />
-            </Card>
-          )}
-          {"agentSlug" in data && (
-            <ImprovementsCard userId={userId} agentSlug={data.agentSlug} />
-          )}
-          {"toolLatency" in data && data.toolLatency.length > 0 && (
-            <Card title="Tool latency for this agent" subtitle={`Top ${data.toolLatency.length} tools by cumulative time — find the one dragging the agent down`}>
-              <ToolLatencyTable rows={data.toolLatency} />
-            </Card>
-          )}
-          {data.slowSessions.length > 0 && (
-            <Card title="Slowest sessions" subtitle={`Top ${data.slowSessions.length} by total wall-clock — expand a row for the tool breakdown`}>
-              <SlowSessionsTable rows={data.slowSessions} showAgent={showLeaderboard} />
-            </Card>
-          )}
-        </>
+          <Card title="Daily runs by trigger" subtitle="Same run volume, grouped by how the run started." unit={<UnitBadge aggregation="cumulative" unit="runs / day" />}>
+            <TriggerBarChart perDay={data.perDay} />
+          </Card>
+        </div>
+      ) : (
+        <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome." unit={<UnitBadge aggregation="cumulative" unit="runs / day" />}>
+          <SessionsBarChart perDay={data.perDay} />
+        </Card>
+      )}
+      {/* Two charts side-by-side so each line gets its own y-axis. When
+          p50 and p95 share a scale (p95 is 10-20× larger), the p50 line
+          flattens to the baseline and looks broken. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
+        <Card title="Typical run time over time" subtitle="p50 — half of runs finished faster than this each day. Watch for upward drift." unit={<UnitBadge aggregation="median" unit="ms / day" />}>
+          <SingleLineChart perDay={data.perDay} valueKey="p50TotalMs" color={SERIES[0]} displayName="Typical run (p50)" />
+        </Card>
+        <Card title="Slow-tail over time" subtitle="p95 — the slowest 5% each day. This is where pain lives." unit={<UnitBadge aggregation="p95" unit="ms / day" />}>
+          <SingleLineChart perDay={data.perDay} valueKey="p95TotalMs" color={SERIES[1]} displayName="Slow tail (p95)" />
+        </Card>
+      </div>
+      <Card title="LLM time vs Tool time" subtitle="Mean time per run, split by where it went. If the tool segment grows, tools are dragging things; if the LLM segment grows, the model itself is slow." unit={<UnitBadge aggregation="average" unit="ms / run" />}>
+        <SplitChart perDay={data.perDay} />
+      </Card>
+      {showLeaderboard && "byProvider" in data && (
+        <Card title="LLM latency by provider/model" subtitle="Compare provider+model pairs using the same window. Sort by any column to isolate slow tails or unstable providers.">
+          <ProviderLatencyTable rows={data.byProvider} />
+        </Card>
+      )}
+      {showLeaderboard && "topAgents" in data && (
+        <Card title="Agents leaderboard" subtitle={`Top ${data.topAgents.length} by run count — click a row to drill into one agent`}>
+          <AgentTable rows={data.topAgents} onAgentClick={onAgentClick} />
+        </Card>
+      )}
+      {"sentiment" in data && data.sentiment.totalRuns > 0 && (
+        <Card title="User sentiment & feedback" subtitle="Explicit ratings + behavioural signals from the same window. Lower bars are better.">
+          <SentimentPanel sentiment={data.sentiment} />
+        </Card>
+      )}
+      {"agentSlug" in data && (
+        <ImprovementsCard userId={userId} agentSlug={data.agentSlug} />
+      )}
+      {"toolLatency" in data && data.toolLatency.length > 0 && (
+        <Card title="Tool latency for this agent" subtitle={`Top ${data.toolLatency.length} tools by cumulative time — find the one dragging the agent down`}>
+          <ToolLatencyTable rows={data.toolLatency} />
+        </Card>
+      )}
+      {data.slowSessions.length > 0 && (
+        <Card title="Slowest sessions" subtitle={`Top ${data.slowSessions.length} by total wall-clock — expand a row for the tool breakdown`}>
+          <SlowSessionsTable rows={data.slowSessions} showAgent={showLeaderboard} />
+        </Card>
       )}
     </div>
   );
@@ -295,18 +282,75 @@ function SlowSessionsTable({ rows, showAgent }: { rows: SlowSession[]; showAgent
 
 export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   const { isAdmin } = useAdminStatus();
-  // null = workspace-wide view, otherwise a single agent's slug.
-  // The selector below drives this; the leaderboard renders agent rows as
-  // clickable links into the per-agent view so you can pivot without scrolling
-  // back to the dropdown.
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
-  const [allOrgs, setAllOrgs] = useState(false);
+  const [params, setParams] = useSearchParams();
+
+  // Filters live in the URL so a refresh or a pasted link restores the exact
+  // view. `agent` null = workspace-wide; the leaderboard writes it so a row
+  // click pivots without scrolling back to the dropdown.
+  const days = parseDays(params.get("range"));
+  const windowSelection: WindowSelection = {
+    days,
+    ...(params.get("from") ? { from: params.get("from")! } : {}),
+    ...(params.get("to") ? { to: params.get("to")! } : {}),
+  };
+  const sessionId = params.get("session") ?? "";
+  const selectedAgents = parseList(params.get("agent"));
+  const selectedTools = parseList(params.get("tool"));
+  // The run-level rollup endpoints are single-agent, so the overview and the
+  // headline follow the selection only when exactly one agent is picked. Two or
+  // more stays workspace-wide, and the overview says so rather than silently
+  // showing numbers that ignore the filter.
+  const selectedAgent = selectedAgents.length === 1 ? selectedAgents[0]! : null;
+  const tab = parseTab(params.get("tab"));
+  const allOrgs = isAdmin && params.get("orgScope") === "all";
+  const includeSubagents = params.get("subagents") === "1";
+  const exactCitations = params.get("exact") === "1";
   const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
 
+  // One object threaded to every deep hook, so a window or scope change can
+  // never reach one panel and miss another.
+  const filters: DeepMetricsFilters = {
+    days,
+    ...(windowSelection.from ? { from: windowSelection.from } : {}),
+    ...(windowSelection.to ? { to: windowSelection.to } : {}),
+    orgScope: adminOrgScope,
+    agentSlugs: selectedAgents,
+    ...(sessionId ? { sessionId } : {}),
+  };
+
+  const chart: ChartRequest = {
+    measure: parseChartMeasure(params.get("cm")),
+    aggregation: parseChartAgg(params.get("ca")),
+  };
+
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value === null || value === "") next.delete(key);
+          else next.set(key, value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  const windowRange = {
+    from: windowSelection.from,
+    to: windowSelection.to,
+  };
+
+  const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
+  const [data, setData] = useState<GlobalMetrics | AgentMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!isAdmin && allOrgs) setAllOrgs(false);
-  }, [isAdmin, allOrgs]);
+    if (!isAdmin && params.get("orgScope")) setParam("orgScope", null);
+  }, [isAdmin, params, setParam]);
 
   // Populate the agent selector from the FULL agent roster (allAgents=true, so
   // admins get every user's agents) UNIONed with agents that have runs in the
@@ -326,130 +370,411 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
     return () => { cancelled = true; };
   }, [userId, adminOrgScope]);
 
-  // The fetcher passed to MetricsPanel switches based on selection. Memoising
-  // would be cleaner but a fresh function per render is fine here since the
-  // panel re-runs its effect on every fetcher identity change anyway.
-  const fetcher = useCallback((uid: string, days: 1 | 7 | 30) => (
-    selectedAgent
-      ? fetchAgentMetrics(uid, selectedAgent, days, adminOrgScope)
-      : fetchGlobalMetrics(uid, days, adminOrgScope)
-  ), [selectedAgent, adminOrgScope]);
+  // Run-level metrics. Fetched at page level rather than inside the overview
+  // tab so the headline KPIs above the tabs read the same response instead of
+  // issuing a second identical request.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    // The legacy rollup endpoints take the same from/to the deep ones do, so a
+    // custom range means one thing across every tab.
+    const load = selectedAgent
+      ? fetchAgentMetrics(userId, selectedAgent, days, adminOrgScope, windowRange)
+      : fetchGlobalMetrics(userId, days, adminOrgScope, windowRange);
+    load
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) { setData(null); setError(e instanceof Error ? e.message : String(e)); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId, selectedAgent, days, adminOrgScope, windowRange.from, windowRange.to]);
+
+  // MultiSelect unions in any selected value the roster has not loaded yet, so
+  // the raw roster is enough here.
+  const agentOptions = agentSlugs;
+
+  // Server-driven table state. In the URL so a shared link restores the exact
+  // page, sort and filter — the whole point of paging server-side.
+  const toolPage: ToolPageRequest = {
+    limit: PAGE_LIMIT,
+    offset: parseIntParam(params.get("offset"), 0),
+    sort: parseSort(params.get("sort")),
+    dir: params.get("dir") === "asc" ? "asc" : "desc",
+    ...(params.get("q") ? { search: params.get("q")! } : {}),
+  };
+  const failuresTool = params.get("failures");
+  const failuresOffset = parseIntParam(params.get("foffset"), 0);
+
+  const tools = useToolMetrics(userId, filters, toolPage, chart, tab === "tools");
+  const quality = useToolQualityMetrics(userId, filters, exactCitations, toolPage, tab === "quality");
+  const failures = useToolFailures(userId, tab === "tools" ? failuresTool : null, filters, {
+    limit: PAGE_LIMIT,
+    offset: failuresOffset,
+  });
+
+  // Any change that reshuffles the ranking has to reset to page 1 — otherwise a
+  // re-sort lands the reader on offset 400 of a set that may now be 12 long.
+  const setSort = useCallback(
+    (key: string) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          const sameKey = (next.get("sort") ?? "calls") === key;
+          next.set("sort", key);
+          next.set("dir", sameKey && next.get("dir") !== "asc" ? "asc" : "desc");
+          next.delete("offset");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  const buildPaging = (
+    page: { limit: number; offset: number; total: number; sort: ToolSortKey; dir: "asc" | "desc" } | undefined,
+  ): ServerPaging => ({
+    limit: page?.limit ?? PAGE_LIMIT,
+    offset: page?.offset ?? 0,
+    total: page?.total ?? 0,
+    sort: page?.sort ?? toolPage.sort,
+    dir: page?.dir ?? toolPage.dir,
+    onSort: setSort,
+    onOffset: (offset) => setParam("offset", offset > 0 ? String(offset) : null),
+    search: toolPage.search ?? "",
+    onSearch: (query) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (query) next.set("q", query);
+          else next.delete("q");
+          next.delete("offset");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    searchPlaceholder: "Filter tools by name…",
+    unit: "tools",
+  });
+  const coverage = useToolCoverageMetrics(userId, filters, tab === "coverage");
+  const session = useSessionSummary(userId, sessionId, adminOrgScope);
+  const llm = useLlmCallMetrics(userId, filters, includeSubagents, tab === "llm");
+
+  // Tool options come from whichever response the open tab already fetched, so
+  // the list only ever offers tools that exist in the current window and scope.
+  const toolOptions = useMemo(() => {
+    const names =
+      tab === "tools" ? (tools.data?.tools ?? []).map((r) => r.tool)
+      : tab === "quality" ? (quality.data?.quality ?? []).map((r) => r.tool)
+      : tab === "coverage" ? (coverage.data?.argUsage ?? []).map((r) => r.tool)
+      : [];
+    return [...new Set(names)].sort();
+  }, [tab, tools.data, quality.data, coverage.data]);
+
+  const toolFilterApplies = tab === "tools" || tab === "quality" || tab === "coverage";
 
   return (
-    <div className="flex-1 overflow-auto">
+    <div className="metrics-viz flex-1 overflow-auto">
+      <MetricsVizTokens />
       <div className="max-w-[1180px] mx-auto px-[40px] pt-[32px] pb-[56px] w-full min-w-[640px]">
-        <div className="mb-[16px] flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[22px] font-semibold text-xyne-fg-primary">
-              {selectedAgent ? `Agent · ${selectedAgent}` : "Workspace Metrics"}
-            </h1>
-            <p className="text-[13px] text-xyne-fg-muted mt-1">
-              {selectedAgent
-                ? `Latency, throughput, tokens, users, and tool-by-tool breakdown for ${selectedAgent}.`
-                : "Latency, throughput, and error trends across all agents and users."}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
+        <div className="mb-[16px]">
+          <h1 className="text-[22px] font-semibold text-xyne-fg-primary">
+            {selectedAgent ? `Agent · ${selectedAgent}` : "Workspace Metrics"}
+          </h1>
+          <p className="text-[13px] text-xyne-fg-muted mt-1">
+            {selectedAgent
+              ? `Latency, throughput, tokens, tools, and per-call model performance for ${selectedAgent}.`
+              : "Latency, throughput, errors, tool reliability, and model performance across all agents and users."}
+          </p>
+        </div>
+
+        {/* One filter row, sticky, so the controls stay reachable while reading
+            a long panel and the reader never scrolls back up to change range. */}
+        <div className="sticky top-0 z-10 -mx-[40px] mb-[20px] border-b border-xyne-border bg-xyne-surface/95 px-[40px] py-3 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-3">
+            <MultiSelect
+              label="agents"
+              allLabel="All agents"
+              options={agentOptions}
+              selected={selectedAgents}
+              onChange={(next) => setParam("agent", next.join(",") || null)}
+              emptyMessage="No agents with runs yet."
+              searchPlaceholder="Search agents…"
+            />
+
+            {toolFilterApplies && (
+              <MultiSelect
+                label="tools"
+                allLabel="All tools"
+                options={toolOptions}
+                selected={selectedTools}
+                onChange={(next) => setParam("tool", next.join(",") || null)}
+                emptyMessage="Tool list loads with this tab's data."
+                searchPlaceholder="Search tools…"
+              />
+            )}
+
+            <SessionFilter
+              value={sessionId}
+              onChange={(next) => {
+                setParams(
+                  (prev) => {
+                    const q = new URLSearchParams(prev);
+                    if (next) q.set("session", next);
+                    else q.delete("session");
+                    q.delete("offset");
+                    return q;
+                  },
+                  { replace: true },
+                );
+              }}
+            />
+
+            <DateRangePicker
+              value={windowSelection}
+              onChange={(next) => {
+                setParams(
+                  (prev) => {
+                    const q = new URLSearchParams(prev);
+                    q.set("range", String(next.days));
+                    if (next.from) q.set("from", next.from);
+                    else q.delete("from");
+                    if (next.to) q.set("to", next.to);
+                    else q.delete("to");
+                    q.delete("offset");
+                    return q;
+                  },
+                  { replace: true },
+                );
+              }}
+            />
+
             {isAdmin && (
               <label className="flex shrink-0 items-center gap-2 text-[12px] text-xyne-fg-muted">
-                <Switch checked={allOrgs} onChange={setAllOrgs} />
+                <Switch
+                  checked={allOrgs}
+                  onChange={(next) => setParam("orgScope", next ? "all" : null)}
+                  ariaLabel="Show metrics across all organizations"
+                />
                 All orgs
               </label>
             )}
-            <label className="text-[12px] text-xyne-fg-muted">View:</label>
-            <select
-              value={selectedAgent ?? ""}
-              onChange={(e) => setSelectedAgent(e.target.value || null)}
-              className="text-[13px] rounded-md bg-xyne-bg-secondary border border-xyne-border px-3 py-1.5 text-xyne-fg-primary focus:outline-none focus:ring-1 focus:ring-xyne-fg-primary/30"
-            >
-              <option value="">All workspace</option>
-              {agentSlugs.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+
+            <div className="ml-auto">
+              <Tabs
+                items={TABS}
+                selected={tab}
+                onSelect={(id) => setParam("tab", id === "overview" ? null : id)}
+                className="border-b-0"
+              />
+            </div>
           </div>
         </div>
-        <MetricsPanel
-          // Re-key on selection so the panel resets its day-window state to 7d
-          // each time we switch agent — avoids the dropdown going stale on a
-          // window that has zero data for the newly-picked agent.
-          key={selectedAgent ?? "__global__"}
-          userId={userId}
-          fetcher={fetcher}
-          showLeaderboard={!selectedAgent}
-          onAgentClick={(slug) => setSelectedAgent(slug)}
-        />
+
+        {error && (
+          <div className="mb-[20px] rounded-xl border border-xyne-error-border bg-xyne-error-bg p-4 text-[13px] text-xyne-error-fg">
+            Failed to load metrics: {error}
+          </div>
+        )}
+
+        {loading || !data ? (
+          <div className="flex flex-col gap-[20px]">
+            <Skeleton className="h-[160px] w-full" />
+            <Skeleton className="h-[260px] w-full" />
+            <Skeleton className="h-[260px] w-full" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-[20px]">
+            {/* Headline health, above the tabs — answerable without a choice.
+                Hidden under a session filter: a p95 over one run is that run. */}
+            {!sessionId && <HeadlineKpis data={data} />}
+
+            {tab === "overview" && selectedAgents.length > 1 && (
+              <div className="rounded-xl border border-xyne-info-border bg-xyne-info-bg px-4 py-3 text-[12px] text-xyne-info-fg">
+                <span className="font-medium">Showing the whole workspace.</span> The run-level
+                rollup below is computed per agent or across everything — it cannot yet be scoped
+                to a subset. The Tools, LLM calls, Quality and Coverage tabs do respect all{" "}
+                {selectedAgents.length} selected agents.
+              </div>
+            )}
+            {/* A session filter replaces the window rollup rather than sitting
+                beside it: an aggregate over one run is that run's own numbers,
+                reported as if they were a distribution. */}
+            {tab === "overview" && sessionId && (
+              <SessionSummaryCard
+                sessionId={sessionId}
+                data={session.data}
+                loading={session.loading}
+                error={session.error}
+              />
+            )}
+
+            {tab === "overview" && !sessionId && (
+              <OverviewTab
+                userId={userId}
+                data={data}
+                showLeaderboard={!selectedAgent}
+                onAgentClick={(slug) => setParam("agent", slug)}
+              />
+            )}
+            {tab === "tools" && (
+              <ToolsPanel
+                data={tools.data}
+                loading={tools.loading}
+                error={tools.error}
+                toolFilter={selectedTools}
+                paging={buildPaging(tools.data?.page)}
+                failures={
+                  failuresTool
+                    ? {
+                        tool: failuresTool,
+                        data: failures.data,
+                        loading: failures.loading,
+                        error: failures.error,
+                        onOffset: (offset) => setParam("foffset", offset > 0 ? String(offset) : null),
+                      }
+                    : null
+                }
+                chart={chart}
+                onChartChange={(next) => {
+                  setParams(
+                    (prev) => {
+                      const q = new URLSearchParams(prev);
+                      q.set("cm", next.measure);
+                      q.set("ca", next.aggregation);
+                      return q;
+                    },
+                    { replace: true },
+                  );
+                }}
+                onDrillFailures={(tool) => {
+                  setParams(
+                    (prev) => {
+                      const next = new URLSearchParams(prev);
+                      if (tool) next.set("failures", tool);
+                      else next.delete("failures");
+                      next.delete("foffset");
+                      return next;
+                    },
+                    { replace: true },
+                  );
+                }}
+              />
+            )}
+            {tab === "llm" && (
+              <LlmCallsPanel
+                data={llm.data}
+                loading={llm.loading}
+                error={llm.error}
+                includeSubagents={includeSubagents}
+                onToggleSubagents={(next) => setParam("subagents", next ? "1" : null)}
+              />
+            )}
+            {tab === "quality" && (
+              <QualityPanel
+                data={quality.data}
+                loading={quality.loading}
+                error={quality.error}
+                exact={exactCitations}
+                onToggleExact={(next) => setParam("exact", next ? "1" : null)}
+                toolFilter={selectedTools}
+                paging={buildPaging(quality.data?.page)}
+              />
+            )}
+            {tab === "coverage" && (
+              <CoveragePanel data={coverage.data} loading={coverage.loading} error={coverage.error} toolFilter={selectedTools} />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function parseDays(raw: string | null): MetricsDays {
+  const n = Number(raw);
+  return n === 1 || n === 30 ? n : 7;
+}
+
+/** One page of tools. 50 keeps the payload small without constant paging. */
+const PAGE_LIMIT = 50;
+
+const TOOL_SORT_KEYS: readonly ToolSortKey[] = [
+  "tool", "calls", "errors", "errorRate", "duplicateRate", "droppedEnd",
+  "emptyResults", "recoveryRate", "citeRate", "avgMs", "p50Ms", "p95Ms",
+  "maxMs", "totalMs", "resultBytes",
+];
+
+/** Falls back rather than trusting the URL — the value reaches an ORDER BY. */
+function parseSort(raw: string | null): ToolSortKey {
+  return TOOL_SORT_KEYS.includes(raw as ToolSortKey) ? (raw as ToolSortKey) : "calls";
+}
+
+function parseIntParam(raw: string | null, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : fallback;
+}
+
+const CHART_MEASURES = ["bytes", "time", "errors", "calls"] as const;
+const CHART_AGGS = ["total", "perCall", "perSession"] as const;
+
+function parseChartMeasure(raw: string | null): ChartRequest["measure"] {
+  return (CHART_MEASURES as readonly string[]).includes(raw ?? "")
+    ? (raw as ChartRequest["measure"])
+    : "bytes";
+}
+
+function parseChartAgg(raw: string | null): ChartRequest["aggregation"] {
+  return (CHART_AGGS as readonly string[]).includes(raw ?? "")
+    ? (raw as ChartRequest["aggregation"])
+    : "total";
+}
+
+/** Comma-separated URL list → deduped values. Empty string yields []. */
+function parseList(raw: string | null): string[] {
+  if (!raw) return [];
+  return [...new Set(raw.split(",").map((v) => v.trim()).filter(Boolean))];
+}
+
+function parseTab(raw: string | null): MetricsTab {
+  return TABS.some((t) => t.id === raw) ? (raw as MetricsTab) : "overview";
 }
 
 /* ── building blocks ──────────────────────────────────────────────────── */
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+/** Thin alias over the shared card shell, so old and new sections cannot drift. */
+function Card({ title, subtitle, unit, children }: {
+  title: string;
+  subtitle?: string;
+  /** States how the numbers were aggregated — see UnitBadge. */
+  unit?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-xl bg-xyne-surface shadow-sm p-[20px]">
-      <div className="mb-3">
-        <div className="text-[14px] font-semibold text-xyne-fg-primary">{title}</div>
-        {subtitle && <div className="text-[12px] text-xyne-fg-muted mt-0.5">{subtitle}</div>}
-      </div>
+    <MetricsCard
+      title={title}
+      {...(subtitle ? { description: subtitle } : {})}
+      {...(unit ? { action: unit } : {})}
+    >
       {children}
-    </div>
+    </MetricsCard>
   );
 }
 
+/**
+ * The run-level breakdown: outcomes, where time goes, users, memory, tokens.
+ *
+ * The status banner and the two hero durations that used to open this strip now
+ * live in HeadlineKpis above the tabs, so they stay visible from every tab. No
+ * number was dropped — only promoted.
+ */
 function TotalsStrip({ data }: { data: GlobalMetrics | AgentMetrics }) {
-  const p50d = fmtSignedMs(data.delta.p50TotalMs);
-  const p95d = fmtSignedMs(data.delta.p95TotalMs);
   const errd = fmtSignedPct(data.delta.errorRate);
   const errPct = data.totals.errorRate;
 
-  // ── Status read-out: turns numbers into a one-line health summary. ──
-  // Thresholds tuned for the typical claw run mix; tweak as we learn what's
-  // "normal". The point is to anchor the eye before it dives into details.
-  const isErrorHigh = errPct > 0.1;             // >10% errors
-  const isP95Slow = (data.totals.p95TotalMs ?? 0) > 5 * 60_000; // >5 min p95
-  const errGettingWorse = (data.delta.errorRate ?? 0) > 0.02;   // +2pp
-  const latGettingWorse = (data.delta.p95TotalMs ?? 0) > 30_000; // +30s p95
-  const concerns: string[] = [];
-  if (isErrorHigh)      concerns.push(`error rate is ${fmtPct(errPct)} — high`);
-  if (isP95Slow)        concerns.push(`tail latency p95 = ${fmtMs(data.totals.p95TotalMs)} — slow`);
-  if (errGettingWorse)  concerns.push(`errors trending up vs previous window`);
-  if (latGettingWorse)  concerns.push(`p95 latency trending up vs previous window`);
-  const tone = concerns.length === 0 ? "good"
-              : (isErrorHigh || (isP95Slow && latGettingWorse)) ? "bad"
-              : "warn";
-  const bannerStyle =
-    tone === "good" ? "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/30" :
-    tone === "bad"  ? "bg-red-500/10   text-red-700   dark:text-red-300   border-red-500/30"   :
-                      "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30";
-  const bannerLabel =
-    tone === "good" ? `Workspace looks healthy across ${data.totals.runs} run${data.totals.runs === 1 ? "" : "s"}.`
-    : `${concerns.length} issue${concerns.length === 1 ? "" : "s"}: ${concerns.join(" · ")}`;
-
   return (
     <div className="flex flex-col gap-3">
-      {/* Status banner */}
-      <div className={`rounded-xl border px-4 py-3 text-[13px] ${bannerStyle}`}>
-        {bannerLabel}
-      </div>
-
-      {/* Hero row — the two questions you actually open this page to answer */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Hero
-          label="Typical run time"
-          help="Half of runs finished in under this. Lower = faster."
-          value={fmtMs(data.totals.p50TotalMs)}
-          delta={p50d}
-        />
-        <Hero
-          label="Slow-tail run time"
-          help="Slowest 5% of runs took this long or more — the painful ones."
-          value={fmtMs(data.totals.p95TotalMs)}
-          delta={p95d}
-        />
-      </div>
-
       {/* Supporting metrics in smaller tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Tile
@@ -538,23 +863,6 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function Hero({ label, help, value, delta }: { label: string; help: string; value: string; delta: { label: string; tone: "good" | "bad" | "flat" } }) {
-  const toneClass =
-    delta.tone === "good" ? "text-green-600 dark:text-green-400" :
-    delta.tone === "bad"  ? "text-red-600 dark:text-red-400"   :
-                            "text-xyne-fg-muted";
-  return (
-    <div className="rounded-xl bg-xyne-surface shadow-sm px-5 py-4 flex flex-col">
-      <div className="text-[12px] uppercase tracking-wider text-xyne-fg-muted">{label}</div>
-      <div className="flex items-baseline gap-3 mt-1">
-        <span className="text-[32px] font-semibold text-xyne-fg-primary tabular-nums">{value}</span>
-        <span className={`text-[13px] font-medium ${toneClass}`}>{delta.label}</span>
-      </div>
-      <div className="text-[12px] text-xyne-fg-muted mt-1">{help}</div>
-    </div>
-  );
-}
-
 function Tile({ label, value, sub, subTone = "flat" as "good" | "bad" | "flat" }: { label: string; value: string; sub?: string; subTone?: "good" | "bad" | "flat" }) {
   const toneClass =
     subTone === "good" ? "text-green-600 dark:text-green-400" :
@@ -607,41 +915,25 @@ function MetricChip({ label, value }: { label: string; value: string }) {
 
 /* ── Charts (recharts) ────────────────────────────────────────────────── */
 
+/**
+ * Same four charts, same data, same order as before — updated for chrome only,
+ * so that these and the newer panels read as one system:
+ *
+ *   - colours come from the validated palette instead of hard-coded hexes. The
+ *     old values were fixed light-mode greens and slates that did not adapt to
+ *     the dark theme;
+ *   - gridlines are solid hairlines rather than dashed. Dashing reads as
+ *     "threshold" or "projection" when it is only a grid;
+ *   - outcome colours are status roles (good / critical / neutral) rather than
+ *     arbitrary series hues, because completed-vs-failed IS a status;
+ *   - the legend sits outside the SVG so its text wears text tokens rather than
+ *     the series colour.
+ *
+ * Stacked segments carry a 2px surface gap so neighbouring bands separate by
+ * negative space rather than by a stroke.
+ */
+
 const CHART_HEIGHT = 240;
-const GRID_COLOR = "currentColor";
-const GRID_OPACITY = 0.10;
-
-// Shared X-axis day formatting and Y-axis number formatting are tiny enough
-// to inline at each call site. Tooltip is shared.
-const tickStyle = { fontSize: 11, fill: "currentColor", opacity: 0.65 };
-const axisStyle = { stroke: "currentColor", opacity: 0.2 };
-
-interface TooltipPayloadItem {
-  name?: string;
-  value?: number;
-  color?: string;
-}
-
-function MetricsTooltip({ active, payload, label, valueFormat }: {
-  active?: boolean;
-  payload?: TooltipPayloadItem[];
-  label?: string;
-  valueFormat?: (v: number) => string;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="rounded-md border border-xyne-border bg-xyne-surface px-3 py-2 text-[12px] shadow-md">
-      <div className="font-medium text-xyne-fg-primary mb-1">{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} className="flex items-center gap-2 text-xyne-fg-muted">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
-          <span>{p.name}:</span>
-          <span className="tabular-nums text-xyne-fg-primary">{valueFormat && typeof p.value === "number" ? valueFormat(p.value) : p.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function SessionsBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
   const data = perDay.map((d) => ({
@@ -651,18 +943,27 @@ function SessionsBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
     Cancelled: d.cancelled,
   }));
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={40} allowDecimals={false} />
-        <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="Completed" stackId="s" fill="#22c55e" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="Failed"    stackId="s" fill="#ef4444" />
-        <Bar dataKey="Cancelled" stackId="s" fill="#94a3b8" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <>
+      <ChartLegend
+        className="mb-2"
+        items={[
+          { color: OUTCOME.completed, label: "Completed" },
+          { color: OUTCOME.failed, label: "Failed" },
+          { color: OUTCOME.cancelled, label: "Cancelled" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={NEUTRAL.grid} vertical={false} />
+          <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+          <RcYAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} allowDecimals={false} />
+          <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
+          <Bar dataKey="Completed" stackId="s" fill={OUTCOME.completed} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="Failed" stackId="s" fill={OUTCOME.failed} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="Cancelled" stackId="s" fill={OUTCOME.cancelled} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }
 
@@ -675,19 +976,29 @@ function TriggerBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
     CLI: d.api ?? 0,
   }));
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={40} allowDecimals={false} />
-        <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="User" stackId="s" fill="#3b82f6" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="Automation" stackId="s" fill="#a855f7" />
-        <Bar dataKey="Scheduled" stackId="s" fill="#f59e0b" />
-        <Bar dataKey="CLI" stackId="s" fill="#14b8a6" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <>
+      <ChartLegend
+        className="mb-2"
+        items={[
+          { color: SERIES[0], label: "User" },
+          { color: SERIES[5], label: "Automation" },
+          { color: SERIES[3], label: "Scheduled" },
+          { color: SERIES[2], label: "CLI" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={NEUTRAL.grid} vertical={false} />
+          <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+          <RcYAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} allowDecimals={false} />
+          <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
+          <Bar dataKey="User" stackId="s" fill={SERIES[0]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="Automation" stackId="s" fill={SERIES[5]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="Scheduled" stackId="s" fill={SERIES[3]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="CLI" stackId="s" fill={SERIES[2]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }
 
@@ -704,16 +1015,19 @@ function SingleLineChart({ perDay, valueKey, color, displayName }: {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <LineChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
-        <Tooltip content={<MetricsTooltip valueFormat={(v) => fmtMs(v)} />} />
+        <CartesianGrid stroke={NEUTRAL.grid} vertical={false} />
+        <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+        <RcYAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
+        <Tooltip
+          cursor={{ stroke: NEUTRAL.axis }}
+          content={<MetricsTooltip format={(v) => fmtMs(Number(v))} />}
+        />
         <Line
           type="monotone"
           dataKey={displayName}
           stroke={color}
-          strokeWidth={2.5}
-          dot={{ r: 3.5, fill: color }}
+          strokeWidth={2}
+          dot={{ r: 4, fill: color, strokeWidth: 2, stroke: NEUTRAL.surface }}
           activeDot={{ r: 5 }}
           connectNulls
           isAnimationActive={false}
@@ -730,17 +1044,28 @@ function SplitChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
     "Avg Tool time": d.avgToolMs ?? 0,
   }));
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
-        <Tooltip content={<MetricsTooltip valueFormat={(v) => fmtMs(v)} />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="Avg LLM time"  stackId="s" fill="#6366f1" />
-        <Bar dataKey="Avg Tool time" stackId="s" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <>
+      <ChartLegend
+        className="mb-2"
+        items={[
+          { color: SERIES[5], label: "Avg LLM time" },
+          { color: SERIES[3], label: "Avg Tool time" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={NEUTRAL.grid} vertical={false} />
+          <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+          <RcYAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
+          <Tooltip
+            content={<MetricsTooltip format={(v) => fmtMs(Number(v))} />}
+            cursor={{ fill: "currentColor", opacity: 0.05 }}
+          />
+          <Bar dataKey="Avg LLM time" stackId="s" fill={SERIES[5]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} />
+          <Bar dataKey="Avg Tool time" stackId="s" fill={SERIES[3]} barSize={22} stroke={NEUTRAL.surface} strokeWidth={2} radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }
 

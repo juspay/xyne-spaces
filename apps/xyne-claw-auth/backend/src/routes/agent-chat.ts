@@ -6,6 +6,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { clawMetricsFields } from "../lib/run-metrics-payload.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -1861,8 +1862,11 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(model ? { model } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
-        ...(tokenUsage ? { tokenUsage } : {}),
+        // Read straight off the body rather than the destructured locals: the
+        // latency block, citation outcome and per-call LLM series ride the same
+        // callback and were never picked up here, so dashboard chat runs stored
+        // NULL totalMs and stayed out of every latency chart.
+        ...clawMetricsFields(req.body as Record<string, unknown>),
         ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {

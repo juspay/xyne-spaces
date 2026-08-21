@@ -17,6 +17,7 @@ import { ERROR_PIPELINE } from "../config.js";
 import { classify } from "../error-pipeline/classify.js";
 import { routeError } from "../error-pipeline/buckets.js";
 import { agentRunRepository } from "../repositories/agentRunRepository.js";
+import { clawMetricsFields } from "../lib/run-metrics-payload.js";
 import type { IncomingError } from "../error-pipeline/types.js";
 import { createLogger } from "../logger.js";
 import { prisma } from "../db.js";
@@ -48,6 +49,9 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
     agentSlug?: string;
     conversationId?: string | null;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+    toolsUsed?: string[];
+    provider?: string;
+    model?: string;
   };
   if (!p.sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -59,7 +63,10 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
       status,
       result: p.result ?? null,
       error: p.error ?? null,
-      toolsUsed: [],
+      toolsUsed: p.toolsUsed ?? [],
+      ...(p.provider ? { provider: p.provider } : {}),
+      ...(p.model ? { model: p.model } : {}),
+      ...clawMetricsFields(p),
     });
   } catch (err) {
     log.error(`[run-result] finalize ${p.sessionId} failed — returning 500 so Claw retries: ${err instanceof Error ? err.message : String(err)}`);

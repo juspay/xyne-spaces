@@ -5,6 +5,7 @@ import { requireAuth, requireNoAccessToken, requireResultToken } from "../middle
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
+import { clawMetricsFields } from "../lib/run-metrics-payload.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
@@ -1357,7 +1358,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           // them by id instead of by chronology (which breaks once a user
           // message has multiple assistant siblings).
           ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
-          ...(toolInvocations ? { toolInvocations } : {}),
+          // Latency, tokens, citation outcome and the per-call LLM series all
+          // ride this same callback body; without them a streamed run is
+          // invisible to every latency chart.
+          ...clawMetricsFields(body),
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {

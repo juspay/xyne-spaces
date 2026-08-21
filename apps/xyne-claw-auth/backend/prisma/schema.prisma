@@ -991,6 +991,15 @@ model AgentRun {
   reasoning        String?   @db.Text
   toolsUsed        String[]  @default([])
   toolInvocations  Json? /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
+  toolStats        Json?
+  /// Per-LLM-call latency and token series for the run, written at finalize.
+  /// One entry per call (parent calls plus subagent calls tagged with their
+  /// origin), carrying TTFT, decode ms and the four token buckets. Exists
+  /// because the run-level columns below keep only the FIRST turn's ttftMs and
+  /// one aggregate tokensPerSec, which cannot show how latency moves with
+  /// prompt size or with position in the loop. Shape owned by
+  /// xyne-claw/src/llm-turn-stats.ts. NULL means "not recorded".
+  llmTurnStats     Json? /// Per-tool summary of `toolInvocations`, computed once at finalize. 
   metadata         Json? /// Additive per-run integration metadata (for example external result callback configuration)
   tokensIn         Int?
   tokensOut        Int?

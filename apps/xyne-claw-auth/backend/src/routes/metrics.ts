@@ -18,6 +18,26 @@ import { prisma } from "../db.js";
 import { isClawAdmin, getOrgId } from "../middleware/agent-acl.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { backfillFailureCurator } from "../services/failure-curator-worker.js";
+import { fetchToolErrorClasses, fetchToolFailures, type AnalyticsWindow } from "../lib/tool-metrics.js";
+import { fetchDeadTools, fetchToolArgUsage } from "../lib/tool-coverage.js";
+import { fetchToolCiteRates, fetchCitationConfig, fetchCitationReflection } from "../lib/tool-citations.js";
+import {
+  fetchToolStats,
+  fetchToolStatsCoverage,
+  TOOL_SORT_KEYS,
+  type ChartAggregation,
+  type ChartMeasure,
+  type ChartRequest,
+  type PageRequest,
+  type ToolSortKey,
+} from "../lib/tool-stats-read.js";
+import {
+  fetchLlmCallSeries,
+  fetchLlmLatencyByContext,
+  fetchLlmLatencyByCallIndex,
+  fetchLlmStatsCoverage,
+} from "../lib/llm-turn-stats-read.js";
+import { backfillToolStats } from "../lib/tool-stats-backfill.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("metrics");
@@ -66,6 +86,106 @@ const TRIGGER_GROUPS: TriggerGroup[] = ["user", "automation", "scheduled", "api"
 function parseDays(req: Request): number {
   const raw = Number(req.query["days"]);
   return ALLOWED_DAYS.has(raw) ? raw : DEFAULT_DAYS;
+}
+
+/** Bounds the scan a hand-written URL can ask for. */
+const MAX_WINDOW_DAYS = 366;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface ResolvedWindow {
+  windowStart: Date;
+  windowEnd: Date;
+  /** Same length immediately before the window — the denominator for deltas. */
+  prevWindowStart: Date;
+  /** Window length in days, echoed to the client. Fractional for sub-day ranges. */
+  days: number;
+  /** True when the caller gave explicit dates rather than a preset. */
+  explicit: boolean;
+}
+
+/**
+ * Parses `?from=&to=`, falling back to the `?days=` preset.
+ *
+ * A DATE-ONLY value means the whole UTC day — `from=2026-08-15` starts at
+ * 00:00:00Z and `to=2026-08-15` ends at 23:59:59.999Z, so a single date selects
+ * that day rather than a zero-length window. Callers that care about a local
+ * calendar day should send full ISO instants; those are used verbatim.
+ *
+ * Shared by the run-level and the deep endpoints so a date range cannot mean
+ * one thing on the overview and another on the tool tabs.
+ */
+function parseWindow(req: Request): ResolvedWindow {
+  const rawFrom = typeof req.query["from"] === "string" ? req.query["from"].trim() : "";
+  const rawTo = typeof req.query["to"] === "string" ? req.query["to"].trim() : "";
+
+  const dateOnly = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const parse = (v: string, edge: "start" | "end"): Date | null => {
+    if (!v) return null;
+    const iso = dateOnly(v) ? `${v}T${edge === "start" ? "00:00:00.000" : "23:59:59.999"}Z` : v;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  // Order the RAW values before applying edges. Swapping parsed instants would
+  // hand day-END to `from` and day-START to `to`, so a reversed range came out
+  // narrower than the identical range typed forward.
+  let lo = rawFrom;
+  let hi = rawTo;
+  if (lo && hi) {
+    const cmp = (v: string): number => new Date(dateOnly(v) ? `${v}T00:00:00.000Z` : v).getTime();
+    if (cmp(lo) > cmp(hi)) [lo, hi] = [hi, lo];
+  }
+
+  const from = parse(lo, "start");
+  const to = parse(hi, "end");
+
+  if (from || to) {
+    const now = Date.now();
+    // Never let the window end in the future: a `to` past now would otherwise
+    // slide the whole clamped span into a period that cannot contain any runs.
+    let endMs = Math.min((to ?? new Date()).getTime(), now);
+    // `from` missing but `to` present → the preset length ending at `to`.
+    const fallbackDays = parseDays(req);
+    let startMs = (from ?? new Date(endMs - fallbackDays * DAY_MS)).getTime();
+    // Raw values were ordered above; this only catches a `from` later than a
+    // clamped `to` (a future `to` pulled back to now).
+    if (startMs > endMs) startMs = endMs;
+
+    const span = Math.min(endMs - startMs, MAX_WINDOW_DAYS * DAY_MS);
+    const windowEnd = new Date(endMs);
+    const clampedStart = new Date(endMs - span);
+    return {
+      windowStart: clampedStart,
+      windowEnd,
+      prevWindowStart: new Date(clampedStart.getTime() - span),
+      days: Math.max(1, Math.round(span / DAY_MS)),
+      explicit: true,
+    };
+  }
+
+  const days = parseDays(req);
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - days * DAY_MS);
+  return {
+    windowStart,
+    windowEnd,
+    prevWindowStart: new Date(windowStart.getTime() - days * DAY_MS),
+    days,
+    explicit: false,
+  };
+}
+
+/**
+ * Optional single-session scope.
+ *
+ * `agent_runs.sessionId` is unique, so this collapses every query to one run —
+ * the cheapest filter available and the one that turns these dashboards into a
+ * per-session forensic view.
+ */
+function parseSessionId(req: Request): string | undefined {
+  const raw = req.query["sessionId"];
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return value ? value : undefined;
 }
 
 interface DayBucket {
@@ -214,6 +334,9 @@ interface ToolLatencyRow {
   p50Ms: number | null;
   p95Ms: number | null;
   totalMs: number;
+  /** Calls whose `tool_execution_end` push never landed; excluded from the latency figures above. */
+  droppedEnd: number;
+  droppedEndRate: number;
 }
 
 interface SentimentComment {
@@ -338,6 +461,22 @@ async function fetchSentiment(opts: {
  * Postgres can do this in a single LATERAL + jsonb_array_elements query;
  * the percentile is cheap because the per-tool population is small.
  */
+/**
+ * Per-tool latency for the agent page.
+ *
+ * Reads the precomputed `toolStats` column rather than unnesting the
+ * invocations blob — the same numbers at ~57ms instead of ~850ms. Runs that
+ * predate the column are invisible until backfilled, which is why the agent
+ * response carries `toolStatsCoverage`.
+ *
+ * `p50Ms`/`p95Ms` are bucket-resolution here (summed histograms); `avgMs` and
+ * the totals stay exact. `droppedEnd` surfaces the calls whose
+ * tool_execution_end push never landed — previously counted as instant
+ * successes, which deflated every figure in this table.
+ *
+ * Stays on the `completedAt` window so it remains consistent with the other
+ * cards on the same page.
+ */
 async function fetchToolLatency(opts: {
   windowStart: Date;
   windowEnd: Date;
@@ -346,47 +485,33 @@ async function fetchToolLatency(opts: {
   orgFilter: Prisma.Sql;
   limit: number;
 }): Promise<ToolLatencyRow[]> {
-  const rows = await prisma.$queryRaw<Array<{
-    tool: string;
-    calls: bigint;
-    errors: bigint;
-    avg_ms: number | null;
-    p50_ms: number | null;
-    p95_ms: number | null;
-    // Postgres SUM(int) returns BIGINT — must Number() before serialising.
-    total_ms: bigint | null;
-  }>>`
-    SELECT
-      inv->>'toolName'                                                     AS tool,
-      COUNT(*)                                                             AS calls,
-      COUNT(*) FILTER (WHERE (inv->>'isError')::boolean)                   AS errors,
-      AVG(NULLIF(inv->>'durationMs','')::int)                              AS avg_ms,
-      PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY NULLIF(inv->>'durationMs','')::int) AS p50_ms,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY NULLIF(inv->>'durationMs','')::int) AS p95_ms,
-      SUM(NULLIF(inv->>'durationMs','')::int)                              AS total_ms
-    FROM "agent_runs" r,
-         LATERAL jsonb_array_elements(r."toolInvocations") inv
-    WHERE r."agentSlug" = ${opts.agentSlug}
-      AND r."completedAt" >= ${opts.windowStart}
-      AND r."completedAt" <  ${opts.windowEnd}
-      AND r."toolInvocations" IS NOT NULL
-      AND NULLIF(inv->>'durationMs','') IS NOT NULL
-      ${opts.userFilter}
-      ${opts.orgFilter}
-    GROUP BY inv->>'toolName'
-    ORDER BY total_ms DESC NULLS LAST
-    LIMIT ${opts.limit}
-  `;
-  const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
-  return rows.map((r) => ({
-    tool: r.tool,
-    calls: Number(r.calls),
-    errors: Number(r.errors),
-    avgMs: round(r.avg_ms),
-    p50Ms: round(r.p50_ms),
-    p95Ms: round(r.p95_ms),
-    totalMs: r.total_ms != null ? Number(r.total_ms) : 0,
-  }));
+  const stats = await fetchToolStats(
+    {
+      windowStart: opts.windowStart,
+      windowEnd: opts.windowEnd,
+      windowColumn: "completedAt",
+      agentSlugs: opts.agentSlug ? [opts.agentSlug] : undefined,
+      userFilter: opts.userFilter,
+      orgFilter: opts.orgFilter,
+    },
+    // Ordered by cumulative time — this table exists to surface the tool
+    // dragging one agent down, which is a totalMs question, not a volume one.
+    { limit: opts.limit, offset: 0, sort: "totalMs", dir: "desc" },
+  );
+
+  return stats.rows
+    .map((s) => ({
+      tool: s.tool,
+      calls: s.calls,
+      errors: s.errors,
+      avgMs: s.avgMs,
+      p50Ms: s.p50Ms,
+      p95Ms: s.p95Ms,
+      totalMs: s.totalMs,
+      droppedEnd: s.droppedEnd,
+      droppedEndRate: s.droppedEndRate,
+    }))
+    .sort((a, b) => b.totalMs - a.totalMs);
 }
 
 interface MetricsResponse {
@@ -432,10 +557,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
   try {
     const { userFilter, orgFilter, scopeUserId, scopeOrgId } = await resolveMetricsScope(req, "/metrics/agent");
     const slug = req.params.slug;
-    const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const { windowStart, windowEnd, prevWindowStart, days } = parseWindow(req);
 
     const perDayRaw = await prisma.$queryRaw<Array<{
       day: Date;
@@ -626,10 +748,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
 metricsRouter.get("/global", async (req: Request, res: Response) => {
   try {
     const { userFilter, orgFilter, scopeUserId, scopeOrgId, allOrgs } = await resolveMetricsScope(req, "/metrics/global");
-    const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const { windowStart, windowEnd, prevWindowStart, days } = parseWindow(req);
 
     // Per-day rollup. PostgreSQL handles the percentile + grouping in one pass.
     // Using $queryRawUnsafe is unnecessary — parameterise the interval via a
@@ -1181,6 +1300,463 @@ metricsRouter.post("/improvements/backfill", async (req: Request, res: Response)
     res.json(report);
   } catch (err) {
     log.error("[metrics/improvements/backfill] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * Build the analytics window for the deep tool endpoints below.
+ *
+ * The window column is not a caller preference — it is chosen so an existing
+ * index can serve the scan. Agent-scoped queries use `startedAt`, matching
+ * `@@index([agentSlug, startedAt])` as an exact two-column index condition;
+ * unscoped queries use `completedAt`, matching
+ * `@@index([completedAt, triggerSource])`. Picking the other column in either
+ * case degrades to a BitmapAnd or a sequential scan.
+ *
+ * Agent-scoped responses therefore describe runs STARTED in the window, while
+ * global ones describe runs COMPLETED in it.
+ */
+async function buildAnalyticsWindow(req: Request, endpoint: string): Promise<{
+  window: AnalyticsWindow;
+  days: number;
+  agentSlugs: string[];
+  sessionId: string | undefined;
+}> {
+  const { userFilter, orgFilter } = await resolveMetricsScope(req, endpoint);
+  const { windowStart, windowEnd, days } = parseWindow(req);
+  const agentSlugs = parseAgentSlugs(req);
+  const sessionId = parseSessionId(req);
+
+  return {
+    days,
+    agentSlugs,
+    sessionId,
+    window: {
+      windowStart,
+      windowEnd,
+      // A session is one run, so the window column no longer decides the plan —
+      // the unique index on sessionId does. Keep the agent-scoped choice for
+      // consistency with the un-filtered case.
+      windowColumn: agentSlugs.length > 0 ? "startedAt" : "completedAt",
+      agentSlugs,
+      ...(sessionId ? { sessionId } : {}),
+      userFilter,
+      orgFilter,
+    },
+  };
+}
+
+/**
+ * Reads the agent selection from `?agentSlug=`.
+ *
+ * Accepts a single value, the param repeated, or one comma-separated value, so
+ * the existing single-agent callers keep working verbatim while the metrics UI
+ * can pass a multi-select. Deduped and capped — the cap bounds the IN list a
+ * hand-edited URL can produce, not any real selection.
+ */
+const MAX_AGENT_FILTER = 50;
+
+/** Page-size ceiling. Bounds the response, not the aggregation, which is per-window. */
+const MAX_PAGE_LIMIT = 200;
+const DEFAULT_PAGE_LIMIT = 50;
+
+function parseIntParam(raw: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
+
+/**
+ * Reads `limit` / `offset` / `sort` / `dir` / `search`.
+ *
+ * `sort` is validated against the whitelist rather than passed through — the
+ * value reaches an ORDER BY, and only a known key may.
+ */
+/**
+ * Which series the tools chart should plot.
+ *
+ * Validated against the known sets rather than passed through — both values
+ * select a SQL expression, so only a known key may reach the query.
+ */
+const CHART_MEASURES: readonly ChartMeasure[] = ["bytes", "time", "errors", "calls"];
+const CHART_AGGREGATIONS: readonly ChartAggregation[] = ["total", "perCall", "perSession"];
+
+function parseChartRequest(req: Request): ChartRequest {
+  const measure = String(req.query["chartMeasure"] ?? "");
+  const aggregation = String(req.query["chartAgg"] ?? "");
+  return {
+    measure: CHART_MEASURES.includes(measure as ChartMeasure) ? (measure as ChartMeasure) : "bytes",
+    aggregation: CHART_AGGREGATIONS.includes(aggregation as ChartAggregation)
+      ? (aggregation as ChartAggregation)
+      : "total",
+  };
+}
+
+function parseToolPage(req: Request): PageRequest {
+  const rawSort = String(req.query["sort"] ?? "");
+  const sort = (TOOL_SORT_KEYS as string[]).includes(rawSort) ? (rawSort as ToolSortKey) : "calls";
+  const search = typeof req.query["search"] === "string" ? req.query["search"] : undefined;
+  return {
+    limit: parseIntParam(req.query["limit"], DEFAULT_PAGE_LIMIT, 1, MAX_PAGE_LIMIT),
+    offset: parseIntParam(req.query["offset"], 0, 0, Number.MAX_SAFE_INTEGER),
+    sort,
+    dir: req.query["dir"] === "asc" ? "asc" : "desc",
+    ...(search ? { search } : {}),
+  };
+}
+
+function parseAgentSlugs(req: Request): string[] {
+  const raw = req.query["agentSlug"];
+  const values = Array.isArray(raw) ? raw : [raw];
+  const slugs = values
+    .filter((v): v is string => typeof v === "string")
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return [...new Set(slugs)].slice(0, MAX_AGENT_FILTER);
+}
+
+/**
+ * GET /api/v1/metrics/session/:sessionId
+ *
+ * The one run behind a session filter.
+ *
+ * The window rollups are aggregates and have no single-run form — a p95 over
+ * one value is that value. So rather than telling the reader the filter does
+ * not apply, this returns the run itself: what it did, how long it took, what
+ * it spent, and whether the deep tabs will have anything to show for it.
+ *
+ * Scoped by `resolveMetricsScope`, so a non-admin sees only their own runs.
+ */
+metricsRouter.get("/session/:sessionId", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const { userFilter, orgFilter } = await resolveMetricsScope(req, "/metrics/session");
+    const sessionId = req.params.sessionId?.trim();
+    if (!sessionId) {
+      res.status(400).json({ error: "sessionId is required" });
+      return;
+    }
+
+    const [row] = await prisma.$queryRaw<Array<{
+      session_id: string; agent_slug: string; status: string; trigger_source: string;
+      provider: string | null; model: string | null; task: string | null; error: string | null;
+      started_at: Date; completed_at: Date | null;
+      total_ms: number | null; llm_total_ms: number | null; tool_ms: number | null;
+      llm_turns: number | null; llm_retries: number | null; ttft_ms: number | null;
+      tokens_in: number | null; tokens_out: number | null;
+      tokens_cache_read: number | null; tokens_cache_write: number | null;
+      tools_used: string[] | null; rating: string | null;
+      tool_calls: number | null; llm_calls: number | null;
+    }>>(Prisma.sql`
+      SELECT
+        r."sessionId" AS session_id, r."agentSlug" AS agent_slug, r.status,
+        r."triggerSource" AS trigger_source, r.provider, r.model,
+        left(r.task, 400) AS task, left(r.error, 400) AS error,
+        r."startedAt" AS started_at, r."completedAt" AS completed_at,
+        r."totalMs" AS total_ms, r."llmTotalMs" AS llm_total_ms, r."toolMs" AS tool_ms,
+        r."llmTurns" AS llm_turns, r."llmRetries" AS llm_retries, r."ttftMs" AS ttft_ms,
+        r."tokensIn" AS tokens_in, r."tokensOut" AS tokens_out,
+        r."tokensCacheRead" AS tokens_cache_read, r."tokensCacheWrite" AS tokens_cache_write,
+        r."toolsUsed" AS tools_used, r.rating,
+        CASE WHEN jsonb_typeof(r."toolInvocations") = 'array'
+             THEN jsonb_array_length(r."toolInvocations") END AS tool_calls,
+        CASE WHEN jsonb_typeof(r."llmTurnStats") = 'array'
+             THEN jsonb_array_length(r."llmTurnStats") END AS llm_calls
+      FROM "agent_runs" r
+      WHERE r."sessionId" = ${sessionId} ${userFilter} ${orgFilter}
+      LIMIT 1
+    `);
+
+    if (!row) {
+      res.status(404).json({ error: "Session not found, or not visible to you" });
+      return;
+    }
+
+    res.json({
+      sessionId: row.session_id,
+      agentSlug: row.agent_slug,
+      status: row.status,
+      trigger: row.trigger_source,
+      provider: row.provider,
+      model: row.model,
+      task: row.task,
+      error: row.error,
+      startedAt: row.started_at.toISOString(),
+      completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+      totalMs: row.total_ms,
+      llmTotalMs: row.llm_total_ms,
+      toolMs: row.tool_ms,
+      llmTurns: row.llm_turns,
+      llmRetries: row.llm_retries,
+      ttftMs: row.ttft_ms,
+      tokens: {
+        in: row.tokens_in ?? 0,
+        out: row.tokens_out ?? 0,
+        cacheRead: row.tokens_cache_read ?? 0,
+        cacheWrite: row.tokens_cache_write ?? 0,
+      },
+      toolsUsed: row.tools_used ?? [],
+      toolCalls: row.tool_calls,
+      rating: row.rating,
+      // Null means the run predates the column — the matching tab will be empty
+      // for it, and the UI says so rather than showing a bare zero.
+      llmCallsRecorded: row.llm_calls,
+    });
+  } catch (err) {
+    log.error("[metrics/session] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/v1/metrics/tools?days=7&agentSlug=euler
+ *
+ * Per-tool volume, reliability, latency and context burn, plus the top failure
+ * modes for each tool. Answers "which tool is failing, which is slow, and
+ * which is eating the context budget".
+ */
+metricsRouter.get("/tools", async (req: Request, res: Response) => {
+  try {
+    const { window, days, agentSlugs } = await buildAnalyticsWindow(req, "/metrics/tools");
+    // `tools` and `fieldUsage` read the precomputed toolStats column (~57ms).
+    // `errorClasses` stays on the live blob because grouping failure modes needs
+    // the raw error text, which no fixed-shape summary can carry.
+    const pageReq = parseToolPage(req);
+    const [tools, coverage, errorClasses] = await Promise.all([
+      fetchToolStats(window, pageReq, parseChartRequest(req)),
+      fetchToolStatsCoverage(window),
+      fetchToolErrorClasses(window),
+    ]);
+    res.json({
+      days,
+      agentSlug: agentSlugs.length === 1 ? agentSlugs[0]! : null,
+      agentSlugs,
+      windowStart: window.windowStart.toISOString(),
+      windowEnd: window.windowEnd.toISOString(),
+      windowColumn: window.windowColumn,
+      // Below 1 means backfill is incomplete and every count here under-reports.
+      coverage,
+      tools: tools.rows,
+      // Window-wide, never derived from the page — see ToolWindowTotals.
+      totals: tools.totals,
+      page: tools.page,
+      // Top-N over the whole window, ranked for the requested measure and
+      // aggregation, so a chart never ranks one page of rows.
+      chart: tools.chart,
+      chartRequest: tools.chartRequest,
+      errorClasses,
+    });
+  } catch (err) {
+    log.error("[metrics/tools] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/v1/metrics/tools/quality?days=7&agentSlug=euler
+ *
+ * Behavioural signals: blind-retry rate, recovery-after-error rate, and
+ * citation attribution.
+ *
+ * `citeRate` is null wherever nothing was citeable, and `citationConfig`
+ * reports the two per-agent flags that govern citation coverage — both are
+ * required to read the rate honestly (see lib/tool-citations.ts).
+ */
+metricsRouter.get("/tools/quality", async (req: Request, res: Response) => {
+  try {
+    const { window, days, agentSlugs } = await buildAnalyticsWindow(req, "/metrics/tools/quality");
+    // `?exact=1` swaps the same-turn citation counts carried in toolStats for
+    // the live conversation-scoped join, which also catches a later turn
+    // re-citing an earlier turn's chunk. It costs ~3s, so it is opt-in.
+    const exact = req.query["exact"] === "1" || req.query["exact"] === "true";
+    const pageReq = parseToolPage(req);
+    const [quality, coverage, citationReflection] = await Promise.all([
+      fetchToolStats(window, pageReq),
+      fetchToolStatsCoverage(window),
+      fetchCitationReflection(window),
+    ]);
+    const citations = exact ? await fetchToolCiteRates(window) : null;
+    const citationConfig = await fetchCitationConfig(agentSlugs.length > 0 ? agentSlugs : undefined);
+    res.json({
+      days,
+      agentSlug: agentSlugs.length === 1 ? agentSlugs[0]! : null,
+      agentSlugs,
+      windowStart: window.windowStart.toISOString(),
+      windowEnd: window.windowEnd.toISOString(),
+      coverage,
+      // citeRate here is same-turn scope; `citations` is populated only with
+      // ?exact=1 and is the conversation-scoped figure.
+      quality: quality.rows,
+      totals: quality.totals,
+      page: quality.page,
+      citations,
+      citationScope: exact ? "conversation" : "same-turn",
+      citationReflection,
+      citationConfig,
+    });
+  } catch (err) {
+    log.error("[metrics/tools/quality] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/v1/metrics/tools/failures?tool=search&days=7&limit=50&offset=0
+ *
+ * EVERY failure class for one tool, paged by frequency.
+ *
+ * The overview card on /metrics/tools keeps only the top few classes per tool
+ * so it stays readable; that cap hides the long tail, which is where the rare
+ * fatal failure lives. This is the drill-down — one tool, no rank cap.
+ */
+metricsRouter.get("/tools/failures", async (req: Request, res: Response) => {
+  try {
+    const tool = typeof req.query["tool"] === "string" ? req.query["tool"].trim() : "";
+    if (!tool) {
+      res.status(400).json({ error: "tool is required" });
+      return;
+    }
+    const { window, days } = await buildAnalyticsWindow(req, "/metrics/tools/failures");
+    const limit = parseIntParam(req.query["limit"], DEFAULT_PAGE_LIMIT, 1, MAX_PAGE_LIMIT);
+    const offset = parseIntParam(req.query["offset"], 0, 0, Number.MAX_SAFE_INTEGER);
+    const failures = await fetchToolFailures(window, tool, { limit, offset });
+    res.json({
+      days,
+      tool,
+      windowStart: window.windowStart.toISOString(),
+      windowEnd: window.windowEnd.toISOString(),
+      rows: failures.rows,
+      occurrences: failures.occurrences,
+      page: { limit, offset, total: failures.total },
+    });
+  } catch (err) {
+    log.error("[metrics/tools/failures] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/v1/metrics/tools/coverage?days=7&agentSlug=euler
+ *
+ * Palette and schema hygiene: granted tools never called, and declared tool
+ * parameters never supplied.
+ *
+ * `argUsage[].schemaCovered` is false wherever no declared schema could be
+ * joined; those rows still carry observed field rates but cannot report dead
+ * fields. Callers must surface that distinction rather than render an empty
+ * `deadFields` as "no dead fields".
+ */
+metricsRouter.get("/tools/coverage", async (req: Request, res: Response) => {
+  try {
+    const { window, days, agentSlugs } = await buildAnalyticsWindow(req, "/metrics/tools/coverage");
+    const [deadTools, argUsage] = await Promise.all([
+      fetchDeadTools(window),
+      fetchToolArgUsage(window),
+    ]);
+    res.json({
+      days,
+      agentSlug: agentSlugs.length === 1 ? agentSlugs[0]! : null,
+      agentSlugs,
+      windowStart: window.windowStart.toISOString(),
+      windowEnd: window.windowEnd.toISOString(),
+      deadTools,
+      argUsage: argUsage.rows,
+      // True when more tools have argument data than were returned — the list
+      // is the most-called N, not all of them.
+      argUsageTruncated: argUsage.truncated,
+      argUsageLimit: argUsage.limit,
+    });
+  } catch (err) {
+    log.error("[metrics/tools/coverage] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/metrics/tools/backfill
+ *
+ * Summarise runs that predate the `toolStats` column. Until this completes,
+ * every precomputed number under-reports its window — `GET /metrics/tools`
+ * returns `coverage` so that shortfall is visible rather than silent.
+ *
+ * Chunked and resumable: it only selects rows where `toolStats IS NULL`, so
+ * re-invoking continues where a previous run stopped. Admin-only, since it
+ * reads every historical invocation blob.
+ *
+ * Body (all optional):
+ *   { batchSize?: number, maxRows?: number, pauseMs?: number, sinceDays?: number }
+ */
+metricsRouter.post("/tools/backfill", async (req: Request, res: Response) => {
+  try {
+    const userId = String(req.headers["x-user-id"] ?? "");
+    if (!userId) { res.status(401).json({ error: "x-user-id header is required" }); return; }
+    if (!(await isClawAdmin(userId))) { res.status(403).json({ error: "Admin required" }); return; }
+
+    const body = (req.body ?? {}) as { batchSize?: number; maxRows?: number; pauseMs?: number; sinceDays?: number };
+    const report = await backfillToolStats({
+      ...(typeof body.batchSize === "number" ? { batchSize: Math.min(Math.max(body.batchSize, 1), 1000) } : {}),
+      ...(typeof body.maxRows === "number" ? { maxRows: body.maxRows } : {}),
+      ...(typeof body.pauseMs === "number" ? { pauseMs: Math.min(Math.max(body.pauseMs, 0), 5000) } : {}),
+      ...(typeof body.sinceDays === "number"
+        ? { since: new Date(Date.now() - body.sinceDays * 24 * 60 * 60 * 1000) }
+        : {}),
+    });
+    res.json(report);
+  } catch (err) {
+    log.error("[metrics/tools/backfill] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/v1/metrics/llm-calls?days=7&agentSlug=euler&includeSubagents=1&points=1
+ *
+ * Per-LLM-call latency and token series for the window, plus the two rollups
+ * that answer how TTFT and throughput move with prompt size and with position
+ * in the agent loop.
+ *
+ * `byContext` excludes retried calls, whose TTFT includes an abandoned attempt.
+ * `byCallIndex` keeps them and reports `retriedShare` alongside
+ * `compactionShare`, because at a given index a retry is what actually
+ * happened — the two shares are what stop a sawtooth or a retry spike from
+ * reading as a context effect.
+ *
+ * Raw points are opt-in via `points=1`: unaggregated row data, bounded at 5000,
+ * useful only for scatter/regression work.
+ *
+ * `coverage` below 1 means runs in the window predate the column. Unlike the
+ * tool metrics there is no backfill — per-call timing is only observable while
+ * a run executes — so early windows are permanently partial.
+ */
+metricsRouter.get("/llm-calls", async (req: Request, res: Response) => {
+  try {
+    const { window, days, agentSlugs } = await buildAnalyticsWindow(req, "/metrics/llm-calls");
+    const includeSubagents = req.query["includeSubagents"] === "1" || req.query["includeSubagents"] === "true";
+    const parentOnly = !includeSubagents;
+    const wantPoints = req.query["points"] === "1" || req.query["points"] === "true";
+
+    const [byContext, byCallIndex, coverage] = await Promise.all([
+      fetchLlmLatencyByContext(window, parentOnly),
+      fetchLlmLatencyByCallIndex(window, 40, parentOnly),
+      fetchLlmStatsCoverage(window),
+    ]);
+    const points = wantPoints ? await fetchLlmCallSeries(window) : null;
+
+    res.json({
+      days,
+      agentSlug: agentSlugs.length === 1 ? agentSlugs[0]! : null,
+      agentSlugs,
+      windowStart: window.windowStart.toISOString(),
+      windowEnd: window.windowEnd.toISOString(),
+      scope: parentOnly ? "parent" : "parent+subagents",
+      coverage,
+      byContext,
+      byCallIndex,
+      points,
+    });
+  } catch (err) {
+    log.error("[metrics/llm-calls] error:", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
   }
 });

@@ -5603,10 +5603,22 @@ export interface GlobalMetrics {
   slowSessions: SlowSession[];
 }
 
-export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<GlobalMetrics> {
+/** ISO instants. Present → they define the window and `days` is ignored server-side. */
+export interface MetricsRange {
+  from?: string | undefined;
+  to?: string | undefined;
+}
+
+function applyRange(params: URLSearchParams, range?: MetricsRange): void {
+  if (range?.from) params.set("from", range.from);
+  if (range?.to) params.set("to", range.to);
+}
+
+export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope, range?: MetricsRange): Promise<GlobalMetrics> {
   const qs = new URLSearchParams();
   qs.set("days", String(days));
   applyAdminOrgScope(qs, orgScope);
+  applyRange(qs, range);
   return request<GlobalMetrics>(
     `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
@@ -5710,15 +5722,571 @@ export async function dismissImprovement(userId: string, id: string, reason?: st
   );
 }
 
-export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<AgentMetrics> {
+export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope, range?: MetricsRange): Promise<AgentMetrics> {
   const qs = new URLSearchParams();
   qs.set("days", String(days));
   applyAdminOrgScope(qs, orgScope);
+  applyRange(qs, range);
   return request<AgentMetrics>(
     `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
 }
+
+// ── Deep tool + per-LLM-call metrics ──────────────────────────────────────
+// Four endpoints behind the Tools / LLM calls / Quality / Coverage tabs of the
+// v3 metrics page. They read precomputed columns (agent_runs.toolStats,
+// agent_runs.llmTurnStats) rather than the raw invocation blob, so each is a
+// cheap scalar aggregation.
+//
+// Several fields are legitimately UNKNOWN rather than zero, and the renderer
+// must not smooth that over:
+//   - `coverage` below 1 → the window is only partly summarised; every count
+//     under-reports until the backfill finishes.
+//   - `citeRate: null` → nothing this tool returned was citeable, so there is
+//     no denominator. Not "never cited".
+//   - `schemaCovered: false` → no declared schema could be joined, so dead
+//     fields are unknowable, not absent.
+// Each is documented at its declaration below.
+
+export interface ToolStatsCoverage {
+  runsInWindow: number;
+  runsSummarised: number;
+  /** 0..1. Below 1 means backfill is incomplete and every count under-reports. */
+  coverage: number;
+}
+
+export interface ToolStatsRow {
+  tool: string;
+  calls: number;
+  /** Distinct runs that called this tool at all. */
+  sessions: number;
+  /**
+   * calls ÷ sessions — how often a run that uses this tool calls it.
+   *
+   * Separates "used once by many runs" from "hammered by a few", which the raw
+   * call count cannot distinguish and which point at different problems.
+   */
+  callsPerSession: number | null;
+  topLevelCalls: number;
+  childCalls: number;
+  errors: number;
+  errorRate: number;
+  /** Calls whose tool_execution_end push never landed; excluded from latency. */
+  droppedEnd: number;
+  droppedEndRate: number;
+  emptyResults: number;
+  emptyResultRate: number;
+  duplicateCalls: number;
+  duplicateRate: number;
+  erroredCalls: number;
+  recoveredCalls: number;
+  recoveryRate: number;
+  citeableCalls: number;
+  citedCalls: number;
+  /** Null — not zero — when nothing was citeable. Same-turn scope. */
+  citeRate: number | null;
+  avgMs: number | null;
+  /** Bucket-resolution, not millisecond-resolution. */
+  p50Ms: number | null;
+  p95Ms: number | null;
+  maxMs: number;
+  totalMs: number;
+  resultBytesTotal: number;
+  /** Share of all result bytes in the window, 0..1 — "which tool burns context". */
+  contextShare: number;
+}
+
+export interface ToolFieldUsageRow {
+  tool: string;
+  calls: number;
+  field: string;
+  callsWithField: number;
+  supplyRate: number;
+}
+
+export interface ToolErrorClassRow {
+  tool: string;
+  errorClass: string;
+  occurrences: number;
+  sample: string;
+  lastSeen: string | null;
+}
+
+/**
+ * Sortable columns on the per-tool tables. Mirrors the backend whitelist —
+ * anything else is rejected there and falls back to `calls`.
+ */
+export type ToolSortKey =
+  | "tool" | "calls" | "sessions" | "callsPerSession" | "errors" | "errorRate"
+  | "duplicateRate" | "droppedEnd" | "emptyResults" | "recoveryRate" | "citeRate"
+  | "avgMs" | "p50Ms" | "p95Ms" | "maxMs" | "totalMs" | "resultBytes";
+
+export interface ToolPageRequest {
+  limit: number;
+  offset: number;
+  sort: ToolSortKey;
+  dir: "asc" | "desc";
+  /** Case-insensitive substring match on the tool name. */
+  search?: string | undefined;
+}
+
+export interface ToolPageInfo {
+  limit: number;
+  offset: number;
+  /** Tools matching the search across the WHOLE window, not the page length. */
+  total: number;
+  sort: ToolSortKey;
+  dir: "asc" | "desc";
+}
+
+/**
+ * Window-wide sums for the KPI row.
+ *
+ * Sent separately from the page because summing the visible rows would make
+ * "total tool calls" shrink as the reader pages through the table. Unaffected
+ * by the search box for the same reason.
+ */
+export interface ToolWindowTotals {
+  distinctTools: number;
+  /** Distinct runs that made at least one tool call in the window. */
+  sessions: number;
+  calls: number;
+  errors: number;
+  droppedEnd: number;
+  duplicateCalls: number;
+  emptyResults: number;
+  citeableCalls: number;
+  citedCalls: number;
+  recoveredCalls: number;
+  resultBytes: number;
+  totalMs: number;
+}
+
+/**
+ * A chart series computed over the WHOLE window, independent of the page.
+ *
+ * Ranked server-side per (measure, aggregation): the top 8 by cumulative bytes
+ * and the top 8 by bytes-per-call are different sets, so re-ranking a fixed
+ * top-8 client-side would answer a different question than the one on screen.
+ */
+export interface ToolChartPoint {
+  tool: string;
+  value: number;
+  /** Only meaningful for a `total` aggregation — null otherwise. */
+  share: number | null;
+  /** Sample size behind the value, so a thin average is visible as thin. */
+  calls: number;
+  sessions: number;
+}
+
+export type ChartMeasure = "bytes" | "time" | "errors" | "calls";
+export type ChartAggregation = "total" | "perCall" | "perSession";
+
+export interface ChartRequest {
+  measure: ChartMeasure;
+  aggregation: ChartAggregation;
+}
+
+export interface ToolMetrics {
+  days: number;
+  /** Single-selection echo — null when zero or several agents were selected. */
+  agentSlug: string | null;
+  /** The full selection the response was scoped to. Empty means workspace-wide. */
+  agentSlugs: string[];
+  windowStart: string;
+  windowEnd: string;
+  windowColumn: "startedAt" | "completedAt";
+  coverage: ToolStatsCoverage;
+  tools: ToolStatsRow[];
+  totals: ToolWindowTotals;
+  page: ToolPageInfo;
+  chart: ToolChartPoint[];
+  chartRequest: ChartRequest;
+  errorClasses: ToolErrorClassRow[];
+}
+
+export interface ToolCiteRow {
+  tool: string;
+  calls: number;
+  citeableCalls: number;
+  citedCalls: number;
+  citeRate: number | null;
+}
+
+export interface CitationReflectionRow {
+  outcome: string;
+  runs: number;
+  share: number;
+}
+
+export interface CitationConfigRow {
+  agentSlug: string;
+  autoToolCitations: boolean;
+  citationReflection: boolean;
+}
+
+export interface ToolQualityMetrics {
+  days: number;
+  /** Single-selection echo — null when zero or several agents were selected. */
+  agentSlug: string | null;
+  /** The full selection the response was scoped to. Empty means workspace-wide. */
+  agentSlugs: string[];
+  windowStart: string;
+  windowEnd: string;
+  coverage: ToolStatsCoverage;
+  quality: ToolStatsRow[];
+  totals: ToolWindowTotals;
+  page: ToolPageInfo;
+  /** Populated only with `exact=1` — the conversation-scoped citation figure. */
+  citations: ToolCiteRow[] | null;
+  citationScope: "same-turn" | "conversation";
+  citationReflection: CitationReflectionRow[];
+  citationConfig: CitationConfigRow[];
+}
+
+/** Every failure class for one tool, paged — the drill-down past the top-N card. */
+export interface ToolFailuresResponse {
+  days: number;
+  tool: string;
+  windowStart: string;
+  windowEnd: string;
+  rows: ToolErrorClassRow[];
+  /** Errored calls across all classes for this tool. */
+  occurrences: number;
+  page: { limit: number; offset: number; total: number };
+}
+
+export type ToolGrantKind = "subagents" | "direct" | "custom" | "gateway";
+
+export interface UnusedGrantRow {
+  agentSlug: string;
+  kind: ToolGrantKind;
+  grant: string;
+}
+
+/**
+ * One row per agent that ran in the window — clean, dirty and unscoped alike.
+ *
+ * `unusedGrants` alone can only show agents that HAVE an unused grant, so an
+ * agent with a tight palette looked identical to one that never ran.
+ */
+export interface AgentToolCoverageRow {
+  agentSlug: string;
+  observedTools: number;
+  /** False when the agent has no tools config — granted/unused are then null, not zero. */
+  scoped: boolean;
+  granted: number | null;
+  used: number | null;
+  unused: number | null;
+  usedShare: number | null;
+}
+
+export interface DeadToolReport {
+  agentsAnalysed: number;
+  /** Agents with no tools config — every tool is allowed, so "unused" is undefined. */
+  agentsUnscoped: number;
+  unusedGrants: UnusedGrantRow[];
+  agents: AgentToolCoverageRow[];
+}
+
+export interface ArgFieldRow {
+  field: string;
+  callsWithField: number;
+  supplyRate: number;
+  declared: boolean;
+  required: boolean;
+}
+
+export interface ToolArgUsageRow {
+  tool: string;
+  calls: number;
+  /** False when no declared schema could be joined — deadFields is then unknowable, not empty. */
+  schemaCovered: boolean;
+  fields: ArgFieldRow[];
+  deadFields: string[];
+  undeclaredFields: string[];
+}
+
+export interface ToolCoverageMetrics {
+  days: number;
+  /** Single-selection echo — null when zero or several agents were selected. */
+  agentSlug: string | null;
+  /** The full selection the response was scoped to. Empty means workspace-wide. */
+  agentSlugs: string[];
+  windowStart: string;
+  windowEnd: string;
+  deadTools: DeadToolReport;
+  /** The most-called tools with argument data, not necessarily all of them. */
+  argUsage: ToolArgUsageRow[];
+  /** True when more tools have argument data than were returned. */
+  argUsageTruncated: boolean;
+  argUsageLimit: number;
+}
+
+export interface LlmStatsCoverage {
+  runsInWindow: number;
+  runsWithSeries: number;
+  /** No backfill exists for this column, so early windows are permanently partial. */
+  coverage: number;
+}
+
+export interface LlmCallBucketRow {
+  /** Lower edge of the context-size bucket, in tokens. */
+  contextBucket: number;
+  calls: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgTokensPerSec: number | null;
+  avgOutputTokens: number;
+}
+
+export interface LlmCallIndexRow {
+  callIndex: number;
+  calls: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgContextTokens: number;
+  avgTokensPerSec: number | null;
+  /** Share running on a freshly compacted prompt — the sawtooth's cause. */
+  compactionShare: number;
+  /** Share whose TTFT includes an abandoned attempt. */
+  retriedShare: number;
+}
+
+export interface LlmCallPoint {
+  sessionId: string;
+  agentSlug: string;
+  callIndex: number;
+  ttftMs: number | null;
+  decodeMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** input + cacheRead + cacheWrite — the real prompt size. */
+  contextTokens: number;
+  tokensPerSec: number | null;
+  stopReason: string | null;
+  model: string | null;
+  provider: string | null;
+  afterCompaction: boolean;
+  retried: boolean;
+  /** Null for parent-loop calls. */
+  subagent: string | null;
+}
+
+export interface LlmCallMetrics {
+  days: number;
+  /** Single-selection echo — null when zero or several agents were selected. */
+  agentSlug: string | null;
+  /** The full selection the response was scoped to. Empty means workspace-wide. */
+  agentSlugs: string[];
+  windowStart: string;
+  windowEnd: string;
+  scope: "parent" | "parent+subagents";
+  coverage: LlmStatsCoverage;
+  byContext: LlmCallBucketRow[];
+  byCallIndex: LlmCallIndexRow[];
+  points: LlmCallPoint[] | null;
+}
+
+export interface ToolStatsBackfillReport {
+  scanned: number;
+  summarised: number;
+  skipped: number;
+  batches: number;
+  durationMs: number;
+}
+
+/**
+ * The window and scope every deep endpoint shares.
+ *
+ * `from`/`to` are ISO instants and take precedence over `days`; sending them is
+ * how the UI expresses an exact date or a custom range. `sessionId` collapses
+ * every query to one run.
+ */
+export interface DeepMetricsFilters {
+  days: 1 | 7 | 30;
+  /** ISO instant. Overrides `days` when present. */
+  from?: string | undefined;
+  to?: string | undefined;
+  orgScope?: AdminOrgScope | undefined;
+  agentSlugs?: readonly string[] | undefined;
+  sessionId?: string | undefined;
+}
+
+/**
+ * Shared query string for every deep endpoint — same window and scope rules.
+ *
+ * The agent selection is sent as a REPEATED `agentSlug` param rather than a
+ * comma-joined value, so a slug containing a comma can never split into two.
+ * The backend accepts either form.
+ */
+function deepMetricsQuery(f: DeepMetricsFilters, extra?: Record<string, string>): string {
+  const qs = new URLSearchParams();
+  qs.set("days", String(f.days));
+  if (f.from) qs.set("from", f.from);
+  if (f.to) qs.set("to", f.to);
+  if (f.sessionId) qs.set("sessionId", f.sessionId);
+  applyAdminOrgScope(qs, f.orgScope);
+  for (const slug of f.agentSlugs ?? []) if (slug) qs.append("agentSlug", slug);
+  for (const [key, value] of Object.entries(extra ?? {})) qs.set(key, value);
+  return qs.toString();
+}
+
+/** Page controls, as query params. Omitted keys fall back to the server defaults. */
+function pageParams(page?: ToolPageRequest): Record<string, string> {
+  if (!page) return {};
+  return {
+    limit: String(page.limit),
+    offset: String(page.offset),
+    sort: page.sort,
+    dir: page.dir,
+    ...(page.search ? { search: page.search } : {}),
+  };
+}
+
+export async function fetchToolMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  page?: ToolPageRequest,
+  chart?: ChartRequest,
+): Promise<ToolMetrics> {
+  const extra = {
+    ...pageParams(page),
+    ...(chart ? { chartMeasure: chart.measure, chartAgg: chart.aggregation } : {}),
+  };
+  return request<ToolMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/tools?${deepMetricsQuery(filters, extra)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/**
+ * `exact` swaps the same-turn citation counts carried in toolStats for the
+ * conversation-scoped join, which also catches a later turn re-citing an
+ * earlier turn's chunk. It costs roughly 3s, so it stays opt-in.
+ */
+export async function fetchToolQualityMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  exact = false,
+  page?: ToolPageRequest,
+): Promise<ToolQualityMetrics> {
+  const extra = { ...pageParams(page), ...(exact ? { exact: "1" } : {}) };
+  return request<ToolQualityMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/quality?${deepMetricsQuery(filters, extra)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/** Every failure class for one tool. Paged — a noisy tool can have dozens. */
+export async function fetchToolFailures(
+  userId: string,
+  tool: string,
+  filters: DeepMetricsFilters,
+  page?: { limit: number; offset: number },
+): Promise<ToolFailuresResponse> {
+  const extra: Record<string, string> = { tool };
+  if (page) {
+    extra["limit"] = String(page.limit);
+    extra["offset"] = String(page.offset);
+  }
+  return request<ToolFailuresResponse>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/failures?${deepMetricsQuery(filters, extra)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+export async function fetchToolCoverageMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+): Promise<ToolCoverageMetrics> {
+  return request<ToolCoverageMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/coverage?${deepMetricsQuery(filters)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/**
+ * `points` returns unaggregated per-call rows, which only a scatter needs; the
+ * page never asks for them, so the default response stays two small arrays.
+ */
+export async function fetchLlmCallMetrics(
+  userId: string,
+  filters: DeepMetricsFilters,
+  opts?: { includeSubagents?: boolean; points?: boolean },
+): Promise<LlmCallMetrics> {
+  const extra: Record<string, string> = {};
+  if (opts?.includeSubagents) extra["includeSubagents"] = "1";
+  if (opts?.points) extra["points"] = "1";
+  return request<LlmCallMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/llm-calls?${deepMetricsQuery(filters, extra)}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/**
+ * The one run behind a session filter.
+ *
+ * The window rollups are aggregates with no single-run form, so this is what
+ * the overview shows when a session is selected: the run itself.
+ */
+export interface SessionSummary {
+  sessionId: string;
+  agentSlug: string;
+  status: string;
+  trigger: string;
+  provider: string | null;
+  model: string | null;
+  task: string | null;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  totalMs: number | null;
+  llmTotalMs: number | null;
+  toolMs: number | null;
+  llmTurns: number | null;
+  llmRetries: number | null;
+  ttftMs: number | null;
+  tokens: { in: number; out: number; cacheRead: number; cacheWrite: number };
+  toolsUsed: string[];
+  /** Null when the run recorded no invocation array at all. */
+  toolCalls: number | null;
+  rating: string | null;
+  /** Null when the run predates the per-call series — the LLM tab will be empty. */
+  llmCallsRecorded: number | null;
+}
+
+export async function fetchSessionSummary(
+  userId: string,
+  sessionId: string,
+  orgScope?: AdminOrgScope,
+): Promise<SessionSummary> {
+  const qs = new URLSearchParams();
+  applyAdminOrgScope(qs, orgScope);
+  return request<SessionSummary>(
+    `${AUTH_API_URL}/api/v1/metrics/session/${encodeURIComponent(sessionId)}?${qs.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/** Admin-only. Summarises historical runs so the tool panels stop under-reporting. */
+export async function backfillToolStats(
+  userId: string,
+  body?: { batchSize?: number; maxRows?: number; sinceDays?: number },
+): Promise<ToolStatsBackfillReport> {
+  return request<ToolStatsBackfillReport>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/backfill`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify(body ?? {}),
+    },
+  );
+}
+
 // ── Evals ─────────────────────────────────────────────────────────────────
 // A folder explorer of conversations to replay against an agent. The browser
 // orchestrates a run by calling sendChatMessage() per turn (the real chat SSE
