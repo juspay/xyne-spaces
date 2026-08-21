@@ -4788,9 +4788,10 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('isLatest', true)
         .where('deletedAt', 'IS', null)
         .orderBy('createdAt', 'asc')
-        .related('attachment', a =>
-          a.where('entityType', AttachmentEntityType.COLLECTION).where('isDeleted', false),
-        );
+        // The attachment joins on entityId only; a collection_item's id (a globally
+        // unique cuid) never keys a non-COLLECTION attachment, so an entityType
+        // filter would be redundant. Only isDeleted matters — skip soft-deleted rows.
+        .related('attachment', a => a.where('isDeleted', false));
     },
   ),
 
