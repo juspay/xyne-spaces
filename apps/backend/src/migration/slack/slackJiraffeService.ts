@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { channelUrl } from '@/utils/appUrls';
 import { ExternalEntityType, MessageDirection, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { WebClient } from '@slack/web-api';
@@ -554,7 +555,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
-      xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      xyneSpaceChannelLink = `<${channelUrl(input.xyneSpaceChannelId)}|${channelName}>`;
       jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
   }

@@ -3,6 +3,7 @@ import { PRMetricsRepository } from '@/database/repositories/pullRequestsReposit
 import { BitbucketManager } from '@/bitbucket/apis';
 import { logger } from '@/utils/logger';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { appBaseUrl } from '@/utils/appUrls';
 
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
@@ -19,8 +20,6 @@ const BITBUCKET_PR_CONFIG = {
   BUILD_STATUS: {
     KEY: 'xyne-ticket-check',
     NAME: 'Ticket Validation',
-    SUCCESS_URL: 'https://xyne.juspay.net',
-    FAILED_URL: 'https://spaces.xyne.juspay.net',
   },
 } as const;
 
@@ -185,7 +184,7 @@ export class PullRequestValidationService {
         'SUCCESSFUL',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
         BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
+        appBaseUrl(),
         description,
       );
     } catch (error) {
@@ -203,7 +202,7 @@ export class PullRequestValidationService {
         'FAILED',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
         BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
+        appBaseUrl(),
         description
       );
     } catch (error) {

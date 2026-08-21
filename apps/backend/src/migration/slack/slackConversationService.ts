@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { dirChannelUrl } from '@/utils/appUrls';
 import { ChannelScopeType, ChannelRole, ChannelVisibility, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { postMessage } from './utils/postMessage';
@@ -823,7 +824,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         const channelName = xyneChannel.name;
         const workspaceId = xyneChannel.workspaceId;
         wsConfig = getBotConfigByWorkspaceId(workspaceId);
-        xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
+        xyneSpaceChannelLink = `<${dirChannelUrl(input.xyneSpaceChannelId, workspaceId)}|${channelName}>`;
         if (xyneChannel.isMigrated) {
           const project = xyneChannel.projectId
             ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
@@ -1110,7 +1111,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         xyneSpaceWorkspaceId = ch?.workspaceId;
       }
       const xyneSpacesLink = input.xyneSpaceChannelId && xyneSpaceWorkspaceId
-        ? `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${input.xyneSpaceChannelId}|Xyne Spaces>`
+        ? `<${dirChannelUrl(input.xyneSpaceChannelId, xyneSpaceWorkspaceId)}|Xyne Spaces>`
         : 'Xyne Spaces';
       let finalMessage = `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`;
       const finalMsgSuffix = wsConfig.migrationFinalMessage;
@@ -1250,7 +1251,7 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     // DM flow (sync-dm): prefer the caller-supplied channel so all updates land
     // in the dedicated sync-dm channel, not the generic workspace migration log.
     const dmLogChannelId = responseChannelId || dmWsConfig.slackMigrationLogChannelId || dmChannelId;
-    const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
+    const xyneSpaceChannelLink = `<${dirChannelUrl(xyneSpaceChannelId, xyneSpaceWorkspaceId)}|${channelName}>`;
 
     // Post thread-starter to log channel
     const blocks = getMigrationMessageBlocks({

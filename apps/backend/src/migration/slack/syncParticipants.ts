@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import { WebClient } from '@slack/web-api';
 import { logger } from '../../utils/logger';
+import { dirChannelUrl } from '@/utils/appUrls';
 import { postMessage } from './utils/postMessage';
 import { addChannelParticipantsBeforeMigration } from './slackConversationService';
 import { checkUserAuthorization } from './command';
@@ -87,7 +88,7 @@ export async function runSyncParticipants({
   const token = wsConfig.slackBotToken;
   const client = new WebClient(token);
   const logChannelId = wsConfig.slackMigrationLogChannelId || slackChannelId;
-  const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
+  const xyneSpaceChannelLink = `<${dirChannelUrl(xyneSpaceChannelId, workspaceId)}|${xyneChannel.name}>`;
   const startedTs = await postMessage({
     channelId: logChannelId,
     text: `🔄 <@${userId}> :: Started Participant sync for xyne-space channel ${xyneSpaceChannelLink}...`,
