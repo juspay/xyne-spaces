@@ -9,6 +9,7 @@ import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/Collabor
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
 import { CanvasList } from '../CanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
+import { CanvasSuggestionsPanel } from '../CanvasSuggestionsPanel';
 import {
   CanvasVersionDiffPanel,
   CanvasVersionHistory,
@@ -1655,6 +1656,16 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
             {previewVersion && showVersionDiff && hasVersionDiff && (
               <CanvasVersionDiffPanel parts={versionDiffParts} />
+            )}
+
+            {/* Agent proposals awaiting review. Renders nothing when there are
+                none, so it costs nothing on canvases with no pending changes. */}
+            {selectedCanvas?.id && (
+              <CanvasSuggestionsPanel
+                canvasId={selectedCanvas.id}
+                canEdit={canEdit}
+                editorContainerRef={canvasContentRef}
+              />
             )}
 
             {/* Canvas Editor */}
