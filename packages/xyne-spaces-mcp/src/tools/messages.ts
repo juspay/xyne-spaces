@@ -44,6 +44,12 @@ interface MessageRow {
 	nudgeCount?: number | null;
 	createdAt?: number;
 	attachments?: AttachmentRow[] | null;
+	/** Joined by `messagesBySenderPaginated`, so a message can name its channel. */
+	conversation?: { channelId?: string } | Array<{ channelId?: string }> | null;
+}
+
+function first<T>(value: T | T[] | null | undefined): T | undefined {
+	return Array.isArray(value) ? value[0] : (value ?? undefined);
 }
 
 /**
@@ -262,4 +268,89 @@ const messageReact: ToolDef = {
 	},
 };
 
-export const messageTools: ToolDef[] = [messagesList, messageSend, messageUpdate, messageReact];
+// ── spaces_user_messages ────────────────────────────────────────────────────
+
+/**
+ * `messagesBySenderPaginated` exists for exactly this tool.
+ *
+ * Before it, "everything person X wrote last week" could only be approximated by
+ * fanning relevance-ranked searches across date windows — and a window that came
+ * back empty was indistinguishable from one that had been truncated. This is a
+ * plain ordered scan with real cursors, so a quiet week reads as a quiet week.
+ * The read ACL still applies: it surfaces nothing the caller could not already
+ * see, it only makes the ordering and paging trustworthy.
+ */
+const userMessages: ToolDef = {
+	name: "spaces_user_messages",
+	description:
+		"List the messages one person wrote across all of Xyne Spaces, newest first, optionally bounded by date. " +
+		"This is the right tool for 'what has Priya been working on', 'what did I post yesterday', or building a " +
+		"digest of someone's week. Unlike spaces_search it is an exact ordered scan rather than a relevance ranking, " +
+		"so nothing is silently dropped and an empty result genuinely means they wrote nothing in that window. " +
+		"Omit user to get your own messages. Each message shows its text, timestamp, thread, and channel, so you can " +
+		"follow any of them with spaces_messages_list.",
+	inputSchema: {
+		type: "object",
+		properties: {
+			user: {
+				type: "string",
+				description: "Whose messages to list — a user id or an email address. Omit for your own.",
+			},
+			after: {
+				type: "string",
+				description: "Only messages at or after this time. ISO 8601, e.g. '2026-08-01T00:00:00Z'.",
+			},
+			before: { type: "string", description: "Only messages at or before this time. ISO 8601." },
+			limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max messages (default 50, max 200)." },
+		},
+		additionalProperties: false,
+	},
+	// `start` is `.nullable()`, not `.optional()` — it has to be sent, as null,
+	// to page from the beginning. Omitting it fails validation.
+	catalog: [
+		{ name: "messagesBySenderPaginated", sends: ["userId", "limit", "start"] },
+		{ name: "userSentMessagesPaginated", sends: ["limit", "start"] },
+	],
+	async handler(args, client) {
+		await users.prime(client);
+		const limit = boundedLimit(args, 50, 200);
+		const requested = optionalString(args, "user");
+		const userId = await users.toUserId(client, requested);
+		if (requested && !userId) throw new Error(`No Spaces user matches "${requested}".`);
+
+		const after = optionalString(args, "after");
+		const before = optionalString(args, "before");
+		const bounds = {
+			...(after ? { after: Date.parse(after) } : {}),
+			...(before ? { before: Date.parse(before) } : {}),
+		};
+
+		// With no user named, the caller means themselves — and there is a query
+		// bound to the caller, which saves resolving an id first.
+		const rows = userId
+			? asRows<MessageRow>(
+					await client.catalogQuery("messagesBySenderPaginated", { userId, limit, start: null, ...bounds }),
+				)
+			: asRows<MessageRow>(await client.catalogQuery("userSentMessagesPaginated", { limit, start: null }));
+
+		if (!userId && (after || before)) {
+			// `userSentMessagesPaginated` takes no date bounds, so filter here rather
+			// than silently ignoring what the caller asked for.
+			const lower = after ? Date.parse(after) : Number.NEGATIVE_INFINITY;
+			const upper = before ? Date.parse(before) : Number.POSITIVE_INFINITY;
+			rows.splice(0, rows.length, ...rows.filter((r) => (r.createdAt ?? 0) >= lower && (r.createdAt ?? 0) <= upper));
+		}
+
+		const rendered = rows.map((row, i) => {
+			const text = renderMessage(row, i + 1);
+			const conversation = first(row.conversation);
+			const channelId = conversation?.channelId;
+			return channelId ? `${text}\n  Channel ID: ${channelId}` : text;
+		});
+
+		const whose = userId ? users.name(userId) ?? userId : "you";
+		return list(`message(s) from ${whose}`, rendered, { returned: rendered.length, limit, offset: 0 });
+	},
+};
+
+export const messageTools: ToolDef[] = [messagesList, userMessages, messageSend, messageUpdate, messageReact];
