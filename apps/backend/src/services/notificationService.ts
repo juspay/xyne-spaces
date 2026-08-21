@@ -2188,6 +2188,106 @@ class NotificationService {
     }
   }
 
+  /**
+   * Loops a person into a priority conflict.
+   *
+   * RAISED   → sent to the owner of the task being superseded. Actionable: the raiser's ticket
+   *            stays blocked until this person accepts.
+   * ACCEPTED → sent to the raiser once that owner agrees. Their ticket is now unblocked.
+   *
+   * There is no rejected variant by design: nobody is asked to say no, so the only outcomes
+   * worth notifying about are "you are being asked" and "you were unblocked".
+   */
+  async sendPriorityConflictNotification(
+    recipientUserId: string,
+    ticketId: string,
+    kind: 'RAISED' | 'ACCEPTED',
+    actorUserId: string,
+    supersededTicketId: string,
+  ): Promise<void> {
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+          channel: { select: { type: true } },
+        },
+      });
+      if (!ticket) {
+        logger.warn(`Priority conflict notification: ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const supersededTicket = await prisma.ticket.findUnique({
+        where: { id: supersededTicketId },
+        select: { xyneId: true, title: true },
+      });
+
+      const notificationType: NotificationType =
+        kind === 'RAISED'
+          ? NotificationType.PRIORITY_CONFLICT_RAISED
+          : NotificationType.PRIORITY_CONFLICT_ACCEPTED;
+
+      // 'mention' is the most permissive filter context — it passes for every notification
+      // level except an explicit NONE/global pause. Deliberate: being asked to unblock someone
+      // is actionable. The paired ACTIONABLE activity row is written unfiltered by
+      // priorityConflictService, so a muted respondent still sees it in their feed.
+      const { desktopUsers, mobileUsers } = ticket.channelId
+        ? await notificationFilterService.filterUsers([recipientUserId], ticket.channelId, false, 'mention', {
+            notificationType,
+          })
+        : await notificationFilterService.filterGlobalUsers([recipientUserId], notificationType, 'mention');
+
+      const receiveDesktop = desktopUsers.includes(recipientUserId);
+      const receiveMobile = mobileUsers.includes(recipientUserId);
+
+      if (!receiveDesktop && !receiveMobile) {
+        return;
+      }
+
+      const ticketLabel = ticket.title ? `"${ticket.title}"` : `#${ticket.xyneId}`;
+      const supersededLabel = supersededTicket?.title
+        ? `"${supersededTicket.title}"`
+        : supersededTicket?.xyneId
+          ? `#${supersededTicket.xyneId}`
+          : 'your task';
+
+      const title =
+        kind === 'RAISED' ? 'Priority conflict needs your input' : 'Priority conflict resolved';
+
+      const message =
+        kind === 'RAISED'
+          ? `${ticketLabel} is claimed to take priority over ${supersededLabel}. It stays blocked until you accept.`
+          : `Your claim that ${ticketLabel} takes priority over ${supersededLabel} was accepted.`;
+
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
+
+      await this.createNotification(recipientUserId, {
+        title,
+        message,
+        type: notificationType,
+        relatedEntityType: 'ticket',
+        relatedEntityId: ticketId,
+        actionUrl,
+        metadata: {
+          ticketId,
+          actorUserId,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
+          supersededTicketId,
+          kind,
+        },
+      }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+    } catch (error) {
+      logger.error('Failed to send priority conflict notification:', error);
+    }
+  }
+
   async getStats(): Promise<any> {
     return await realTimeNotificationService.getStats();
   }

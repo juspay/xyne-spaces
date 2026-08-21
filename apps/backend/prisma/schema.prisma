@@ -170,6 +170,8 @@ model Ticket {
   workflows          Workflow[]
   stageEtaEntries    TicketStageEta[]
   assignments        TicketAssignment[]
+  priorityClaims          PriorityConflictClaim[] @relation("PriorityConflictTicket")
+  supersededByClaims      PriorityConflictClaim[] @relation("PriorityConflictSupersededTicket")
 
   @@index([status])
   @@index([assignedTo, status])
@@ -413,6 +415,47 @@ model TicketStageEta {
   @@map("ticket_stage_eta")
   @@index([stageLeftAt])
   @@index([stageEta])
+  @@schema("public")
+}
+
+// One attempt by `ticketId` to be taken up ahead of `supersededTicketId`. Rows are append-only
+// history: re-picking withdraws the current PENDING row and inserts a new one, so the full
+// negotiation trail (who was asked, who accepted, who was never answered) survives for audit.
+// A ticket is unblocked once it has an ACCEPTED row; it is blocked while its newest row is
+// PENDING.
+//
+// `state` is one of PENDING | ACCEPTED | WITHDRAWN. There is deliberately no REJECTED: the
+// superseded task's owner is never asked to reject. Silence is the block — a claim simply stays
+// PENDING until accepted, and only the raiser can WITHDRAWN it to point at a different task.
+// Stored as String, matching this schema's convention of plain text over Prisma enums.
+model PriorityConflictClaim {
+  workspaceId        String?  // denormalized tenant key (nullable; stamped on insert)
+  id                 String   @id @default(cuid())
+  ticketId           String   // The new high-priority ticket being raised
+  supersededTicketId String   // The existing task the raiser wants to go ahead of
+  channelId          String   // Denormalized for channel-scoped queries + ACL
+  state              String   @default("PENDING")
+  justification      String   // Why this task should go ahead of that one
+  raisedBy           String   // User ID (no FK constraint) - the ticket raiser
+  // Owner of the superseded task at claim time. Snapshotted so reassigning that ticket later
+  // does not silently move the pending decision to someone who never agreed to it.
+  respondentId       String   // User ID (no FK constraint)
+  respondedBy        String?  // User ID who accepted (no FK constraint)
+  respondedAt        DateTime?
+  responseNote       String?  // Optional note left by the accepting owner
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  ticket           Ticket @relation("PriorityConflictTicket", fields: [ticketId], references: [id])
+  supersededTicket Ticket @relation("PriorityConflictSupersededTicket", fields: [supersededTicketId], references: [id])
+
+  @@index([ticketId])
+  @@index([ticketId, state])
+  @@index([supersededTicketId])
+  @@index([respondentId, state]) // "what am I being asked to accept" inbox
+  @@index([channelId])
+  @@map("priority_conflict_claims")
   @@schema("public")
 }
 
@@ -1767,6 +1810,10 @@ model Channel {
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
+  // Opt-in per channel. When true, ticket creation in this channel requires an ETA, and
+  // HIGH/CRITICAL tickets may name a task they should go ahead of — staying blocked until that
+  // task's owner accepts. Defaults false so every existing channel keeps its current flow.
+  priorityConflictEnabled Boolean        @default(false)
 
   // Relations
   conversations      Conversation[]

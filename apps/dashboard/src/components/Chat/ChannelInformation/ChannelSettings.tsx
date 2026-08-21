@@ -135,6 +135,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   }, [location.pathname, navigate, searchParams]);
 
   const showTicketsInChat = channel.showTicketsTabTicketsInChat ?? true;
+  const priorityConflictEnabled = channel.priorityConflictEnabled ?? false;
 
   // Admins or the channel owner (creator) can change the ticket-visibility setting.
   const canManageTicketVisibility =
@@ -229,6 +230,21 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
     }
   };
 
+  const handleTogglePriorityConflict = (next: boolean): void => {
+    if (!canManageTicketVisibility) return;
+
+    try {
+      zero.mutate(
+        mutators.channel.updatePriorityConflictEnabled({
+          channelId: channel.id,
+          enabled: next,
+        }),
+      );
+    } catch {
+      toast.error('Failed to update setting');
+    }
+  };
+
   const handleMakePublic = (): void => {
     try {
       zero.mutate(
@@ -308,6 +324,27 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 checked={showTicketsInChat}
                 onCheckedChange={handleToggleTicketsInChat}
                 aria-label='Show tickets created from the Tickets tab in chat'
+              />
+            </div>
+          </div>
+        )}
+
+        {/* isDefaultChannel: the mutator rejects non-default channels (DMs, ticket channels),
+            so hide the switch there rather than surfacing an error on click. */}
+        {canManageTicketVisibility && isDefaultChannel && (
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='flex flex-col gap-y-1'>
+                <p className='text-sm font-medium text-foreground'>Priority conflict resolution</p>
+                <p className='text-sm text-muted-foreground'>
+                  Require an ETA on every new ticket. High priority tickets can name a task to go
+                  ahead of, and stay blocked until that task&apos;s owner agrees.
+                </p>
+              </div>
+              <Switch
+                checked={priorityConflictEnabled}
+                onCheckedChange={handleTogglePriorityConflict}
+                aria-label='Require priority conflict resolution for new tickets'
               />
             </div>
           </div>

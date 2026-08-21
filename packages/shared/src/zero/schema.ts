@@ -87,6 +87,7 @@ import {
   SurfaceLinkKind,
   TicketPriority,
   TicketReferenceRelation,
+  PriorityConflictState,
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
@@ -782,6 +783,9 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    // Opt-in: require an ETA on every ticket and let HIGH/CRITICAL tickets negotiate a place
+    // ahead of existing work.
+    priorityConflictEnabled: boolean().optional(),
   })
   .primaryKey('id');
 
@@ -1829,6 +1833,27 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
   })
   .primaryKey('id');
 
+export const priorityConflictClaimTable = table('priority_conflict_claims')
+  .columns({
+    id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    ticketId: string(),
+    supersededTicketId: string(),
+    channelId: string(),
+    state: enumeration<PriorityConflictState>(),
+    justification: string(),
+    raisedBy: string(),
+    // Owner of the superseded task at claim time, snapshotted so a later reassignment cannot
+    // silently move the pending decision to someone who never agreed to it.
+    respondentId: string(),
+    respondedBy: string().optional(),
+    respondedAt: number().optional(),
+    responseNote: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 // publishedDocTable has been deprecated - published docs were folded into canvasTable
 export const dashboardTable = table('dashboards')
   .columns({
@@ -2381,6 +2406,18 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['id'],
     destField: ['ticketId'],
     destSchema: ticketStageRequestTable,
+  }),
+  // Claims this ticket raised against other tasks (its own negotiation history).
+  priorityClaims: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: priorityConflictClaimTable,
+  }),
+  // Claims other tickets raised against this one (this task is the thing being superseded).
+  supersededByClaims: many({
+    sourceField: ['id'],
+    destField: ['supersededTicketId'],
+    destSchema: priorityConflictClaimTable,
   }),
   subTicketMappings: many({
     sourceField: ['id'],
@@ -4420,6 +4457,22 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
   }),
 }));
 
+export const priorityConflictClaimTableRelationships = relationships(
+  priorityConflictClaimTable,
+  ({ one }) => ({
+    ticket: one({
+      sourceField: ['ticketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+    supersededTicket: one({
+      sourceField: ['supersededTicketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+  }),
+);
+
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
   form: one({
     sourceField: ['formId'],
@@ -4751,6 +4804,7 @@ export const schema = createSchema({
     formEntityValuesTable,
     stageApproversTable,
     ticketStageRequestTable,
+    priorityConflictClaimTable,
     stageTransitionTable,
     dashboardTable,
     queryTable,
@@ -4882,6 +4936,7 @@ export const schema = createSchema({
     formFieldsTableRelationships,
     formEntityValuesTableRelationships,
     ticketStageRequestTableRelationships,
+    priorityConflictClaimTableRelationships,
     stageTransitionTableRelationships,
     stageApproversTableRelationships,
     dashboardTableRelationships,
@@ -5015,6 +5070,7 @@ export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;
+export type PriorityConflictClaim = Row<typeof schema.tables.priority_conflict_claims>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
