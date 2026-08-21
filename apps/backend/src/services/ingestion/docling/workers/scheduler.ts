@@ -69,7 +69,7 @@ const submittedPartTimeoutMs = () =>
   Math.max(sched().submitPermitLeaseTtlMs, sched().leaseMs);
 
 const workerId = (role: string) =>
-  `${role}:${process.env.HOSTNAME || 'local'}:${process.pid}:${randomUUID()}`;
+  `${role}:${config.observability.hostname || 'local'}:${process.pid}:${randomUUID()}`;
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -153,7 +153,7 @@ const readStagedPartBuffer = async (
 };
 
 const wrapperGlobalActiveKey =
-  process.env.DOCLING_WRAPPER_GLOBAL_ACTIVE_KEY || 'docling:async:global:active';
+  config.docling.wrapperGlobalActiveKey || 'docling:async:global:active';
 
 // ── AsyncWorkQueue (prefetch queue for submitter) ────────────────────────────
 

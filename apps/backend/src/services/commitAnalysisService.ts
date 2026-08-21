@@ -10,6 +10,7 @@ import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { XyneChangeType } from './release/xyne/xyneReleaseForm';
+import { config } from '@/config/env';
 import {
   ChangeDetector,
   FileChangeType,
@@ -176,8 +177,8 @@ export class CommitAnalysisService {
       // TODO: remove this branch (or harden into an admin tool) before this
       // ships — local dev convenience only.
       if (
-        process.env.NODE_ENV !== 'production' &&
-        process.env.RELEASE_AUTOSTUB_MISSING_TICKETS === '1'
+        config.env !== 'production' &&
+        config.releaseAutostubMissingTickets
       ) {
         const stub = await this.autoStubMissingTicket(xyneId, ticketPrefix, workspaceId, prTitle, prAuthor);
         if (stub) {

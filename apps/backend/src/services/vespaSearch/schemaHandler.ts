@@ -1,13 +1,14 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const CONFIG_SERVER_BASE = (
-  process.env['VESPA_CONFIG_SERVER_URL'] ?? 'http://127.0.0.1:19071'
+  config.vespa.configServerUrl ?? 'http://127.0.0.1:19071'
 ).replace(/\/+$/, '');
 
 const SCHEMA_BASE_URL = `${CONFIG_SERVER_BASE}/application/v2/tenant/default/application/default/environment/default/region/default/instance/default/content/schemas`;
 
-if (!process.env['VESPA_CONFIG_SERVER_URL']) {
+if (!config.vespa.configServerUrl) {
   logger.warn('[schemaHandler] VESPA_CONFIG_SERVER_URL is not set — falling back to http://127.0.0.1:19071');
 }
 

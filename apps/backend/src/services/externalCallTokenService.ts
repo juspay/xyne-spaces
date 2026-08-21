@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export interface ExternalCallTokenPayload {
   participantId: string;
@@ -19,7 +20,7 @@ class ExternalCallTokenService {
   private readonly secret: string;
 
   constructor() {
-    const secret = process.env.JWT_SECRET;
+    const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }

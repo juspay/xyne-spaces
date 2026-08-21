@@ -31,9 +31,9 @@ export class MultiPullRequestController {
     const bitbucketConfig: MultiBitbucketConfig = {
       baseUrl: config.bitbucket.baseUrl,
       repositories: repositories,
-      username: process.env.BITBUCKET_USERNAME || '',
-      password: process.env.BITBUCKET_PASSWORD || '',
-      token: process.env.BITBUCKET_TOKEN
+      username: config.bitbucket.apiUsername || '',
+      password: config.bitbucket.password || '',
+      token: config.bitbucket.token
     };
 
     this.multiPullRequestService = new MultiPullRequestService(bitbucketConfig);

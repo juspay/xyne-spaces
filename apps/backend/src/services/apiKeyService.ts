@@ -3,6 +3,7 @@ import { AuthProvider, UserStatus, AccessType } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
 import { logger } from '../utils/logger';
 import { CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyListItem, ApiKeyUser } from '../types/express';
+import { config } from '@/config/env';
 
 export class ApiKeyService {
   private db = DatabaseClient.getInstance();
@@ -32,7 +33,7 @@ export class ApiKeyService {
     const token = authHeader.split(' ')[1];
     
     // Check if the raw token matches the environment API key first
-    const envApiKey = process.env.API_KEY;
+    const envApiKey = config.auth.apiKey;
     if (envApiKey && token === envApiKey) {
       return token; // Return raw environment API key
     }
@@ -55,7 +56,7 @@ export class ApiKeyService {
   async validateApiKey(apiKey: string, userHeaders?: { name?: string; email?: string; workspaceId?: string }): Promise<ApiKeyUser | null> {
     try {
       // Check for environment API key first
-      const envApiKey = process.env.API_KEY;
+      const envApiKey = config.auth.apiKey;
       if (envApiKey && apiKey === envApiKey) {
         logger.info('Environment API key used for authentication');
         

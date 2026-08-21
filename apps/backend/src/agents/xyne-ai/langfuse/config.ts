@@ -1,3 +1,4 @@
+import { config } from '@/config/env';
 /**
  * Langfuse Configuration
  * 
@@ -12,9 +13,9 @@ export interface LangfuseConfig {
 }
 
 export function getLangfuseConfig(): LangfuseConfig {
-  const secretKey = process.env.LANGFUSE_SECRET_KEY || '';
-  const publicKey = process.env.LANGFUSE_PUBLIC_KEY || '';
-  const baseUrl = process.env.LANGFUSE_BASE_URL || '';
+  const secretKey = config.langfuse.secretKey || '';
+  const publicKey = config.langfuse.publicKey || '';
+  const baseUrl = config.langfuse.baseUrl || '';
   
   // All three credentials must be present for Langfuse to be enabled
   const enabled = Boolean(secretKey && publicKey && baseUrl);

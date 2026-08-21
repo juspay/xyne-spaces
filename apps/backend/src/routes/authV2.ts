@@ -3,6 +3,7 @@ import { AuthV2Controller } from '../controllers/authV2Controller';
 import { MicrosoftAuthController } from '../controllers/microsoftAuthController';
 import { EmailAuthController } from '../controllers/emailAuthController';
 import { authV2Middleware } from '../middleware/authV2Middleware';
+import { config } from '@/config/env';
 
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
@@ -11,8 +12,8 @@ const emailAuthController = new EmailAuthController();
 
 router.get('/providers', (_req, res) => {
   return res.json({
-    google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    microsoft: Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET),
+    google: Boolean(config.email.clientId && config.email.clientSecret),
+    microsoft: Boolean(config.microsoftGraph.clientId && config.microsoftGraph.clientSecret),
     email: true,
   });
 });

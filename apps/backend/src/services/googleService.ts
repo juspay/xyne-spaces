@@ -20,6 +20,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { config } from '@/config/env';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -340,7 +341,7 @@ export class GoogleService {
   // ─── Gmail API — Watch ───────────────────────────────────────────────────
 
   async setupGmailWatch(): Promise<WatchResult> {
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC;
+    const topicName = config.google.pubsubTopic;
     if (!topicName) throw new Error('GOOGLE_PUBSUB_TOPIC env variable is not set');
 
     try {
@@ -611,11 +612,11 @@ export class GoogleService {
   static async setupPubSubSubscription(): Promise<string> {
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+      projectId: config.google.cloudProjectId,
       credentials,
     });
 
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
+    const topicName = config.google.pubsubTopic || DEFAULT_PUBSUB_TOPIC;
     const subscriptionName = GoogleService.getSharedSubscriptionName();
     const webhookUrl = GoogleService.generateWebhookUrl();
 
@@ -656,7 +657,7 @@ export class GoogleService {
   }
 
   static generateWebhookUrl(): string {
-    const baseUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
+    const baseUrl = config.backendUrl || DEFAULT_BACKEND_URL;
     return `${baseUrl}${SHARED_GOOGLE_WEBHOOK_PATH}`;
   }
 
@@ -667,7 +668,7 @@ export class GoogleService {
     //   spaces.sandbox.xyne.juspay.net → sandbox
     //   localhost / ngrok / trycloudflare / 127.0.0.1 → dev
     //   anything else (prod domain) → prod
-    const backendUrl = (process.env.BACKEND_URL || '').toLowerCase();
+    const backendUrl = (config.backendUrl || '').toLowerCase();
     let suffix: string;
     if (backendUrl.includes('sandbox')) {
       suffix = 'sandbox';
@@ -769,10 +770,10 @@ export class GoogleService {
 
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+      projectId: config.google.cloudProjectId,
       credentials,
     });
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
+    const topicName = config.google.pubsubTopic || DEFAULT_PUBSUB_TOPIC;
     const topic = pubsub.topic(topicName);
 
     // 1. Make sure the shared sub exists FIRST so events have a destination
@@ -841,11 +842,11 @@ export class GoogleService {
   }
 
   static validatePushInfrastructure(): void {
-    if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+    if (!config.google.cloudProjectId) {
       throw new Error('Google channel email mailbox requires GOOGLE_CLOUD_PROJECT_ID to be configured');
     }
 
-    if (!process.env.GOOGLE_PUBSUB_TOPIC) {
+    if (!config.google.pubsubTopic) {
       throw new Error('Google channel email mailbox requires GOOGLE_PUBSUB_TOPIC to be configured');
     }
 
@@ -1047,9 +1048,9 @@ export class GoogleService {
 
   private static createOAuth2Client(credentials: GoogleCredentials): OAuth2Client {
     const client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI,
+      config.email.clientId,
+      config.email.clientSecret,
+      config.google.redirectUri,
     ) as unknown as OAuth2Client;
 
     client.setCredentials({
@@ -1061,7 +1062,7 @@ export class GoogleService {
   }
 
   private static loadPubSubServiceAccount(): ServiceAccountCredentials {
-    const base64Json = process.env.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64;
+    const base64Json = config.google.pubsubServiceAccountBase64;
     if (!base64Json) {
       throw new Error('GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 is not set');
     }

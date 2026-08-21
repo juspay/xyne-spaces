@@ -3,6 +3,7 @@ import { InvitationResponse, NotificationType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { notificationService } from '@/services/notificationService';
+import { config } from '@/config/env';
 
 const CALL_TIMEOUT_QUEUE_NAME = 'call-timeout-queue';
 
@@ -12,10 +13,10 @@ export class CallTimeoutWorker {
 
   constructor() {
     const redisConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-      ...(process.env.REDIS_TLS === 'true' && {
+      host: config.redis.host || 'localhost',
+      port: config.redis.port,
+      ...(config.redis.password && { password: config.redis.password }),
+      ...(config.redis.tls && {
         tls: {
           rejectUnauthorized: false
         }

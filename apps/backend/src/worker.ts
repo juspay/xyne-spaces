@@ -82,27 +82,27 @@ class WorkerService {
       logger.info('Initializing Vespa queue (producer)...')
       await vespaQueue.initialize()
 
-      const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
-      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
+      const vespaEnabled = appConfig.workers.vespa
+      const vespaFileWorkerEnabled = appConfig.workers.vespaFile
+      const gcsPollingEnabled = appConfig.workers.gcsPolling
       const activityClassificationEnabled =
-        process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+        appConfig.workers.activityClassification
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
-      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
-      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const proactiveNudgeWorkerEnabled = appConfig.workers.proactiveNudge
+      const callValidationEnabled = appConfig.workers.callValidation
+      const socialMediaSyncEnabled = appConfig.workers.socialMediaSync
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
-    const workflowType = process.env.WORKFLOW_TYPE
+    const workflowType = appConfig.workers.type
     if (enableRecovery) {
       await recoveryService.start()
     } else {
       logger.info('Recovery worker is disabled ')
     }
-      const enableNotificationProducer = process.env.ENABLE_NOTIFICATION_PRODUCER === 'true';
+      const enableNotificationProducer = appConfig.workers.notificationProducer;
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -338,13 +338,13 @@ class WorkerService {
         });
       }
 
-      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
+      const documentIngestionWorkerEnabled = appConfig.workers.documentIngestion;
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
         await documentIngestionWorker.start();
       }
 
-      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      const dataSourceIngestionWorkerEnabled = appConfig.workers.dataSourceIngestion;
       if (dataSourceIngestionWorkerEnabled) {
         logger.info('Starting data source ingestion worker...');
         await dataSourceIngestionWorker.start();
@@ -388,20 +388,20 @@ class WorkerService {
         clearInterval(this.sdlcReconciliationTimer)
         this.sdlcReconciliationTimer = null
       }
-      const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
-      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
+      const vespaEnabled = appConfig.workers.vespa
+      const vespaFileWorkerEnabled = appConfig.workers.vespaFile
+      const gcsPollingEnabled = appConfig.workers.gcsPolling
       const activityClassificationEnabled =
-        process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+        appConfig.workers.activityClassification
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
-      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
-      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const proactiveNudgeWorkerEnabled = appConfig.workers.proactiveNudge
+      const callValidationEnabled = appConfig.workers.callValidation
+      const socialMediaSyncEnabled = appConfig.workers.socialMediaSync
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
-      const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
-      const workflowType = process.env.WORKFLOW_TYPE
+      const enableRecovery = appConfig.workflowRecoveryEnabled
+      const workflowType = appConfig.workers.type
       if (enableRecovery) {
         await recoveryService.stop()
       }
@@ -501,12 +501,12 @@ class WorkerService {
         await tagGenerationPipeline.close();
       }
 
-      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
+      const documentIngestionWorkerEnabled = appConfig.workers.documentIngestion;
       if (documentIngestionWorkerEnabled) {
         await documentIngestionWorker.shutdown();
       }
 
-      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      const dataSourceIngestionWorkerEnabled = appConfig.workers.dataSourceIngestion;
       if (dataSourceIngestionWorkerEnabled) {
         await dataSourceIngestionWorker.shutdown();
       }

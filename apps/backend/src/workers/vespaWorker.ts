@@ -31,11 +31,11 @@ export class VespaWorker {
 		try {
 			// Redis configuration from environment
 			const redisConfig = {
-				host: process.env.REDIS_HOST || 'localhost',
-				port: parseInt(process.env.REDIS_PORT || '6379', 10),
+				host: config.redis.host || 'localhost',
+				port: config.redis.port,
 				maxRetriesPerRequest: 3,
-				...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-				...(process.env.REDIS_TLS === 'true' && {
+				...(config.redis.password && { password: config.redis.password }),
+				...(config.redis.tls && {
 					tls: {
 						rejectUnauthorized: false
 					}
@@ -45,7 +45,7 @@ export class VespaWorker {
 			// Worker connects to the EXISTING queue created by the API server
 			// Multiple Bull instances with the same name share the same Redis queue
 			// The API server (vespaBullQueue) is the producer, worker is the consumer
-			const queueName = process.env.VESPA_WORKER_QUEUE_NAME || 'vespa-ingestion';
+			const queueName = config.vespa.workerQueueName || 'vespa-ingestion';
 			this.queue = new Bull<VespaJob>(queueName, {
 				redis: redisConfig,
 				defaultJobOptions: {

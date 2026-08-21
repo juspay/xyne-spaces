@@ -15,8 +15,8 @@ export class AuthController {
   private codeCleanupInterval: NodeJS.Timeout;
 
   constructor() {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const clientId = config.email.clientId;
+    const clientSecret = config.email.clientSecret;
     
     if (!clientId || !clientSecret) {
       throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
@@ -40,20 +40,20 @@ export class AuthController {
   private getFrontendUrl(): string {
     logger.info('🔍 [OAUTH DEBUG] getFrontendUrl() called');
     logger.info('🔍 [OAUTH DEBUG] Environment variables:');
-    logger.info('  - NODE_ENV:', process.env.NODE_ENV);
-    logger.info('  - FRONTEND_URL:', process.env.FRONTEND_URL);
-    logger.info('  - CORS_ORIGIN:', process.env.CORS_ORIGIN);
+    logger.info('  - NODE_ENV:', config.env);
+    logger.info('  - FRONTEND_URL:', config.frontendUrl);
+    logger.info('  - CORS_ORIGIN:', config.cors.origin.join(','));
     
     // First priority: explicit FRONTEND_URL environment variable
-    if (process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()) {
-      const frontendUrl = process.env.FRONTEND_URL.trim();
+    if (config.frontendUrl && config.frontendUrl.trim()) {
+      const frontendUrl = config.frontendUrl.trim();
       logger.info('✅ [OAUTH DEBUG] Using FRONTEND_URL:', frontendUrl);
       return frontendUrl;
     }
     
     // Second priority: if CORS_ORIGIN contains an HTTPS URL, use that
-    if (process.env.CORS_ORIGIN) {
-      const corsOrigins = process.env.CORS_ORIGIN.split(',').map(url => url.trim());
+    if (config.cors.origin.length) {
+      const corsOrigins = config.cors.origin;
       logger.info('🔍 [OAUTH DEBUG] CORS_ORIGIN parsed:', corsOrigins);
       
       // Find the first HTTPS URL (external/production URL)
@@ -86,9 +86,9 @@ export class AuthController {
     logger.info('  - req.headers["x-forwarded-proto"]:', req.headers['x-forwarded-proto']);
     
     // First priority: if FRONTEND_URL is set, use same domain
-    if (process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()) {
+    if (config.frontendUrl && config.frontendUrl.trim()) {
       try {
-        const frontendUrl = new URL(process.env.FRONTEND_URL.trim());
+        const frontendUrl = new URL(config.frontendUrl.trim());
         const backendUrl = `${frontendUrl.protocol}//${frontendUrl.host}`;
         logger.info('✅ [OAUTH DEBUG] Using backend URL from FRONTEND_URL:', backendUrl);
         return backendUrl;
@@ -99,8 +99,8 @@ export class AuthController {
     }
     
     // Second priority: if CORS_ORIGIN contains HTTPS URL, use that domain
-    if (process.env.CORS_ORIGIN) {
-      const corsOrigins = process.env.CORS_ORIGIN.split(',').map(url => url.trim());
+    if (config.cors.origin.length) {
+      const corsOrigins = config.cors.origin;
       const httpsUrl = corsOrigins.find(url => url.startsWith('https://'));
       if (httpsUrl) {
         try {
@@ -220,7 +220,7 @@ export class AuthController {
       const verifyStartTime = Date.now();
       const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: config.email.clientId,
       });
       const verifyEndTime = Date.now();
       logger.info(`✅ [${requestId}] ID token verified in ${verifyEndTime - verifyStartTime}ms`);
@@ -230,7 +230,7 @@ export class AuthController {
         logger.info(`❌ [${requestId}] Invalid Google token payload`);
         if (isOAuthCallback) {
           // Redirect to frontend with error
-          const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+          const frontendUrl = config.cors.origin[0] ?? 'http://localhost:5173';
           res.redirect(`${frontendUrl}?error=invalid_token`);
           return;
         }
@@ -310,7 +310,7 @@ export class AuthController {
       }
 
       // Set HTTP-only cookies for tokens
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -343,7 +343,7 @@ export class AuthController {
           hasRefreshToken: refresh_token ? 'true' : 'false'
         });
 
-        const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+        const frontendUrl = config.cors.origin[0] ?? 'http://localhost:5173';
         logger.info(`🔄 [${requestId}] Redirecting to frontend: ${frontendUrl}?${params.toString()}`);
         logger.info(`✅ [${requestId}] === OAuth Exchange Complete (REDIRECT) ===`);
         res.redirect(`${frontendUrl}?${params.toString()}`);
@@ -381,7 +381,7 @@ export class AuthController {
       const isOAuthCallback = req.method === 'GET' && req.query.code;
       if (isOAuthCallback) {
         // Redirect to frontend with error
-        const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+        const frontendUrl = config.cors.origin[0] ?? 'http://localhost:5173';
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         logger.info(`🔄 [${requestId}] Redirecting to frontend with error: ${errorMessage}`);
         res.redirect(`${frontendUrl}?error=auth_failed&message=${encodeURIComponent(errorMessage)}`);
@@ -449,7 +449,7 @@ export class AuthController {
       // Verify the new token
       const ticket = await this.googleClient.verifyIdToken({
         idToken: newIdToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -479,7 +479,7 @@ export class AuthController {
       });
 
       // Set HTTP-only cookie for refreshed token
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       res.cookie('google_access_token', customToken, {
         httpOnly: true,
         secure: isProduction,
@@ -622,7 +622,7 @@ export class AuthController {
       logger.info(`🔐 [${requestId}] Verifying ID token...`);
       const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: config.email.clientId,
       });
       
       const payload = ticket.getPayload();
@@ -698,7 +698,7 @@ export class AuthController {
       }
       
       // Set HTTP-only cookies for tokens
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -818,7 +818,7 @@ export class AuthController {
       });
 
       // Set new token in HTTP-only cookie (browser receives this directly!)
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       res.cookie('google_access_token', customToken, {
         httpOnly: true,

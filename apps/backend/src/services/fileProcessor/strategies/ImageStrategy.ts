@@ -66,13 +66,13 @@ export class ImageDescriptionStrategy extends BaseStrategy {
         // Resolve base URL and API key — config takes priority, then env aliases.
         const baseUrl =
             config.litellm.baseUrl ||
-            process.env.LITELLM_BASE_URL ||
-            process.env.OPENAI_API_BASE
+            config.llm.litellmBaseUrl ||
+            config.openai.apiBase
 
         const apiKey =
             config.litellm.apiKey ||
-            process.env.LITELLM_API_KEY ||
-            process.env.OPENAI_API_KEY
+            config.llm.litellmApiKey ||
+            config.openai.apiKey
 
         if (!baseUrl || !apiKey) {
             logger.warn(`[ImageStrategy] No LLM configured, skipping image description for ${vespaDocId}`)
@@ -83,9 +83,9 @@ export class ImageDescriptionStrategy extends BaseStrategy {
         // NOTE: the chosen model MUST be multimodal — text-only models (e.g. the
         // GLM family here) return HTTP 400 "is not a multimodal model".
         const model =
-            process.env.IMAGE_DESCRIPTION_MODEL ||
-            process.env.LITELLM_BEST_MODEL ||
-            process.env.LITELLM_FAST_MODEL ||
+            config.openai.imageDescriptionModel ||
+            config.litellm.bestModel ||
+            config.litellm.fastModel ||
             'glm-latest'
 
         const endpoint = baseUrl.endsWith('/v1')

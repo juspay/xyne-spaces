@@ -18,10 +18,11 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const TAG = '[GmailWatchRenewal]';
 const GMAIL_WATCH_RENEWAL_CRON =
-  process.env.GMAIL_WATCH_RENEWAL_CRON || '0 3 * * *';
+  config.crons.gmailWatchRenewal || '0 3 * * *';
 
 // Process N sources concurrently per batch. Gmail's per-user quota is
 // generous; keep this modest so one slow source doesn't stall the cycle.

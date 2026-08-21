@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { config } from '@/config/env';
 
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16; // AES block size
@@ -13,7 +14,7 @@ const IV_LENGTH = 16; // AES block size
  * Must be 32 bytes (64 hex characters) for AES-256
  */
 function getEncryptionKey(): Buffer {
-  const key = process.env.ENCRYPTION_KEY;
+  const key = config.auth.encryptionKey;
 
   if (!key) {
     throw new Error('ENCRYPTION_KEY not found in environment variables');

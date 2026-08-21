@@ -21,7 +21,6 @@ import { getStorageService, type StorageService } from '@/services/storage';
 import { v4 as uuidv4 } from 'uuid';
 import { safeSerialize } from '../workflows/storage/serialization';
 import { STEP_TYPES } from '../workflows/storage/step-types';
-import { config } from '@/config/env';
 
 export class WorkflowController {
   private workflowRepository: WorkflowRepository;
@@ -130,7 +129,7 @@ export class WorkflowController {
         );
 
         if (attachments.length > 0 && attachments[0].url?.startsWith('gs://')) {
-          const storageService = getStorageService(config.gcs.workflowStepsBucketName);
+          const storageService = getStorageService(appConfig.gcs.workflowStepsBucketName);
           const gcsPath = attachments[0].url.replace('gs://', '').split('/').slice(1).join('/');
 
           try {
@@ -154,7 +153,7 @@ export class WorkflowController {
       // 2. Create new Redis key and MessageAttachment for new execution
       const newRedisKey = buildWorkflowStepKey(newExecutionId, stepName);
       const newGcsPath = `workflows/${newExecutionId}/${stepName}.json`;
-      const newGcsUrl = getStorageService(config.gcs.workflowStepsBucketName).buildStorageUri(newGcsPath);
+      const newGcsUrl = getStorageService(appConfig.gcs.workflowStepsBucketName).buildStorageUri(newGcsPath);
 
       // Create MessageAttachment for new execution's step
       const { repositories } = await import('@/database/repositories');
@@ -169,7 +168,7 @@ export class WorkflowController {
         uploadedByUserId: 'system',
         createdBy: 'system',
         conversationId: null,
-        workspaceId: config.defaultWorkspaceId,
+        workspaceId: appConfig.defaultWorkspaceId,
         metadata: {
           workflowExecutionId: newExecutionId,
           checkpointId: stepName,
@@ -1733,7 +1732,7 @@ export class WorkflowController {
         return;
       }
 
-      const vrBucketName = config.gcs.workflowVRBucketName;
+      const vrBucketName = appConfig.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
       // List artifacts from GCS
@@ -1831,7 +1830,7 @@ export class WorkflowController {
         return;
       }
 
-      const vrBucketName = config.gcs.workflowVRBucketName;
+      const vrBucketName = appConfig.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-IMAGE] Fetching image from GCS: bucket=${vrBucketName}, path=${gcsPath}`);
@@ -1882,7 +1881,7 @@ export class WorkflowController {
         return;
       }
 
-      const vrBucketName = config.gcs.workflowVRBucketName;
+      const vrBucketName = appConfig.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-DOWNLOAD] Fetching artifact from GCS: bucket=${vrBucketName}, path=${gcsPath}`);
@@ -1935,7 +1934,7 @@ export class WorkflowController {
         return;
       }
 
-      const vrBucketName = config.gcs.workflowVRBucketName;
+      const vrBucketName = appConfig.gcs.workflowVRBucketName;
       const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-VIEW] Fetching artifact from GCS: bucket=${vrBucketName}, path=${gcsPath}`);

@@ -14,6 +14,7 @@ import { type NotificationData } from './notificationService';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
+import { config } from '@/config/env';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -71,7 +72,7 @@ class WebSocketService {
     this.io = new SocketIOServer(httpServer, {
       path: '/api/socket.io/',
       cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
+        origin: config.clientUrl || "http://localhost:3000",
         methods: ["GET", "POST"],
         credentials: true
       },

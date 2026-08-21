@@ -112,7 +112,7 @@ export class CommunityWorkspaceController {
         memberId: joinResult.workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -300,7 +300,7 @@ export class CommunityWorkspaceController {
 
   private async parsePendingAuthCookie(cookie: string): Promise<PendingAuth | null> {
     try {
-      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
+      const decoded = jwt.verify(cookie, config.jwt.secret!) as {
         googleId?: string;
         providerUserId?: string;
         email?: string;

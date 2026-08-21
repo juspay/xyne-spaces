@@ -17,6 +17,7 @@ import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
+import { config } from '@/config/env';
 import { serializeInitialMessageMd,
   isDeskChannelType,
   type InitialMessageSummary,
@@ -612,7 +613,7 @@ class NotificationService {
 
     // Truncate and add notice
     const truncatedText = outputText.substring(0, MAX_OUTPUT_SIZE);
-    const viewFullLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/tickets/${ticketId}`;
+    const viewFullLink = `${config.frontendUrl || 'http://localhost:5173'}/tickets/${ticketId}`;
     const truncationNotice = `\n\n... (Output truncated due to length)\n\n📋 View full output in ticket details: ${viewFullLink}`;
 
     return truncatedText + truncationNotice;
@@ -3040,7 +3041,7 @@ class NotificationService {
     senderId: string,
     data: NotificationData,
   ): Promise<void> {
-    if (process.env.LOTUS_OWN_MESSAGE_PREFETCH_ENABLED !== 'true') return;
+    if (!config.lotusOwnMessagePrefetchEnabled) return;
     try {
       const sessions = await fcmPushService.getActiveSessionsWithTokens(senderId);
       const mobileSessions = sessions.filter(

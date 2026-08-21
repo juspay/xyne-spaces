@@ -9,6 +9,7 @@ import { ExternalSourceRepository } from '../../database/repositories/externalSo
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
+import { config } from '@/config/env';
 
 export async function handleSyncPinnedMessagesCommand(req: Request, res: Response): Promise<Response> {
   try {
@@ -67,7 +68,7 @@ export async function syncPinnedMessages({
     return;
   }
 
-  const token = botToken || process.env.SLACK_BOT_TOKEN;
+  const token = botToken || config.slackBotToken;
   if (!token) {
     logger.error('[SyncPins] No bot token available');
     await postMessage({ channelId: slackChannelId, text: '❌ Slack integration is not configured.', botToken });

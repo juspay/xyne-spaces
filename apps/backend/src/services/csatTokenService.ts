@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const ISSUER = 'xyne-csat';
 const AUDIENCE = 'xyne-csat-survey';
@@ -9,7 +10,7 @@ class CsatTokenService {
   private readonly secret: string;
 
   constructor() {
-    const secret = process.env.JWT_SECRET;
+    const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }

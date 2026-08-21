@@ -4,6 +4,7 @@ import { ConfluenceImportService, type ConfluenceImportConfig } from '@/services
 import { DatabaseClient } from '@/database/client';
 import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 interface CliConfig extends Omit<ConfluenceImportConfig, 'actorUserId'> {
   actorUserId?: string;
@@ -16,7 +17,7 @@ async function main(): Promise<void> {
   }
 
   const rawConfig = JSON.parse(await fs.readFile(configPath, 'utf8')) as CliConfig;
-  const actorUserId = rawConfig.actorUserId || process.env.CONFLUENCE_IMPORT_ACTOR_USER_ID;
+  const actorUserId = rawConfig.actorUserId || config.confluence.importActorUserId;
   if (!actorUserId) {
     throw new Error('actorUserId is required in config or CONFLUENCE_IMPORT_ACTOR_USER_ID');
   }

@@ -57,8 +57,8 @@ export abstract class BaseStrategy {
         }
 
         const model =
-            process.env.LITELLM_FAST_MODEL ||
-            process.env.LITELLM_BEST_MODEL ||
+            config.litellm.fastModel ||
+            config.litellm.bestModel ||
             'glm-flash-experimental'
 
         const endpoint = credential.baseUrl.endsWith('/v1')

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponse, HealthCheckResponse } from '@/types/express';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
+import { config } from '@/config/env';
 
 export class HealthController {
   public static async getHealth(_req: Request, res: Response): Promise<void> {
@@ -15,8 +16,8 @@ export class HealthController {
         status: isDatabaseHealthy ? 'OK' : 'DEGRADED',
         timestamp: new Date().toISOString(),
         uptime: Math.floor(process.uptime()),
-        version: process.env.npm_package_version || '1.0.0',
-        environment: process.env.NODE_ENV || 'development',
+        version: config.version,
+        environment: config.env || 'development',
         memory: {
           used: Math.round(memoryUsage.heapUsed / 1024 / 1024), // MB
           total: Math.round(memoryUsage.heapTotal / 1024 / 1024), // MB

@@ -25,6 +25,7 @@ import { TicketController } from '@/controllers/ticketController';
 import { conversationService } from '@/services/conversationService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { PDFParse } from 'pdf-parse';
+import { config } from '@/config/env';
 
 // Typed metadata for network document workflow
 export interface NetworkDocumentWorkflowMetadata {
@@ -287,7 +288,7 @@ async function autoAssignTicket(
 
   try {
     const userGroupId = context.metadata?.userGroupId || 
-                       process.env.NETWORK_DOCUMENT_DEFAULT_USER_GROUP_ID;
+                       config.networkDocuments.defaultUserGroupId;
 
     if (!userGroupId) {
       return { assignedUserId: null, assignmentReason: 'No userGroupId configured' };

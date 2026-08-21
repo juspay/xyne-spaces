@@ -6,6 +6,7 @@ import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
 import { issueSdlcInteractiveGrant } from './vcs/sdlcInteractiveGrant';
+import { config } from '@/config/env';
 
 export type SdlcAgentOperation = 'interactive' | 'baseline' | 'work' | 'wiki';
 export type SdlcWikiAgentRole =
@@ -151,7 +152,7 @@ export class SdlcAgentContextService {
                 actorUserId: actor.userId,
                 conversationId: input.conversationId,
               },
-              process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || ''
+              config.internalS2sKey || config.xyneClaw.s2sKey || ''
             )
           : null,
       artifact: {

@@ -19,6 +19,7 @@ import {
 } from '@/services/calendarOAuthFlow';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { config } from '@/config/env';
 
 const router = express.Router();
 
@@ -54,8 +55,8 @@ function getMicrosoftRedirectUri(req: Request): string {
 }
 
 function createGoogleClient(req: Request): OAuth2Client {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = config.email.clientId;
+  const clientSecret = config.email.clientSecret;
   if (!clientId || !clientSecret) {
     throw new Error('Google OAuth is not configured');
   }
@@ -64,9 +65,9 @@ function createGoogleClient(req: Request): OAuth2Client {
 }
 
 function createMicrosoftClient(): AuthorizationCode {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  const clientId = config.microsoftGraph.clientId;
+  const clientSecret = config.microsoftGraph.clientSecret;
+  const tenantId = config.microsoftGraph.tenantId || 'common';
   if (!clientId || !clientSecret) {
     throw new Error('Microsoft OAuth is not configured');
   }
@@ -130,8 +131,8 @@ function getTokenExpiry(token: Record<string, unknown>): Date | undefined {
 }
 
 async function verifyMicrosoftIdToken(idToken: string): Promise<MicrosoftIdTokenClaims> {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const configuredTenant = process.env.MICROSOFT_TENANT_ID || 'common';
+  const clientId = config.microsoftGraph.clientId;
+  const configuredTenant = config.microsoftGraph.tenantId || 'common';
   if (!clientId) throw new Error('Microsoft OAuth is not configured');
 
   const jwksTenant = configuredTenant === 'common' ? 'common' : configuredTenant;
@@ -264,7 +265,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
 
     const ticket = await client.verifyIdToken({
       idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: config.email.clientId,
     });
     const payload = ticket.getPayload();
     if (

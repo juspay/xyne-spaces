@@ -1,4 +1,5 @@
 import type { FlowComponent, FlowState } from '@xyne/shared';
+import { config } from '@/config/env';
 
 /**
  * Helpers shared by the alert incoming-webhook parsers (Amazon SNS, Pingdom,
@@ -83,8 +84,8 @@ export function blacklistedLabels(): Set<string> {
   // ALERT_BLACKLISTED_LABELS covers every alert webhook type; SNS_BLACKLISTED_LABELS
   // is kept as a fallback so existing deployments keep their configured list.
   const raw =
-    process.env.ALERT_BLACKLISTED_LABELS?.trim() ||
-    process.env.SNS_BLACKLISTED_LABELS?.trim() ||
+    config.observability.alertBlacklistedLabels?.trim() ||
+    config.observability.snsBlacklistedLabels?.trim() ||
     DEFAULT_BLACKLISTED_LABELS;
   return new Set(
     raw

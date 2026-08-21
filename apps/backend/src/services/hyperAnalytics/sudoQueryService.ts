@@ -1,5 +1,6 @@
 import { SudoQuery } from 'sudo-query';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 interface SudoQueryUser {
   id: string;
@@ -24,7 +25,7 @@ class SudoQueryService {
       return;
     }
 
-    const token = process.env.SUDO_QUERY_TOKEN as string | undefined;
+    const token = config.auth.sudoQueryToken as string | undefined;
 
     if (!token || token.trim() === '') {
       logger.warn('[SudoQuery] No token found in env, skipping initialization');
