@@ -11,5 +11,7 @@ import { identityTools } from "./identity.js";
 import { channelTools } from "./channels.js";
 import { threadTools } from "./threads.js";
 import { messageTools } from "./messages.js";
+import { ticketTools } from "./tickets.js";
+import { lookupTools } from "./lookups.js";
 
-export const allTools: ToolDef[] = [...identityTools, ...channelTools, ...threadTools, ...messageTools];
+export const allTools: ToolDef[] = [...identityTools, ...channelTools, ...threadTools, ...messageTools, ...ticketTools, ...lookupTools];
