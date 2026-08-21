@@ -363,6 +363,44 @@ export interface Participant {
   email: string;
   picture: string;
 }
+/** Live data a generated artifact declared it wants. Inert today — the host-data
+ *  bridge is not built yet — but carried end-to-end so enabling it later needs
+ *  no format change. */
+export interface ReactArtifactDataRequirement {
+  name: string;
+  description?: string;
+  /** Where the data comes from. Absent on requirements authored before live
+   *  data existed — those resolve to an explicit error, not an endless load.
+   *  Shape mirrored in ReactArtifact/artifactData.constants.ts. */
+  source?:
+    | { kind: 'query'; query: string; args?: Record<string, unknown> }
+    | {
+        kind: 'ast';
+        model: string;
+        operation?: 'findMany' | 'count';
+        where?: Record<string, unknown>;
+        orderBy?: Record<string, unknown> | Array<Record<string, unknown>>;
+        take?: number;
+      };
+}
+
+/**
+ * Small descriptor for an agent-generated React app, produced by the
+ * `create-react-artifact` tool and stored on the attachment row. Deliberately
+ * excludes file contents: the full project rides the attachment bytes and is
+ * fetched only when the artifact is opened, so this stays cheap to replay on
+ * every history load.
+ */
+export interface ReactArtifactManifest {
+  version: number;
+  title: string;
+  entry: string;
+  fileCount: number;
+  files: string[];
+  dependencies: string[];
+  dataRequirements: ReactArtifactDataRequirement[];
+}
+
 export interface MessageAttachment {
   /** Unique attachment ID (for persisted attachments from claw-auth) */
   id?: string;
@@ -387,6 +425,8 @@ export interface MessageAttachment {
       background?: { color?: string } | string;
       objects: unknown[];
     }>;
+    /** Present when this attachment is an agent-generated React app. */
+    reactArtifact?: ReactArtifactManifest;
   };
 }
 

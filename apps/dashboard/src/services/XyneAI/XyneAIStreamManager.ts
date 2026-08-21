@@ -1603,6 +1603,7 @@ class XyneAIStreamManager {
           fileName: string;
           mimeType: string;
           data: string;
+          metadata?: MessageAttachment['metadata'];
         }>
       | undefined;
 
@@ -1614,6 +1615,11 @@ class XyneAIStreamManager {
       data: att.data,
       // Parse dimensions if present in data URL or metadata
       ...parseAttachmentDimensions(att.data),
+      // Tool-generated metadata (e.g. the React-artifact manifest). On this live
+      // path the id is a placeholder and the bytes are inline in `data`; after a
+      // reload it is the reverse — a real attachment id and no bytes. Consumers
+      // must handle both.
+      ...(att.metadata ? { metadata: att.metadata } : {}),
     }));
 
     updateMessages(prev =>

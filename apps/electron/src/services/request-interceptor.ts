@@ -231,15 +231,23 @@ function installFrontendCsp(): void {
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';
+  // Sandpack (agent-generated React artifacts in Ask AI) does NOT bundle
+  // in-page: its preview is an iframe whose document is served by the
+  // CodeSandbox bundler, and the client talks to that frame. Without both
+  // frame-src and connect-src the preview silently never loads.
+  // Revisit when the artifact data-bridge lands — at that point real workspace
+  // data enters the frame and the bundler should be self-hosted on xyneHosts
+  // (Sandpack's `bundlerURL` option) instead of allowlisting a third party.
+  const sandpackBundler = 'https://*.codesandbox.io';
   const cspDirectives = [
     `default-src 'self' ${xyneHosts}`,
     `script-src 'self' ${xyneHosts} ${googleApis}`,
     `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
     `img-src 'self' data: blob: https:`,
     `media-src 'self' blob: ${xyneHosts}`,
-    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com`,
+    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com ${sandpackBundler}`,
     `font-src 'self' data: ${xyneHosts} ${googleFontsFiles}`,
-    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com`,
+    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com ${sandpackBundler}`,
     `worker-src 'self' blob:`,
     `object-src 'none'`,
     `base-uri 'none'`,

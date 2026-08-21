@@ -34,6 +34,7 @@ import { organizationsRouter } from "./routes/organizations.js";
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
+import { artifactAppsRouter } from "./routes/artifact-apps.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
 import { ERROR_PIPELINE } from "./config.js";
@@ -186,6 +187,7 @@ app.use(`${BASE}/admin`, requireAuth, adminRouter);
 app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
+app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)

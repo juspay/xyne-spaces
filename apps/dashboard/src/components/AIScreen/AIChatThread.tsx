@@ -67,6 +67,7 @@ import {
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
+import { MessageReactArtifacts } from './ReactArtifact';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -1170,6 +1171,8 @@ function ChatMessageBubble({
               )}
             </div>
           )}
+
+          {!isUser && <MessageReactArtifacts message={message} />}
 
           {inlineCitations.length > 0 && <InlineCitations citations={inlineCitations} />}
 
