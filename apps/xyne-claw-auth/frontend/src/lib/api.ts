@@ -4677,6 +4677,19 @@ export async function getDigitalTwinPipelineEvent(
   return data.data;
 }
 
+/** Re-run one pipeline event's window. 202 — the work continues server-side and
+ *  shows up as new events in the feed. Only error/empty runs are retryable. */
+export async function retryDigitalTwinPipelineEvent(
+  userId: string,
+  id: string,
+): Promise<{ status: string }> {
+  const data = await request<{ success: boolean; data: { status: string } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/pipeline/events/${encodeURIComponent(id)}/retry`,
+    { method: "POST", headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
 export async function getDigitalTwinEstimate(
   userId: string,
   from: string,

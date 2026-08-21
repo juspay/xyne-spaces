@@ -21,7 +21,7 @@ import { createLogger, createTraceId } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import {
   fetchUserMessages,
-  fetchUserHostedCalls,
+  fetchUserCalls,
   fetchUserCanvases,
 } from "./userMemoryFetcher.js";
 import { assembleConversationUnits, isContextAssemblerEnabled } from "./contextAssembler.js";
@@ -53,7 +53,7 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
       isContextAssemblerEnabled()
         ? assembleConversationUnits(userId, window)
         : fetchUserMessages(userId, window)] as const,
-    ["calls", () => fetchUserHostedCalls(userId, window)] as const,
+    ["calls", () => fetchUserCalls(userId, window)] as const,
     ["canvases", () => fetchUserCanvases(userId, window)] as const,
   ]) {
     let records;
