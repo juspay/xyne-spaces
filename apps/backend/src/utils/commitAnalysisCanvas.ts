@@ -11,6 +11,7 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -510,16 +511,26 @@ async function fireCanvasSideEffectsAndIndex(
   createdByUserId: string,
   isInsert: boolean,
 ): Promise<void> {
-  const user = await db.user.findUnique({
-    where: { id: createdByUserId },
-    select: { id: true, email: true, workspaceId: true, role: true },
-  });
-  if (!user || !user.workspaceId) {
-    throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
-  }
-  if (isInsert) {
+  // The creator is usually the xyne-release-bot user, not the human whose request
+  // triggered the analysis. Under the ambient request context OrgMembersACL narrows
+  // the org_members read to the caller's OWN row (for non-admin members), hiding the
+  // bot's row and wrongly failing with "not a member of any organization". This is
+  // workspace work, so resolve the creator under service scope (tenant boundary only).
+  const { user, orgMember } = await withWorkspaceScope(async () => {
+    const user = await db.user.findUnique({
+      where: { id: createdByUserId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+    if (!user || !user.workspaceId) {
+      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+    }
     // Email is globally unique in orgMember, single lookup is sufficient
-    const orgMember = await db.orgMember.findUnique({ where: { email: user.email } });
+    const orgMember = isInsert
+      ? await db.orgMember.findUnique({ where: { email: user.email } })
+      : null;
+    return { user, orgMember };
+  });
+  if (isInsert) {
     if (!orgMember) {
       throw new Error(`User ${createdByUserId} is not a member of any organization`);
     }
