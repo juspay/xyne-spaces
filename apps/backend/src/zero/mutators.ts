@@ -9753,25 +9753,28 @@ export function createMutators(
             throw new Error('Folder name is required');
           }
 
+          // Channel folders no longer require a project (the channel canvas UI has
+          // no project grouping), but the channel itself must still be valid and
+          // not archived. A projectId is optional; when present it must match.
+          if (channelId) {
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
+            if (!channel) {
+              throw new Error('Channel not found');
+            }
+
+            if (channel.isArchived) {
+              throw new Error('Channel is archived');
+            }
+
+            if (projectId && channel.projectId != null && channel.projectId !== projectId) {
+              throw new Error('Channel does not belong to project');
+            }
+          }
+
           if (projectId) {
             const project = await tx.run(zql.projects.where('id', projectId).one());
             if (!project) {
               throw new Error('Project not found');
-            }
-
-            if (channelId) {
-              const channel = await tx.run(zql.channels.where('id', channelId).one());
-              if (!channel) {
-                throw new Error('Channel not found');
-              }
-
-              if (channel.isArchived) {
-                throw new Error('Channel is archived');
-              }
-
-              if (channel.projectId != null && channel.projectId !== projectId) {
-                throw new Error('Channel does not belong to project');
-              }
             }
           }
 
@@ -9781,7 +9784,9 @@ export function createMutators(
               .where('name', cleanName)
               .where(({ and, cmp }) =>
                 channelId
-                  ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                  ? projectId
+                    ? and(cmp('projectId', '=', projectId), cmp('channelId', '=', channelId))
+                    : and(cmp('projectId', 'IS', null), cmp('channelId', '=', channelId))
                   : projectId
                     ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                     : and(
@@ -9866,10 +9871,15 @@ export function createMutators(
                 .where('name', cleanName)
                 .where(({ and, cmp }) =>
                   folder.channelId
-                    ? and(
-                      cmp('projectId', '=', folder.projectId as string),
-                      cmp('channelId', '=', folder.channelId),
-                    )
+                    ? folder.projectId
+                      ? and(
+                        cmp('projectId', '=', folder.projectId),
+                        cmp('channelId', '=', folder.channelId),
+                      )
+                      : and(
+                        cmp('projectId', 'IS', null),
+                        cmp('channelId', '=', folder.channelId),
+                      )
                     : folder.projectId
                       ? and(
                         cmp('projectId', '=', folder.projectId),
