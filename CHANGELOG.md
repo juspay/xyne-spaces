@@ -1,3 +1,33 @@
+## [1.206.1](https://github.com/juspay/xyne-spaces/compare/v1.206.0...v1.206.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes show more button overlay issue for code block ([#859](https://github.com/juspay/xyne-spaces/issues/859)) ([917f073](https://github.com/juspay/xyne-spaces/commit/917f0735ebc4896de37037487951fae16f934d5d))
+
+## [1.206.0](https://github.com/juspay/xyne-spaces/compare/v1.205.3...v1.206.0) (2026-08-21)
+
+
+### Features
+
+* digital twin response ui ([#844](https://github.com/juspay/xyne-spaces/issues/844)) ([dadd153](https://github.com/juspay/xyne-spaces/commit/dadd1536f2b4eee5e2901f23eddf0e3208af8621))
+
+## [1.205.3](https://github.com/juspay/xyne-spaces/compare/v1.205.2...v1.205.3) (2026-08-21)
+
+## [1.205.2](https://github.com/juspay/xyne-spaces/compare/v1.205.1...v1.205.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* acl fix for cross-app support ([#823](https://github.com/juspay/xyne-spaces/issues/823)) ([3c24739](https://github.com/juspay/xyne-spaces/commit/3c247391674f3027cf22ff119ba70984bacf570a))
+
+## [1.205.1](https://github.com/juspay/xyne-spaces/compare/v1.205.0...v1.205.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* restore cmd+K on every back, and give the results page a back arrow ([#835](https://github.com/juspay/xyne-spaces/issues/835)) ([14698a8](https://github.com/juspay/xyne-spaces/commit/14698a80d54445234cb8dc9d725da15d3d1bfb97))
+
 ## [1.205.0](https://github.com/juspay/xyne-spaces/compare/v1.204.0...v1.205.0) (2026-08-20)
 
 
