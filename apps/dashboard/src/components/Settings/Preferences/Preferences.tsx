@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Search,
   Monitor,
   Smartphone,
   LayoutGrid,
@@ -80,7 +79,6 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
-  { id: 'search', label: 'Search', icon: <Search className='size-4' /> },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -923,32 +921,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
-// ─── Search ─────────────────────────────────────────────────────────────────
-const SearchSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-4'>
-    <SectionHeader
-      title='Search'
-      subtitle='Choose how search opens when you click the search bar or press ⌘K'
-    />
-    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
-      <RadioGroup
-        value={state.searchMode}
-        onChange={value => state.setSearchMode(value as 'popup' | 'screen')}
-      >
-        <Radio value='popup' subtext='Opens a floating modal — fast navigation and inline results'>
-          Quick search popup
-        </Radio>
-        <Radio
-          value='screen'
-          subtext='Opens the search results page with filters for type, sender, channel, and sort'
-        >
-          Full search screen
-        </Radio>
-      </RadioGroup>
-    </div>
-  </div>
-);
-
 // ─── Toolbar ────────────────────────────────────────────────────────────────
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
   const items = useVisibleNavigationItems();
@@ -1002,7 +974,6 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calls: CallsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
-  search: SearchSection,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
