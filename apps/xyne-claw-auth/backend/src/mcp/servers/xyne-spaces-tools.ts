@@ -4455,6 +4455,197 @@ const spacesUpdateTicket: ToolDef = {
     }
   },
 };
+// ── spaces-update-bulk-tickets ──────────────────────────────────────
+
+interface BulkTicketUpdateInput {
+  ticketId?: unknown;
+  assigneeId?: unknown;
+  stage?: unknown;
+  groupId?: unknown;
+  title?: unknown;
+  description?: unknown;
+  priority?: unknown;
+  status?: unknown;
+  eta?: unknown;
+  tags?: unknown;
+}
+
+const spacesUpdateBulkTickets: ToolDef = {
+  name: "spaces-update-bulk-tickets",
+  // PATCH /api/tickets/:id is user-session-only (same constraint as
+  // spaces-update-ticket — there is no dual-auth /api/tickets/claw update
+  // route), so this bulk variant is likewise userOnly: app-mode calls 401.
+  userOnly: true,
+  description:
+    "Update MANY tickets in Spaces behind ONE approval. Prefer this over calling spaces-update-ticket repeatedly " +
+    "when applying updates to multiple tickets (e.g. moving a range of tickets to COMPLETED). Each ticket entry needs " +
+    "an internal ticketId (use spaces-tickets — the 'Internal ID', not the Xyne ID) plus at least one field to change. " +
+    "Set shared defaults once at the top level (defaultStage, defaultStatus, defaultPriority, defaultAssigneeId, " +
+    "defaultGroupId, defaultTags); each ticket may override any of them. A stage change also updates status to the " +
+    "stage's default status unless a status override is provided. Tickets are updated sequentially and partial " +
+    "failures are reported.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      defaultStage: { type: "string", description: "Stage applied to tickets that do not specify a stage." },
+      defaultStatus: {
+        type: "string",
+        enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+        description: "Status applied to tickets that do not specify a status.",
+      },
+      defaultPriority: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        description: "Priority applied to tickets that do not specify priority.",
+      },
+      defaultAssigneeId: { type: "string", description: "Assignee (user ID) applied to tickets that do not specify assigneeId." },
+      defaultGroupId: { type: "string", description: "User group ID applied to tickets that do not specify groupId." },
+      defaultTags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tags applied to tickets that do not specify tags (replaces that ticket's tags).",
+      },
+      tickets: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            ticketId: {
+              type: "string",
+              description: "Internal database ID of the ticket to update (use spaces-tickets — 'Internal ID', not 'Xyne ID').",
+            },
+            assigneeId: { type: "string", description: "User ID to assign the ticket to" },
+            stage: { type: "string", description: "Stage name to move the ticket to" },
+            groupId: { type: "string", description: "User group ID to assign to the ticket" },
+            title: { type: "string", description: "New title for the ticket" },
+            description: { type: "string", description: "New description for the ticket" },
+            priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
+            status: {
+              type: "string",
+              enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+              description: "New status. A stage change may also change status to the stage's default — set this to override.",
+            },
+            eta: { type: "string", description: "New due date as ISO 8601 string" },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Replace the ticket's tags with this list (empty array clears all tags).",
+            },
+          },
+          required: ["ticketId"],
+        },
+      },
+    },
+    required: ["tickets"],
+  },
+  async handler(args) {
+    const tickets = Array.isArray(args["tickets"]) ? (args["tickets"] as BulkTicketUpdateInput[]) : [];
+    if (tickets.length === 0) return err("tickets must contain at least one ticket.");
+
+    const MAX_TICKETS = 100;
+    if (tickets.length > MAX_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Update bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    }
+
+    const defaultStage = optionalString(args["defaultStage"]);
+    const defaultStatus = optionalString(args["defaultStatus"]);
+    const defaultPriority = optionalString(args["defaultPriority"]) as TicketPriority | undefined;
+    const defaultAssigneeId = optionalString(args["defaultAssigneeId"]);
+    const defaultGroupId = optionalString(args["defaultGroupId"]);
+    const defaultTags = normalizeTags(args["defaultTags"]);
+
+    const updated: Array<{ index: number; ticketId: string; fields: string[] }> = [];
+    const failures: Array<{ index: number; ticketId: string; reason: string }> = [];
+
+    for (let i = 0; i < tickets.length; i += 1) {
+      const ticket = tickets[i]!;
+      const ticketId = optionalString(ticket.ticketId);
+      const label = ticketId ?? `ticket ${i + 1}`;
+      if (!ticketId) {
+        failures.push({ index: i + 1, ticketId: label, reason: "ticketId is required." });
+        continue;
+      }
+
+      const assigneeId = optionalString(ticket.assigneeId) ?? defaultAssigneeId;
+      const stage = optionalString(ticket.stage) ?? defaultStage;
+      const groupId = optionalString(ticket.groupId) ?? defaultGroupId;
+      const title = optionalString(ticket.title);
+      const description = optionalString(ticket.description);
+      const priority = optionalString(ticket.priority) ?? defaultPriority;
+      const status = optionalString(ticket.status) ?? defaultStatus;
+      const eta = optionalString(ticket.eta);
+
+      // Tags: an explicit per-ticket array (including an empty array, which
+      // clears tags) takes precedence; otherwise fall back to defaultTags.
+      let tags: string[] | undefined;
+      let tagsToSend = false;
+      if (ticket.tags !== undefined) {
+        if (!Array.isArray(ticket.tags)) {
+          failures.push({ index: i + 1, ticketId: label, reason: "tags must be an array of strings." });
+          continue;
+        }
+        tags = (ticket.tags as unknown[]).map((t) => String(t));
+        tagsToSend = true;
+      } else if (defaultTags) {
+        tags = defaultTags;
+        tagsToSend = true;
+      }
+
+      const body: Record<string, unknown> = {};
+      if (assigneeId) body["assigneeId"] = assigneeId;
+      if (stage) body["stage"] = stage;
+      if (groupId) body["groupId"] = groupId;
+      if (title) body["title"] = title;
+      if (description) body["description"] = description;
+      if (priority) body["priority"] = priority;
+      if (status) body["status"] = status;
+      if (eta) body["eta"] = eta;
+      if (tagsToSend) body["tags"] = tags;
+
+      if (Object.keys(body).length === 0) {
+        failures.push({
+          index: i + 1,
+          ticketId: label,
+          reason: "at least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).",
+        });
+        continue;
+      }
+
+      try {
+        const result = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        })) as { success: boolean; updated?: string[] };
+        updated.push({ index: i + 1, ticketId, fields: result.updated ?? Object.keys(body) });
+      } catch (e) {
+        failures.push({
+          index: i + 1,
+          ticketId: label,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    const lines = [
+      `Bulk ticket update complete: requested ${tickets.length}, updated ${updated.length}, failed ${failures.length}.`,
+    ];
+    if (updated.length) {
+      lines.push("", "Updated:");
+      for (const u of updated) {
+        lines.push(`  ${u.index}. ${u.ticketId}${u.fields.length ? ` (${u.fields.join(", ")})` : ""}`);
+      }
+    }
+    if (failures.length) {
+      lines.push("", `Failures${failures.length > 10 ? " (first 10)" : ""}:`);
+      for (const f of failures.slice(0, 10)) {
+        lines.push(`  ${f.index}. ${f.ticketId}: ${f.reason}`);
+      }
+    }
+    return ok(lines.join("\n"));
+  },
+};
+
 // ── spaces-schedule-call ────────────────────────────────────────────
 
 const spacesScheduleCall: ToolDef = {
@@ -8582,6 +8773,7 @@ export const tools: ToolDef[] = [
   spacesCreateTicket,
   spacesCreateBulkTickets,
   spacesUpdateTicket,
+  spacesUpdateBulkTickets,
   spacesScheduleCall,
   spacesReadCanvas,
   spacesEditCanvas,
