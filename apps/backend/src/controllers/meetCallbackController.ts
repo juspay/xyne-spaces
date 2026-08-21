@@ -65,7 +65,7 @@ export class MeetCallbackController {
       const payload = validationResult.data;
 
       // Extract identifiers from query params
-      const xyneTicketId = req.query.xyneTicketId as string;
+      const xyneTicketId = typeof req.query.xyneTicketId === 'string' ? req.query.xyneTicketId : '';
       const workspaceId = req.query.workspaceId as string;
       const threadId = req.query.threadId as string;
       const meetCode = req.query.meetCode as string;
