@@ -719,6 +719,7 @@ export enum ChannelType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294
