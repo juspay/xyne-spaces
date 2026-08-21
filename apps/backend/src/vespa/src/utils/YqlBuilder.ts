@@ -57,6 +57,9 @@ export interface SlackFilters {
   // messages that justified a tag. Different questions; both exact attribute filters.
   threadType?: string[];
   messageActs?: string[];
+  // Extracted-entity filter: messages the entity pipeline tagged with these entity ids.
+  // `entityIds` is a fast-search attribute, so this is set membership, not a scan.
+  entityIds?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -419,7 +422,11 @@ export class YqlBuilder {
       // keeping the highest-relevance hit within each thread.
       yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
     } else if (groupBy && this.shouldGroup(groupBy, schemas, apps)) {
-      const groupClause = this.buildGroupingClause(groupBy, Math.min(safeLimit, 50));
+      // threadId grouping is paged by slicing the group prefix (same approach as the
+      // mail branch above), so the caller raises `limit` to offset+pageSize to reach
+      // deeper pages. Capping it at 50 here would silently stop paging at group 50.
+      const maxGroups = groupBy === 'threadId' ? safeLimit : Math.min(safeLimit, 50);
+      const groupClause = this.buildGroupingClause(groupBy, maxGroups);
       if (groupClause) {
         yql += `| ${groupClause}`;
       }
@@ -816,6 +823,14 @@ export class YqlBuilder {
         .map((act) => `messageActs contains ${params.bind('messageActs', act.trim())}`)
         .join(' or ');
       conditions.push(`(${acts})`);
+    }
+
+    // Extracted-entity filter - messages the entity pipeline tagged with these entities
+    if (filters.entityIds && filters.entityIds.length > 0) {
+      const entities = filters.entityIds
+        .map((id) => `entityIds contains ${params.bind('entityId', id.trim())}`)
+        .join(' or ');
+      conditions.push(`(${entities})`);
     }
 
     if (filters.createdBefore) {
@@ -1380,6 +1395,10 @@ export class YqlBuilder {
   private static readonly GROUP_FIELD_SCHEMAS: Record<string, VespaSchema[] | 'all'> = {
     senderId: [messageSchema, attachmentSchema],
     userId: [messageSchema, attachmentSchema],
+    // threadId -> chat_message only. Entity extraction resolves per THREAD and
+    // stamps the result on every message in it, so grouping by thread collapses
+    // that fan-out back to one row per conversation.
+    threadId: [messageSchema],
     channelId: [messageSchema, attachmentSchema, ticketSchema, fileSchema, mailSchema],
     docType: 'all',
     threadType: [messageSchema],
@@ -1429,6 +1448,12 @@ export class YqlBuilder {
       case 'docType':
         // Group by document type (messages, channels, attachments, etc.)
         return `all(group(docType) max(10) each(max(10) each(output(summary()))))`;
+
+      case 'threadId':
+        // Group by conversation. A deeper per-group cap than the others: the point
+        // of this grouping is to see a thread's matching messages together, and a
+        // cap of 5 would silently hide most of a long thread.
+        return `all(group(threadId) max(${maxGroups}) each(max(20) each(output(summary()))))`;
 
       case 'senderId':
       case 'userId':

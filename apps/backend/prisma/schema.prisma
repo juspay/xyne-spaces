@@ -4797,3 +4797,40 @@ model RadarTeam {
   @@map("radar_teams")
   @@schema("non_zero")
 }
+
+/// Human review of ONE extracted entity on ONE message, by ONE reviewer.
+///
+/// Per-message rather than per-entity because extraction assigns an entity to a
+/// whole thread: the same entity can be right on the message that names it and
+/// wrong on a reply that inherited it.
+///
+/// The unique key includes `createdBy` so reviewers do not overwrite each other —
+/// disagreement between two people is signal, and collapsing it to a single row
+/// would silently discard the earlier verdict along with its attribution. A person
+/// re-reviewing still upserts their own row rather than adding a second one.
+model EntityFeedback {
+  workspaceId String
+  id          String @id @default(cuid())
+
+  messageId String
+  /// Denormalized so a thread's feedback can be read without joining messages.
+  conversationId String
+  entityId       String
+
+  /// APPROVED | REJECTED
+  verdict String
+  /// Free-text reason, captured when a rejection is recorded.
+  remarks String?
+
+  createdBy String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([messageId, entityId, createdBy])
+  @@index([entityId])
+  @@index([conversationId])
+  @@index([messageId, entityId])
+  @@map("entity_feedback")
+  @@schema("non_zero")
+}

@@ -46,6 +46,12 @@ import { PrismaClient } from '@prisma/client';
        senderId?: string;
        senderName?: string;
        senderEmail?: string;
+       // Extracted entities on this message. The three arrays are deduplicated
+       // independently by the extraction write-back, so they are NOT index-aligned:
+       // entityNames[i] does not necessarily describe entityIds[i].
+       entityIds?: string[];
+       entityNames?: string[];
+       entitySurfaceForms?: string[];
        userId?: string;
        email?: string;
        status?: string;
@@ -543,6 +549,11 @@ import { PrismaClient } from '@prisma/client';
          senderId: doc.userId,
          senderName: doc.username,
          senderEmail: doc.userEmail,
+         ...(doc.entityIds?.length ? { entityIds: doc.entityIds } : {}),
+         ...(doc.entityNames?.length ? { entityNames: doc.entityNames } : {}),
+         ...(doc.entitySurfaceForms?.length
+           ? { entitySurfaceForms: doc.entitySurfaceForms }
+           : {}),
        },
      };
    }

@@ -229,6 +229,15 @@ export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 
   messageActs?: string[];
   /** What kind of thread this is. Set only on the thread's root message. */
   threadType?: string[];
+  /**
+   * Entities the extraction pipeline resolved on this message. Written by
+   * `writeEntitiesToVespa`, which assigns a thread's whole set to every message in
+   * it, and deduplicates the three arrays independently — so they are NOT
+   * index-aligned with each other.
+   */
+  entityIds?: string[];
+  entityNames?: string[];
+  entitySurfaceForms?: string[];
   channelWeightedSet: any,
   userWeightedSet: any,
   channelRef: string;
