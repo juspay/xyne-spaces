@@ -27,6 +27,7 @@ import {
 } from '../../ui/TipTapExtensions/CitationMark';
 import { registerClawIcons } from '../XyneAISidebar/utils/clawCitationUrl';
 import type { ToolInvocation } from '../XyneAISidebar/utils/XyneAITypes';
+import { TwinReasoningPopover } from './TwinReasoningPopover';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 import type { AssistTab } from './useThreadAssist';
 
@@ -65,7 +66,10 @@ interface ThreadAssistDockProps {
     decline: (draftId: string) => Promise<void>;
   };
   onPosted: (target: PostedTarget | null) => void;
-  onOpenReasoning: (draft: TwinReplyDraftView) => void;
+  onReasoningOpenChange: (draft: TwinReplyDraftView, open: boolean) => void;
+  reasoningOpen?: boolean;
+  /** Conversation the reasoning popover's debug tab reads its session from. */
+  conversationId: string;
   resolveSource?: (draft: TwinReplyDraftView) => TwinSourceInfo;
   attached?: boolean;
   onBeginEdit?: (draft: TwinReplyDraftView) => void;
@@ -82,7 +86,9 @@ export function ThreadAssistDock({
   recap,
   reply,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen = false,
+  conversationId,
   resolveSource,
   attached = true,
   onBeginEdit,
@@ -198,7 +204,9 @@ export function ThreadAssistDock({
                         approve={edited => reply.approve(selectedDraft.id, edited)}
                         decline={() => reply.decline(selectedDraft.id)}
                         onPosted={onPosted}
-                        onOpenReasoning={() => onOpenReasoning(selectedDraft)}
+                        onReasoningOpenChange={next => onReasoningOpenChange(selectedDraft, next)}
+                        reasoningOpen={reasoningOpen}
+                        conversationId={conversationId}
                         {...(onBeginEdit && { onBeginEdit: () => onBeginEdit(selectedDraft) })}
                       />
                     </motion.div>
@@ -691,7 +699,9 @@ function ReplyCard({
   approve,
   decline,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen,
+  conversationId,
   onBeginEdit,
 }: {
   draft: TwinReplyDraftView;
@@ -700,7 +710,9 @@ function ReplyCard({
   approve: (edited?: string) => Promise<PostedTarget | null>;
   decline: () => Promise<void>;
   onPosted: (t: PostedTarget | null) => void;
-  onOpenReasoning: () => void;
+  onReasoningOpenChange: (open: boolean) => void;
+  reasoningOpen: boolean;
+  conversationId: string;
   onBeginEdit?: () => void;
 }): ReactElement {
   const [editing, setEditing] = useState(false);
@@ -780,26 +792,43 @@ function ReplyCard({
       </div>
 
       <div className='flex items-center gap-8 px-1'>
-        {draft.reasoning ? (
-          <Tooltip content='See why this reply was drafted' side='top' align='start'>
-            <button
-              onClick={onOpenReasoning}
-              aria-label='See why this reply was drafted'
-              data-track-category='twin-dock'
-              data-track-name='open-reasoning'
-              className='min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground/40 transition-colors hover:text-foreground'
-            >
-              {footerNote}
-            </button>
-          </Tooltip>
-        ) : (
-          <span className='min-w-0 flex-1 truncate text-xs font-medium text-foreground/40'>
-            {footerNote}
-          </span>
-        )}
+        {/* Provenance only — plain text. It used to double as the reasoning
+            trigger, which made a full-width line of prose clickable and easy to
+            hit by accident; the "Why?" button below owns that job now. */}
+        <span className='min-w-0 flex-1 truncate text-xs font-medium text-foreground/40'>
+          {footerNote}
+        </span>
 
         <div className='flex shrink-0 items-center gap-2'>
           <div className='flex items-center'>
+            {draft.reasoning && (
+              // A non-modal popover rather than a drawer, so the thread stays
+              // readable behind it. No tooltip on the trigger: Radix owns the
+              // click here, and the label already says what it opens.
+              <TwinReasoningPopover
+                open={reasoningOpen}
+                onOpenChange={onReasoningOpenChange}
+                draft={draft}
+                conversationId={conversationId}
+                trigger={
+                  <button
+                    aria-label='See why this reply was drafted'
+                    aria-haspopup='dialog'
+                    aria-expanded={reasoningOpen}
+                    data-track-category='twin-dock'
+                    data-track-name='open-reasoning'
+                    // Same px-[9px] py-1.5 band as the icon buttons beside it, so
+                    // the four controls read as one row.
+                    className={cn(
+                      'flex items-center justify-center px-[9px] py-1.5 text-xs font-medium transition-colors hover:text-foreground',
+                      reasoningOpen ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    Why?
+                  </button>
+                }
+              />
+            )}
             <Tooltip content='Discard draft' side='top'>
               <button
                 onClick={() => void decline()}
