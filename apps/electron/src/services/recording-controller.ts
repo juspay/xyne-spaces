@@ -36,6 +36,7 @@ let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startingRecording = false;
+let callActive = false;
 let startingRecordingExpiry: ReturnType<typeof setTimeout> | null = null;
 let startTime: number | null = null;
 let paused = false;
@@ -91,6 +92,7 @@ function watchRendererLifecycle(win: BrowserWindow): void {
     // syncRecordingState early-returns on inactive -> inactive, so a crash
     // mid-start would strand the flag.
     setRecordingStarting(false);
+    callActive = false;
     syncRecordingState(false);
   });
 }
@@ -343,8 +345,15 @@ export function setRecordingStarting(next: boolean): void {
   }, STARTING_RECORDING_TIMEOUT_MS);
 }
 
-export function isRecordingInProgress(): boolean {
-  return active || startingRecording;
+// Calls enable the mic the same way recordings do, so the meeting detector must
+// treat both as ours. The renderer reports call state on every transition and
+// resends it on mount, so a reload self-heals; only a crash needs the reset above.
+export function setCallActive(next: boolean): void {
+  callActive = next;
+}
+
+export function isMicOwnedByXyne(): boolean {
+  return active || startingRecording || callActive;
 }
 
 export function syncRecordingState(
