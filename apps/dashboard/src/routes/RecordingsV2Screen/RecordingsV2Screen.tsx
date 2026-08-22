@@ -4,14 +4,19 @@ import { Virtuoso } from 'react-virtuoso';
 import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import {
+  refreshOatsRecordings,
   usePaginatedOatsRecordings,
   type OatsRecordingEntry,
 } from '../../hooks/usePaginatedOatsRecordings';
+import { recordingService } from '../../services/Recording/recordingService';
+import { logRecordingError } from '../../utils/recordingUtils';
+import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -25,8 +30,12 @@ import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
 import RecordingAskAIModal from './components/RecordingAskAIModal';
-import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
+import RecordingsV2Pill, {
+  RecordingsV2LivePill,
+  type RecordingsV2PillRecording,
+} from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
+import { RecordingDeleteDialog } from './components/RecordingDeleteDialog';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import {
   buildRecordingRows,
@@ -60,6 +69,8 @@ const RecordingsV2Screen = (): ReactElement => {
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
+  const [shareRecording, setShareRecording] = useState<RecordingsV2PillRecording | null>(null);
+  const [deleteRecording, setDeleteRecording] = useState<RecordingsV2PillRecording | null>(null);
   const showTemplatesModal = shouldOpenTemplatesFromUrl;
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } =
     useSummaryTemplates(showTemplatesModal);
@@ -243,6 +254,29 @@ const RecordingsV2Screen = (): ReactElement => {
     },
     [filteredRecordings, navigate],
   );
+
+  const handleShareRecording = useCallback((recording: RecordingsV2PillRecording): void => {
+    setShareRecording(recording);
+  }, []);
+
+  const handleRequestDeleteRecording = useCallback((recording: RecordingsV2PillRecording): void => {
+    setDeleteRecording(recording);
+  }, []);
+
+  const handleConfirmDeleteRecording = useCallback(async (): Promise<void> => {
+    if (!deleteRecording) return;
+
+    const target = deleteRecording;
+    setDeleteRecording(null);
+    try {
+      await recordingService.deleteRecording(target.externalId);
+      refreshOatsRecordings();
+      toast.success('Recording deleted');
+    } catch (err) {
+      logRecordingError('RecordingsV2Screen.deleteRecording', err);
+      toast.error('Failed to delete recording');
+    }
+  }, [deleteRecording]);
 
   const handleOpenAskAI = useCallback((): void => {
     setShowAskAIContextModal(true);
@@ -516,7 +550,10 @@ const RecordingsV2Screen = (): ReactElement => {
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
                         tags={row.recording.labels.filter(isManualLabel)}
                         resolveLabel={resolveLabel}
+                        currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}
+                        onShare={handleShareRecording}
+                        onDelete={handleRequestDeleteRecording}
                       />
                     </div>
                   )
@@ -568,6 +605,23 @@ const RecordingsV2Screen = (): ReactElement => {
           onConfirm={handleConfirmAskAIContext}
         />
       )}
+
+      {shareRecording && (
+        <Dialog
+          open
+          onOpenChange={open => !open && setShareRecording(null)}
+          title='Share recording'
+          testId='recordings-v2-share-dialog'
+        >
+          <RecordingShareModal recording={shareRecording} onClose={() => setShareRecording(null)} />
+        </Dialog>
+      )}
+
+      <RecordingDeleteDialog
+        recording={deleteRecording}
+        onOpenChange={open => !open && setDeleteRecording(null)}
+        onConfirm={() => void handleConfirmDeleteRecording()}
+      />
     </div>
   );
 };

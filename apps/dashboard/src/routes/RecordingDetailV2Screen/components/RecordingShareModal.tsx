@@ -20,7 +20,7 @@ import { getApiErrorMessage } from '../../../utils/apiError';
 import { logRecordingError } from '../../../utils/recordingUtils';
 
 export interface RecordingShareModalProps {
-  recording: RecordingDetail;
+  recording: Pick<RecordingDetail, 'externalId' | 'createdByUserId'>;
   onClose?: () => void;
   onTicketLinkUpdated?: (ticketLink: RecordingTicketLinkState) => void;
 }
