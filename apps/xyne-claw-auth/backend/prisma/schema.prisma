@@ -1155,7 +1155,8 @@ model ArtifactApp {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  versions ArtifactAppVersion[]
+  versions  ArtifactAppVersion[]
+  agentRuns ArtifactAppAgentRun[]
 
   @@index([workspaceId, visibility])
   @@index([ownerUserId])
@@ -1194,6 +1195,59 @@ model ArtifactAppVersion {
   @@index([appId, createdAt])
   @@index([workspaceId])
   @@map("artifact_app_versions")
+}
+
+/// One agent run triggered from inside an artifact app.
+///
+/// This is an INDEX, not a second source of truth. The answer, tool calls and
+/// token counts live on `AgentRun` (keyed by the same `sessionId`) and on the
+/// assistant `ChatMessage`, which are already the durable writers on the
+/// callback path. What this table adds is the app-shaped lookup those tables
+/// cannot serve: "which run belongs to this app, for this viewer, under this
+/// key" — the query a reopened app makes to resync work it started earlier.
+model ArtifactAppAgentRun {
+  id             String   @id @default(cuid())
+  /// Denormalized tenant key, stamped at dispatch. Every table carries its own
+  /// (see ArtifactAppVersion) so a query that forgets to join cannot cross
+  /// tenants.
+  workspaceId    String
+  /// claw-auth's own tenant key. Not interchangeable with workspaceId — it is
+  /// what scopes the agent lookup.
+  orgId          String
+  /// Null while the app is still an unsaved chat artifact; `attachmentId` then
+  /// identifies it. Set once the app has been saved.
+  appId          String?
+  attachmentId   String?
+  /// The viewer who triggered the run. Runs are never shared between viewers of
+  /// a published app.
+  userId         String
+  /// App-chosen thread name, "default" when the app does not pass one. The
+  /// (appId, userId, runKey) triple is what makes a run findable on reopen.
+  runKey         String   @default("default")
+  /// Stable per (app, viewer, runKey), so repeat runs continue one thread and
+  /// /live + /messages both attach to it.
+  conversationId String
+  agentSlug      String
+  /// claw's run id. Null only in the window between row creation and a
+  /// successful dispatch.
+  sessionId      String?  @unique
+  prompt         String   @db.Text
+  /// "pending" | "running" | "completed" | "failed" | "cancelled". Mirrors
+  /// AgentRun.status; kept here so the in-flight check for a key is one indexed
+  /// read rather than a join.
+  status         String   @default("pending")
+  /// Set only for dispatch-time failures. Run-time errors live on AgentRun.
+  error          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  app ArtifactApp? @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, userId, runKey])
+  @@index([userId, status])
+  @@index([conversationId])
+  @@index([workspaceId])
+  @@map("artifact_app_agent_runs")
 }
 
 model AgentRequest {

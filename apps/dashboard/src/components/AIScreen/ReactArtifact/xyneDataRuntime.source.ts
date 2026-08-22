@@ -12,7 +12,7 @@
  * as the current viewer and posts snapshots in over postMessage.
  */
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 const PROTOCOL_VERSION = 1;
 
@@ -80,6 +80,11 @@ window.addEventListener('message', (event: MessageEvent) => {
     window.clearTimeout(entry.timer);
     if (message.ok) entry.resolve();
     else entry.reject(new Error(message.error || 'The change could not be saved.'));
+    return;
+  }
+
+  if (message.type === 'agent-state' || message.type === 'agent-event') {
+    applyAgentMessage(message as unknown as Record<string, unknown>);
     return;
   }
 
@@ -214,4 +219,266 @@ export function useXyneMutate(): {
   }, []);
 
   return { mutate, status, error };
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+//
+// An app can hand work to a real claw agent. Three things make this different
+// from reads and writes, and shape everything below:
+//
+//   1. A run takes MINUTES. There is no timeout here — the 30s ceiling on
+//      mutations would fire on every single run.
+//   2. A run OUTLIVES the app. It executes server-side, detached, so closing the
+//      app or reloading the tab does not cancel it. The host re-sends the full
+//      state whenever this module announces `ready`, which is why the hook needs
+//      no storage of its own and why an app must simply render whatever state it
+//      is handed on mount rather than starting a run to repopulate it.
+//   3. Runs are threaded by `key`. One key is one conversation, so repeat calls
+//      continue it and the agent keeps its context.
+
+export type XyneAgentStatus =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface XyneAgentInfo {
+  slug: string;
+  name: string;
+  description: string;
+  color: string;
+}
+
+interface AgentState {
+  runId: string | null;
+  status: XyneAgentStatus;
+  output: string;
+  reasoning: string;
+  invocations: unknown[];
+  label: string | null;
+  error: string | null;
+  agents: XyneAgentInfo[];
+  /** False when agent runs are switched off for this workspace. */
+  available: boolean;
+}
+
+const IDLE_AGENT_STATE: AgentState = {
+  runId: null,
+  status: 'idle',
+  output: '',
+  reasoning: '',
+  invocations: [],
+  label: null,
+  error: null,
+  agents: [],
+  available: true,
+};
+
+/** One entry per run key. Values are replaced, never mutated, so the snapshot
+ *  reference changes if and only if something changed. */
+const agentStates = new Map<string, AgentState>();
+const agentListeners = new Set<() => void>();
+function agentStateFor(key: string): AgentState {
+  return agentStates.get(key) ?? IDLE_AGENT_STATE;
+}
+
+function setAgentState(key: string, next: AgentState): void {
+  agentStates.set(key, next);
+  agentListeners.forEach(listener => listener());
+}
+
+function applyAgentMessage(message: Record<string, unknown>): void {
+  const key = typeof message['runKey'] === 'string' ? message['runKey'] : '';
+  if (!key) return;
+  const current = agentStateFor(key);
+
+  // Full state: the host's view wins outright. This is what restores a run the
+  // user walked away from.
+  if (message['type'] === 'agent-state') {
+    const run = (message['run'] ?? {}) as Partial<AgentState>;
+    setAgentState(key, {
+      ...IDLE_AGENT_STATE,
+      ...run,
+      agents: Array.isArray(message['agents']) ? (message['agents'] as XyneAgentInfo[]) : [],
+      available: message['available'] !== false,
+    });
+    return;
+  }
+
+  const kind = message['kind'];
+  const text = typeof message['text'] === 'string' ? message['text'] : '';
+
+  if (kind === 'accepted') {
+    setAgentState(key, {
+      ...current,
+      runId: typeof message['runId'] === 'string' ? message['runId'] : null,
+      status: 'running',
+      // A new run replaces the previous answer, not appends to it.
+      output: '',
+      reasoning: '',
+      invocations: [],
+      label: null,
+      error: null,
+    });
+    return;
+  }
+
+  if (kind === 'delta') {
+    setAgentState(key, { ...current, status: 'running', output: current.output + text });
+    return;
+  }
+
+  if (kind === 'reasoning') {
+    setAgentState(key, { ...current, status: 'running', reasoning: current.reasoning + text });
+    return;
+  }
+
+  if (kind === 'label') {
+    setAgentState(key, {
+      ...current,
+      status: 'running',
+      label: typeof message['label'] === 'string' ? message['label'] : null,
+    });
+    return;
+  }
+
+  if (kind === 'invocation') {
+    setAgentState(key, {
+      ...current,
+      status: 'running',
+      invocations: [...current.invocations, message['invocation']],
+    });
+    return;
+  }
+
+  if (kind === 'done') {
+    const status = message['status'];
+    setAgentState(key, {
+      ...current,
+      status: status === 'cancelled' ? 'cancelled' : status === 'failed' ? 'failed' : 'completed',
+      // `done` carries the canonical answer; prefer it over accumulated deltas,
+      // which can be missing a window if the stream reconnected mid-run.
+      output: text || current.output,
+      label: null,
+      error: typeof message['error'] === 'string' ? message['error'] : current.error,
+    });
+    return;
+  }
+
+  if (kind === 'error') {
+    setAgentState(key, {
+      ...current,
+      status: 'failed',
+      label: null,
+      error: typeof message['error'] === 'string' ? message['error'] : 'The agent run failed.',
+    });
+  }
+}
+
+function subscribeAgents(onChange: () => void): () => void {
+  agentListeners.add(onChange);
+  return () => {
+    agentListeners.delete(onChange);
+  };
+}
+
+export interface XyneAgentResult {
+  /** Hand the agent a task. Resolves as soon as it is accepted — NOT when it
+   *  finishes. Watch `status` and `output` for that. */
+  run: (prompt: string, agentSlug?: string) => void;
+  /** Stop the current run. No-op when nothing is running. */
+  cancel: () => void;
+  status: XyneAgentStatus;
+  /** The answer, streaming in as it is written. */
+  output: string;
+  reasoning: string;
+  /** Tool calls the agent has made — render these so a long run shows progress. */
+  invocations: unknown[];
+  /** What the agent is doing right now, e.g. "Searching tickets". */
+  label: string | null;
+  error: string | null;
+  runId: string | null;
+  /** Agents this viewer may use here. May be empty — say so rather than failing. */
+  agents: XyneAgentInfo[];
+  /** False when agent runs are turned off. Render a plain message, not an error. */
+  available: boolean;
+}
+
+/**
+ * Run a claw agent from inside the app.
+ *
+ * The agent runs AS THE PERSON USING THE APP, under their own permissions, so it
+ * can only see and do what they could themselves.
+ *
+ * Runs take MINUTES. Render every status, and show `output`/`invocations` as
+ * they arrive rather than a bare spinner. A run keeps going if the app is closed
+ * and is restored when the user returns — so on mount, render whatever you are
+ * given; never start a run just to repopulate it.
+ *
+ * Only call run() from a real user action such as a click.
+ *
+ *   const { run, status, output, invocations } = useXyneAgent({ key: 'triage' });
+ *   <Button disabled={status === 'running'} onClick={() => run('Summarise these tickets')}>
+ */
+export function useXyneAgent(options?: { key?: string; agent?: string }): XyneAgentResult {
+  const key = options?.key ?? 'default';
+  const preferredAgent = options?.agent;
+
+  const state = useSyncExternalStore(
+    subscribeAgents,
+    () => agentStateFor(key),
+    () => agentStateFor(key),
+  );
+
+  // Ask the host for this key's state. Runs on mount, which is exactly when an
+  // app is reopened onto a run that is already in flight somewhere.
+  useEffect(() => {
+    post({ type: 'agent-attach', runKey: key });
+  }, [key]);
+
+  const run = useCallback(
+    (prompt: string, agentSlug?: string): void => {
+      const text = typeof prompt === 'string' ? prompt.trim() : '';
+      if (!text) return;
+      // Optimistic, so a click feels immediate over a round trip that has to
+      // resolve permissions and dispatch before it can answer.
+      setAgentState(key, {
+        ...agentStateFor(key),
+        status: 'starting',
+        output: '',
+        reasoning: '',
+        invocations: [],
+        label: null,
+        error: null,
+      });
+      const slug = agentSlug ?? preferredAgent;
+      post({
+        type: 'agent-run',
+        runKey: key,
+        prompt: text,
+        ...(slug ? { agentSlug: slug } : {}),
+      });
+    },
+    [key, preferredAgent],
+  );
+
+  const cancel = useCallback((): void => {
+    post({ type: 'agent-cancel', runKey: key });
+  }, [key]);
+
+  return {
+    run,
+    cancel,
+    status: state.status,
+    output: state.output,
+    reasoning: state.reasoning,
+    invocations: state.invocations,
+    label: state.label,
+    error: state.error,
+    runId: state.runId,
+    agents: state.agents,
+    available: state.available,
+  };
 }

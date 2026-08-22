@@ -430,3 +430,80 @@ describe("dependencies are open by default", () => {
     );
   });
 });
+
+describe("agent invocation", () => {
+  it("defaults to no agent use", () => {
+    const built = buildReactArtifact(validParams());
+    expect(built.payload.invokesAgents).toBeUndefined();
+    expect(built.payload.agents).toBeUndefined();
+    expect(built.manifest.invokesAgents).toBeUndefined();
+  });
+
+  it("carries invokesAgents through to payload and manifest", () => {
+    const built = buildReactArtifact(validParams({ invokesAgents: true }));
+    expect(built.payload.invokesAgents).toBe(true);
+    expect(built.manifest.invokesAgents).toBe(true);
+  });
+
+  it("round-trips declared agents", () => {
+    const built = buildReactArtifact(validParams({ agents: ["fractal-agent", "ask-ai"] }));
+    expect(built.payload.agents).toEqual(["fractal-agent", "ask-ai"]);
+    expect(built.manifest.agents).toEqual(["fractal-agent", "ask-ai"]);
+  });
+
+  // Declaring an agent is itself a statement that the app runs agents; making
+  // the author set both flags consistently is a trap not worth leaving open.
+  it("implies invokesAgents when agents are declared", () => {
+    const built = buildReactArtifact(validParams({ agents: ["fractal-agent"] }));
+    expect(built.payload.invokesAgents).toBe(true);
+  });
+
+  it("rejects a malformed slug", () => {
+    expect(() => buildReactArtifact(validParams({ agents: ["Fractal Agent"] }))).toThrow(
+      /not a valid agent slug/,
+    );
+  });
+
+  it("rejects duplicates", () => {
+    expect(() => buildReactArtifact(validParams({ agents: ["a", "a"] }))).toThrow(/Duplicate agent/);
+  });
+
+  it("rejects more than the limit", () => {
+    expect(() =>
+      buildReactArtifact(validParams({ agents: ["a", "b", "c", "d", "e"] })),
+    ).toThrow(/Too many agents/);
+  });
+
+  it("rejects a non-array", () => {
+    expect(() => buildReactArtifact(validParams({ agents: "fractal-agent" }))).toThrow(
+      /must be an array/,
+    );
+  });
+
+  it("survives the manifest wire format", async () => {
+    const result = await run(validParams({ agents: ["fractal-agent"], invokesAgents: true }));
+    const manifest = JSON.parse(MANIFEST_RE.exec(result)![1]!) as ReactArtifactManifest;
+    expect(manifest.agents).toEqual(["fractal-agent"]);
+    expect(manifest.invokesAgents).toBe(true);
+  });
+
+  it("describes useXyneAgent and the one-run-per-key rule to the model", () => {
+    expect(createReactArtifactTool.description).toContain("useXyneAgent");
+    expect(createReactArtifactTool.description).toContain("CONTINUES IF THE APP IS CLOSED");
+    expect(createReactArtifactTool.description).toMatch(/ONLY ONE run per key/i);
+  });
+});
+
+describe("ast source guidance", () => {
+  // The gateway rejects a bare-object orderBy with a 400 before the query runs,
+  // and the validator accepts either form — so the description is the only thing
+  // stopping an agent writing the idiomatic Prisma shape and shipping a broken app.
+  it("tells the model orderBy must be an array", () => {
+    expect(createReactArtifactTool.description).toMatch(/orderBy` must be an ARRAY/);
+    expect(createReactArtifactTool.description).toContain('[{"createdAt":"desc"}]');
+  });
+
+  it("tells the model where may traverse relations", () => {
+    expect(createReactArtifactTool.description).toMatch(/`where` may traverse relations/);
+  });
+});

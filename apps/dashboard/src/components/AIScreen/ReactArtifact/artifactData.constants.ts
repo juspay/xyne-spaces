@@ -51,6 +51,16 @@ export const REFRESH_THROTTLE_MS = 2000;
 /** Concurrent writes per app. A cap on runaway generated code, not a permission. */
 export const MAX_INFLIGHT_MUTATIONS = 5;
 
+/**
+ * Tool calls forwarded into an app for one run. Every invocation is
+ * structured-cloned across postMessage, so an agent with a long tool loop would
+ * otherwise stall the iframe. The server already caps its own store at 1000.
+ */
+export const MAX_AGENT_INVOCATIONS = 100;
+
+/** Per-invocation result budget. Tool results can be whole result sets. */
+export const MAX_AGENT_INVOCATION_RESULT_CHARS = 4000;
+
 export interface ArtifactNamedQuerySource {
   kind: 'query';
   query: string;
@@ -105,16 +115,66 @@ export interface HostMutateResultMessage {
   error?: string;
 }
 
+/**
+ * Host → app: one event from a running agent, forwarded off the live
+ * conversation stream. Fire-and-forget; the app accumulates them.
+ */
+export interface HostAgentEventMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'agent-event';
+  runKey: string;
+  kind: 'accepted' | 'delta' | 'reasoning' | 'label' | 'invocation' | 'done' | 'error';
+  runId?: string;
+  /** `delta` / `reasoning`: appended. `done`: the final text when present. */
+  text?: string;
+  /** `label`: the tool the agent is currently running. */
+  label?: string;
+  /** `invocation`: one tool call. Capped and truncated before it is sent. */
+  invocation?: unknown;
+  /** `done` / `error`. */
+  status?: string;
+  error?: string;
+}
+
+/**
+ * Host → app: the full state of a run key. Sent on attach and whenever the app
+ * re-announces `ready`, so a reopened app is restored without app-side storage.
+ * Idempotent, last write wins — same contract as a data snapshot.
+ */
+export interface HostAgentStateMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'agent-state';
+  runKey: string;
+  available: boolean;
+  agents: Array<{ slug: string; name: string; description: string; color: string }>;
+  run: {
+    runId: string | null;
+    status: 'idle' | 'starting' | 'running' | 'completed' | 'failed' | 'cancelled';
+    output: string;
+    reasoning: string;
+    invocations: unknown[];
+    label: string | null;
+    error: string | null;
+  };
+}
+
 /** App → host. */
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
   v: number;
-  type: 'ready' | 'refresh' | 'mutate';
+  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
   /** `mutate` only. */
   requestId?: string;
   args?: unknown;
+  /** Agent messages: which conversation thread this concerns. */
+  runKey?: string;
+  /** `agent-run` only. */
+  prompt?: string;
+  agentSlug?: string;
 }
 
 export function isAppArtifactMessage(value: unknown): value is AppArtifactMessage {
@@ -122,6 +182,14 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
   const msg = value as Partial<AppArtifactMessage>;
   if (msg.source !== 'xyne-artifact') return false;
   if (msg.type === 'ready' || msg.type === 'refresh') return true;
+  if (msg.type === 'agent-attach' || msg.type === 'agent-cancel') {
+    return typeof msg.runKey === 'string';
+  }
+  if (msg.type === 'agent-run') {
+    return (
+      typeof msg.runKey === 'string' && typeof msg.prompt === 'string' && msg.prompt.length > 0
+    );
+  }
   return msg.type === 'mutate' && typeof msg.requestId === 'string' && typeof msg.name === 'string';
 }
 

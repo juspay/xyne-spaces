@@ -2517,9 +2517,14 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Get all messages for this user+agent, grouped by conversation
     const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
-    // Group by conversationId
+    // Group by conversationId, skipping artifact-app threads. Those are real,
+    // durable conversations, but their prompts are written by app code on the
+    // user's behalf — surfacing them here would bury the user's own chats under
+    // machine-generated ones. They stay visible in the Agent Control Center via
+    // triggerSource "app". The id prefix is the marker, same as "scheduled_".
     const convMap = new Map<string, typeof allMessages>();
     for (const msg of allMessages) {
+      if (msg.conversationId.startsWith("app_")) continue;
       const list = convMap.get(msg.conversationId) ?? [];
       list.push(msg);
       convMap.set(msg.conversationId, list);
