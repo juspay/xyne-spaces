@@ -48,8 +48,10 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     [locallyRevokedShareIds, recordingRow],
   );
 
-  const isOwner = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
-  const canManage = isOwner;
+  // Anyone the recording reached can pass it on; only the creator can take
+  // access away again, so the "People with access" rows lose their remove
+  // control for everybody else (the sharing API rejects their revoke too).
+  const canRevoke = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
 
   const sharedUserIds = useMemo(
     () => new Set(shares.map(share => share.userId).filter((id): id is string => Boolean(id))),
@@ -69,7 +71,12 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   // userGroupId/channelId (dynamic membership), not expanded to individual users.
   const options = useMemo(() => {
     const userOptions = activeUsers
-      .filter(u => u.id !== recording.createdByUserId && !sharedUserIds.has(u.id))
+      .filter(
+        u =>
+          u.id !== recording.createdByUserId &&
+          u.id !== currentUser?.id &&
+          !sharedUserIds.has(u.id),
+      )
       .map(u => ({
         label: getUserDisplayName(u),
         subtitle: u.email ?? '',
@@ -104,6 +111,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     sharedUserGroupIds,
     sharedChannelIds,
     recording.createdByUserId,
+    currentUser?.id,
   ]);
 
   const handleShare = async (): Promise<void> => {
@@ -174,14 +182,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     }
   };
 
-  if (!canManage) {
-    return (
-      <div className='p-5 text-sm text-muted-foreground'>
-        Only the recording creator can manage sharing.
-      </div>
-    );
-  }
-
   return (
     <div className='flex flex-col w-full p-5 gap-4'>
       <div className='space-y-2'>
@@ -241,16 +241,18 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
                     {icon}
                     <span className='text-sm truncate'>{label}</span>
                   </div>
-                  <button
-                    type='button'
-                    onClick={() => void handleAccessChange(target)}
-                    className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
-                    aria-label='Remove access'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='revoke_recording_share'
-                  >
-                    <X className='size-3.5' />
-                  </button>
+                  {canRevoke && (
+                    <button
+                      type='button'
+                      onClick={() => void handleAccessChange(target)}
+                      className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
+                      aria-label='Remove access'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='revoke_recording_share'
+                    >
+                      <X className='size-3.5' />
+                    </button>
+                  )}
                 </div>
               );
             })}

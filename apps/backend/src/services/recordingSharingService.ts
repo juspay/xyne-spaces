@@ -123,13 +123,24 @@ export class RecordingSharingService {
     access: GrantableEntityUserAccess,
   ): Promise<RecordingSharingResult> {
     const { shares, activities } = await this.runTransaction(async tx => {
-      const recording = await this.loadManageableRecording(tx, callId, actor);
-      await this.validateTargets(tx, recording, actor.workspaceId, targets);
+      const recording = await this.loadManageableRecording(tx, callId, actor, 'owner_or_recipient');
+      await this.validateTargets(tx, recording, actor, targets);
+
+      // A recipient passes the recording on exactly as they hold it — VIEW — so
+      // re-sharing can never hand out more access than the creator granted.
+      const grantedAccess =
+        recording.createdByUserId === actor.userId ? access : EntityUserAccess.VIEW;
 
       const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
       const activities: RecordingAccessActivity[] = [];
       for (const target of targets) {
-        const change = await this.setAccess(tx, recording, actor.workspaceId, target, access);
+        const change = await this.setAccess(
+          tx,
+          recording,
+          actor.workspaceId,
+          target,
+          grantedAccess,
+        );
         shares.push({ id: change.share.id, target, access: change.share.entityUserAccess });
         if (change.activated && target.type !== 'channel') {
           activities.push({ shareId: change.share.id, action: 'recording_shared' });
@@ -492,10 +503,20 @@ export class RecordingSharingService {
     return { share: revokedShare, channelId: ticket.channelId };
   }
 
+  /**
+   * The recording, plus the check that `actor` may run this command on it.
+   *
+   * The creator may run every command. Someone the recording was shared with —
+   * directly, or through a user group / channel they belong to — may only pass
+   * it on (`allow: 'owner_or_recipient'`, always at VIEW; see `grant`). Revoking
+   * access and (un)linking a ticket stay with the creator, so a recipient can
+   * neither undo the owner's sharing nor detach the recording from its ticket.
+   */
   private async loadManageableRecording(
     tx: Prisma.TransactionClient,
     callId: string,
     actor: RecordingSharingActor,
+    allow: 'owner' | 'owner_or_recipient' = 'owner',
   ): Promise<LoadedRecording> {
     const call = await tx.call.findUnique({
       where: { externalId: callId },
@@ -517,12 +538,56 @@ export class RecordingSharingService {
       throw new RecordingSharingError('Recording not found', 404);
     }
     if (call.createdByUserId !== actor.userId) {
-      throw new RecordingSharingError(
-        'Only the recording creator can manage sharing',
-        403,
-      );
+      const isRecipient =
+        allow === 'owner_or_recipient' && (await this.hasActiveShare(tx, call.id, actor));
+      if (!isRecipient) {
+        throw new RecordingSharingError(
+          allow === 'owner'
+            ? 'Only the recording creator can manage sharing'
+            : 'Only people this recording is shared with can share it',
+          403,
+        );
+      }
     }
     return call;
+  }
+
+  /**
+   * Mirrors `entityAccessService.hasActiveShare`, but reads through the caller's
+   * transaction so the permission check sees the same snapshot as the write it
+   * guards.
+   */
+  private async hasActiveShare(
+    tx: Prisma.TransactionClient,
+    recordingId: string,
+    actor: RecordingSharingActor,
+  ): Promise<boolean> {
+    const groupMappings = await tx.userGroupMapping.findMany({
+      where: { userId: actor.userId },
+      select: { userGroupId: true },
+    });
+    const channelParticipations = await tx.channelParticipant.findMany({
+      where: { userId: actor.userId },
+      select: { channelId: true },
+    });
+    const userGroupIds = groupMappings.map(mapping => mapping.userGroupId);
+    const channelIds = channelParticipations.map(participation => participation.channelId);
+
+    const share = await tx.entityAccess.findFirst({
+      where: {
+        workspaceId: actor.workspaceId,
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
+        entityId: recordingId,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        OR: [
+          { userId: actor.userId },
+          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    return share !== null;
   }
 
   private async runTransaction<T>(
@@ -545,13 +610,19 @@ export class RecordingSharingService {
   private async validateTargets(
     tx: Prisma.TransactionClient,
     recording: LoadedRecording,
-    workspaceId: string,
+    actor: RecordingSharingActor,
     targets: RecordingShareTarget[],
   ): Promise<void> {
+    const workspaceId = actor.workspaceId;
     for (const target of targets) {
       if (target.type === 'user') {
         if (target.id === recording.createdByUserId) {
           throw new RecordingSharingError('The recording owner already has access', 400);
+        }
+        // A recipient sharing onward could otherwise target themselves and
+        // rewrite their own share row down to VIEW.
+        if (target.id === actor.userId) {
+          throw new RecordingSharingError('You already have access to this recording', 400);
         }
         const user = await tx.user.findFirst({
           where: { id: target.id, workspaceId, leftAt: null },
