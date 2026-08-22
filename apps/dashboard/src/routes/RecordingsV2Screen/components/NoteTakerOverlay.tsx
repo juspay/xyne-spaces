@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import { Flag, PauseBig, PlayBig, StopBig, CloudDisabled } from '@xyne/icons';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { ChevronDown, Flag, PauseBig, PlayBig, Spinner, StopBig, CloudDisabled } from '@xyne/icons';
+import { Maximize2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { Button } from '../../../components/ui/Button/Button';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor';
 import { LiveTranscriptList } from '../../../components/Notetaker/LiveTranscriptList';
 import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
+import { useEditableRecordingTitle } from '../../RecordingDetailV2Screen/useEditableRecordingTitle';
 import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
-import { DEFAULT_RECORDING_TITLE } from '../../../utils/recordingUtils';
+import { resolveRecordingTitle } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import {
@@ -36,25 +37,28 @@ interface NoteTakerOverlayProps {
   onResume: () => void;
   onMarkMoment: () => void;
   onMinimize?: (() => void) | undefined;
+  onTitleUpdated?: ((title: string) => void) | undefined;
 }
 
 type TabId = 'notes' | 'transcript';
 
 interface RecordingPanelHeaderProps {
-  isPaused: boolean;
-  displayTitle: string;
   recordingId: string | null;
+  isPaused: boolean;
+  title: string | undefined;
+  elapsed: number;
+  onMinimize?: (() => void) | undefined;
+  onTitleUpdated?: ((title: string) => void) | undefined;
 }
 
 interface RecordingControlBarProps {
-  elapsed: number;
+  recordingId: string | null;
   isPaused: boolean;
   markedCount: number;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
   onMarkMoment: () => void;
-  onMinimize?: (() => void) | undefined;
 }
 
 interface NotesTabProps {
@@ -73,16 +77,28 @@ const MARK_FEEDBACK_MS = 1400;
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
 const RecordingPanelHeader = ({
-  isPaused,
-  displayTitle,
   recordingId,
+  isPaused,
+  title,
+  elapsed,
+  onMinimize,
+  onTitleUpdated,
 }: RecordingPanelHeaderProps): ReactElement => {
-  const navigate = useWorkspaceNavigate();
-
-  const handleOpenDetails = (): void => {
-    if (!recordingId) return;
-    void navigate(`/recordings/${recordingId}`);
-  };
+  const {
+    isEditingTitle,
+    editedTitle,
+    isSavingTitle,
+    handleStartEdit,
+    handleSaveTitle,
+    handleTitleChange,
+    handleTitleKeyDown,
+  } = useEditableRecordingTitle({
+    recordingId,
+    title,
+    onTitleUpdated,
+    context: 'NoteTakerOverlay',
+  });
+  const displayTitle = resolveRecordingTitle(title);
 
   return (
     <header
@@ -99,26 +115,75 @@ const RecordingPanelHeader = ({
       <span className='sr-only' role='status'>
         {isPaused ? 'Recording paused' : 'Recording'}
       </span>
-      <h2
-        className='min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground'
-        title={displayTitle}
+      {isEditingTitle ? (
+        <input
+          type='text'
+          value={editedTitle}
+          onChange={event => handleTitleChange(event.target.value)}
+          onBlur={() => void handleSaveTitle()}
+          onFocus={event => event.currentTarget.select()}
+          onKeyDown={handleTitleKeyDown}
+          disabled={isSavingTitle}
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          className='min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-sm font-semibold tracking-tight text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='edit_title_input'
+        />
+      ) : (
+        <div
+          role='button'
+          tabIndex={0}
+          onClick={handleStartEdit}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleStartEdit();
+            }
+          }}
+          className='min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='edit_title_click_title'
+        >
+          <h2
+            className='truncate text-sm font-semibold tracking-tight text-foreground'
+            title={displayTitle}
+          >
+            {displayTitle}
+          </h2>
+        </div>
+      )}
+      {isSavingTitle && (
+        <span
+          className='flex shrink-0 items-center justify-center text-muted-foreground'
+          role='status'
+          aria-label='Saving title'
+        >
+          <Spinner size={13} className='animate-spin' />
+        </span>
+      )}
+      <span
+        className='shrink-0 font-mono text-xs font-thin tabular-nums text-muted-foreground px-2'
+        role='timer'
+        aria-label={`Elapsed time ${formatElapsedTime(elapsed)}`}
       >
-        {displayTitle}
-      </h2>
-      <Button
-        type='button'
-        variant='ghost'
-        size='iconSm'
-        onClick={handleOpenDetails}
-        disabled={!recordingId}
-        className='size-7 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35'
-        aria-label='Open recording details'
-        title='Open recording details'
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='open_recording_details'
-      >
-        <Maximize2 size={15} strokeWidth={2.2} />
-      </Button>
+        {formatElapsedTime(elapsed)}
+      </span>
+      {onMinimize && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='iconSm'
+          onClick={onMinimize}
+          className='shrink-0 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+          aria-label='Minimize to floating pill'
+          title='Minimize to floating pill'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='minimize_panel'
+        >
+          <ChevronDown size={16} strokeWidth={2.2} />
+        </Button>
+      )}
     </header>
   );
 };
@@ -218,76 +283,77 @@ const MarkMomentButton = ({
 };
 
 const RecordingControlBar = ({
-  elapsed,
+  recordingId,
   isPaused,
   markedCount,
   onPause,
   onResume,
   onStop,
   onMarkMoment,
-  onMinimize,
-}: RecordingControlBarProps): ReactElement => (
-  <div
-    className='flex h-13 shrink-0 items-center gap-1.5 border-t border-border px-4 py-2'
-    aria-label='Recording controls'
-  >
-    <span
-      className='shrink-0 font-mono text-sm font-thin tabular-nums text-muted-foreground'
-      role='timer'
-      aria-label={`Elapsed time ${formatElapsedTime(elapsed)}`}
+}: RecordingControlBarProps): ReactElement => {
+  const navigate = useWorkspaceNavigate();
+
+  const handleOpenDetails = (): void => {
+    if (!recordingId) return;
+    void navigate(`/recordings/${recordingId}`);
+  };
+
+  return (
+    <div
+      className='flex shrink-0 items-center gap-1.5 border-t border-border px-4 py-2'
+      aria-label='Recording controls'
     >
-      {formatElapsedTime(elapsed)}
-    </span>
-    <div className='flex flex-1 shrink-0 items-center justify-end gap-1.5'>
-      <MarkMomentButton markedCount={markedCount} onMarkMoment={onMarkMoment} />
-      {onMinimize && (
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        onClick={handleOpenDetails}
+        disabled={!recordingId}
+        className='h-auto rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-35 gap-2'
+        aria-label='Open recording details'
+        title='Open recording details'
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='open_recording_details'
+      >
+        <Maximize2 strokeWidth={2.8} className='size-3' />
+        <span>Full screen</span>
+      </Button>
+      <div className='flex flex-1 shrink-0 items-center justify-end gap-1.5'>
+        <MarkMomentButton markedCount={markedCount} onMarkMoment={onMarkMoment} />
         <Button
           type='button'
-          variant='ghost'
-          size='iconSm'
-          onClick={onMinimize}
-          className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
-          aria-label='Minimize to floating pill'
-          title='Minimize to floating pill'
+          variant='outline'
+          size='icon'
+          onClick={isPaused ? onResume : onPause}
+          className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
+          aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
+          title={isPaused ? 'Resume recording' : 'Pause recording'}
           data-track-category={TRACK_CATEGORY}
-          data-track-name='minimize_panel'
+          data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
         >
-          <Minimize2 size={16} strokeWidth={2.2} />
+          {isPaused ? (
+            <PlayBig size={17} variant='Solid' />
+          ) : (
+            <PauseBig size={17} strokeWidth={4} variant='Solid' />
+          )}
         </Button>
-      )}
-      <Button
-        type='button'
-        variant='outline'
-        size='icon'
-        onClick={isPaused ? onResume : onPause}
-        className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
-        aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
-        title={isPaused ? 'Resume recording' : 'Pause recording'}
-        data-track-category={TRACK_CATEGORY}
-        data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
-      >
-        {isPaused ? (
-          <PlayBig size={17} variant='Solid' />
-        ) : (
-          <PauseBig size={17} strokeWidth={4} variant='Solid' />
-        )}
-      </Button>
-      <Button
-        type='button'
-        variant='destructive'
-        size='icon'
-        onClick={onStop}
-        className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
-        aria-label='Stop recording'
-        title='Stop recording'
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='stop_recording'
-      >
-        <StopBig size={16} variant='Solid' />
-      </Button>
+        <Button
+          type='button'
+          variant='destructive'
+          size='icon'
+          onClick={onStop}
+          className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
+          aria-label='Stop recording'
+          title='Stop recording'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='stop_recording'
+        >
+          <StopBig size={16} variant='Solid' />
+        </Button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => {
   const handleFileUpload = useCallback(
@@ -346,6 +412,7 @@ export function NoteTakerOverlay({
   onResume,
   onMarkMoment,
   onMinimize,
+  onTitleUpdated,
 }: NoteTakerOverlayProps): ReactElement | null {
   const shouldReduceMotion = useReducedMotion();
   // Read once on mount: the panel stays up for the whole recording, so a preference
@@ -358,8 +425,6 @@ export function NoteTakerOverlay({
   const containerRef = useRef<HTMLDivElement>(null);
   const isPaused = status === 'paused';
   const isActive = status === 'recording' || isPaused;
-  const trimmedTitle = title?.trim();
-  const displayTitle = trimmedTitle || DEFAULT_RECORDING_TITLE;
   const { position, isDragging, hasDragged, handleMouseDown, handleTouchStart } =
     useDraggableOverlay(containerRef, { x: 0, y: 0 });
 
@@ -440,9 +505,12 @@ export function NoteTakerOverlay({
         aria-label='Live recording transcript'
       >
         <RecordingPanelHeader
-          isPaused={isPaused}
-          displayTitle={displayTitle}
           recordingId={recordingId}
+          isPaused={isPaused}
+          title={title}
+          elapsed={elapsed}
+          onMinimize={onMinimize}
+          onTitleUpdated={onTitleUpdated}
         />
 
         <div className='flex min-h-0 flex-1 flex-col'>
@@ -506,14 +574,13 @@ export function NoteTakerOverlay({
           </div>
 
           <RecordingControlBar
-            elapsed={elapsed}
+            recordingId={recordingId}
             isPaused={isPaused}
             markedCount={markedMoments.length}
             onPause={onPause}
             onResume={onResume}
             onStop={onStop}
             onMarkMoment={onMarkMoment}
-            onMinimize={onMinimize}
           />
         </div>
       </section>
