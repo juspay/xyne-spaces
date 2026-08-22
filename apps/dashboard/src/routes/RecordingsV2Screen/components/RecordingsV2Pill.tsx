@@ -9,7 +9,6 @@ import {
   calculateRecordingElapsedMs,
   formatElapsedTime,
   formatRecordingDuration,
-  getRecordingTagDotColor,
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
@@ -17,6 +16,7 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
+import { LabelChip } from '../../RecordingDetailV2Screen/components/RecordingLabelPicker';
 
 export interface RecordingsV2PillProps {
   recording: Pick<
@@ -194,19 +194,7 @@ const RecordingsV2Pill = ({
         {visibleTags.length > 0 && (
           <span className='flex flex-wrap items-center gap-1.5'>
             {visibleTags.map(tag => (
-              <span
-                key={tag}
-                className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors'
-              >
-                <span
-                  className={cn(
-                    'size-1.5 rounded-full',
-                    getRecordingTagDotColor(resolveLabel(tag)),
-                  )}
-                  aria-hidden='true'
-                />
-                <span className='max-w-32 truncate'>{resolveLabel(tag)}</span>
-              </span>
+              <LabelChip key={tag} label={resolveLabel(tag)} />
             ))}
           </span>
         )}
