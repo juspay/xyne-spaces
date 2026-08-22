@@ -1475,6 +1475,37 @@ export const sdlcEntityLinkTable = table('sdlc_entity_links')
   })
   .primaryKey('id');
 
+export const sdlcArtifactTable = table('sdlc_artifacts')
+  .columns({
+    workspaceId: string(),
+    artifactId: string(),
+    repoId: string(),
+    artifactType: string(),
+    artifactStatus: string(),
+    workflowExecutionId: string().optional(),
+    generationCommit: string().optional(),
+    sourceReferences: string().optional(),
+    sourcePaths: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('artifactId');
+
+export const sdlcTrackTable = table('sdlc_tracks')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    repoId: string(),
+    name: string(),
+    description: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const emailTable = table('emails')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -3354,6 +3385,27 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
   }),
 }));
 
+export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  canvas: one({
+    sourceField: ['artifactId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+}));
+
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+}));
+
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
     sourceField: ['channelId'],
@@ -3826,6 +3878,11 @@ export const canvasFolderTableRelationships = relationships(canvasFolderTable, (
 }));
 
 export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
+  sdlcArtifact: one({
+    sourceField: ['id'],
+    destField: ['artifactId'],
+    destSchema: sdlcArtifactTable,
+  }),
   participants: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -4727,6 +4784,8 @@ export const schema = createSchema({
     linkAccessTable,
     repoTable,
     sdlcEntityLinkTable,
+    sdlcArtifactTable,
+    sdlcTrackTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4824,6 +4883,8 @@ export const schema = createSchema({
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
+    sdlcArtifactTableRelationships,
+    sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
@@ -4993,6 +5054,8 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
