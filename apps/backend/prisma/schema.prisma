@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "SdkApiKey", "ExternalSource"]
 }
 
 datasource db {
@@ -953,6 +953,24 @@ model ScheduledMessage {
   @@index([channelId])
   @@index([createdBy])
   @@map("scheduled_messages")
+  @@schema("non_zero")
+}
+
+// API keys for the public Spaces SDK (/api/sdk).
+model SdkApiKey {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  name        String
+  userId      String
+  token       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sdk_api_keys")
   @@schema("non_zero")
 }
 

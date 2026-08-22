@@ -9,6 +9,10 @@ dist/
 build/
 *.tsbuildinfo
 zero-*
+# The public API deliberately centralizes its pinned Zero private imports in
+# these source files; they are not generated Zero build output.
+!src/api/sdk/engine/zero-internals.ts
+!src/api/sdk/engine/zero-internals.test.ts
 
 # Environment variables
 .env

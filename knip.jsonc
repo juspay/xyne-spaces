@@ -188,6 +188,16 @@
         "dist/**",
         "node_modules/**"
       ]
+    },
+    "packages/xyne-spaces-contract": {
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "dist/**",
+        "node_modules/**"
+      ]
     }
   },
   "ignore": [

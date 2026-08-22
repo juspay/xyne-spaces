@@ -192,6 +192,9 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { createSdkRouter } from '@/api/sdk';
+import { sdkConfig } from '@/api/sdk/config';
+import sdkKeyRoutes from '@/routes/sdk-keys';
 
 
 export class App {
@@ -342,6 +345,24 @@ export class App {
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(decryptRequestBodyMiddleware);
     this.app.use(encryptResponseBodyMiddleware);
+
+    // Public SDK API. It authenticates its own API keys, so it must be mounted
+    // before the legacy catch-all `/api` session middleware.
+    if (sdkConfig.enabled) {
+      this.app.use('/api/sdk', createSdkRouter());
+      logger.info('Public SDK API mounted at /api/sdk');
+
+      // Where those keys are minted. Session-authenticated, not key-authenticated:
+      // you cannot use an API key to mint another one.
+      this.app.use('/api/sdk-keys', authMiddleware.authenticate, sdkKeyRoutes);
+    } else {
+      this.app.use('/api/sdk', (_req, res) => {
+        res.status(404).json({
+          success: false,
+          error: 'The public SDK API is not enabled on this deployment.',
+        });
+      });
+    }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -728,14 +749,6 @@ export class App {
 
     this.app.use('/internal', internalRoutes);
 
-    // API versioning placeholder
-    this.app.use('/api/v1', (_req, res) => {
-      res.json({
-        success: true,
-        message: 'API v1 endpoint - ready for implementation',
-        timestamp: new Date().toISOString(),
-      });
-    });
   }
 
   private initializeErrorHandling(): void {
