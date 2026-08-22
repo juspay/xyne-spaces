@@ -1,0 +1,395 @@
+# xyne-spaces-mcp
+
+An MCP server that lets a coding agent read and write Xyne Spaces — channels, threads,
+messages, tickets, calls, canvases and search — using the same `xyne_sk_` API key as
+[`@xyne/spaces-sdk`](../xyne-spaces-sdk).
+
+33 tools over the Spaces public API. Not 508: the API exposes every operation in the
+Zero catalog, and this exposes the ones an agent actually reaches for, each with an
+exact schema.
+
+---
+
+## Quick start
+
+**1. Mint a key.** Spaces dashboard → **Apps** → **API keys** → *Create key*. The key is
+shown once. It lasts 30 days, and you may hold two live keys at a time.
+
+**2. Tell the server about it.** Either an environment variable:
+
+```bash
+export XYNE_SPACES_API_KEY="xyne_sk_…"
+export XYNE_SPACES_BASE_URL="https://spaces.xyne.juspay.net"   # optional; this is the default
+```
+
+…or a file, which keeps the key out of a committed config:
+
+```jsonc
+// ~/.xyne/agent/spaces.json
+{
+  "baseUrl": "https://spaces.xyne.juspay.net",
+  "apiKey": "xyne_sk_…"
+}
+```
+
+**3. Register the server.**
+
+<details open>
+<summary><b>Claude Code</b></summary>
+
+```bash
+claude mcp add xyne-spaces -- node /path/to/packages/xyne-spaces-mcp/dist/index.js
+```
+
+or in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "xyne-spaces": {
+      "command": "node",
+      "args": ["/path/to/packages/xyne-spaces-mcp/dist/index.js"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><b>Cursor, Windsurf, Zed, Continue, or any other stdio MCP client</b></summary>
+
+The same three fields, in whichever file that client reads. `.mcp.json` in this package
+is a copyable sample — replace the placeholder path.
+
+```json
+{
+  "mcpServers": {
+    "xyne-spaces": {
+      "command": "node",
+      "args": ["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"],
+      "env": { "XYNE_SPACES_API_KEY": "xyne_sk_…" }
+    }
+  }
+}
+```
+
+Use an **absolute** path: the server is launched as a subprocess and its working
+directory is the client's, not this package's.
+</details>
+
+<details>
+<summary><b>Your own agent, via an MCP SDK</b></summary>
+
+Any MCP client library can spawn it directly — there is nothing to special-case:
+
+```python
+# Python, modelcontextprotocol SDK
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+params = StdioServerParameters(
+    command="node",
+    args=["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"],
+    env={"XYNE_SPACES_API_KEY": "xyne_sk_…"},
+)
+
+async with stdio_client(params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        result = await session.call_tool("spaces_whoami", {})
+```
+</details>
+
+**4. Check it works.** Ask the agent to run `spaces_whoami`. It should name you, your
+workspace, and when the key expires.
+
+### Compatibility
+
+This is a plain **stdio MCP server** with no host-specific code — it works with any MCP
+client, not just Claude Code. Concretely:
+
+- **Transport** is stdio over JSON-RPC, the baseline every client implements.
+- **Protocol** negotiates whatever the client asks for; verified against `2024-11-05`,
+  `2025-03-26`, `2025-06-18` and `2025-11-25`.
+- **Capabilities** are `tools` only — no prompts, resources, sampling or roots, so there
+  is nothing a client has to support beyond calling a tool.
+- **Results are plain text blocks**, the most widely supported content type. There is no
+  `structuredContent`, so no client has to understand a second encoding of the same rows.
+- **Runtime** is Node 22+. Nothing else is required.
+
+The one thing that differs per client is *how you register the server*, which is the
+config above. Claude Code, Cursor, Windsurf, Zed, Continue, and anything built on an MCP
+SDK all take the same `command` + `args` + `env` triple in their own config file.
+
+---
+
+## What the key can do
+
+**A key acts as you.** Zero's per-table ACL is folded into every read and every write, so
+these tools reach exactly what your Spaces user reaches — no more. A private channel you
+are not in does not appear in `spaces_channels_list` and its threads are not readable,
+even by id.
+
+Two consequences worth internalising:
+
+- Nothing here is an admin backdoor. If an agent "cannot find" a channel, the answer is
+  usually that the acting user is not in it.
+- Writes are real and immediate. `spaces_message_send` posts to a live thread that other
+  people can see, and there is no undo from this server.
+
+**Read-only mode** removes every write tool from the listing:
+
+```bash
+XYNE_SPACES_READONLY=1
+```
+
+33 tools become 23. A tool the model cannot see is a tool it cannot decide to use, which
+is more reliable than declining after the fact.
+
+---
+
+## Tools
+
+Ids are the currency. Almost every write needs an id that only a read can give you, so
+the reads are listed first and each one tells you what it hands the next call.
+
+### Identity and discovery
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_whoami` | — | Your user id, workspace, org, role, key expiry. **Call this first** in any session that filters or writes by user |
+| `spaces_search` | — | Relevance-ranked hits across messages, tickets, channels, files, calls, emails, canvases, people — each carrying the ids to act on it |
+
+`spaces_search` is fuzzy. For an exact channel name use `spaces_channels_list`; for
+structured ticket filtering use `spaces_tickets_list`. Its `type` and `apps` values are
+validated strictly and are **plural** — a hit labelled `[message]` corresponds to
+`type: ["messages"]`.
+
+### Channels and threads
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_channels_list` | — | Channels you can see: name, scope, visibility, live member count, unread count, ids. The authoritative name → id lookup |
+| `spaces_channel_participants` | `channel_id` | Members with user id, email, channel role, join date |
+| `spaces_channel_create` | `project_id` | A new channel, or a DM with `scope_type: "DM"` + `dm_user` |
+| `spaces_threads_list` | `channel_id` | Recent threads with their opening message, reply count, participants, `conversation_id` |
+| `spaces_thread_get` | `conversation_id` | One thread's context |
+| `spaces_thread_create` | `channel_id`, `content` | Starts a thread. Returns the new `conversation_id` and `message_id` |
+
+### Messages
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_messages_list` | `conversation_id` | Messages in a thread, full text, author, attachments, `message_id` |
+| `spaces_user_messages` | — | Everything one person wrote, newest first, optionally date-bounded. Omit `user` for your own |
+| `spaces_message_send` | `conversation_id`, `content` | Posts a reply. Returns the new `message_id` |
+| `spaces_message_update` | `message_id`, `content` | Edits your own message |
+| `spaces_message_react` | `message_id`, `emoji` | Adds or removes a reaction. Emoji by **name**, no colons |
+
+`spaces_user_messages` is an exact ordered scan, not a ranking — an empty result genuinely
+means they wrote nothing in that window, which repeated searches could never establish.
+
+### Tickets
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_tickets_list` | `view_mode` | Tickets in one scope, in full detail |
+| `spaces_tickets_search` | — | Tickets whose key or title matches. The fastest key → id lookup |
+| `spaces_ticket_get` | `ticket_id` | One ticket with tags, role assignments, related tickets, stage requests, RCA |
+| `spaces_ticket_activities` | `ticket_id` | Change history: who moved what, when |
+| `spaces_ticket_create` | `title`, `description`, `project_id`, `channel_id` | A new ticket. The server allocates the key (`PLAT-1234`) |
+| `spaces_ticket_update` | `ticket_id` | Changes fields. Reassign with `assigned_to` |
+| `spaces_ticket_transition` | `ticket_id`, `to_stage_name` | Moves a stage, picking the right path for the board |
+
+`view_mode` decides the scope and which companion argument is needed: `my-tickets` needs
+none, `project` needs `project_id`, `board` needs `board_id`, `user-tickets` needs
+`user_id`, `group-tickets` needs `group_id`. Omitting the companion is refused rather
+than silently returning everything.
+
+**Use `spaces_ticket_transition` for stage moves**, not `spaces_ticket_update`. It reads
+the board type and applies the target stage's status either way; on `NON_LINEAR` boards it
+also runs the form gates and approvals that a plain field write skips.
+
+### Lookups
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_projects_list` | — | Projects with ids and key prefixes |
+| `spaces_board_stages` | `project_id` | Boards **with their stages in workflow order**, in one call |
+| `spaces_users_list` | — | People with user ids |
+
+Stage names must match exactly, so read them from `spaces_board_stages` rather than
+guessing at "Done" or "In Progress".
+
+### Everything else
+
+| Tool | Required | Returns |
+|---|---|---|
+| `spaces_notifications_list` | — | Mentions, replies, ticket changes. Filter `unread_only` or `classification: ["ACTIONABLE"]` |
+| `spaces_notifications_mark_read` | `notification_id` | Marks one read |
+| `spaces_emails_list` | `channel_id` | Emails in a desk or shared-inbox channel, with bodies |
+| `spaces_calls_list` | — | Calls by `scope`: `scheduled`, `active`, or `history` (with recordings, transcripts, AI summaries) |
+| `spaces_drafts_list` | — | Your unsent drafts |
+| `spaces_canvases_list` | — | Canvases: title, owner, last editor |
+| `spaces_canvas_get` | `canvas_id` | A canvas body converted to markdown |
+| `spaces_claw_list_agents` | — | Claw agents available to this deployment |
+| `spaces_claw_run` | `agent`, `task` | Dispatches a Claw run and waits for the answer |
+| `spaces_claw_get_run` | `session_id` | Status and result of a run |
+
+Email channels are excluded from `spaces_channels_list` by default — pass
+`include_email_channels` to find one.
+
+---
+
+## Recipes
+
+**Post into a channel by name**
+
+```
+spaces_channels_list  { name: "payments" }        → channel_id
+spaces_thread_create  { channel_id, content }     → conversation_id, message_id
+```
+
+To reply in an existing thread instead:
+
+```
+spaces_threads_list   { channel_id }              → conversation_id
+spaces_message_send   { conversation_id, content }
+```
+
+**File a ticket**
+
+```
+spaces_projects_list  { name: "platform" }        → project_id
+spaces_board_stages   { project_id }              → board_id + exact stage names
+spaces_channels_list  { name: "eng" }             → channel_id
+spaces_ticket_create  { title, description, project_id, board_id, channel_id }
+```
+
+**Reassign and move a ticket**
+
+```
+spaces_tickets_search     { query: "PLAT-1234" }              → ticket_id
+spaces_ticket_update      { ticket_id, assigned_to: "someone@company.com" }
+spaces_ticket_transition  { ticket_id, to_stage_name: "QA" }
+```
+
+`assigned_to` takes an email or a user id — every tool that names a person does.
+
+**Catch up on a person's week**
+
+```
+spaces_user_messages  { user: "someone@company.com", after: "2026-08-14T00:00:00Z" }
+```
+
+**Triage what needs you**
+
+```
+spaces_notifications_list       { unread_only: true, classification: ["ACTIONABLE"] }
+spaces_messages_list            { conversation_id }        ← from any notification
+spaces_notifications_mark_read  { notification_id }
+```
+
+---
+
+## Errors
+
+Failures come back as text with the API's stable error code, and the auth cases say what
+to do:
+
+```
+Your Xyne Spaces API key has expired — keys last 30 days. Mint a new one in the Spaces
+dashboard, under Apps → API keys and set XYNE_SPACES_API_KEY.
+```
+
+| Code | Means |
+|---|---|
+| `unauthenticated` | No key configured, or the key was revoked |
+| `token_expired` | Past its 30 days — mint another |
+| `forbidden` | Your user is not allowed this. Not a bug in the tool |
+| `not_found` | Absent, or invisible to you — deliberately indistinguishable |
+| `validation_failed` | An argument the server rejects. The message names the field |
+| `domain_rule` | A business rule refused it, e.g. an unsupported stage move |
+| `upstream_unavailable` | Search or Claw is down. Retryable |
+
+Anything unexpected carries a `request_id` so a server-side failure can be correlated.
+
+---
+
+## Also using Claw?
+
+`packages/xyne-claw-mcp` ships its own Claw tools behind a separate device login. If both
+servers are installed the model sees two Claw tool sets and may pick the one that is not
+authenticated. **Install one or the other.** The three `spaces_claw_*` tools here need no
+second login — the Spaces backend relays to Claw with the deployment's own credential.
+
+---
+
+## Development
+
+```bash
+npm run build       # tsc, then the conformance check
+npm run check       # the check alone (needs a prior build)
+npm run typecheck
+```
+
+Nothing in this package is type-checked against the server: a catalog operation is a
+string in a request body, so `"ticketDetailsByIdV2"` and a typo compile identically.
+`scripts/check-operations.mjs` is what makes that safe. It parses the backend's real
+`queries.ts`, `mutators.ts` and `api/sdk/direct.ts` and asserts:
+
+1. every catalog operation a tool names still exists;
+2. every argument that operation **requires** is one the tool actually sends —
+   `.nullable()` counts as required, `.optional()` and `.default()` do not;
+3. every direct route a tool calls is still mounted;
+4. the search enums still match `@xyne/spaces-contract`.
+
+Check 2 is the one that earns its keep. Zero's optimistic-write model makes operations
+demand arguments no caller would think of — a required `isMember` the query never reads,
+a `start` that must be explicitly `null`, a caller-generated `messageId` and `timestamp`.
+Getting one wrong produces `"Validation failed: Required, Required"` at runtime, naming
+neither the operation nor the argument. This turns that into a build failure that names
+both.
+
+### Adding a tool
+
+One entry in the relevant `src/tools/*.ts`, exporting a `ToolDef`:
+
+```ts
+{
+  name: "spaces_thing_list",
+  description: "…",                       // long, and directive — this is what decides selection
+  inputSchema: { /* JSON Schema, snake_case, with per-field descriptions */ },
+  catalog: [{ name: "thingsQueryV2", sends: ["limit", "start"] }],
+  write: false,
+  async handler(args, client) { … },
+}
+```
+
+`catalog` and `direct` are what the guard reads, so declare every operation the handler
+calls. Mark anything that changes state `write: true` so read-only mode can drop it.
+
+**Output is per tool, not a shared projection.** Read tools emit every column that carries
+meaning — what matters about a ticket is not what matters about a channel — and never
+truncate a body. Bound the number of rows, never the content of one. `src/render.ts` holds
+the shared vocabulary: `toIST`, `cleanText`, `indented`, `paginationFooter`, and the
+`Name <email> (id: …)` user label.
+
+### Layout
+
+```
+src/
+  index.ts        server wiring, dispatch, read-only filter
+  client.ts       config, auth, HTTP to /api/sdk, error mapping
+  render.ts       formatting vocabulary shared by every renderer
+  tools/
+    shared.ts     ToolDef, and the user directory (id → name, email → id)
+    identity.ts   whoami, search
+    channels.ts   threads.ts   messages.ts
+    tickets.ts    lookups.ts   comms.ts   claw.ts
+```
+
+The only runtime dependency is `@modelcontextprotocol/sdk`. There is deliberately no
+dependency on `@xyne/spaces-sdk`: this server speaks HTTP to the same endpoints, which
+keeps it publishable as a standalone binary.

@@ -31,6 +31,7 @@
       "#zero-internal/compiler": ["../node_modules/@rocicorp/zero/out/z2s/src/compiler"],
       "#zero-internal/sql": ["../node_modules/@rocicorp/zero/out/z2s/src/sql"],
       "@xyne/shared": ["../../../packages/shared/dist"],
+      "@xyne/spaces-contract": ["../../../packages/xyne-spaces-contract/dist"],
       "@xyne/storage": ["../../../packages/storage/dist"],
       "@framework": ["../../../packages/framework/dist"],
       "@/*": ["*"],

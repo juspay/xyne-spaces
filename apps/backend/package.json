@@ -90,6 +90,7 @@
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^2.10.3",
     "@xyne/shared": "workspace:*",
+    "@xyne/spaces-contract": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
     "@y-sweet/sdk": "^0.9.1",
