@@ -415,6 +415,12 @@ export interface ReactArtifactManifest {
   files: string[];
   dependencies: string[];
   dataRequirements: ReactArtifactDataRequirement[];
+  /** The app changes workspace data (useXyneMutate). Badge only. */
+  writes?: boolean;
+  /** The app runs claw agents (useXyneAgent). Badge only. */
+  invokesAgents?: boolean;
+  /** Agents the app prefers. Narrowing hint; the viewer's access is the ceiling. */
+  agents?: string[];
 }
 
 export interface MessageAttachment {

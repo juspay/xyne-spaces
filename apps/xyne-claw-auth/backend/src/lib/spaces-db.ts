@@ -174,6 +174,7 @@ export type SpacesAuthCaller =
   | "clone-owner-dm"
   | "skill-update-owner-dm"
   | "artifact-apps"
+  | "artifact-app-agents"
   | "unknown";
 
 export async function getSpacesAuthForUser(

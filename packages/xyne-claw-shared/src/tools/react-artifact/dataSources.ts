@@ -37,31 +37,56 @@ export const MAX_DATA_REQUIREMENTS = 8;
  * Named backend queries an app may reference. Each runs with the viewer's own
  * context, so rows are ACL-filtered per viewer automatically.
  *
- * `argsHint` is surfaced verbatim in the tool description — it is how the agent
- * learns what to pass, so keep it accurate against
- * apps/backend/src/zero/queries.ts.
+ * `argsHint` and `fieldsHint` are surfaced verbatim in the tool description —
+ * they are the ONLY way the agent learns the arguments and the row shape, so
+ * keep them accurate against apps/backend/src/zero/queries.ts and the Prisma
+ * schema.
+ *
+ * `fieldsHint` exists because guessed field names have been the single largest
+ * source of silently-wrong generated apps: an app read `status` (the column is
+ * `statusV2`) and reported 0% completion on healthy data, and another read
+ * `assignments[]` (empty in practice; assignment lives on `assignedTo`) and
+ * showed every ticket as unassigned. Name the traps explicitly.
  */
-export const ALLOWED_NAMED_QUERIES: Record<string, { argsHint: string; note?: string }> = {
+/** Shared by every ticket-returning source. */
+const TICKET_FIELDS =
+  "id, xyneId (display id like JSP-42), title, description, " +
+  "statusV2 (TODO|STARTED|PAUSED|COMPLETED|CANCELLED — NOT `status`), " +
+  "priority (LOW|MEDIUM|HIGH|CRITICAL), " +
+  "assignedTo (user id of the assignee, or null — this IS the assignment; the " +
+  "`assignments[]` relation is unused and comes back empty, do NOT read it), " +
+  "createdBy (user id), boardId, projectId, stageName, channelId, " +
+  "eta (due date, epoch ms), createdAt, updatedAt, isArchived, ticketType";
+
+export const ALLOWED_NAMED_QUERIES: Record<
+  string,
+  { argsHint: string; note?: string; fieldsHint?: string }
+> = {
   getAllBoards: {
     argsHint: "{}",
     note: "Every board in the workspace, with project and stages.",
+    fieldsHint: "id, name, projectId, project{id,name}, stages[]{id,name,sequenceNumber}",
   },
   boardsByProject: {
     argsHint: '{ "projectId": "<id>" }',
     note: "Boards of one project, with their stages.",
+    fieldsHint: "id, name, projectId, stages[]{id,name,sequenceNumber}",
   },
   stagesByBoard: {
     argsHint: '{ "boardId": "<id>" }',
     note: "Ordered stages of one board — use for kanban columns.",
+    fieldsHint: "id, name, boardId, sequenceNumber",
   },
   ticketsQueryV2: {
     argsHint:
       '{ "viewMode": "board" | "project" | "my-tickets", "boardId"?: "<id>", "projectId"?: "<id>" }',
-    note: "Tickets with assignments and tags. Scope with boardId/projectId — unbounded otherwise.",
+    note: "Tickets. Scope with boardId/projectId — unbounded otherwise.",
+    fieldsHint: TICKET_FIELDS,
   },
   allTickets: {
     argsHint: "{}",
     note: "Every non-archived ticket in the workspace. Unbounded — prefer ticketsQueryV2 with a scope.",
+    fieldsHint: TICKET_FIELDS,
   },
 };
 
