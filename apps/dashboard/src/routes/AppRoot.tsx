@@ -646,7 +646,9 @@ const AppRoot = (): ReactElement => {
                           </Panel>
                         </ResizableGroup>
                       </div>
-                    ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage && sdlcRepoId === null ? (
+                    ) : // SDLC routes DO show the generic XyneAI panel (header Ask AI opens it);
+                    // only the standalone SDLC debugger stays suppressed there.
+                    isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                       // XyneAI is open on desktop - show panel layout with XyneAI
                       <div className='flex flex-col h-screen'>
                         <ResizableGroup
@@ -1359,15 +1361,27 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'sdlc',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId/:section',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'team-intelligence',

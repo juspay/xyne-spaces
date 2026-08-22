@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
@@ -16,6 +17,7 @@ interface InitiateCallParams {
   targetUserIds?: string[];
   callDisplayName?: string;
   conversationId?: string;
+  sdlcLink?: SdlcCallLink;
   onComplete?: () => void;
 }
 
@@ -38,6 +40,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     targetUserIds?: string[];
     callDisplayName?: string;
     conversationId?: string;
+    sdlcLink?: SdlcCallLink;
     onComplete?: () => void;
   } | null>(null);
 
@@ -85,6 +88,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
+          ...(action.sdlcLink && { sdlcLink: action.sdlcLink }),
         });
 
         // Call completion callback after sending initiate event
@@ -141,6 +145,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     targetUserIds,
     callDisplayName,
     conversationId,
+    sdlcLink,
     onComplete,
   }: InitiateCallParams): void => {
     if (!channelId) return;
@@ -157,6 +162,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         ...(targetUserIds && { targetUserIds }),
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),
+        ...(sdlcLink && { sdlcLink }),
       });
       onComplete?.();
       return;
@@ -169,6 +175,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
       ...(conversationId && { conversationId }),
+      ...(sdlcLink && { sdlcLink }),
       ...(onComplete && { onComplete }),
     };
     roomActor.send({ type: 'DISCONNECT' });

@@ -35,7 +35,19 @@ export function normalizeWikiSourcePath(sourceRepository: string, sourcePath: st
   return normalizeWikiRelativePath(normalized.slice(prefix.length));
 }
 
-export function wikiFolderName(relativePath: string): string {
-  const directory = path.posix.dirname(relativePath);
-  return directory === '.' ? WIKI_FOLDER_PREFIX : `${WIKI_FOLDER_PREFIX}/${directory}`;
+// Wiki uses exactly two flat canvas folders: 'Wiki' (live pages) and
+// 'Wiki Archive' (archived pages). Folder placement IS the archive state.
+// Page hierarchy lives only in wikiRelativePath; no nested folder rows exist.
+export function wikiFolderName(): string {
+  return WIKI_FOLDER_PREFIX;
+}
+
+const WIKI_ARCHIVE_FOLDER_PREFIX = 'Wiki Archive';
+
+export function wikiArchiveFolderName(): string {
+  return WIKI_ARCHIVE_FOLDER_PREFIX;
+}
+
+export function isWikiArchiveFolder(name: string | null | undefined): boolean {
+  return name === WIKI_ARCHIVE_FOLDER_PREFIX;
 }
