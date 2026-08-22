@@ -93,6 +93,10 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
+/** Trims a recording's title, falling back to `DEFAULT_RECORDING_TITLE` when blank. */
+export const resolveRecordingTitle = (title: string | null | undefined): string =>
+  title?.trim() || DEFAULT_RECORDING_TITLE;
+
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
 
