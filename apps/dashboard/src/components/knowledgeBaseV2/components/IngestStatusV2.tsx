@@ -24,7 +24,7 @@ export const IngestStatusV2: React.FC<IngestStatusV2Props> = ({ status }) => {
   if (normalized === 'PROCESSING') {
     return (
       <span className={cn('inline-flex h-4 w-4 items-center justify-center')} title='Processing'>
-        <Loader2 className='h-3 w-3 animate-spin text-blue-500' strokeWidth={1.75} />
+        <Loader2 className='h-3 w-3 animate-spin text-amber-500' strokeWidth={1.75} />
       </span>
     );
   }

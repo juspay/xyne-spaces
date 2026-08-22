@@ -1614,6 +1614,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    appWebhookDeliveryEnabled: boolean().optional(),
   })
   .primaryKey('channelId');
 
@@ -3063,6 +3064,13 @@ export const collectionTableRelationships = relationships(collectionTable, ({ ma
   items: many({
     sourceField: ['id'],
     destField: ['collectionId'],
+    destSchema: collectionItemTable,
+  }),
+  // Every file anywhere under this root collection (keyed on rootCollectionId, so it
+  // spans subfolders) — powers the KB root per-collection ingestion rollup.
+  allItems: many({
+    sourceField: ['id'],
+    destField: ['rootCollectionId'],
     destSchema: collectionItemTable,
   }),
   permissions: many({
