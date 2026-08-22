@@ -160,7 +160,10 @@ function extractFlowJsonLinks(content: string): string[] {
     const json = attrMatch[1]
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r');
+      .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as { components?: unknown[] };
 
     const links = new Set<string>();

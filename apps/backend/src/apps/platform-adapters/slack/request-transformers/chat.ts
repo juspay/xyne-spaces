@@ -5,6 +5,7 @@ import {
 	resolveSlackText,
 } from "@/integrations/adapters/slack-webhook-tickets/utils/slackUtils";
 import { config } from "@/config/env";
+import { encodeHtmlAttr } from "@/utils/contentUtils";
 import type { TransformContext } from "../../types";
 import type {
 	SlackChatPostMessageRequest,
@@ -49,7 +50,7 @@ async function processContent(
 		}, botToken, workspaceId);
 
 		if (flowJSON) {
-			const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, "&quot;");
+			const escapedJSON = encodeHtmlAttr(JSON.stringify(flowJSON));
 			return {
 				content: `<div data-flow-json="${escapedJSON}">Flow JSON</div>`,
 				isMarkdown: false,
