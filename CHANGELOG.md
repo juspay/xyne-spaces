@@ -1,3 +1,10 @@
+## [1.209.1](https://github.com/juspay/xyne-spaces/compare/v1.209.0...v1.209.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* make  Outbound webhook url optional in app desk ([#840](https://github.com/juspay/xyne-spaces/issues/840)) ([d29a0fd](https://github.com/juspay/xyne-spaces/commit/d29a0fd40c0c7e03188dc39b1fd0ccfa0c3930ad))
+
 ## [1.209.0](https://github.com/juspay/xyne-spaces/compare/v1.208.3...v1.209.0) (2026-08-21)
 
 
