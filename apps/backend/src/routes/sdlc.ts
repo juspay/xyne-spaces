@@ -15,6 +15,7 @@ import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
 import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
+import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
@@ -300,5 +301,8 @@ router.post(
     res.status(200).json({ success: true, approval });
   })
 );
+
+// One-off for pre-ca3b73606 hubs. Delete with src/sdlc/cleanup/ once none are left.
+router.use('/cleanup', sdlcCleanupRoutes);
 
 export default router;
