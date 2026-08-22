@@ -1123,7 +1123,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             title: messageContent,
                             description: messageContent,
                             channelId: channelId,
-                            projectId: (channel.projectId as string | null) || '',
                             ticketType: BaseTicketType.Support,
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };

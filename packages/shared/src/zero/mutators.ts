@@ -335,29 +335,6 @@ async function hasCanvasVersionEditAccess(
     }
   }
 
-  // Batch query: fetch projectIds for all participant channels 
-  if (channelIds.length > 0) {
-    const channels = await tx.run(
-      zql.channels.where(({ cmp }) => cmp('id', 'IN', channelIds)),
-    );
-    const projectIds = channels
-      .map(ch => ch.projectId)
-      .filter((id): id is string => Boolean(id));
-
-    if (projectIds.length > 0) {
-      const projectGuestAccess = await tx.run(
-        zql.guest_access
-          .where('userId', userId)
-          .where('workspaceId', ctx.workspaceId)
-          .where('accessibleEntityType', GuestEntity.PROJECT)
-          .where(({ cmp }) => cmp('accessibleEntityId', 'IN', projectIds)),
-      );
-      if (projectGuestAccess.length > 0) {
-        return true;
-      }
-    }
-  }
-
   return false;
 }
 
@@ -6595,29 +6572,28 @@ export const mutators = defineMutators({
           throw new Error('Folder name is required');
         }
 
-        if (!projectId && channelId) {
-          throw new Error('Channel folders must belong to a project');
+        // Channel folders no longer require a project (the channel canvas UI has
+        // no project grouping), but the channel itself must still be valid and
+        // not archived. A projectId is optional; when present it must match.
+        if (channelId) {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error('Channel not found');
+          }
+
+          if (channel.isArchived) {
+            throw new Error('Channel is archived');
+          }
+
+          if (projectId && channel.projectId !== projectId) {
+            throw new Error('Channel does not belong to project');
+          }
         }
 
         if (projectId) {
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
-          }
-
-          if (channelId) {
-            const channel = await tx.run(zql.channels.where('id', channelId).one());
-            if (!channel) {
-              throw new Error('Channel not found');
-            }
-
-            if (channel.isArchived) {
-              throw new Error('Channel is archived');
-            }
-
-            if (channel.projectId !== projectId) {
-              throw new Error('Channel does not belong to project');
-            }
           }
         }
 
@@ -6627,7 +6603,9 @@ export const mutators = defineMutators({
             .where('name', cleanName)
             .where(({ and, cmp }) =>
               channelId
-                ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                ? projectId
+                  ? and(cmp('projectId', '=', projectId), cmp('channelId', '=', channelId))
+                  : and(cmp('projectId', 'IS', null), cmp('channelId', '=', channelId))
                 : projectId
                   ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                   : and(
@@ -6712,10 +6690,12 @@ export const mutators = defineMutators({
               .where('name', cleanName)
               .where(({ and, cmp }) =>
                 folder.channelId
-                  ? and(
-                    cmp('projectId', '=', folder.projectId as string),
-                    cmp('channelId', '=', folder.channelId),
-                  )
+                  ? folder.projectId
+                    ? and(
+                      cmp('projectId', '=', folder.projectId),
+                      cmp('channelId', '=', folder.channelId),
+                    )
+                    : and(cmp('projectId', 'IS', null), cmp('channelId', '=', folder.channelId))
                   : folder.projectId
                     ? and(cmp('projectId', '=', folder.projectId), cmp('channelId', 'IS', null))
                     : and(
@@ -7303,7 +7283,6 @@ export const mutators = defineMutators({
                   targetId: entityId,
                   linkKind: SurfaceLinkKind.RELATES_TO,
                   createdBy: ctx.userID,
-                  projectId: nudge.projectId,
                   createdAt: timestamp,
                 });
               }
@@ -8959,7 +8938,6 @@ export const mutators = defineMutators({
           name: trimmed,
           ...(color ? { color } : {}),
           channelId,
-          projectId: channel.projectId,
           workspaceId: channel.workspaceId,
           createdBy: ctx.userID,
           createdAt: timestamp,
@@ -9004,7 +8982,6 @@ export const mutators = defineMutators({
             name: trimmed,
             ...(args.color ? { color: args.color } : {}),
             channelId: args.channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: now,

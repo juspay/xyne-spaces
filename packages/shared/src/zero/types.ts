@@ -96,6 +96,7 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
+  /** @deprecated Project-level guest grants are removed; kept for backwards-compat with existing rows. New grants must be CHANNEL or CANVAS. */
   PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',

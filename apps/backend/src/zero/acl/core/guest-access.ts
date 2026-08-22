@@ -10,29 +10,29 @@ export type TicketScope = {
   projectId: string;
 };
 
+/**
+ * @deprecated Project-level guest grants have been removed. Guests get access
+ * via channel participation or direct channel/canvas grants only.
+ */
 export async function hasGuestProjectAccess(
-  ctx: QueryContext,
-  tx: Transaction<Schema>,
-  projectId: string,
+  _ctx: QueryContext,
+  _tx: Transaction<Schema>,
+  _projectId: string,
 ): Promise<boolean> {
-  return hasGuestProjectAccessForUser(ctx, tx, ctx.userID, projectId);
+  return false;
 }
 
+/**
+ * @deprecated Project-level guest grants have been removed. Guests get access
+ * via channel participation or direct channel/canvas grants only.
+ */
 export async function hasGuestProjectAccessForUser(
-  ctx: QueryContext,
-  tx: Transaction<Schema>,
-  userId: string,
-  projectId: string,
+  _ctx: QueryContext,
+  _tx: Transaction<Schema>,
+  _userId: string,
+  _projectId: string,
 ): Promise<boolean> {
-  const access = await tx.run(
-    zql.guest_access
-      .where('workspaceId', '=', ctx.workspaceId)
-      .where('userId', '=', userId)
-      .where('accessibleEntityType', '=', GuestEntity.PROJECT)
-      .where('accessibleEntityId', '=', projectId)
-      .one(),
-  );
-  return Boolean(access);
+  return false;
 }
 
 export async function hasGuestChannelAccess(
@@ -72,13 +72,7 @@ export async function hasGuestChannelAccessForUser(
       .where('userId', '=', userId)
       .one(),
   );
-  if (channelParticipant) {
-    return true;
-  }
-
-  return channel.projectId
-    ? hasGuestProjectAccessForUser(ctx, tx, userId, channel.projectId)
-    : false;
+  return Boolean(channelParticipant);
 }
 
 export async function hasGuestTicketAccess(
@@ -108,11 +102,7 @@ export async function hasGuestTicketAccess(
       .where('userId', '=', ctx.userID)
       .one(),
   );
-  if (channelParticipant) {
-    return true;
-  }
-
-  return hasGuestProjectAccess(ctx, tx, ticket.projectId);
+  return Boolean(channelParticipant);
 }
 
 export async function hasChannelMutationAccess(

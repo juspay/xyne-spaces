@@ -75,13 +75,12 @@ function isCanvasArray(value: unknown): value is Canvas[] {
   return Array.isArray(value);
 }
 
-function nextChannelFolderName(channelProjectId: string, folders: CanvasFolder[]): string {
+function nextChannelFolderName(channelId: string, folders: CanvasFolder[]): string {
   const prefix = 'Untitled folder';
   const usedNumbers = new Set<number>();
 
   for (const folder of folders) {
-    if (folder.projectId !== channelProjectId) continue;
-    if (!folder.channelId) continue;
+    if (folder.channelId !== channelId) continue;
     const match = folder.name.match(/^Untitled folder (\d+)$/i);
     if (match?.[1]) usedNumbers.add(Number(match[1]));
   }
@@ -387,27 +386,13 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       return;
     }
 
-    if (!channel?.projectId) {
-      toast.error('Unable to create folder', {
-        description: 'This channel is missing project information.',
-      });
-      return;
-    }
-
-    setNewFolderName(nextChannelFolderName(channel.projectId, folders));
+    setNewFolderName(nextChannelFolderName(channelId, folders));
     setShowCreateFolderDialog(true);
-  }, [channel?.projectId, folders, isChannelArchived, showArchivedChannelCreateError]);
+  }, [channelId, folders, isChannelArchived, showArchivedChannelCreateError]);
 
   const handleCreateFolder = useCallback((): void => {
     if (isChannelArchived) {
       showArchivedChannelCreateError('folder');
-      return;
-    }
-
-    if (!channel?.projectId) {
-      toast.error('Unable to create folder', {
-        description: 'This channel is missing project information.',
-      });
       return;
     }
 
@@ -423,7 +408,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         const result = z.mutate(
           mutators.canvasFolder.create({
             id: uuidv4(),
-            projectId: channel.projectId,
             channelId,
             name,
             timestamp: Date.now(),
@@ -445,14 +429,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         setIsCreatingFolder(false);
       }
     })();
-  }, [
-    channel?.projectId,
-    channelId,
-    isChannelArchived,
-    newFolderName,
-    showArchivedChannelCreateError,
-    z,
-  ]);
+  }, [channelId, isChannelArchived, newFolderName, showArchivedChannelCreateError, z]);
 
   const handleCreateCanvas = async (): Promise<void> => {
     if (isChannelArchived) {
