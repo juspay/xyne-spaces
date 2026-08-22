@@ -1,13 +1,14 @@
+import { isBaselineCanvasType } from '@xyne/shared';
 import type { SdlcDiscussion, SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
-export type SdlcDiscussionSurfaceType = SdlcDiscussion['surfaceType'];
+export type SdlcDiscussionSurfaceType = NonNullable<SdlcDiscussion['surfaceType']>;
 
 export interface SdlcDiscussionOwnerLookup {
   getCanvas: (id: string) => Promise<{
     id: string;
     workspaceId: string;
     channelId: string | null;
-    metadata: unknown;
+    artifactType: string;
   } | null>;
   getTicket: (id: string) => Promise<{
     id: string;
@@ -47,19 +48,14 @@ export async function resolveSdlcDiscussionOwnerId(
     ) {
       return null;
     }
-    const metadata =
-      canvas.metadata && typeof canvas.metadata === 'object' && !Array.isArray(canvas.metadata)
-        ? (canvas.metadata as Record<string, unknown>)
-        : {};
-    if (metadata.repoId !== input.repoId) return null;
     if (
-      metadata.artifactKind === 'PRD' ||
-      metadata.artifactKind === 'BASELINE' ||
-      metadata.documentKind === 'WIKI'
+      canvas.artifactType === 'PRD' ||
+      canvas.artifactType === 'WIKI' ||
+      isBaselineCanvasType(canvas.artifactType)
     ) {
       return canvas.id;
     }
-    if (metadata.artifactKind !== 'TECH_DOC') return null;
+    if (canvas.artifactType !== 'TECH_DOC') return null;
     const link = await lookup.findLinkSource({
       repoId: input.repoId,
       targetType: 'CANVAS',

@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isSdlcSurface } from '../../config';
-import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
+import {
+  parseSdlcFrameMessage,
+  SDLC_FRAME_MESSAGE,
+  type SdlcFrameAskAiPayload,
+} from './sdlcFrameMessages';
 
 /** True when this document is the SDLC bundle running inside the parent's frame. */
 export function isFramedSdlcSurface(): boolean {
@@ -15,6 +19,19 @@ export function isFramedSdlcSurface(): boolean {
 export function requestSdlcFrameReset(): void {
   if (!isFramedSdlcSurface()) return;
   window.parent.postMessage({ type: SDLC_FRAME_MESSAGE.reset }, window.location.origin);
+}
+
+/**
+ * Ask the parent to open its Ask AI panel for this repository.
+ *
+ * Returns false when this document is not framed, which is the caller's signal to
+ * drive its own xyneAIActor instead — that is the standalone /sdlc-app case and
+ * the main bundle's /sdlc route, where the panel is local.
+ */
+export function requestSdlcAskAi(payload: SdlcFrameAskAiPayload): boolean {
+  if (!isFramedSdlcSurface()) return false;
+  window.parent.postMessage({ type: SDLC_FRAME_MESSAGE.askAi, payload }, window.location.origin);
+  return true;
 }
 
 /**

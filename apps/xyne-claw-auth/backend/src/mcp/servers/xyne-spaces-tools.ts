@@ -3925,6 +3925,474 @@ const spacesCreateCanvas: ToolDef = {
   },
 };
 
+// ── canonical SDLC artifact mutation ──────────────────────────────
+const SDLC_AGENT_COMMIT_REF_PATTERN = "^(?:[0-9a-fA-F]{9,40}|ROOT_BOOTSTRAP)$";
+const SDLC_WIKI_PATH_PATTERN = "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[^/\\\\]+(?:/[^/\\\\]+)*\\.[mM][dD]$";
+const sdlcSourcePathsSchema = {
+  type: "array",
+  maxItems: 500,
+  items: { type: "string", minLength: 1, maxLength: 1024 },
+} as const;
+const sdlcSourceReferencesSchema = {
+  type: "array",
+  maxItems: 500,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: { type: "string", minLength: 1, maxLength: 1024, description: "Repository-relative source path" },
+      symbol: { type: "string", minLength: 1, maxLength: 512, description: "Optional source symbol shown in the link label" },
+      startLine: { type: "integer", minimum: 1, description: "Optional trusted one-based start line" },
+      endLine: { type: "integer", minimum: 1, description: "Optional trusted one-based end line" },
+    },
+    required: ["path"],
+  },
+} as const;
+
+function sdlcMutationVariant(
+  artifactType: "WIKI" | "BASELINE" | "PRD" | "TECH_DOC",
+  action: string,
+  required: readonly string[],
+  propertyOverrides: Record<string, unknown> = {},
+) {
+  return {
+    type: "object",
+    properties: {
+      artifactType: { const: artifactType },
+      action: { const: action },
+      ...(required.includes("sourcePaths") && action !== "archive" ? { sourcePaths: { minItems: 1 } } : {}),
+      ...propertyOverrides,
+    },
+    required: ["artifactType", "action", ...required],
+  } as const;
+}
+
+const spacesSdlcMutateArtifact: ToolDef = {
+  name: SDLC_TOOL_NAMES.mutateArtifact,
+  description:
+    "Create or mutate one trusted-repository SDLC artifact. Supports PRD/Tech Doc creation, incremental " +
+    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Trusted repository and " +
+    "execution identity is injected by the platform.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      workspaceId: { type: "string", minLength: 1 },
+      actorUserId: { type: "string", minLength: 1 },
+      executionId: { type: "string", minLength: 1 },
+      sessionId: { type: "string", minLength: 1 },
+      artifactType: { type: "string", enum: ["WIKI", "BASELINE", "PRD", "TECH_DOC"] },
+      baselineKind: {
+        type: "string",
+        enum: [...SDLC_BASELINE_KINDS],
+      },
+      setupExecutionId: { type: "string", minLength: 1 },
+      workflowExecutionId: { type: "string", minLength: 1 },
+      title: { type: "string", minLength: 1, maxLength: 255 },
+      action: {
+        type: "string",
+        enum: ["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore", "begin", "upsert_section", "finalize"],
+      },
+      sectionKey: { type: "string", minLength: 1, maxLength: 80 },
+      sectionTitle: { type: "string", minLength: 1, maxLength: 255 },
+      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
+      path: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
+      destinationPath: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
+      expectedContentHash: { type: "string", minLength: 1, maxLength: 128 },
+      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing page heading used as the section mutation target or insertion anchor" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
+      sourcePaths: sdlcSourcePathsSchema,
+      sourceReferences: sdlcSourceReferencesSchema,
+      kind: { type: "string", enum: ["PRD", "TECH_DOC"] },
+      parentCanvasId: { type: "string", minLength: 1 },
+      trackId: { type: "string", minLength: 1, description: "Optional SDLC track ID; assigns a created PRD to that track" },
+      generationCommit: { type: "string", maxLength: 255 },
+      canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
+    },
+    required: ["artifactType", "action"],
+    oneOf: [
+      sdlcMutationVariant("WIKI", "create", ["commitSha", "path", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "update", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "restore", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "archive", ["commitSha", "path", "expectedContentHash", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "replace_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
+      sdlcMutationVariant("WIKI", "insert_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
+      sdlcMutationVariant("WIKI", "remove_section", ["commitSha", "path", "expectedContentHash", "heading", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "move", ["commitSha", "path", "destinationPath", "expectedContentHash"]),
+      sdlcMutationVariant("BASELINE", "begin", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
+      sdlcMutationVariant("BASELINE", "upsert_section", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title", "sectionKey", "sectionTitle", "markdown", "sourceReferences"], { markdown: { maxLength: 1_000_000 }, sourceReferences: { minItems: 1 } }),
+      sdlcMutationVariant("BASELINE", "finalize", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
+      sdlcMutationVariant("PRD", "create", ["title", "markdown"]),
+      sdlcMutationVariant("PRD", "update", ["canvasId", "markdown"]),
+      sdlcMutationVariant("TECH_DOC", "create", ["title", "markdown", "parentCanvasId"]),
+      sdlcMutationVariant("TECH_DOC", "update", ["canvasId", "markdown"]),
+    ],
+  },
+  async handler(args, ctx) {
+    return mutateSdlcArtifact(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return mutateSdlcArtifact(args, ctx);
+  },
+};
+
+async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/baseline-drafts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    })) as {
+      artifact: {
+        canvasId: string;
+        viewAccessId?: string;
+        url?: string;
+        kind: string;
+      };
+    };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC baseline"));
+    return okCited(
+      prefixChunk(1, `SDLC baseline ${String(args["action"] ?? "updated")}`, [
+        `Canvas ID: ${artifact.canvasId}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Update SDLC baseline error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    })) as {
+      artifact: {
+        canvasId: string;
+        viewAccessId?: string;
+        url?: string;
+        kind: string;
+      };
+    };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
+    return okCited(
+      prefixChunk(1, "SDLC artifact created", [
+        `Canvas ID: ${artifact.canvasId}`,
+        `Kind: ${artifact.kind}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Create SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  const artifactType = String(args["artifactType"] ?? "");
+  const action = String(args["action"] ?? "");
+  if (artifactType === "BASELINE") {
+    if (!["begin", "upsert_section", "finalize"].includes(action)) {
+      return err("Baseline action must be begin, upsert_section, or finalize.");
+    }
+    return updateSdlcBaseline(args, ctx);
+  }
+  if (artifactType === "PRD" || artifactType === "TECH_DOC") {
+    if (action === "create") {
+      return createSdlcArtifact({ ...args, kind: artifactType }, ctx);
+    }
+    if (action === "update") {
+      try {
+        const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
+          method: "POST",
+          headers: { "x-xyne-acting-user-id": ctx.userId },
+          body: JSON.stringify({ ...args, kind: artifactType }),
+        })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
+        return ok(JSON.stringify(data.artifact));
+      } catch (e) {
+        return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return err(`${artifactType} action must be create or update.`);
+  }
+  if (artifactType !== "WIKI") return err("Unsupported SDLC artifactType.");
+  if (action === "move") {
+    return callSdlcWiki("/pages/move", {
+      executionId: args["executionId"], sessionId: args["sessionId"], repoId: args["repoId"],
+      commitSha: args["commitSha"], sourcePath: args["path"], destinationPath: args["destinationPath"],
+      expectedContentHash: args["expectedContentHash"], title: args["title"],
+    });
+  }
+  if (!["create", "update", "replace_section", "insert_section", "remove_section", "archive", "restore"].includes(action)) {
+    return err("Unsupported Wiki artifact action.");
+  }
+  const page = {
+    action,
+    path: args["path"],
+    title: args["title"],
+    markdown: args["markdown"],
+    expectedContentHash: args["expectedContentHash"],
+    heading: args["heading"],
+    sourcePaths: args["sourcePaths"] ?? [],
+    sourceReferences: args["sourceReferences"],
+  };
+  return callSdlcWiki("/pages/write", {
+    executionId: args["executionId"], sessionId: args["sessionId"], repoId: args["repoId"],
+    commitSha: args["commitSha"], page,
+  });
+}
+
+async function callSdlcWiki(path: string, args: Record<string, unknown>): Promise<ToolResult> {
+  try {
+    const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+    if (!s2sKey) return err("Internal S2S key is unavailable for the SDLC Wiki tool.");
+    const data = await spacesFetch(
+      `/api/internal/sdlc/wiki${path}`,
+      { method: "POST", body: JSON.stringify(args) },
+      { s2sKey },
+    );
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC Wiki tool error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function callSdlcArtifactHistory(
+  path: string,
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  try {
+    const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+    if (!s2sKey) return err("Internal S2S key is unavailable for SDLC artifact history.");
+    const data = await spacesFetch(
+      `/api/internal/sdlc/artifact-versions${path}`,
+      {
+        method: "POST",
+        headers: { "x-xyne-acting-user-id": ctx.userId },
+        body: JSON.stringify(args),
+      },
+      { s2sKey },
+    );
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC artifact history error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+const sdlcArtifactSelectorSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: { const: "WIKI_PAGE" },
+        path: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+          pattern: SDLC_WIKI_PATH_PATTERN,
+          description: "Current normalized relative Markdown Wiki page path",
+        },
+        includeArchived: { type: "boolean" },
+      },
+      required: ["type", "path"],
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: { const: "SDLC_CANVAS" },
+        canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Repo Knowledge, PRD, or Tech Doc Canvas ID" },
+      },
+      required: ["type", "canvasId"],
+    },
+  ],
+} as const;
+
+const spacesSdlcListArtifactVersions: ToolDef = {
+  name: SDLC_TOOL_NAMES.listArtifactVersions,
+  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, PRD, or Tech Doc. Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      selector: sdlcArtifactSelectorSchema,
+      cursor: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1, maximum: 25 },
+    },
+    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+  },
+  async handler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
+  async appHandler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
+};
+
+const spacesSdlcReadArtifactVersion: ToolDef = {
+  name: SDLC_TOOL_NAMES.readArtifactVersion,
+  description: "Read exactly one immutable version previously listed for a trusted-repository SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      selector: sdlcArtifactSelectorSchema,
+      versionId: { type: "string", minLength: 1 },
+    },
+    required: ["repoId", "workspaceId", "actorUserId", "selector", "versionId"],
+  },
+  async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
+  async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
+};
+
+const spacesSdlcListArtifacts: ToolDef = {
+  name: SDLC_TOOL_NAMES.listArtifacts,
+  description: "List current trusted-repository Wiki, Baseline, PRD, and Tech Doc artifacts. Returns bounded identity and current-state metadata without historical bodies.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      executionId: { type: "string" }, sessionId: { type: "string" },
+      kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "PRD", "TECH_DOC"] } },
+      includeArchived: { type: "boolean" },
+    },
+    required: ["repoId", "workspaceId", "actorUserId"],
+  },
+  async handler(args, ctx) {
+    return args["executionId"] && args["sessionId"]
+      ? callSdlcWiki("/pages/list", args)
+      : callSdlcArtifactHistory("/current/list", args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return args["executionId"] && args["sessionId"]
+      ? callSdlcWiki("/pages/list", args)
+      : callSdlcArtifactHistory("/current/list", args, ctx);
+  },
+};
+
+const spacesSdlcReadArtifact: ToolDef = {
+  name: SDLC_TOOL_NAMES.readArtifact,
+  description: "Read one current trusted-repository Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      selector: sdlcArtifactSelectorSchema,
+    },
+    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+  },
+  async handler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
+  async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
+};
+
+const spacesSdlcWikiVerifySources: ToolDef = {
+  name: SDLC_TOOL_NAMES.verifyWikiSources,
+  description: "Preflight a bounded batch of repository-relative source paths at one assigned abbreviated checkpoint ref. Returns the exact invalid path instead of discovering source failures during a page mutation.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
+      paths: { ...sdlcSourcePathsSchema, minItems: 1 },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "paths"],
+  },
+  async handler(args) { return callSdlcWiki("/sources/verify", args); },
+  async appHandler(args) { return callSdlcWiki("/sources/verify", args); },
+};
+
+const spacesSdlcWikiBeginCheckpoint: ToolDef = {
+  name: SDLC_TOOL_NAMES.beginWikiCheckpoint,
+  description:
+    "Begin one server-authorized checkpoint inside the assigned history window. Choose a meaningful intermediate ref or the mandatory endpoint, then serialize all page writes and finalization for that ref before beginning another checkpoint.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha"],
+  },
+  async handler(args) { return callSdlcWiki("/checkpoints/begin", args); },
+  async appHandler(args) { return callSdlcWiki("/checkpoints/begin", args); },
+};
+
+const spacesSdlcWikiFinalizeCommit: ToolDef = {
+  name: SDLC_TOOL_NAMES.finalizeWikiCommit,
+  description:
+    "Durably finalize one assigned Wiki commit after all required one-page writes succeed, or finalize it as no-op when no pages were written. This advances the commit checkpoint.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN }, outcome: { type: "string", enum: ["changes", "noop"] },
+      summary: { type: "string", minLength: 1, maxLength: 4_000 },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "outcome", "summary"],
+  },
+  async handler(args) { return callSdlcWiki("/commits/finalize", args); },
+  async appHandler(args) { return callSdlcWiki("/commits/finalize", args); },
+};
+
+// ── spaces-sdlc-create-pull-request ───────────────────────────────
+const spacesSdlcCreatePullRequest: ToolDef = {
+  name: SDLC_TOOL_NAMES.createPullRequest,
+  description:
+    "Create a draft pull request after a convention-derived safe feature branch has been pushed. " +
+    "The Spaces backend resolves its trusted execution or interactive authorization and verifies repository, " +
+    "remote commit, exact head/base, and draft state. Never use generic GitHub credentials for SDLC work.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" },
+      sessionId: { type: "string" },
+      interactiveGrant: { type: "string" },
+      conversationId: { type: "string" },
+      repoId: { type: "string" },
+      title: { type: "string", minLength: 1, maxLength: 256 },
+      body: { type: "string", maxLength: 65_536 },
+      head: { type: "string", minLength: 1, maxLength: 255 },
+      base: { type: "string", minLength: 1, maxLength: 255 },
+      commitHash: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+    },
+    required: ["repoId", "title", "head", "base", "commitHash"],
+  },
+  async handler(args) {
+    try {
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+      if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
+      const data = (await spacesFetch(
+        "/api/internal/sdlc/vcs/pull-requests",
+        { method: "POST", body: JSON.stringify(args) },
+        { s2sKey },
+      )) as {
+        pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string };
+      };
+      if (!data.pullRequest?.url || data.pullRequest.draft !== true) {
+        return err("Spaces returned an invalid draft pull request result.");
+      }
+      return ok(
+        [
+          "Draft pull request created and verified.",
+          `URL: ${data.pullRequest.url}`,
+          `Number: ${data.pullRequest.number ?? "unknown"}`,
+          `Head: ${data.pullRequest.head ?? "unknown"}`,
+          `Base: ${data.pullRequest.base ?? "unknown"}`,
+        ].join("\n"),
+      );
+    } catch (e) {
+      return err(`Create SDLC pull request error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+  async appHandler(args) {
+    return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
+  },
+};
 
 // ── spaces-emails ──────────────────────────────────────────────────
 

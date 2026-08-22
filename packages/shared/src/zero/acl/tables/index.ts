@@ -43,6 +43,8 @@ export { ReactionCountsACL } from './reaction-counts-acl';
 export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';
 export { SdlcEntityLinksACL } from './sdlc-entity-links-acl';
+export { SdlcArtifactsACL } from './sdlc-artifacts-acl';
+export { SdlcTracksACL } from './sdlc-tracks-acl';
 export { RecurringCallParticipantsACL } from './recurring-call-participants-acl';
 export { RolesACL } from './roles-acl';
 export { ResourcesACL } from './resources-acl';
