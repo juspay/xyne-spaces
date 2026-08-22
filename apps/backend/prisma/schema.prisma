@@ -2966,6 +2966,13 @@ model Canvas {
   metadata     Json? // Tags, categories, custom properties
   isCollaborative   Boolean   @default(false)
 
+  // Canvas kind: DEFAULT for normal canvases; SDLC artifact types
+  // (PRD | TECH_DOC | WIKI | <baseline kinds>) for SDLC-owned canvases
+  canvasType   String           @default("DEFAULT")
+
+  // Lifecycle: ACTIVE | DRAFT (generation in progress) | REFRESH_CANDIDATE (hidden staged refresh copy)
+  canvasStatus String           @default("ACTIVE")
+
   // Doc type - Canvas or Quarto
   docType      String           @default("Canvas")
 
@@ -2988,6 +2995,8 @@ model Canvas {
   @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)
   @@index([createdBy])
   @@index([channelId])
+  @@index([channelId, canvasType])
+  @@index([channelId, canvasType, canvasStatus])
   @@index([folderId])
   @@index([projectId])
   @@index([visibility])
@@ -3217,6 +3226,8 @@ model Repo {
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: Cascade)
   setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
   sdlcEntityLinks SdlcEntityLink[]
+  sdlcArtifacts   SdlcArtifact[]
+  sdlcTracks      SdlcTrack[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
   @@unique([workspaceId, canonicalUrl])
@@ -3248,6 +3259,51 @@ model SdlcEntityLink {
   @@index([repoId, sourceType, sourceId])
   @@index([repoId, targetType, targetId])
   @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// Provenance for SDLC-owned entities (one row per entity).
+// entityType is 'CANVAS' for now; 'TICKET' reserved for future flows.
+// sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]
+model SdlcArtifact {
+  workspaceId         String
+  artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
+  repoId              String
+  workflowExecutionId String?
+  generationCommit    String?
+  sourceReferences    String?
+  sourcePaths         String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([repoId])
+  @@index([workflowExecutionId])
+  @@index([workspaceId])
+  @@map("sdlc_artifacts")
+  @@schema("public")
+}
+
+// SDLC track: a named workstream inside a repo. Groups PRD canvases and
+// conversations via their nullable trackId columns (one track per item).
+model SdlcTrack {
+  workspaceId String
+  id          String   @id @default(cuid())
+  repoId      String
+  name        String
+  description String?
+  status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([repoId, status])
+  @@index([workspaceId])
+  @@map("sdlc_tracks")
   @@schema("public")
 }
 

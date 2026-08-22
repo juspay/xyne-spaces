@@ -4943,6 +4943,7 @@ const spacesSdlcMutateArtifact: ToolDef = {
       sourceReferences: sdlcSourceReferencesSchema,
       kind: { type: "string", enum: ["PRD", "TECH_DOC"] },
       parentCanvasId: { type: "string", minLength: 1 },
+      trackId: { type: "string", minLength: 1, description: "Optional SDLC track ID; assigns a created PRD to that track" },
       generationCommit: { type: "string", maxLength: 255 },
       canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
     },
