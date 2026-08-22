@@ -17,6 +17,11 @@ export interface ReactArtifactPayload {
   /** Declared by the agent when the app calls useXyneMutate. Drives the header
    *  badge only — it grants nothing, since there is no mutation allowlist. */
   writes?: boolean;
+  /** Declared when the app calls useXyneAgent. Drives the header badge only. */
+  invokesAgents?: boolean;
+  /** Agents the app prefers. A narrowing hint: the viewer's own access decides
+   *  what actually runs, so this can never grant anything. */
+  agents?: string[];
 }
 
 /**

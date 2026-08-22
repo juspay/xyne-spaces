@@ -103,6 +103,11 @@ const SHADCN_UI_COMPONENTS = [
 
 const RESERVED_PATH_PREFIXES = ["/components/ui/", "/lib/utils", "/lib/xyne-data", "/public/"] as const;
 
+/** Agent slugs an app may name. A short list: this is a preference, not a menu —
+ *  the viewer's own access is always the real ceiling. */
+const MAX_DECLARED_AGENTS = 4;
+const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 export interface ReactArtifactFile {
   path: string;
   content: string;
@@ -120,6 +125,12 @@ export interface ReactArtifactPayload {
   /** Set when the app calls useXyneMutate. Drives a UI badge only — it grants
    *  nothing, since any mutation the viewer may perform is callable. */
   writes?: boolean;
+  /** Set when the app calls useXyneAgent. Drives a UI badge only. */
+  invokesAgents?: boolean;
+  /** Agents the app prefers, by slug. NARROWING only: the run is authorized
+   *  against what the viewer can reach, so naming an agent here can never grant
+   *  access to it. Absent/empty means "any agent the viewer can reach". */
+  agents?: string[];
 }
 
 /** Small descriptor persisted to ChatAttachment.metadata and rendered by the inline card. */
@@ -132,6 +143,8 @@ export interface ReactArtifactManifest {
   dependencies: string[];
   dataRequirements: ReactArtifactDataRequirement[];
   writes?: boolean;
+  invokesAgents?: boolean;
+  agents?: string[];
 }
 
 /**
@@ -385,6 +398,34 @@ function parseDataRequirements(raw: unknown): ReactArtifactDataRequirement[] {
   return requirements;
 }
 
+/**
+ * Agents the app names as its preferred ones. Validated for shape only — whether
+ * a slug exists, and whether the person opening the app may use it, is decided
+ * per-viewer at dispatch time and cannot be decided here.
+ */
+function parseAgents(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) fail("`agents` must be an array of agent slugs.");
+  if (raw.length > MAX_DECLARED_AGENTS) {
+    fail(`Too many agents: ${raw.length}. The limit is ${MAX_DECLARED_AGENTS}.`);
+  }
+
+  const agents: string[] = [];
+  for (const entry of raw) {
+    const slug = asString(entry).trim();
+    if (!slug) fail("Every entry in `agents` must be a non-empty agent slug.");
+    if (!AGENT_SLUG_RE.test(slug)) {
+      fail(
+        `"${slug}" is not a valid agent slug — lowercase letters, digits and ` +
+          "hyphens only, not starting with a hyphen.",
+      );
+    }
+    if (agents.includes(slug)) fail(`Duplicate agent "${slug}".`);
+    agents.push(slug);
+  }
+  return agents;
+}
+
 export interface BuiltReactArtifact {
   payload: ReactArtifactPayload;
   manifest: ReactArtifactManifest;
@@ -415,6 +456,8 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     `Generated "${title}" with ${files.length} file(s).`;
 
   const writes = params["writes"] === true;
+  const agents = parseAgents(params["agents"]);
+  const invokesAgents = params["invokesAgents"] === true || agents.length > 0;
 
   const payload: ReactArtifactPayload = {
     version: ARTIFACT_VERSION,
@@ -425,6 +468,8 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     dependencies,
     dataRequirements,
     ...(writes ? { writes: true } : {}),
+    ...(invokesAgents ? { invokesAgents: true } : {}),
+    ...(agents.length ? { agents } : {}),
   };
 
   const manifest: ReactArtifactManifest = {
@@ -436,6 +481,8 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     dependencies: Object.keys(dependencies),
     dataRequirements,
     ...(writes ? { writes: true } : {}),
+    ...(invokesAgents ? { invokesAgents: true } : {}),
+    ...(agents.length ? { agents } : {}),
   };
 
   return { payload, manifest, summary };
@@ -490,11 +537,20 @@ export const createReactArtifactTool: ToolDefinition = {
     "permitted to see nothing. Dates arrive as epoch-millisecond NUMBERS: use `new Date(row.createdAt)`.\n" +
     `      Named sources — source: { "kind": "query", "query": …, "args": … }:\n` +
     Object.entries(ALLOWED_NAMED_QUERIES)
-      .map(([name, meta]) => `        • ${name} ${meta.argsHint}${meta.note ? ` — ${meta.note}` : ""}`)
+      .map(
+        ([name, meta]) =>
+          `        • ${name} ${meta.argsHint}${meta.note ? ` — ${meta.note}` : ""}` +
+          (meta.fieldsHint ? `\n            fields: ${meta.fieldsHint}` : ""),
+      )
       .join("\n") +
+    "\n      Rows come back with EXACTLY these fields — do not invent others, and do not " +
+    "assume a field exists because it would be convenient. User ids (assignedTo, createdBy) " +
+    "are opaque ids: fetch the `user` model via an ast source and join on id to show names.\n" +
     "\n" +
     `      Or a direct query — source: { "kind": "ast", "model": …, "where": …, "orderBy": …, "take": … } ` +
-    `over: ${[...ALLOWED_AST_MODELS].sort().join(", ")} (findMany or count, take <= ${MAX_AST_TAKE}).\n\n` +
+    `over: ${[...ALLOWED_AST_MODELS].sort().join(", ")} (findMany or count, take <= ${MAX_AST_TAKE}). ` +
+    `\`orderBy\` must be an ARRAY of single-key objects — [{"createdAt":"desc"}], NOT {"createdAt":"desc"}. ` +
+    "`where` may traverse relations, e.g. { conversation: { channel: { scopeType: \"DM\" } } }.\n\n" +
     "WRITES — an app can also CHANGE data, using the same preloaded module:\n" +
     "        import { useXyneMutate } from './lib/xyne-data';\n" +
     "        const { mutate, status, error } = useXyneMutate();\n" +
@@ -507,6 +563,37 @@ export const createReactArtifactTool: ToolDefinition = {
     "user action such as a click — NEVER during render, and NEVER in an effect on mount. " +
     "Set `writes: true` when the app calls it, so the user is told it can change things. " +
     "Reads you declared refresh automatically after a successful write.\n\n" +
+    "AGENTS — an app can also hand work to a full AI agent, for anything that needs " +
+    "judgement rather than a query: summarising, drafting, triaging, explaining, answering " +
+    "a question about what the app is showing.\n" +
+    "        import { useXyneAgent } from './lib/xyne-data';\n" +
+    "        const { run, cancel, status, output, invocations, error } = useXyneAgent({ key: 'triage' });\n" +
+    "        await run(`Group these ${tickets.length} tickets by theme: ${summary}`);\n" +
+    "      The agent runs AS THE PERSON USING THE APP, using an agent they already have " +
+    "access to, so it can only see and do what they could themselves.\n" +
+    "      PUT THE DATA IN THE PROMPT. You already loaded it via dataRequirements, so build a " +
+    "compact digest and include it — the agent then answers in ONE turn, in seconds. Asking the " +
+    "agent to go and find the data itself (\"look up my tickets\", \"find my DMs\") makes it " +
+    "re-discover with tools: minutes instead of seconds, for rows the app is already holding. " +
+    "Trim the digest to what the question needs — recent items, short fields, no ids the model " +
+    "will not use.\n" +
+    "      A run takes MINUTES, not seconds. Design for that or the app will look broken:\n" +
+    "        • render every `status` — idle, starting, running, completed, failed, cancelled;\n" +
+    "        • show progress while running. `output` streams in as it is written, and " +
+    "`invocations` lists the tools the agent is using (toolName, args, result), so show one " +
+    "or both rather than a bare spinner;\n" +
+    "        • offer cancel() on anything long.\n" +
+    "      The run CONTINUES IF THE APP IS CLOSED and is restored when the user comes back — " +
+    "so on mount, just render whatever `status` and `output` you are given; do NOT start a " +
+    "run to repopulate them.\n" +
+    "      `key` names a conversation: repeat run() calls on the same key CONTINUE that " +
+    "thread, so the agent remembers earlier turns and the user can ask follow-ups. Use " +
+    "different keys for unrelated tasks. Only ONE run per key at a time — a second call " +
+    "while one is running is refused, so disable the button on `starting`/`running`.\n" +
+    "      Only ever call run() from a real user action such as a click — NEVER during " +
+    "render, and NEVER in an effect on mount: it is slow and it costs real money. " +
+    "Set `invokesAgents: true` when the app calls it. Optionally name preferred agents in " +
+    "`agents` — a hint only; a viewer without access to them sees the app say so.\n\n" +
     "Any npm package can be listed in `dependencies` ({name: version}, \"latest\" if the version " +
     "does not matter) — it is installed into the preview. Prefer ones already loaded (recharts for " +
     "charts, lucide-react for icons, date-fns, clsx) since they cost nothing, and prefer packages that " +
@@ -554,6 +641,20 @@ export const createReactArtifactTool: ToolDefinition = {
         description:
           "Set to true when the app calls useXyneMutate() to change data. Shows the user a " +
           "badge that the app can modify their workspace.",
+      },
+      invokesAgents: {
+        type: "boolean",
+        description:
+          "Set to true when the app calls useXyneAgent() to run an AI agent. Shows the user a " +
+          "badge that the app can start agent runs.",
+      },
+      agents: {
+        type: "array",
+        description:
+          "Optional agent slugs this app prefers, most-preferred first. A narrowing hint only — " +
+          `the app always runs as the viewer, using agents THEY can access. Max ${MAX_DECLARED_AGENTS}. ` +
+          "Omit unless the app is built around a specific agent.",
+        items: { type: "string" },
       },
       dataRequirements: {
         type: "array",

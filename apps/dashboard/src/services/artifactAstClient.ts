@@ -16,13 +16,33 @@ interface AstQueryError {
   message?: string;
 }
 
+/**
+ * The gateway's schema requires `orderBy` to be an ARRAY; a bare object is
+ * rejected with a 400 before the query ever runs.
+ *
+ * Agents write the idiomatic Prisma single-object form (`{ createdAt: 'desc' }`)
+ * because that is what the ORM accepts everywhere else, and the artifact
+ * validator has always allowed either — so a generated app would 400 on a source
+ * that looked correct. Normalising here rather than tightening the validator is
+ * deliberate: payloads are persisted, so apps saved before this fix must keep
+ * working. The two forms are equivalent to the gateway.
+ */
+function normalizeOrderBy(
+  orderBy: ArtifactAstSource['orderBy'],
+): Array<Record<string, unknown>> | undefined {
+  if (!orderBy) return undefined;
+  const list = Array.isArray(orderBy) ? orderBy : [orderBy];
+  return list.length > 0 ? list : undefined;
+}
+
 export async function executeArtifactAstQuery(source: ArtifactAstSource): Promise<unknown> {
+  const orderBy = normalizeOrderBy(source.orderBy);
   try {
     const { data } = await apiInstance.post<AstQueryResponse>('/query/claw', {
       model: source.model,
       operation: source.operation ?? 'findMany',
       ...(source.where ? { where: source.where } : {}),
-      ...(source.orderBy ? { orderBy: source.orderBy } : {}),
+      ...(orderBy ? { orderBy } : {}),
       ...(source.take !== undefined ? { take: source.take } : {}),
     });
     return data?.data ?? null;

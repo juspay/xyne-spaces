@@ -8,7 +8,18 @@ import {
   type MutableRefObject,
   type ReactElement,
 } from 'react';
-import { Check, Code2, Loader2, Maximize2, Pencil, Play, RefreshCw, Save, X } from 'lucide-react';
+import {
+  Check,
+  Code2,
+  Loader2,
+  Maximize2,
+  Pencil,
+  Play,
+  RefreshCw,
+  Save,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { useCacConfig } from '@xyne/shared/hooks';
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
@@ -22,6 +33,12 @@ import {
 import type { ReactArtifactPayload, ReactArtifactViewProps } from './ReactArtifact.types';
 import { ArtifactCodeView } from './ArtifactCodeView';
 import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataBridge';
+import { useArtifactAgentBridge } from './useArtifactAgentBridge';
+import {
+  DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
+  REACT_ARTIFACT_AGENT_CAC_KEY,
+  type ReactArtifactAgentCacConfig,
+} from './reactArtifactAgentCacConfig';
 import {
   REACT_ARTIFACT_WRITE_CAC_KEY,
   DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
@@ -79,12 +96,18 @@ const ArtifactSandpack = memo(
     theme,
     refreshRef,
     canWrite,
+    canInvokeAgents,
     appId,
+    attachmentId,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
     canWrite: boolean;
+    canInvokeAgents: boolean;
     appId?: string;
+    /** Identifies an artifact that has not been saved yet, so it can still run
+     *  agents from the chat thread it was generated in. */
+    attachmentId?: string;
     /** Stable ref object — passing a changing prop here would remount the sandbox. */
     refreshRef: MutableRefObject<(() => Promise<void>) | null>;
   }): ReactElement => {
@@ -99,6 +122,15 @@ const ArtifactSandpack = memo(
       ...(appId ? { appId } : {}),
       previewRef,
       refreshRef,
+    });
+
+    // Separate from the data bridge: agent runs outlive the app and must not be
+    // torn down with it, and an agent-only app declares no data requirements.
+    useArtifactAgentBridge({
+      canInvokeAgents,
+      ...(appId ? { appId } : {}),
+      ...(attachmentId ? { attachmentId } : {}),
+      previewRef,
     });
 
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
@@ -149,6 +181,10 @@ export const ReactArtifactView = ({
   const { config: writeConfig } = useCacConfig<ReactArtifactWriteCacConfig>({
     key: REACT_ARTIFACT_WRITE_CAC_KEY,
     fallbackConfig: DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
+  });
+  const { config: agentConfig } = useCacConfig<ReactArtifactAgentCacConfig>({
+    key: REACT_ARTIFACT_AGENT_CAC_KEY,
+    fallbackConfig: DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
   });
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId } = artifact;
@@ -249,6 +285,15 @@ export const ReactArtifactView = ({
               ))}
             </div>
           )}
+          {payload.invokesAgents && agentConfig.enabled && (
+            <span
+              className='flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400'
+              title='This app can run an AI agent as you. Runs continue if you close the app.'
+            >
+              <Sparkles className='h-3 w-3' aria-hidden='true' />
+              Uses AI agents
+            </span>
+          )}
           {payload.writes && writeConfig.enabled && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400'
@@ -344,7 +389,9 @@ export const ReactArtifactView = ({
           theme={theme}
           refreshRef={refreshRef}
           canWrite={writeConfig.enabled}
+          canInvokeAgents={agentConfig.enabled}
           {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
+          {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
         />
       </div>
       {fill && tab === 'code' && (

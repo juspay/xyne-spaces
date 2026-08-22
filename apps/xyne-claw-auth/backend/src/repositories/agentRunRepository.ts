@@ -92,7 +92,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "app";
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
