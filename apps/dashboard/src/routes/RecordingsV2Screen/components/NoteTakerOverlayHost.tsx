@@ -112,6 +112,9 @@ export function NoteTakerOverlayHost(): ReactElement {
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
             onMarkMoment={markMoment}
             onMinimize={isElectron ? handleMinimize : undefined}
+            onTitleUpdated={(nextTitle: string) =>
+              sendRecordingEvent({ type: 'setTitle', title: nextTitle })
+            }
           />
         )}
       </AnimatePresence>

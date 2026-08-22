@@ -14,13 +14,14 @@ import {
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
 import {
-  DEFAULT_RECORDING_TITLE,
   logRecordingError,
+  resolveRecordingTitle,
   type RecordingTitleState,
 } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
 import { RecordingParticipants } from './RecordingParticipants';
+import { useEditableRecordingTitle } from '../useEditableRecordingTitle';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
@@ -72,9 +73,6 @@ export const RecordingDetailV2Header = ({
 }: RecordingDetailV2HeaderProps): ReactElement => {
   const navigate = useNavigate();
   const currentUser = useSelf();
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState(recording.title);
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
   const labelsUpdateSeqRef = useRef(0);
@@ -86,7 +84,22 @@ export const RecordingDetailV2Header = ({
   const displayTitle =
     titleState && titleState.kind !== 'generating'
       ? titleState.text
-      : recording.title?.trim() || DEFAULT_RECORDING_TITLE;
+      : resolveRecordingTitle(recording.title);
+  const {
+    isEditingTitle,
+    editedTitle,
+    isSavingTitle,
+    handleStartEdit,
+    handleSaveTitle,
+    handleTitleChange,
+    handleTitleKeyDown,
+  } = useEditableRecordingTitle({
+    recordingId: recording.externalId,
+    title: recording.title,
+    onTitleUpdated,
+    disabled: isGeneratingTitle,
+    context: 'RecordingDetailV2Header',
+  });
   // A still-running recording has no length yet, so the meta line is just when it started.
   const durationMs =
     recording.durationMs ??
@@ -99,37 +112,6 @@ export const RecordingDetailV2Header = ({
   ]
     .filter(Boolean)
     .join(' · ');
-
-  const handleSaveTitle = async (): Promise<void> => {
-    if (isSavingTitle) return;
-
-    const trimmed = editedTitle.trim();
-    if (!trimmed) {
-      setEditedTitle(recording.title);
-      setIsEditingTitle(false);
-      toast.error('Title cannot be empty');
-      return;
-    }
-
-    if (trimmed === recording.title) {
-      setIsEditingTitle(false);
-      return;
-    }
-
-    setIsSavingTitle(true);
-    try {
-      await recordingService.updateRecordingTitle(recording.externalId, trimmed);
-      onTitleUpdated(trimmed);
-      toast.success('Title updated');
-    } catch (err) {
-      logRecordingError('RecordingDetailV2Header.updateTitle', err);
-      toast.error('Failed to update title');
-      setEditedTitle(recording.title);
-    } finally {
-      setIsSavingTitle(false);
-      setIsEditingTitle(false);
-    }
-  };
 
   /** Labels apply optimistically and roll back if the recording rejects the write. */
   const handleLabelsChange = async (labels: string[]): Promise<void> => {
@@ -179,28 +161,6 @@ export const RecordingDetailV2Header = ({
     }
   };
 
-  const handleCancelEdit = (): void => {
-    if (isSavingTitle) return;
-    setEditedTitle(recording.title);
-    setIsEditingTitle(false);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      event.currentTarget.blur();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      handleCancelEdit();
-    }
-  };
-
-  const handleStartEdit = (): void => {
-    if (isEditingTitle || isSavingTitle || isGeneratingTitle) return;
-    setEditedTitle(recording.title);
-    setIsEditingTitle(true);
-  };
-
   return (
     <header className='mb-6'>
       {/* Breadcrumb */}
@@ -248,10 +208,10 @@ export const RecordingDetailV2Header = ({
                 <input
                   type='text'
                   value={editedTitle}
-                  onChange={event => setEditedTitle(event.target.value)}
+                  onChange={event => handleTitleChange(event.target.value)}
                   onBlur={() => void handleSaveTitle()}
                   onFocus={event => event.currentTarget.select()}
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={handleTitleKeyDown}
                   disabled={isSavingTitle}
                   className='absolute inset-0 w-full bg-transparent border-0 p-0 text-3xl font-medium text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
                   // eslint-disable-next-line jsx-a11y/no-autofocus
