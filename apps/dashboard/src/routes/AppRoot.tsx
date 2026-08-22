@@ -1364,15 +1364,27 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'sdlc',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId/:section',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'team-intelligence',

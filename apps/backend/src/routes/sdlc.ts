@@ -289,16 +289,4 @@ router.delete(
   })
 );
 
-router.post(
-  '/repositories/:repoId/baseline/:canvasId/approve',
-  route(async (req, res) => {
-    const approval = await sdlcHub.approveBaseline(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.canvasId
-    );
-    res.status(200).json({ success: true, approval });
-  })
-);
-
 export default router;

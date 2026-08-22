@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
@@ -19,6 +20,7 @@ interface PendingAction {
   targetUserIds?: string[];
   callDisplayName?: string;
   conversationId?: string;
+  sdlcLink?: SdlcCallLink;
 }
 
 interface UseCallActionsOptions {
@@ -26,6 +28,7 @@ interface UseCallActionsOptions {
   targetUserIds?: string[] | undefined;
   callDisplayName?: string | undefined; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string | undefined; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
 }
 
 interface UseCallActionsReturn {
@@ -48,6 +51,7 @@ export const useCallActions = ({
   targetUserIds,
   callDisplayName,
   conversationId,
+  sdlcLink,
 }: UseCallActionsOptions): UseCallActionsReturn => {
   const zero = useZero();
   const { isMobile } = usePlatform();
@@ -119,6 +123,7 @@ export const useCallActions = ({
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
+          ...(action.sdlcLink && { sdlcLink: action.sdlcLink }),
         });
       }
     }
@@ -162,6 +167,7 @@ export const useCallActions = ({
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
           ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
         };
         roomActor.send({ type: 'DISCONNECT' });
       } else {
@@ -181,6 +187,7 @@ export const useCallActions = ({
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
           ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
         });
       }
     }
