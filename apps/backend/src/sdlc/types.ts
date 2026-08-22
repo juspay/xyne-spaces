@@ -50,12 +50,6 @@ export interface SdlcLink {
   relationType: string;
 }
 
-export interface ApprovedSdlcBaseline {
-  canvasId: string;
-  knowledgeDocumentId: string;
-  allBaselinesApproved: boolean;
-}
-
 export interface SdlcHub {
   attachRepository(actor: SdlcActor, input: AttachSdlcRepositoryInput): Promise<SdlcRepositoryHub>;
   setupRepository(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
@@ -82,9 +76,4 @@ export interface SdlcHub {
   ): Promise<SdlcArtifact>;
   linkContext(actor: SdlcActor, repoId: string, input: CreateSdlcLinkInput): Promise<SdlcLink>;
   unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void>;
-  approveBaseline(
-    actor: SdlcActor,
-    repoId: string,
-    canvasId: string
-  ): Promise<ApprovedSdlcBaseline>;
 }

@@ -116,6 +116,7 @@ export interface Canvas {
   createdAt: number;
   updatedAt: number;
   metadata?: Record<string, unknown> | KnowledgeCanvasMetadata;
+  sdlcArtifact?: { artifactType?: string; artifactStatus?: string } | null;
   accessLevel?: CanvasRole;
   docType?: DocType;
   folder?: CanvasFolder | null;
