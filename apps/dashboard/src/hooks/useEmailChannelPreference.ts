@@ -36,6 +36,7 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug,
       metricsEnabled,
       frtStageNames,
+      appWebhookDeliveryEnabled,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -48,6 +49,7 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug?: string | null;
       metricsEnabled?: boolean;
       frtStageNames?: string | null;
+      appWebhookDeliveryEnabled?: boolean;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -64,6 +66,7 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
           ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+          ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
         }),
       );
       return Promise.resolve();
