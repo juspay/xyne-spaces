@@ -2,10 +2,7 @@ import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { SDLC_APP_BASE_PATH } from '../../config';
-import { useSelectedAgent } from '../../hooks/useSelectedAgent';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSdlcFrame } from './SdlcFrameContext';
-import { shouldStartFreshSdlcAssistant } from './sdlcChatPolicy';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 
 /**
@@ -23,7 +20,6 @@ const SdlcFrameHost = (): ReactElement | null => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -72,49 +68,6 @@ const SdlcFrameHost = (): ReactElement | null => {
         return;
       }
 
-      // The lane bundle renders chrome-free, so the Ask AI panel lives out here.
-      // Freshness is decided against this document's actor, not the frame's — the
-      // frame's xyneAIActor is a different instance and never holds the thread.
-      if (message.type === SDLC_FRAME_MESSAGE.askAi) {
-        const {
-          channelId,
-          repoId,
-          repoName,
-          forceFreshChat,
-          canvasInfo,
-          initialQuery,
-          initialContextSelections,
-          threadInfo,
-        } = message.payload;
-        const snapshot = xyneAIActor.getSnapshot();
-        const actorResearchContext = snapshot.context.researchContext;
-        const startFreshChat =
-          forceFreshChat ||
-          shouldStartFreshSdlcAssistant({
-            actorOpen: snapshot.matches('open'),
-            selectedAgentSlug,
-            actorChannelId: snapshot.context.channelId,
-            repositoryChannelId: channelId,
-            actorRepositoryId:
-              actorResearchContext?.type === 'repository' ? actorResearchContext.id : null,
-            repositoryId: repoId,
-          });
-        setSelectedAgentSlug('sdlc-agent');
-        xyneAIActor.send({
-          type: 'OPEN',
-          contextType: 'chat',
-          contextId: channelId,
-          channelId,
-          startFreshChat,
-          ...(canvasInfo && { canvasInfo }),
-          researchContext: { type: 'repository', id: repoId, name: repoName },
-          ...(initialQuery !== undefined && { initialQuery }),
-          ...(initialContextSelections && { initialContextSelections }),
-          ...(threadInfo && { threadInfo }),
-        });
-        return;
-      }
-
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
         // Timestamp forces a fresh document rather than a cached one. JS cannot
         // request a true cache-bypassing reload.
@@ -140,15 +93,7 @@ const SdlcFrameHost = (): ReactElement | null => {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [
-    location.pathname,
-    location.search,
-    navigate,
-    selectedAgentSlug,
-    setSelectedAgentSlug,
-    viewport,
-    workspaceId,
-  ]);
+  }, [location.pathname, location.search, navigate, viewport, workspaceId]);
 
   // parent → frame
   useEffect(() => {

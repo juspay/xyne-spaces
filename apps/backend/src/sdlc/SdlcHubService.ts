@@ -16,6 +16,7 @@ import {
   type AttachSdlcRepositoryInput,
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
+  type CreateSdlcTrackInput,
   type UpdateSdlcBaselineDraftInput,
   type UpdateSdlcClawArtifactInput,
 } from '@xyne/shared';
@@ -55,10 +56,7 @@ import type {
 } from './types';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
-import {
-  resolveSdlcSourceReferenceTokens,
-  type SdlcSourceReference,
-} from './sdlcSourceReferences';
+import { resolveSdlcSourceReferenceTokens, type SdlcSourceReference } from './sdlcSourceReferences';
 import { sdlcVcs } from './vcs';
 
 const SDLC_FOLDERS = ['Baseline', 'PRDs', 'Tech Docs'] as const;
@@ -747,7 +745,7 @@ export class SdlcHubService implements SdlcHub {
               },
             },
           });
-          if (input.kind === 'PRD' && input.trackId) {
+          if ((input.kind === 'PRD' || input.kind === 'TECH_DOC') && input.trackId) {
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
@@ -1247,7 +1245,7 @@ export class SdlcHubService implements SdlcHub {
     const content = await convertMarkdownToBlockNote(resolved.markdown);
     return commitAndSyncCanvasArtifact(
       () =>
-        this.prisma.$transaction(async tx => {
+        this.prisma.$transaction(async (tx) => {
           const canvas = await tx.canvas.update({
             where: { id: existing.id },
             data: {
@@ -1304,6 +1302,47 @@ export class SdlcHubService implements SdlcHub {
       const link = await this.prisma.sdlcEntityLink.create({
         data: { ...input, workspaceId: actor.workspaceId, repoId, createdBy: actor.userId },
       });
+      // Propagate the source artifact's track onto the ticket so the ticket shows
+      // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
+      if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
+        const trackLink = await this.prisma.sdlcEntityLink.findFirst({
+          where: {
+            repoId,
+            sourceType: 'TRACK',
+            targetType: 'CANVAS',
+            targetId: input.sourceId,
+            relationType: 'TRACK_ITEM',
+          },
+          select: { sourceId: true },
+        });
+        if (trackLink) {
+          try {
+            await this.prisma.sdlcEntityLink.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                repoId,
+                sourceType: 'TRACK',
+                sourceId: trackLink.sourceId,
+                targetType: 'TICKET',
+                targetId: input.targetId,
+                relationType: 'TRACK_ITEM',
+                createdBy: actor.userId,
+              },
+            });
+          } catch (trackError) {
+            // The ticket may already belong to the track; the unique constraint
+            // makes this idempotent. Any other error must not fail the primary link.
+            if (
+              !(
+                trackError instanceof Prisma.PrismaClientKnownRequestError &&
+                trackError.code === 'P2002'
+              )
+            ) {
+              throw trackError;
+            }
+          }
+        }
+      }
       return link;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -1311,6 +1350,37 @@ export class SdlcHubService implements SdlcHub {
       }
       throw error;
     }
+  }
+
+  async listTracks(actor: SdlcActor, repoId: string) {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    return this.prisma.sdlcTrack.findMany({
+      where: { repoId: repo.id },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async createTrack(actor: SdlcActor, input: CreateSdlcTrackInput) {
+    const repo = await this.requireRepositoryRole(actor, input.repoId, false);
+    return this.prisma.sdlcTrack.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        repoId: repo.id,
+        name: input.name,
+        ...(input.description ? { description: input.description } : {}),
+        status: 'ACTIVE',
+        createdBy: actor.userId,
+      },
+      select: { id: true, name: true, description: true, status: true },
+    });
   }
 
   async unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void> {
@@ -1406,11 +1476,9 @@ export class SdlcHubService implements SdlcHub {
   }): Promise<{ markdown: string; sourceReferences: SdlcSourceReference[] }> {
     const requested = input.sourceReferences ?? [];
     await Promise.all([
-      sdlcVcs.verifySourcePaths(
-        input.repoId,
-        input.generationCommit,
-        [...new Set(requested.map(reference => reference.path))]
-      ),
+      sdlcVcs.verifySourcePaths(input.repoId, input.generationCommit, [
+        ...new Set(requested.map((reference) => reference.path)),
+      ]),
       sdlcVcs.verifySourceRanges(input.repoId, input.generationCommit, requested),
     ]);
     return {
@@ -1420,7 +1488,7 @@ export class SdlcHubService implements SdlcHub {
         commitSha: input.generationCommit,
         references: requested,
       }),
-      sourceReferences: requested.map(reference => ({
+      sourceReferences: requested.map((reference) => ({
         ...reference,
         commitSha: input.generationCommit,
       })),
