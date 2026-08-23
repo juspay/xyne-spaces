@@ -10,12 +10,15 @@ import {
   ChannelVisibility,
   SDLC_BASELINE_COUNT,
   WorkspaceRole,
+  normalizeChannelName,
+  validateChannelName,
   type AttachSdlcRepositoryInput,
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
   type UpdateSdlcBaselineDraftInput,
   type UpdateSdlcClawArtifactInput,
 } from '@xyne/shared';
+import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcQueue } from '@/queues/sdlcQueue';
@@ -66,6 +69,7 @@ import {
 import { sdlcVcs } from './vcs';
 
 const SDLC_FOLDERS = ['Baseline', 'PRDs', 'Tech Docs'] as const;
+const channelRepository = new ChannelRepository();
 type TransactionClient = Prisma.TransactionClient;
 
 export class SdlcHubService implements SdlcHub {
@@ -77,7 +81,11 @@ export class SdlcHubService implements SdlcHub {
   ): Promise<SdlcRepositoryHub> {
     const parsedRepository = sdlcVcs.parseRepository('GITHUB', input.url);
     const canonicalUrl = parsedRepository.canonicalUrl;
-    const name = input.name?.trim() || parsedRepository.name;
+    const name = normalizeChannelName(input.name?.trim() || parsedRepository.name);
+    const nameError = validateChannelName(name);
+    if (nameError) {
+      throw new AppError(nameError, 400);
+    }
 
     try {
       const repository = await this.prisma.$transaction(async (tx) => {
@@ -98,6 +106,10 @@ export class SdlcHubService implements SdlcHub {
           throw new AppError('Repository already has an SDLC hub in this workspace', 409);
         }
 
+        if (await channelRepository.checkDuplicateName(name, actor.workspaceId)) {
+          throw new AppError(`Channel with name "${name}" already exists.`, 409);
+        }
+
         const repoId = randomUUID();
         const channelId = randomUUID();
         const now = new Date();
@@ -105,9 +117,9 @@ export class SdlcHubService implements SdlcHub {
         await tx.channel.create({
           data: {
             id: channelId,
-            name: `${name} · SDLC`,
+            name,
             description: `Private SDLC workspace for ${name}`,
-            type: ChannelType.DEFAULT,
+            type: ChannelType.SDLC,
             scopeType: ChannelScopeType.DEFAULT,
             visibility: ChannelVisibility.PRIVATE,
             createdBy: actor.userId,
@@ -118,7 +130,6 @@ export class SdlcHubService implements SdlcHub {
             showTicketsTabTicketsInChat: false,
             metadata: {
               surface: 'SDLC',
-              hiddenFromChat: true,
               repoId,
             },
             channelStats: {

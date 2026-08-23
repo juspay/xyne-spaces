@@ -613,6 +613,17 @@ export interface SdlcWikiCanvasMetadata {
 
 export interface SdlcChannelMetadata {
   surface: "SDLC";
-  hiddenFromChat: true;
   repoId: string;
+  hiddenFromChat?: true;
+}
+
+export function inferRepositoryNameFromUrl(raw: string): string | null {
+  const value = raw.trim().replace(/^git@([^:]+):/, "https://$1/");
+  const path = value.includes("://") ? value.split("://")[1] : value;
+  const segments = (path ?? "")
+    .split(/[?#]/)[0]!
+    .replace(/\.git$/i, "")
+    .split("/")
+    .filter(Boolean);
+  return segments.length >= 3 ? segments.at(-1)! : null;
 }
