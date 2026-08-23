@@ -620,8 +620,9 @@ export class TicketService {
       totalRemoved += toRemove.length;
     }
 
+    const safeWorkspaceId = workspaceId.replace(/[\r\n]/g, '');
     logger.info(
-      `[TicketService] bulkUpdateTicketTags workspace=${workspaceId} requested=${uniqueIds.length} updated=${updated.length} unchanged=${unchanged.length} skipped=${skipped.length} +${totalAdded} -${totalRemoved}`,
+      `[TicketService] bulkUpdateTicketTags workspace=${safeWorkspaceId} requested=${uniqueIds.length} updated=${updated.length} unchanged=${unchanged.length} skipped=${skipped.length} +${totalAdded} -${totalRemoved}`,
     );
 
     return { updated, unchanged, skipped, totalAdded, totalRemoved };
