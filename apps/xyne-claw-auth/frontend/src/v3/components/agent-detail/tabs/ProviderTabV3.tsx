@@ -723,7 +723,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
             <p className="mt-1.5 text-[12px] text-xyne-fg-secondary">
               {providerView === "standard"
                 ? "Pick the providers that run this agent. They're tried in order — top first."
-                : "What runs when fast mode is on. Defaults to the standard setup; give fast mode its own providers if you want."}
+                : "Providers used when fast mode is on."}
             </p>
           </div>
           {/* Standard vs. fast mode — two provider setups for the one agent. */}
@@ -919,35 +919,20 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   : "border-xyne-border bg-xyne-surface-subtle"
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[13px] font-medium text-xyne-fg-primary">
-                    <LightningIcon size={14} weight={fastMode ? "fill" : "bold"} className={fastMode ? "text-amber-500" : "text-xyne-fg-muted"} />
-                    Fast mode by default
-                  </div>
-                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                    {fastMode
-                      ? "On — every run of this agent starts in fast mode unless the chat toggle turns it off."
-                      : "Off — runs start at standard speed; users can switch fast mode on per chat from the composer."}
-                    {" "}On a Claude credential running Claude Opus 5 / Opus 4.8, fast mode also uses Anthropic's fast tier (premium pricing).
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-[13px] font-medium text-xyne-fg-primary">
+                  <LightningIcon size={14} weight={fastMode ? "fill" : "bold"} className={fastMode ? "text-amber-500" : "text-xyne-fg-muted"} />
+                  Turn on fast mode by default
                 </div>
-                <Switch checked={fastMode} onChange={setFastMode} ariaLabel="Fast mode by default" />
+                <Switch checked={fastMode} onChange={setFastMode} ariaLabel="Turn on fast mode by default" />
               </div>
             </div>
 
             {/* Which providers serve fast-mode runs. Inherit (default) = the
                 standard setup; custom = its own order + optional model pins. */}
             <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[13px] font-medium text-xyne-fg-primary">Providers in fast mode</div>
-                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                    {fastProfileMode === "inherit"
-                      ? "Same as standard — fast mode runs on the standard providers and credentials above."
-                      : "Custom — fast mode has its own provider order. Credentials are shared with standard mode; pin a different model per provider if you want."}
-                  </p>
-                </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[13px] font-medium text-xyne-fg-primary">Providers in fast mode</div>
                 <div
                   role="radiogroup"
                   aria-label="Which providers fast mode runs on"
