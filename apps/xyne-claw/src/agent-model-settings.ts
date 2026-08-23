@@ -14,6 +14,12 @@
  *                               // requires temperature=1 with extended thinking)
  *     maxTokens?: number        // max output tokens (default 16384)
  *     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high"
+ *     speed?: "standard" | "fast"
+ *                               // provider fast mode (Anthropic `speed: "fast"`,
+ *                               // Opus 5 / 4.8 on a direct Claude credential).
+ *                               // Same credential + model, faster tier. NOT the
+ *                               // top-level agentConfig.fastMode tool-catalog
+ *                               // flag — see model-speed.ts
  *   }
  *
  *   config.outputFormat = {
@@ -30,6 +36,7 @@
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { parseModelSpeed, type ModelSpeed } from "./model-speed.js";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
 export type ModelSettingsThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -39,6 +46,7 @@ export interface AgentModelSettings {
   temperature?: number | undefined;
   maxTokens?: number | undefined;
   thinkingLevel?: ModelSettingsThinkingLevel | undefined;
+  speed?: ModelSpeed | undefined;
 }
 
 // Clamps mirror the control-plane validation (claw-auth routes/agents.ts) so a
@@ -65,6 +73,9 @@ export function parseModelSettings(agentConfig: Record<string, unknown> | undefi
   if (typeof r["thinkingLevel"] === "string" && (THINKING_LEVELS as readonly string[]).includes(r["thinkingLevel"])) {
     out.thinkingLevel = r["thinkingLevel"] as ModelSettingsThinkingLevel;
   }
+
+  const speed = parseModelSpeed(r["speed"]);
+  if (speed) out.speed = speed;
 
   return Object.keys(out).length > 0 ? out : undefined;
 }

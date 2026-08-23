@@ -18,7 +18,7 @@
 import { writeAuditLog } from "./audit.js";
 
 /** The modelSettings keys we track. Mirrors agent-config-validation.ts. */
-export const AUDITED_MODEL_SETTING_KEYS = ["model", "temperature", "maxTokens", "thinkingLevel"] as const;
+export const AUDITED_MODEL_SETTING_KEYS = ["model", "temperature", "maxTokens", "thinkingLevel", "speed"] as const;
 export type AuditedModelSettingKey = (typeof AUDITED_MODEL_SETTING_KEYS)[number];
 
 export type ModelSettingsSnapshot = Record<AuditedModelSettingKey, unknown>;
@@ -35,6 +35,7 @@ export function readModelSettingsSnapshot(config: unknown): ModelSettingsSnapsho
     temperature: ms["temperature"],
     maxTokens: ms["maxTokens"],
     thinkingLevel: ms["thinkingLevel"],
+    speed: ms["speed"],
   };
 }
 

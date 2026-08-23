@@ -52,6 +52,10 @@ interface ModelSettings {
   temperature?: number;
   maxTokens?: number;
   thinkingLevel?: string;
+  /** Provider fast mode (Anthropic `speed: "fast"`). Edited in the "Select
+   *  providers" card above, not here — this row only preserves it on save so
+   *  the two editors don't clobber each other's modelSettings. */
+  speed?: "standard" | "fast";
 }
 
 interface Props {
@@ -128,6 +132,8 @@ export function SpacesDefaultRowV3({ agent }: Props) {
       settings.maxTokens = m;
     }
     if (thinkingLevel) settings.thinkingLevel = thinkingLevel;
+    // Fast mode is owned by the provider card above — carry it through untouched.
+    if (readSettings().speed === "fast") settings.speed = "fast";
     if (thinkingConflict) {
       showSnackbar({ variant: "error", title: 'Temperature requires thinking "Off" — thinking models ignore temperature' });
       return;

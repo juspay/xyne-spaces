@@ -45,6 +45,7 @@ import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
@@ -306,6 +307,14 @@ interface DebugThinkingConfiguration {
   wireMode: string;
 }
 
+/** Provider fast mode (modelSettings.speed) as it was resolved for this run —
+ *  so a "why wasn't it faster?" report can be answered from the trace. */
+interface DebugSpeedConfiguration {
+  requested: ModelSpeed;
+  applied: boolean;
+  reason: string;
+}
+
 interface DebugSessionSnapshot {
   schemaVersion: 1;
   conversationId?: string;
@@ -319,6 +328,8 @@ interface DebugSessionSnapshot {
   model?: string;
   /** Requested/effective thinking selection and its provider wire representation. */
   thinking?: DebugThinkingConfiguration;
+  /** Requested/applied provider fast mode and the eligibility verdict. */
+  speed?: DebugSpeedConfiguration;
   startedAt: string;
   finishedAt: string;
   task: string;
@@ -953,6 +964,12 @@ export function resolveModel(
   if (provider === "claude" && providerConfig?.apiKey) {
     const isOauthToken = (providerConfig as ClaudeConfig).authType === "oauth_token";
     const providerName = "anthropic-user";
+    // Claude 4.6+ takes adaptive thinking (`thinking: {type:"adaptive"}` +
+    // output_config.effort); pi-ai only flags that for its built-in catalogue,
+    // and falls back to budget_tokens for custom models — deprecated on 4.6 and
+    // a 400 from 4.7 on. Spell it out so Opus 4.8 / Opus 5 (the only fast-mode
+    // models) actually accept a thinking-enabled request.
+    const adaptiveThinking = isAdaptiveThinkingClaudeModel(providerConfig.model);
     modelRegistry.registerProvider(providerName, {
       baseUrl: providerConfig.baseUrl || "https://api.anthropic.com",
       apiKey: providerConfig.apiKey,
@@ -964,6 +981,7 @@ export function resolveModel(
           id: providerConfig.model,
           name: providerConfig.model,
           reasoning: true,
+          ...(adaptiveThinking ? { compat: { forceAdaptiveThinking: true } } : {}),
           input: ["text", "image"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: contextWindowFor(providerConfig.model),
@@ -975,7 +993,7 @@ export function resolveModel(
     if (!model) {
       throw new Error(`Failed to register Claude model "${providerConfig.model}" at ${providerConfig.baseUrl ?? "anthropic"}`);
     }
-    log.info(`[agent] Using Claude model: ${providerConfig.model} (${isOauthToken ? "oauth_token" : "api_key"}, reasoning)`);
+    log.info(`[agent] Using Claude model: ${providerConfig.model} (${isOauthToken ? "oauth_token" : "api_key"}, ${adaptiveThinking ? "adaptive thinking" : "reasoning"})`);
     return model;
   }
 
@@ -2242,6 +2260,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       baseStreamFn(streamModel, streamContext, { ...(streamOptions ?? {}), temperature });
     log.info(`[agent] Applying per-agent temperature: ${temperature}`);
   }
+  // Provider fast mode (modelSettings.speed = "fast"): same credential, same
+  // model, Anthropic's faster tier. Gated to direct-Anthropic Opus 5 / 4.8 —
+  // see model-speed.ts for why it must never reach an ineligible provider.
+  const debugSpeed: DebugSpeedConfiguration | undefined = modelSettings?.speed
+    ? modelSettings.speed === "fast"
+      ? { requested: "fast", ...installFastMode(session.agent, model) }
+      : { requested: "standard", applied: false, reason: "standard speed requested" }
+    : undefined;
   installLlmCallMetrics(session.agent, sessionId ?? conversationId ?? "unknown", { fastMode: fastMode === true });
 
   // Mid-turn compaction: pi compacts AFTER an assistant message but doesn't
@@ -2432,6 +2458,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(provider ? { provider } : {}),
         model: model.id,
         thinking: debugThinking,
+        ...(debugSpeed ? { speed: debugSpeed } : {}),
         inProgress: true,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
@@ -2555,6 +2582,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     provider,
     model: model.id,
     thinking: debugThinking,
+    ...(debugSpeed ? { speed: debugSpeed } : {}),
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
@@ -3501,6 +3529,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(provider ? { provider } : {}),
         model: model.id,
         thinking: debugThinking,
+        ...(debugSpeed ? { speed: debugSpeed } : {}),
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
@@ -3677,6 +3706,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(provider ? { provider } : {}),
           model: model.id,
           thinking: debugThinking,
+          ...(debugSpeed ? { speed: debugSpeed } : {}),
           cancelled: true,
           startedAt: debugStartedIso,
           finishedAt: new Date().toISOString(),
