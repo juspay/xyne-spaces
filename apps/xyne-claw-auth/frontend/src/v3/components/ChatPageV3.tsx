@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  LightningIcon,
   PlusIcon,
   PaperPlaneTiltIcon,
   StopIcon,
@@ -250,6 +251,31 @@ function ModelSelect({
       ))}
     </Menu>
   );
+}
+
+/* ── fast mode toggle ────────────────────────────────────────────── */
+
+/** localStorage key for the per-agent chat fast-mode preference. */
+function fastModeStorageKey(agentSlug: string): string {
+  return `chat-fast-mode:${agentSlug}`;
+}
+
+export function readStoredFastMode(agentSlug: string | null | undefined): boolean {
+  if (!agentSlug) return false;
+  try {
+    return localStorage.getItem(fastModeStorageKey(agentSlug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredFastMode(agentSlug: string, enabled: boolean): void {
+  try {
+    if (enabled) localStorage.setItem(fastModeStorageKey(agentSlug), "1");
+    else localStorage.removeItem(fastModeStorageKey(agentSlug));
+  } catch {
+    /* storage unavailable (private mode / quota) — preference is session-only */
+  }
 }
 
 /* ── typing indicator ────────────────────────────────────────────── */
@@ -2538,6 +2564,10 @@ export interface InputAreaProps {
    *  we slot it in as a render prop so positioning relative to the input
    *  card lives here. */
   renderMentionPicker?: () => React.ReactNode;
+  /** Per-chat provider fast mode (optional — only the agent chat wires it).
+   *  Rendered as a ⚡ pill in the button row next to attach / mention. */
+  fastMode?: boolean;
+  onToggleFastMode?: (enabled: boolean) => void;
 }
 
 /**
@@ -2569,6 +2599,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     mentionOpen,
     onToggleMention,
     renderMentionPicker,
+    fastMode,
+    onToggleFastMode,
   },
   ref,
 ) {
@@ -2792,6 +2824,28 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               >
                 <AtIcon size={14} />
               </button>
+              {onToggleFastMode && (
+                <button
+                  type="button"
+                  data-id="fast-mode-toggle"
+                  data-enabled={fastMode ? "1" : "0"}
+                  role="switch"
+                  aria-checked={!!fastMode}
+                  aria-label="Use fast mode"
+                  title={fastMode
+                    ? "Fast mode ON for this chat — click to use the agent's default"
+                    : "Fast mode OFF (agent default) — click for faster output from the provider's fast tier"}
+                  onClick={() => onToggleFastMode(!fastMode)}
+                  className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors ${
+                    fastMode
+                      ? "bg-amber-500 text-white hover:bg-amber-600"
+                      : "bg-xyne-surface-subtle text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  }`}
+                >
+                  <LightningIcon size={13} weight={fastMode ? "fill" : "bold"} />
+                  Fast mode
+                </button>
+              )}
             </div>
 
             {sending ? (
@@ -4737,6 +4791,9 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }>>([]);
   const [litellmDefaultModel, setLitellmDefaultModel] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  // Per-chat provider fast mode — remembered per agent in localStorage so the
+  // choice sticks across reloads. ON ⇒ every turn in this chat sends speed=fast.
+  const [fastMode, setFastMode] = useState<boolean>(false);
   const [leftPanelWidth, setLeftPanelWidth]   = useState<number>(() => {
     try {
       const saved = localStorage.getItem("chat-left-panel-width");
@@ -4966,6 +5023,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
    * (no litellm credential, or error) ⇒ the picker hides itself. */
   useEffect(() => {
     setSelectedModel("");
+    setFastMode(readStoredFastMode(activeAgentSlug));
     if (!activeAgentSlug || !userId) {
       setLitellmModels([]);
       setLitellmDefaultModel(null);
@@ -5377,15 +5435,23 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     setEditedDesignHtml(null);
   }, [conversationId, displayedDesignVersion?.messageId, mode]);
 
+  const handleFastModeChange = useCallback((enabled: boolean) => {
+    setFastMode(enabled);
+    if (activeAgentSlug) writeStoredFastMode(activeAgentSlug, enabled);
+  }, [activeAgentSlug]);
+  // Only an explicit ON is sent — OFF means "whatever the agent is configured
+  // with", so the agent-level setting still applies.
+  const speedOverride = fastMode ? ("fast" as const) : undefined;
+
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
-    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
-  }, [activeAgentSlug, sending, regenerate, userId, selectedModel]);
+    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined, speedOverride);
+  }, [activeAgentSlug, sending, regenerate, userId, selectedModel, speedOverride]);
 
   const handleEditUserMessage = useCallback((userMessageId: string, text: string) => {
     if (!activeAgentSlug || sending) return;
-    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined);
-  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel]);
+    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined, speedOverride);
+  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel, speedOverride]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -5488,6 +5554,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
+          // Per-chat provider fast mode (sidebar toggle).
+          ...(speedOverride ? { speed: speedOverride } : {}),
         });
         if (designSelectionSnapshot) setDesignSelection(null);
         if (manualEditsSnapshot.length > 0) {
@@ -5508,7 +5576,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, speedOverride, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -5790,6 +5858,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                   onRemoveContext={handleRemoveContext}
                   mentionOpen={mentionOpen}
                   onToggleMention={handleToggleMention}
+                  fastMode={fastMode}
+                  onToggleFastMode={handleFastModeChange}
                   renderMentionPicker={() => (
                     <ContextPicker
                       slug={activeAgent.slug}

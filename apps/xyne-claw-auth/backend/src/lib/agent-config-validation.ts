@@ -13,6 +13,8 @@
  */
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+// Provider fast mode (Anthropic `speed: "fast"`). Mirrors xyne-claw/src/model-speed.ts.
+const MODEL_SPEEDS = ["standard", "fast"] as const;
 const MAX_TOKENS_MIN = 1024;
 const MAX_TOKENS_MAX = 64000;
 const MAX_SCHEMA_BYTES = 32 * 1024;
@@ -34,7 +36,7 @@ function validateModelSettings(raw: unknown): ConfigValidationResult {
   if (raw === undefined || raw === null) return { ok: true };
   if (!isPlainObject(raw)) return fail("modelSettings must be an object");
 
-  const allowed = new Set(["model", "temperature", "maxTokens", "thinkingLevel"]);
+  const allowed = new Set(["model", "temperature", "maxTokens", "thinkingLevel", "speed"]);
   for (const key of Object.keys(raw)) {
     if (!allowed.has(key)) return fail(`modelSettings.${key} is not a recognized setting`);
   }
@@ -63,6 +65,12 @@ function validateModelSettings(raw: unknown): ConfigValidationResult {
   if (raw["thinkingLevel"] !== undefined) {
     if (!(THINKING_LEVELS as readonly string[]).includes(raw["thinkingLevel"] as string)) {
       return fail(`modelSettings.thinkingLevel must be one of: ${THINKING_LEVELS.join(", ")}`);
+    }
+  }
+
+  if (raw["speed"] !== undefined) {
+    if (!(MODEL_SPEEDS as readonly string[]).includes(raw["speed"] as string)) {
+      return fail(`modelSettings.speed must be one of: ${MODEL_SPEEDS.join(", ")}`);
     }
   }
 
@@ -139,9 +147,44 @@ function validateOutputFormat(raw: unknown): ConfigValidationResult {
 }
 
 /** Validate the model-related keys of an agent `config` payload. */
+// Mirrors KNOWN_PROVIDERS in agent-provider-config.ts (kept local so this
+// module stays dependency-free).
+const PROFILE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm", "spaces"]);
+
+/** config.fastModeProfile — which providers fast mode runs on (see
+ *  agent-provider-config.ts → parseFastModeProfile for the shape). */
+function validateFastModeProfile(raw: unknown): ConfigValidationResult {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (!isPlainObject(raw)) return fail("fastModeProfile must be an object");
+  const allowed = new Set(["providers", "providerOrder", "models"]);
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) return fail(`fastModeProfile.${key} is not a recognized setting`);
+  }
+  if (raw["providers"] !== undefined && raw["providers"] !== "inherit" && raw["providers"] !== "custom") {
+    return fail('fastModeProfile.providers must be "inherit" or "custom"');
+  }
+  if (raw["providerOrder"] !== undefined) {
+    const order = raw["providerOrder"];
+    if (!Array.isArray(order) || order.some((p) => typeof p !== "string" || !PROFILE_PROVIDERS.has(p))) {
+      return fail(`fastModeProfile.providerOrder must list providers from: ${[...PROFILE_PROVIDERS].join(", ")}`);
+    }
+  }
+  if (raw["models"] !== undefined) {
+    const models = raw["models"];
+    if (!isPlainObject(models)) return fail("fastModeProfile.models must be an object of provider → model id");
+    for (const [k, v] of Object.entries(models)) {
+      if (!PROFILE_PROVIDERS.has(k)) return fail(`fastModeProfile.models.${k} is not a known provider`);
+      if (typeof v !== "string" || !v.trim() || v.length > 200) return fail(`fastModeProfile.models.${k} must be a non-empty model id`);
+    }
+  }
+  return { ok: true };
+}
+
 export function validateAgentModelConfig(config: Record<string, unknown> | undefined): ConfigValidationResult {
   if (!config) return { ok: true };
   const ms = validateModelSettings(config["modelSettings"]);
   if (!ms.ok) return ms;
+  const fp = validateFastModeProfile(config["fastModeProfile"]);
+  if (!fp.ok) return fp;
   return validateOutputFormat(config["outputFormat"]);
 }

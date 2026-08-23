@@ -12,12 +12,14 @@ import {
   FloppyDiskIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import type { Agent, AgentLight } from "../../../../lib/types";
 import { useSnackbar } from "../../ui/Snackbar";
 import { Menu, MenuItem } from "../../ui/Menu";
 import { Dialog } from "../../ui/Dialog";
 import { Button } from "../../ui/Button";
+import { Switch } from "../../ui/Switch";
 import {
   updateAgent,
   listAgentProviderCredentials,
@@ -56,6 +58,148 @@ const AUTH_TYPE_DISPLAY: Record<string, string> = {
 };
 
 const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "litellm", "spaces"];
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Ordered provider list + "Available providers" chips. Used twice: for the
+ * standard provider order and for the fast-mode profile's own order. With
+ * `models` the fast view also lets each selected provider pin a model for
+ * fast mode (same credential key, different model); blank = the model saved
+ * on the credential.
+ * ───────────────────────────────────────────────────────────────────── */
+function ProviderOrderEditor({
+  order,
+  onChange,
+  models,
+  onModelChange,
+  modelPlaceholder,
+  readOnly,
+  idPrefix,
+}: {
+  order: string[];
+  onChange: (next: string[]) => void;
+  models?: Record<string, string>;
+  onModelChange?: (provider: string, model: string) => void;
+  modelPlaceholder?: (provider: string) => string;
+  readOnly?: boolean;
+  idPrefix: string;
+}) {
+  const move = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= order.length) return;
+    const next = [...order];
+    const tmp = next[idx]!;
+    next[idx] = next[target]!;
+    next[target] = tmp;
+    onChange(next);
+  };
+  const remove = (idx: number) => onChange(order.filter((_, i) => i !== idx));
+  const add = (p: string) => onChange(order.includes(p) ? order : [...order, p]);
+
+  return (
+    <>
+      {order.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary mb-4">
+          No providers selected yet — pick one or more below to start.
+        </div>
+      ) : (
+        <ol data-id={`${idPrefix}-order`} className={`space-y-2 mb-4 ${readOnly ? "opacity-60" : ""}`}>
+          {order.map((p, idx) => (
+            <li
+              key={p}
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-xyne-border bg-xyne-surface-subtle px-3 py-2.5"
+            >
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-xyne-fg-primary text-xyne-fg-inverse text-[12px] font-semibold tabular-nums">
+                {idx + 1}
+              </span>
+              <span className="flex-1 text-[13px] font-medium text-xyne-fg-primary">
+                {PROVIDER_DISPLAY[p] ?? p}
+              </span>
+              {models && onModelChange && p !== "spaces" && (
+                <input
+                  value={models[p] ?? ""}
+                  onChange={(e) => onModelChange(p, e.target.value)}
+                  placeholder={modelPlaceholder?.(p) ?? "model from credential"}
+                  spellCheck={false}
+                  autoComplete="off"
+                  disabled={readOnly}
+                  aria-label={`Fast-mode model for ${PROVIDER_DISPLAY[p] ?? p}`}
+                  title="Model to use in fast mode on this provider (same credential). Blank = the model saved on the credential."
+                  className="w-[200px] rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 font-mono text-[12px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+                />
+              )}
+              {!readOnly && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() => move(idx, -1)}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                    title="Move up"
+                    aria-label="Move up"
+                  >
+                    <ArrowUpIcon size={13} weight="bold" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === order.length - 1}
+                    onClick={() => move(idx, 1)}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                    title="Move down"
+                    aria-label="Move down"
+                  >
+                    <ArrowDownIcon size={13} weight="bold" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(idx)}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-error-bg hover:text-xyne-error-fg transition-colors"
+                    title="Remove from order"
+                    aria-label="Remove from order"
+                  >
+                    <XIcon size={13} weight="bold" />
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {!readOnly && (
+        <div>
+          <div className="text-[12px] font-medium text-xyne-fg-tertiary mb-2">
+            Available providers
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {ALL_PROVIDERS.map((p) => {
+              const selected = order.includes(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  data-id={`${idPrefix}-pill-${p}`}
+                  onClick={() => (selected ? remove(order.indexOf(p)) : add(p))}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                    selected
+                      ? "border-xyne-fg-primary bg-xyne-fg-primary text-xyne-fg-inverse"
+                      : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+                  }`}
+                >
+                  {selected ? (
+                    <CheckIcon size={12} weight="bold" />
+                  ) : (
+                    <PlusIcon size={12} weight="bold" />
+                  )}
+                  {PROVIDER_DISPLAY[p] ?? p}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -145,6 +289,49 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [automationMode, setAutomationMode] = useState<string>(seedAutomationMode);
   const [savedAutomationMode, setSavedAutomationMode] = useState<string>(seedAutomationMode);
 
+  /**
+   * Provider FAST MODE — Anthropic `speed: "fast"`. Same credential, same
+   * model, served from the provider's faster (premium-priced) tier. Honored
+   * by the runtime only when the run is served by a direct Claude credential
+   * on Claude Opus 5 / Opus 4.8; every other provider ignores it (logged, never
+   * a failed run). Can also be toggled per chat in the chat sidebar.
+   * Stored at agent.config.modelSettings.speed; undefined ⇒ standard.
+   */
+  const seedFastMode =
+    ((agent.config as Record<string, unknown> | undefined)?.["modelSettings"] as Record<string, unknown> | undefined)?.["speed"] === "fast";
+  const [fastMode, setFastMode] = useState<boolean>(seedFastMode);
+  const [savedFastMode, setSavedFastMode] = useState<boolean>(seedFastMode);
+
+  /**
+   * Fast-mode provider PROFILE — which providers (and on which model) run
+   * when fast mode is on. "inherit" (default) = the same providers +
+   * credentials as standard mode; "custom" = its own order below, with an
+   * optional per-provider model pin. Credential keys are per provider and
+   * shared by both modes. Stored at agent.config.fastModeProfile; mirrors
+   * claw-auth lib/agent-provider-config.ts → parseFastModeProfile.
+   */
+  const seedFastProfile = (() => {
+    const raw = (agent.config as Record<string, unknown> | undefined)?.["fastModeProfile"] as Record<string, unknown> | undefined;
+    const custom = raw?.["providers"] === "custom";
+    const order = custom && Array.isArray(raw?.["providerOrder"])
+      ? (raw!["providerOrder"] as unknown[]).filter((p): p is string => typeof p === "string" && (ALL_PROVIDERS as string[]).includes(p))
+      : [];
+    const models: Record<string, string> = {};
+    const rawModels = custom ? raw?.["models"] : undefined;
+    if (rawModels && typeof rawModels === "object") {
+      for (const [k, v] of Object.entries(rawModels as Record<string, unknown>)) if (typeof v === "string" && v.trim()) models[k] = v.trim();
+    }
+    return { mode: (custom ? "custom" : "inherit") as "custom" | "inherit", order, models };
+  })();
+  const [fastProfileMode, setFastProfileMode] = useState<"inherit" | "custom">(seedFastProfile.mode);
+  const [savedFastProfileMode, setSavedFastProfileMode] = useState<"inherit" | "custom">(seedFastProfile.mode);
+  const [fastOrder, setFastOrder] = useState<string[]>(seedFastProfile.order);
+  const [savedFastOrder, setSavedFastOrder] = useState<string[]>(seedFastProfile.order);
+  const [fastModels, setFastModels] = useState<Record<string, string>>(seedFastProfile.models);
+  const [savedFastModels, setSavedFastModels] = useState<Record<string, string>>(seedFastProfile.models);
+  /** Which provider setup the card is showing: standard or fast mode. */
+  const [providerView, setProviderView] = useState<"standard" | "fast">("standard");
+
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderSaved, setOrderSaved] = useState(false);
   /** Provider preference order explainer modal — the inline wall of
@@ -158,7 +345,11 @@ export function ProviderTabV3({ agent, userId }: Props) {
     JSON.stringify(providerOrder) !== JSON.stringify(savedOrder) ||
     alwaysOn !== savedAlwaysOn ||
     subagentMode !== savedSubagentMode ||
-    automationMode !== savedAutomationMode;
+    automationMode !== savedAutomationMode ||
+    fastMode !== savedFastMode ||
+    fastProfileMode !== savedFastProfileMode ||
+    JSON.stringify(fastOrder) !== JSON.stringify(savedFastOrder) ||
+    JSON.stringify(fastModels) !== JSON.stringify(savedFastModels);
 
   const [creds, setCreds] = useState<AgentProviderCredentialStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -418,13 +609,38 @@ export function ProviderTabV3({ agent, userId }: Props) {
       // minimal — the backend treats undefined as "same provider as chat".
       if (automationMode !== "default") cfg.automationProvider = automationMode;
       else delete cfg.automationProvider;
+      // Provider fast mode rides modelSettings (shared with the Spaces row's
+      // model/temperature/thinking fields) — merge, never replace, and drop the
+      // key entirely when off so the JSON stays minimal.
+      const ms = { ...((cfg.modelSettings as Record<string, unknown> | undefined) ?? {}) };
+      if (fastMode) ms.speed = "fast";
+      else delete ms.speed;
+      if (Object.keys(ms).length > 0) cfg.modelSettings = ms;
+      else delete cfg.modelSettings;
+      // Fast-mode provider profile. Omit entirely when inheriting (the
+      // default) so the JSON stays minimal; blank model pins are dropped.
+      if (fastProfileMode === "custom") {
+        const models: Record<string, string> = {};
+        for (const [k, v] of Object.entries(fastModels)) if (fastOrder.includes(k) && v.trim()) models[k] = v.trim();
+        cfg.fastModeProfile = { providers: "custom", providerOrder: fastOrder, ...(Object.keys(models).length ? { models } : {}) };
+      } else {
+        delete cfg.fastModeProfile;
+      }
       await updateAgent(agent.slug, { config: cfg });
+      // Keep the prop-derived config in step (the Spaces row merges against it).
+      const live = agent.config as Record<string, unknown>;
+      if (cfg.modelSettings) live["modelSettings"] = cfg.modelSettings;
+      else delete live["modelSettings"];
       // Mirror the just-saved state so future edits compute against it
       // and the dirty check clears (button returns to its quiet default).
       setSavedOrder([...providerOrder]);
       setSavedAlwaysOn(alwaysOn);
       setSavedSubagentMode(subagentMode);
       setSavedAutomationMode(automationMode);
+      setSavedFastMode(fastMode);
+      setSavedFastProfileMode(fastProfileMode);
+      setSavedFastOrder([...fastOrder]);
+      setSavedFastModels({ ...fastModels });
       setOrderSaved(true);
       // The button morphs to "Saved" briefly, then this resets to false —
       // since the dirty check now reads clean, the button drops back to
@@ -436,22 +652,6 @@ export function ProviderTabV3({ agent, userId }: Props) {
       setOrderSaving(false);
     }
   };
-
-  const moveOrderItem = (idx: number, dir: -1 | 1) => {
-    setProviderOrder((curr) => {
-      const target = idx + dir;
-      if (target < 0 || target >= curr.length) return curr;
-      const next = [...curr];
-      const tmp = next[idx]!;
-      next[idx] = next[target]!;
-      next[target] = tmp;
-      return next;
-    });
-  };
-  const removeOrderItem = (idx: number) =>
-    setProviderOrder((curr) => curr.filter((_, i) => i !== idx));
-  const addOrderItem = (p: string) =>
-    setProviderOrder((curr) => (curr.includes(p) ? curr : [...curr, p]));
 
   const submitForm = async () => {
     // apiKey is only required the FIRST time. If a credential already exists
@@ -521,243 +721,263 @@ export function ProviderTabV3({ agent, userId }: Props) {
               </button>
             </div>
             <p className="mt-1.5 text-[12px] text-xyne-fg-secondary">
-              Pick the providers that run this agent. They're tried in order — top first.
+              {providerView === "standard"
+                ? "Pick the providers that run this agent. They're tried in order — top first."
+                : "Providers used when fast mode is on."}
             </p>
           </div>
-        </div>
-
-        {/* Always On vs. On /upgrade — policy switch for when the agent's
-            premium provider is actually consumed. Defaults to Always On for
-            backfill (matches every existing agent's pre-feature behavior). */}
-        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-xyne-fg-primary">When to use these providers</div>
-              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                {alwaysOn
-                  ? "Always on — every run uses the first provider above."
-                  : "On /upgrade only — runs default to the Spaces model (Kimi). Users opt in by typing /upgrade or accepting the prompt after a failure."}
-              </p>
-            </div>
-            <div
-              role="radiogroup"
-              aria-label="When to use the agent's premium provider"
-              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
-            >
+          {/* Standard vs. fast mode — two provider setups for the one agent. */}
+          <div
+            role="tablist"
+            aria-label="Provider setup"
+            className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface-subtle p-0.5"
+          >
+            {(["standard", "fast"] as const).map((v) => (
               <button
+                key={v}
                 type="button"
-                role="radio"
-                aria-checked={alwaysOn}
-                onClick={() => setAlwaysOn(true)}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  alwaysOn
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                role="tab"
+                data-id={`provider-view-${v}`}
+                aria-selected={providerView === v}
+                onClick={() => setProviderView(v)}
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  providerView === v
+                    ? v === "fast"
+                      ? "bg-amber-500 text-white"
+                      : "bg-xyne-fg-primary text-xyne-fg-inverse"
                     : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
                 }`}
               >
-                Always on
+                {v === "fast" && <LightningIcon size={11} weight="fill" />}
+                {v === "standard" ? "Standard" : "Fast mode"}
               </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={!alwaysOn}
-                onClick={() => setAlwaysOn(false)}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  !alwaysOn
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                }`}
-              >
-                On /upgrade
-              </button>
-            </div>
+            ))}
           </div>
         </div>
 
-        {/* Subagent provider — which provider the agent's subagents run on when
-            they have no explicit per-subagent override. "Spaces default" (the
-            default) runs subagents on the cheaper platform model; "Follow parent"
-            inherits this agent's provider and uses more tokens on paid plans. */}
-        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
-              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                {subagentMode === "spaces"
-                  ? "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider."
-                  : "Follow parent — subagents run on the same provider as this agent."}
-                {" "}A per-subagent override, when set, always wins.
-              </p>
-            </div>
-            <div
-              role="radiogroup"
-              aria-label="Which provider subagents run on"
-              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
-            >
-              <button
-                type="button"
-                role="radio"
-                aria-checked={subagentMode === "spaces"}
-                onClick={() => setSubagentMode("spaces")}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  subagentMode === "spaces"
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                }`}
-              >
-                Spaces default
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={subagentMode === "parent"}
-                onClick={() => setSubagentMode("parent")}
-                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                  subagentMode === "parent"
-                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                }`}
-              >
-                Follow parent
-              </button>
-            </div>
-          </div>
-
-          {/* Cost warning — only when moving off the cheaper Spaces default. */}
-          {subagentMode === "parent" && (
-            <p className="mt-2.5 flex items-start gap-1.5 rounded-md border border-xyne-warning-border bg-xyne-warning-bg px-2.5 py-1.5 text-[11.5px] leading-relaxed text-xyne-warning-fg">
-              <WarningCircleIcon size={14} weight="fill" className="mt-px shrink-0" />
-              <span>
-                Subagents will run on this agent&apos;s provider. On paid / premium plans
-                this consumes noticeably more tokens and credits than the Spaces default.
-              </span>
-            </p>
-          )}
-        </div>
-
-        {/* Automation/scheduled model — headless bulk runs (automations, error
-            pipeline, scheduled jobs) fire on every PR / message / cron tick and
-            can dominate premium-provider usage. This downgrades ONLY those runs
-            to the platform default model; chat and mentions are unaffected. */}
-        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-xyne-fg-primary">Automations &amp; scheduled runs</div>
-              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                {automationMode === "default"
-                  ? "Same as chat — automation, scheduled, and error-pipeline runs use this agent's full provider order."
-                  : automationMode === "platform"
-                    ? "Platform default — automation, scheduled, and error-pipeline runs use the platform model; chat and mentions keep the premium provider."
-                    : `${PROVIDER_DISPLAY[automationMode] ?? automationMode} — automation, scheduled, and error-pipeline runs go to this provider only; chat and mentions keep the premium provider.`}
-              </p>
-            </div>
-            <select
-              aria-label="Which provider automation and scheduled runs use"
-              value={automationMode}
-              onChange={(e) => setAutomationMode(e.target.value)}
-              className="shrink-0 rounded-full border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[11px] font-medium text-xyne-fg-primary"
-            >
-              <option value="default">Same as chat</option>
-              <option value="platform">Platform default</option>
-              {/* Only providers this agent actually has selected — routing
-                  automations at a provider with no credentials would fail every
-                  headless run, and the failure is silent (falls through). */}
-              {providerOrder.map((key) => (
-                <option key={key} value={key}>
-                  {PROVIDER_DISPLAY[key] ?? key}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Selected providers (the ordered list) */}
-        {providerOrder.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary mb-4">
-            No providers selected yet — pick one or more below to start.
-          </div>
-        ) : (
-          <ol className="space-y-2 mb-4">
-            {providerOrder.map((p, idx) => (
-              <li
-                key={p}
-                className="flex items-center gap-3 rounded-lg border border-xyne-border bg-xyne-surface-subtle px-3 py-2.5"
-              >
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-xyne-fg-primary text-xyne-fg-inverse text-[12px] font-semibold tabular-nums">
-                  {idx + 1}
-                </span>
-                <span className="flex-1 text-[13px] font-medium text-xyne-fg-primary">
-                  {PROVIDER_DISPLAY[p] ?? p}
-                </span>
-                <div className="flex items-center gap-0.5">
+        {providerView === "standard" ? (
+          <>
+            {/* Always On vs. On /upgrade — policy switch for when the agent's
+                premium provider is actually consumed. Defaults to Always On for
+                backfill (matches every existing agent's pre-feature behavior). */}
+            <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-xyne-fg-primary">When to use these providers</div>
+                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                    {alwaysOn
+                      ? "Always on — every run uses the first provider above."
+                      : "On /upgrade only — runs default to the Spaces model (Kimi). Users opt in by typing /upgrade or accepting the prompt after a failure."}
+                  </p>
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label="When to use the agent's premium provider"
+                  className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+                >
                   <button
                     type="button"
-                    disabled={idx === 0}
-                    onClick={() => moveOrderItem(idx, -1)}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                    title="Move up"
-                    aria-label="Move up"
+                    role="radio"
+                    aria-checked={alwaysOn}
+                    onClick={() => setAlwaysOn(true)}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      alwaysOn
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
                   >
-                    <ArrowUpIcon size={13} weight="bold" />
+                    Always on
                   </button>
                   <button
                     type="button"
-                    disabled={idx === providerOrder.length - 1}
-                    onClick={() => moveOrderItem(idx, 1)}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                    title="Move down"
-                    aria-label="Move down"
+                    role="radio"
+                    aria-checked={!alwaysOn}
+                    onClick={() => setAlwaysOn(false)}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      !alwaysOn
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
                   >
-                    <ArrowDownIcon size={13} weight="bold" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeOrderItem(idx)}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-xyne-fg-tertiary hover:bg-xyne-error-bg hover:text-xyne-error-fg transition-colors"
-                    title="Remove from order"
-                    aria-label="Remove from order"
-                  >
-                    <XIcon size={13} weight="bold" />
+                    On /upgrade
                   </button>
                 </div>
-              </li>
-            ))}
-          </ol>
-        )}
+              </div>
+            </div>
 
-        {/* Available providers — checkbox-style toggle so the chips
-            actually feel like "select these". Selected ones grey out
-            (they're already in the list above); unselected ones invite
-            the click. */}
-        <div>
-          <div className="text-[12px] font-medium text-xyne-fg-tertiary mb-2">
-            Available providers
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {ALL_PROVIDERS.map((p) => {
-              const selected = providerOrder.includes(p);
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => (selected ? removeOrderItem(providerOrder.indexOf(p)) : addOrderItem(p))}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                    selected
-                      ? "border-xyne-fg-primary bg-xyne-fg-primary text-xyne-fg-inverse"
-                      : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong hover:text-xyne-fg-primary"
-                  }`}
+            {/* Subagent provider — which provider the agent's subagents run on when
+                they have no explicit per-subagent override. "Spaces default" (the
+                default) runs subagents on the cheaper platform model; "Follow parent"
+                inherits this agent's provider and uses more tokens on paid plans. */}
+            <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
+                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                    {subagentMode === "spaces"
+                      ? "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider."
+                      : "Follow parent — subagents run on the same provider as this agent."}
+                    {" "}A per-subagent override, when set, always wins.
+                  </p>
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label="Which provider subagents run on"
+                  className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
                 >
-                  {selected ? (
-                    <CheckIcon size={12} weight="bold" />
-                  ) : (
-                    <PlusIcon size={12} weight="bold" />
-                  )}
-                  {PROVIDER_DISPLAY[p] ?? p}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={subagentMode === "spaces"}
+                    onClick={() => setSubagentMode("spaces")}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      subagentMode === "spaces"
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
+                  >
+                    Spaces default
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={subagentMode === "parent"}
+                    onClick={() => setSubagentMode("parent")}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      subagentMode === "parent"
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
+                  >
+                    Follow parent
+                  </button>
+                </div>
+              </div>
+
+              {/* Cost warning — only when moving off the cheaper Spaces default. */}
+              {subagentMode === "parent" && (
+                <p className="mt-2.5 flex items-start gap-1.5 rounded-md border border-xyne-warning-border bg-xyne-warning-bg px-2.5 py-1.5 text-[11.5px] leading-relaxed text-xyne-warning-fg">
+                  <WarningCircleIcon size={14} weight="fill" className="mt-px shrink-0" />
+                  <span>
+                    Subagents will run on this agent&apos;s provider. On paid / premium plans
+                    this consumes noticeably more tokens and credits than the Spaces default.
+                  </span>
+                </p>
+              )}
+            </div>
+
+            {/* Automation/scheduled model — headless bulk runs (automations, error
+                pipeline, scheduled jobs) fire on every PR / message / cron tick and
+                can dominate premium-provider usage. This downgrades ONLY those runs
+                to the platform default model; chat and mentions are unaffected. */}
+            <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-xyne-fg-primary">Automations &amp; scheduled runs</div>
+                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                    {automationMode === "default"
+                      ? "Same as chat — automation, scheduled, and error-pipeline runs use this agent's full provider order."
+                      : automationMode === "platform"
+                        ? "Platform default — automation, scheduled, and error-pipeline runs use the platform model; chat and mentions keep the premium provider."
+                        : `${PROVIDER_DISPLAY[automationMode] ?? automationMode} — automation, scheduled, and error-pipeline runs go to this provider only; chat and mentions keep the premium provider.`}
+                  </p>
+                </div>
+                <select
+                  aria-label="Which provider automation and scheduled runs use"
+                  value={automationMode}
+                  onChange={(e) => setAutomationMode(e.target.value)}
+                  className="shrink-0 rounded-full border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[11px] font-medium text-xyne-fg-primary"
+                >
+                  <option value="default">Same as chat</option>
+                  <option value="platform">Platform default</option>
+                  {/* Only providers this agent actually has selected — routing
+                      automations at a provider with no credentials would fail every
+                      headless run, and the failure is silent (falls through). */}
+                  {providerOrder.map((key) => (
+                    <option key={key} value={key}>
+                      {PROVIDER_DISPLAY[key] ?? key}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <ProviderOrderEditor order={providerOrder} onChange={setProviderOrder} idPrefix="standard" />
+          </>
+        ) : (
+          <>
+            {/* Fast mode — the agent's DEFAULT speed. The composer toggle in
+                chat overrides it per conversation. Runtime: Anthropic
+                `speed: "fast"` on Claude Opus 5 / 4.8; other providers simply
+                run on whichever fast-mode providers are picked below. */}
+            <div
+              data-id="provider-fast-mode-row"
+              data-enabled={fastMode ? "1" : "0"}
+              className={`mb-4 rounded-lg border p-3 transition-colors ${
+                fastMode
+                  ? "border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/30"
+                  : "border-xyne-border bg-xyne-surface-subtle"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-[13px] font-medium text-xyne-fg-primary">
+                  <LightningIcon size={14} weight={fastMode ? "fill" : "bold"} className={fastMode ? "text-amber-500" : "text-xyne-fg-muted"} />
+                  Turn on fast mode by default
+                </div>
+                <Switch checked={fastMode} onChange={setFastMode} ariaLabel="Turn on fast mode by default" />
+              </div>
+            </div>
+
+            {/* Which providers serve fast-mode runs. Inherit (default) = the
+                standard setup; custom = its own order + optional model pins. */}
+            <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[13px] font-medium text-xyne-fg-primary">Providers in fast mode</div>
+                <div
+                  role="radiogroup"
+                  aria-label="Which providers fast mode runs on"
+                  className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+                >
+                  {(["inherit", "custom"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="radio"
+                      data-id={`fast-profile-${m}`}
+                      aria-checked={fastProfileMode === m}
+                      onClick={() => {
+                        setFastProfileMode(m);
+                        // Seed a fresh custom order from the standard one so the
+                        // user edits a copy instead of starting from nothing.
+                        if (m === "custom" && fastOrder.length === 0) setFastOrder([...providerOrder]);
+                      }}
+                      className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                        fastProfileMode === m
+                          ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                          : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                      }`}
+                    >
+                      {m === "inherit" ? "Same as standard" : "Custom"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {fastProfileMode === "inherit" ? (
+              <ProviderOrderEditor order={providerOrder} onChange={() => {}} readOnly idPrefix="fast-inherit" />
+            ) : (
+              <ProviderOrderEditor
+                order={fastOrder}
+                onChange={setFastOrder}
+                models={fastModels}
+                onModelChange={(provider, model) => setFastModels((m) => ({ ...m, [provider]: model }))}
+                modelPlaceholder={(provider) => creds.find((c) => c.provider === provider && c.configured)?.model ?? "model from credential"}
+                idPrefix="fast"
+              />
+            )}
+          </>
+        )}
 
         {/* Floating Save FAB — bottom-right of the card, icon-only at rest,
             expands into a labeled pill on hover/focus. Three visual states:
@@ -834,6 +1054,12 @@ export function ProviderTabV3({ agent, userId }: Props) {
               <h3 className="text-[14px] font-semibold text-xyne-fg-primary">
                 Configure Credentials
               </h3>
+              {providerView === "fast" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-700/60">
+                  <LightningIcon size={11} weight="fill" />
+                  Shared with standard mode
+                </span>
+              )}
               <span
                 className="inline-flex items-center gap-1 text-[11px] font-medium text-xyne-success-fg bg-xyne-success-bg border border-xyne-success-border rounded-full px-2 py-0.5"
                 title="Credentials are encrypted at rest and never returned by the API."
