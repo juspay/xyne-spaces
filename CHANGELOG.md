@@ -1,3 +1,10 @@
+## [1.209.2](https://github.com/juspay/xyne-spaces/compare/v1.209.1...v1.209.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* use the system channel-naming rule for SDLC repo channels ([#905](https://github.com/juspay/xyne-spaces/issues/905)) ([491275b](https://github.com/juspay/xyne-spaces/commit/491275bee416c7c4a157bc85e665b0cd28457d56))
+
 ## [1.209.1](https://github.com/juspay/xyne-spaces/compare/v1.209.0...v1.209.1) (2026-08-22)
 
 
