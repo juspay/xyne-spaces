@@ -605,7 +605,13 @@ const InlineTextFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    // Use UPDATE if the viewer is already open (e.g. switching to this
+    // attachment from another one in the side thread panel); the machine only
+    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
+    attachmentViewerActor.send({
+      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
+      attachments: [attachment],
+    });
   };
 
   if (isLargeFile) {
@@ -751,7 +757,13 @@ const InlineCodeFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    // Use UPDATE if the viewer is already open (e.g. switching to this
+    // attachment from another one in the side thread panel); the machine only
+    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
+    attachmentViewerActor.send({
+      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
+      attachments: [attachment],
+    });
   };
 
   return (
@@ -903,20 +915,29 @@ const InlineVideoPlayer: React.FC<{
     // Capture current video time before opening modal
     const currentTime = videoRef.current?.currentTime;
     const isPlayingInline = videoRef.current ? !videoRef.current.paused : false;
+    // When switching to this video while the viewer is already open, start
+    // playback (the reported expectation for clicking a video in the panel).
+    const viewerOpen = attachmentViewerActor.getSnapshot().value !== 'closed';
     const attachment: AttachmentRef = {
       attachmentId,
       fileName,
       fileUrl: '', // Not used for videos
       mimeType,
       fileSize,
-      autoPlay: startPlayback || isPlayingInline,
+      autoPlay: startPlayback || isPlayingInline || viewerOpen,
       ...(currentTime !== undefined && { initialTime: currentTime }),
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    // Use UPDATE if the viewer is already open (e.g. switching to this
+    // attachment from another one in the side thread panel); the machine only
+    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
+    attachmentViewerActor.send({
+      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
+      attachments: [attachment],
+    });
   };
 
   const dimensions = useMemo(() => {
