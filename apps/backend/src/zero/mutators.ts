@@ -2895,9 +2895,20 @@ export function createMutators(
             metadata: undefined,
           });
 
-          // Copy attachments from the original message
-          for (const attachment of attachmentsArray) {
-            if (!attachment) continue;
+          // Copy attachments from the original message, preserving their display order.
+          // Sort the source rows by the same comparator the UI uses, then stamp a
+          // strictly increasing explicit position (and createdAt offset) on each clone
+          // so the forwarded copy renders in the same order the sender saw.
+          const orderedSourceAttachments = [...attachmentsArray]
+            .filter((a): a is MessageAttachment => !!a)
+            .sort(
+              (a, b) =>
+                ((a.position ?? Number.MAX_SAFE_INTEGER) -
+                  (b.position ?? Number.MAX_SAFE_INTEGER)) ||
+                (a.createdAt as number) - (b.createdAt as number) ||
+                a.id.localeCompare(b.id),
+            );
+          for (const [index, attachment] of orderedSourceAttachments.entries()) {
             await tx.mutate.message_attachments.insert({
               id: uuidv4(),
               entityId: messageId,
@@ -2913,7 +2924,8 @@ export function createMutators(
               conversationId: conversationId,
               workspaceId: authData.workspaceId,
               metadata: attachment.metadata,
-              createdAt: now,
+              createdAt: now + index,
+              position: index,
               isDeleted: false,
             });
           }
@@ -3001,7 +3013,8 @@ export function createMutators(
                       conversationId: conversationId,
                       workspaceId: authData.workspaceId,
                       metadata: attInfo.metadata as any,
-                      createdAt: now,
+                      createdAt: now + j,
+                      position: j,
                       isDeleted: false,
                     });
                   }
@@ -12312,6 +12325,7 @@ export function createMutators(
                   height,
                   uploadedByUserId: authData.sub,
                   createdAt: timestamp + index,
+                  position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
                   metadata: null,

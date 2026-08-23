@@ -2090,7 +2090,8 @@ export const mutators = defineMutators({
                   size: attInfo.size || 0,
                   thumbnailUrl: attInfo.thumbnailUrl,
                   mimetype: attInfo.mimetype || '',
-                  createdAt: attInfo.createdAt || now,
+                  createdAt: (attInfo.createdAt || now) + j,
+                  position: j,
                   storageProvider: attInfo.storageProvider || 's3',
                   uploadedByUserId: ctx.userID,
                   createdBy: ctx.userID,
@@ -3167,6 +3168,7 @@ export const mutators = defineMutators({
               height,
               uploadedByUserId: ctx.userID,
               createdAt: timestamp + index,
+              position: index,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
               workspaceId: ctx.workspaceId,

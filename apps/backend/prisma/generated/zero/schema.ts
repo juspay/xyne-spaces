@@ -1436,6 +1436,7 @@ export const messageAttachmentTable = table("message_attachments")
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
+    position: number().optional(),
   })
   .primaryKey("id");
 

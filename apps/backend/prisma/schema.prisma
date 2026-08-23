@@ -2341,6 +2341,7 @@ model MessageAttachment {
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
+  position           Int?                  // Display order within a message (lower = earlier); null for legacy rows
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2349,6 +2350,7 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, position])
   @@map("message_attachments")
   @@schema("public")
 }
