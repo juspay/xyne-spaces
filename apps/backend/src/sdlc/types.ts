@@ -2,6 +2,7 @@ import type {
   AttachSdlcRepositoryInput,
   CreateSdlcClawArtifactInput,
   CreateSdlcLinkInput,
+  CreateSdlcTrackInput,
   UpdateSdlcBaselineDraftInput,
 } from '@xyne/shared';
 import type { SdlcAgentContext } from './SdlcAgentContextService';
@@ -74,6 +75,8 @@ export interface SdlcHub {
     actor: SdlcActor,
     input: UpdateSdlcBaselineDraftInput
   ): Promise<SdlcArtifact>;
+  listTracks(actor: SdlcActor, repoId: string): Promise<unknown>;
+  createTrack(actor: SdlcActor, input: CreateSdlcTrackInput): Promise<unknown>;
   linkContext(actor: SdlcActor, repoId: string, input: CreateSdlcLinkInput): Promise<SdlcLink>;
   unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void>;
 }
