@@ -1,3 +1,10 @@
+## [1.209.3](https://github.com/juspay/xyne-spaces/compare/v1.209.2...v1.209.3) (2026-08-23)
+
+
+### Bug Fixes
+
+* render SDLC call mini-view in host via frame bridge ([#924](https://github.com/juspay/xyne-spaces/issues/924)) ([#926](https://github.com/juspay/xyne-spaces/issues/926)) ([afa388c](https://github.com/juspay/xyne-spaces/commit/afa388c7ad19f7a2975f41bf85bbf9423be0d004))
+
 ## [1.209.2](https://github.com/juspay/xyne-spaces/compare/v1.209.1...v1.209.2) (2026-08-23)
 
 
