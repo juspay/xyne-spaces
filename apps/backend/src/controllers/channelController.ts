@@ -557,7 +557,19 @@ export class ChannelController {
          // Copy attachments to the new message
          const copiedAttachments: any[] = [];
         if (originalAttachments.length > 0) {
-           for (const attachment of originalAttachments) {
+           // Preserve the sender's display order: sort by explicit position
+           // (falling back to createdAt/id for legacy rows), then stamp a fresh
+           // strictly-increasing position + createdAt on each copy so the
+           // forwarded message renders in the same order as the source.
+           const orderedOriginalAttachments = [...originalAttachments].sort(
+             (a, b) =>
+               (a.position ?? Number.MAX_SAFE_INTEGER) -
+                 (b.position ?? Number.MAX_SAFE_INTEGER) ||
+               a.createdAt.getTime() - b.createdAt.getTime() ||
+               a.id.localeCompare(b.id)
+           );
+           const forwardCloneBaseTs = Date.now();
+           for (const [attIndex, attachment] of orderedOriginalAttachments.entries()) {
              const copiedAttachment = await tx.messageAttachment.create({
                data: {
                  entityId: createdMessage.messageId,
@@ -575,6 +587,8 @@ export class ChannelController {
                 metadata: (attachment.metadata as Record<string, any>) || {},
                  width: attachment.width ?? undefined,
                  height: attachment.height ?? undefined,
+                 createdAt: new Date(forwardCloneBaseTs + attIndex),
+                 position: attIndex,
                },
              });
              copiedAttachments.push(copiedAttachment);
@@ -626,7 +640,15 @@ export class ChannelController {
               });
 
               const botChannelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
-              for (const originalAtt of botOriginalAttachments) {
+              const orderedBotAttachments = [...botOriginalAttachments].sort(
+                (a, b) =>
+                  (a.position ?? Number.MAX_SAFE_INTEGER) -
+                    (b.position ?? Number.MAX_SAFE_INTEGER) ||
+                  a.createdAt.getTime() - b.createdAt.getTime() ||
+                  a.id.localeCompare(b.id)
+              );
+              const botCloneBaseTs = Date.now();
+              for (const [botAttIndex, originalAtt] of orderedBotAttachments.entries()) {
                 await tx.messageAttachment.create({
                   data: {
                     entityId: clonedMessage.messageId,
@@ -644,6 +666,8 @@ export class ChannelController {
                     metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
                     width: originalAtt.width ?? undefined,
                     height: originalAtt.height ?? undefined,
+                    createdAt: new Date(botCloneBaseTs + botAttIndex),
+                    position: botAttIndex,
                   }
                 });
               }
