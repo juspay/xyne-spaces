@@ -1,7 +1,7 @@
 import { useCacConfig } from '@xyne/shared/hooks';
 
 export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
-const DEFAULT_ALL_RANK_PROFILE = 'default_native';
+const DEFAULT_ALL_RANK_PROFILE = 'personalized';
 
 export interface CmdkSearchCacConfig {
   allDefaultRankProfile: string;
@@ -15,10 +15,10 @@ export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
  * Resolves the ALL-tab rank profile through Superposition CAC.
  *
  * The backend supplies `environment: playground` when Electron's pre-prod
- * routing toggle is active. Production falls back to `default_native`.
+ * routing toggle is active. Production falls back to `personalized`.
  *
  * CAC key: `cmdk_search_config`
- * Default value: { "allDefaultRankProfile": "default_native" }
+ * Default value: { "allDefaultRankProfile": "personalized" }
  * Playground override: { "allDefaultRankProfile": "unified" }
  */
 export function useCmdkAllDefaultRankProfile(): string {
