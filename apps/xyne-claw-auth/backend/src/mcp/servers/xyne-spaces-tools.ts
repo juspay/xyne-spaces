@@ -13,6 +13,7 @@ import {
   spacesFetchBuffer,
   spacesFetchText,
   appFetch,
+  type SpacesAuthContext,
 } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
@@ -4084,7 +4085,7 @@ const spacesCreateTicket: ToolDef = {
               targetId: data.id,
               relationType: "TICKET",
             }),
-          });
+          }, sdlcSpacesAuth());
         } catch (linkError) {
           return err(
             `Ticket ${data.xyneId} was created, but its Tech Doc link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
@@ -4909,8 +4910,9 @@ const spacesSdlcMutateArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.mutateArtifact,
   description:
     "Create or mutate one trusted-repository SDLC artifact. Supports PRD/Tech Doc creation, incremental " +
-    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Trusted repository and " +
-    "execution identity is injected by the platform.",
+    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Creating a PRD or Tech " +
+    "Doc requires trackId (the SDLC track it belongs to); a Tech Doc may also set parentCanvasId to link a parent " +
+    "PRD, but that is optional. Trusted repository and execution identity is injected by the platform.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4943,7 +4945,7 @@ const spacesSdlcMutateArtifact: ToolDef = {
       sourceReferences: sdlcSourceReferencesSchema,
       kind: { type: "string", enum: ["PRD", "TECH_DOC"] },
       parentCanvasId: { type: "string", minLength: 1 },
-      trackId: { type: "string", minLength: 1, description: "Optional SDLC track ID; assigns a created PRD to that track" },
+      trackId: { type: "string", minLength: 1, description: "Required when creating a PRD or Tech Doc: the SDLC track the artifact belongs to. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
       generationCommit: { type: "string", maxLength: 255 },
       canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
     },
@@ -4960,9 +4962,9 @@ const spacesSdlcMutateArtifact: ToolDef = {
       sdlcMutationVariant("BASELINE", "begin", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
       sdlcMutationVariant("BASELINE", "upsert_section", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title", "sectionKey", "sectionTitle", "markdown", "sourceReferences"], { markdown: { maxLength: 1_000_000 }, sourceReferences: { minItems: 1 } }),
       sdlcMutationVariant("BASELINE", "finalize", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
-      sdlcMutationVariant("PRD", "create", ["title", "markdown"]),
+      sdlcMutationVariant("PRD", "create", ["title", "markdown", "trackId"]),
       sdlcMutationVariant("PRD", "update", ["canvasId", "markdown"]),
-      sdlcMutationVariant("TECH_DOC", "create", ["title", "markdown", "parentCanvasId"]),
+      sdlcMutationVariant("TECH_DOC", "create", ["title", "markdown", "trackId"]),
       sdlcMutationVariant("TECH_DOC", "update", ["canvasId", "markdown"]),
     ],
   },
@@ -4980,7 +4982,7 @@ async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerCon
       method: "POST",
       headers: { "x-xyne-acting-user-id": ctx.userId },
       body: JSON.stringify(args),
-    })) as {
+    }, sdlcSpacesAuth())) as {
       artifact: {
         canvasId: string;
         viewAccessId?: string;
@@ -5009,7 +5011,7 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
       method: "POST",
       headers: { "x-xyne-acting-user-id": ctx.userId },
       body: JSON.stringify(args),
-    })) as {
+    }, sdlcSpacesAuth())) as {
       artifact: {
         canvasId: string;
         viewAccessId?: string;
@@ -5052,7 +5054,7 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
           method: "POST",
           headers: { "x-xyne-acting-user-id": ctx.userId },
           body: JSON.stringify({ ...args, kind: artifactType }),
-        })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
+        }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
         return ok(JSON.stringify(data.artifact));
       } catch (e) {
         return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
@@ -5186,6 +5188,79 @@ const spacesSdlcReadArtifactVersion: ToolDef = {
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
+};
+
+// SDLC claw routes (/api/sdlc/claw/*) can be pointed at a dedicated SDLC backend
+// via SDLC_BACKEND_URL, mirroring the iframe's VITE_SDLC_BACKEND_URL. Unset -> the
+// call falls through to the default Spaces backend. token/session/workspace are
+// re-supplied from env because passing an auth object otherwise blanks them.
+function sdlcSpacesAuth(): SpacesAuthContext | undefined {
+  const baseUrl = process.env["SDLC_BACKEND_URL"];
+  if (!baseUrl) return undefined;
+  const token = process.env["XYNE_SPACES_TOKEN"];
+  const sessionId = process.env["XYNE_SPACES_SESSION_ID"];
+  const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"];
+  return {
+    baseUrl,
+    ...(token !== undefined && { token }),
+    ...(sessionId !== undefined && { sessionId }),
+    ...(workspaceId !== undefined && { workspaceId }),
+  };
+}
+
+async function callSdlcTracks(
+  path: string,
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  try {
+    const data = await spacesFetch(`/api/sdlc/claw/tracks${path}`, {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    }, sdlcSpacesAuth());
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC tracks error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+const spacesSdlcListTracks: ToolDef = {
+  name: SDLC_TOOL_NAMES.listTracks,
+  description:
+    "List the SDLC tracks (workstreams) in a trusted repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
+  inputSchema: {
+    type: "object",
+    properties: { repoId: { type: "string", minLength: 1 } },
+    required: ["repoId"],
+  },
+  async handler(args, ctx) {
+    return callSdlcTracks("/list", args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcTracks("/list", args, ctx);
+  },
+};
+
+const spacesSdlcCreateTrack: ToolDef = {
+  name: SDLC_TOOL_NAMES.createTrack,
+  description:
+    "Create a new SDLC track (workstream) in a trusted repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      name: { type: "string", minLength: 1, maxLength: 120 },
+      description: { type: "string", maxLength: 2000 },
+    },
+    required: ["repoId", "name"],
+  },
+  async handler(args, ctx) {
+    return callSdlcTracks("", args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcTracks("", args, ctx);
+  },
 };
 
 const spacesSdlcListArtifacts: ToolDef = {
@@ -8101,6 +8176,8 @@ export const tools: ToolDef[] = [
   spacesCreateCanvas,
   spacesSdlcListArtifacts,
   spacesSdlcReadArtifact,
+  spacesSdlcListTracks,
+  spacesSdlcCreateTrack,
   spacesSdlcMutateArtifact,
   spacesSdlcCreatePullRequest,
   spacesSdlcListArtifactVersions,
