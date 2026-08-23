@@ -41,6 +41,9 @@ export function initAgentBackfillWorker(): Worker<AgentBackfillJobData> {
       err: err instanceof Error ? err.message : String(err),
     });
   });
+  worker.on("error", (err) => {
+    logger.error("[agent-backfill] worker error", { err: err instanceof Error ? err.message : String(err) });
+  });
 
   return worker;
 }

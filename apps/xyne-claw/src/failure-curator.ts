@@ -21,11 +21,12 @@ const log = createLogger("failure-curator");
  */
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { LITELLM } from "./config.js";
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = LITELLM.url;
 // Background job: prefer the low-priority automation key so curator bursts
 // can't queue interactive agent turns on the main key's parallel-slot pool.
-const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
+const LITELLM_API_KEY = LITELLM.automationApiKey;
 // Model MUST be resolved from the same source as the key above: LiteLLM keys are
 // team-scoped and the teams' allowed-model lists are DISJOINT, so pairing the
 // automation key with the interactive `LITELLM_MODEL` yields a hard 403

@@ -215,6 +215,9 @@ export function initEvalGenerationWorker(): Worker<EvalGenerationJobData> {
     log.error(`[eval-run] job ${job?.id} failed:`, err instanceof Error ? err.message : err);
     if (job?.data?.runId) void evalRepository.updateRunStatus(job.data.runId, "failed").catch(() => {});
   });
+  worker.on("error", (err) => {
+    log.error(`[eval-run] worker error:`, err instanceof Error ? err.message : err);
+  });
   log.info("[eval-run] Worker started");
   return worker;
 }

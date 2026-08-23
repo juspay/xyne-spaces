@@ -157,6 +157,9 @@ export function initEvalJudgeWorker(): Worker<EvalJudgeJobData> {
   worker.on("failed", (job, err) => {
     log.error(`[eval-judge] job ${job?.id} failed:`, err instanceof Error ? err.message : err);
   });
+  worker.on("error", (err) => {
+    log.error(`[eval-judge] worker error:`, err instanceof Error ? err.message : err);
+  });
   log.info("[eval-judge] Worker started");
   return worker;
 }

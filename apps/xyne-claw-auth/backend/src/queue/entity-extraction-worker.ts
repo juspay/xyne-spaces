@@ -62,6 +62,9 @@ export function initEntityExtractionWorker(): Worker<EntityExtractionJobData> {
     });
     void markFailed(job?.data?.runId, err, job?.attemptsMade ?? 0, job?.opts?.attempts);
   });
+  worker.on("error", (err) => {
+    logger.error("[entity-extraction] worker error", { err: err instanceof Error ? err.message : String(err) });
+  });
 
   return worker;
 }
