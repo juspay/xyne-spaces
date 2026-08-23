@@ -749,13 +749,22 @@ export class EmailController {
       const participantUserIds = new Set(
         await this.channelParticipantRepo.getBotAppParticipantUserIds(channelId),
       );
-      if (participantUserIds.size === 0) {
-        return res.json({ agents: [] });
-      }
+
+      const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
+      const savedAgentSlug = preference?.autoDraftAgentSlug?.trim() || null;
 
       const allAgents = await listS2SClawAgents();
+      const savedAgent = savedAgentSlug
+        ? allAgents.find(a => a.slug === savedAgentSlug)
+        : null;
+
+      const allowedUserIds = new Set(participantUserIds);
+      if (savedAgent?.spacesAppUserId) {
+        allowedUserIds.add(savedAgent.spacesAppUserId);
+      }
+
       const agents = allAgents
-        .filter(a => a.spacesAppUserId && participantUserIds.has(a.spacesAppUserId))
+        .filter(a => a.spacesAppUserId && allowedUserIds.has(a.spacesAppUserId))
         .map(a => ({ slug: a.slug, name: a.name, color: a.color }));
 
       res.setHeader('Cache-Control', 'no-store');

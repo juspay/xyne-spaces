@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bot, Plus, Sparkles } from 'lucide-react';
 import type { ChannelClawAgent } from '../../../hooks/useChannelClawAgents';
+import type { SelectedAgentInfo } from './AddAgentModal';
 import { AddAgentModal } from './AddAgentModal';
 import {
   Select,
@@ -33,6 +34,14 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   compact = false,
 }) => {
   const [showAddAgent, setShowAddAgent] = useState(false);
+  const [optimisticAgent, setOptimisticAgent] = useState<SelectedAgentInfo | null>(null);
+
+  const handleSelectAgent = (slug: string | null, agent?: SelectedAgentInfo): void => {
+    if (agent && slug) {
+      setOptimisticAgent(agent);
+    }
+    onChange(slug);
+  };
 
   const select = (
     <Select
@@ -75,6 +84,20 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
             </span>
           </SelectItem>
         ))}
+        {optimisticAgent && !clawAgents.some(a => a.slug === optimisticAgent.slug) && (
+          <>
+            <SelectSeparator />
+            <SelectItem value={optimisticAgent.slug} className='rounded-[8px]'>
+              <span className='flex items-center gap-2'>
+                <span
+                  className='inline-block h-2.5 w-2.5 shrink-0 rounded-full'
+                  style={{ backgroundColor: optimisticAgent.color || 'var(--desk-accent)' }}
+                />
+                <span>{optimisticAgent.name}</span>
+              </span>
+            </SelectItem>
+          </>
+        )}
         <SelectSeparator />
         <SelectItem
           value={ADD_AGENT_OPTION}
@@ -92,8 +115,14 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   );
 
   const modal = (
-    <AddAgentModal open={showAddAgent} onOpenChange={setShowAddAgent} onSelectAgent={onChange} />
+    <AddAgentModal
+      open={showAddAgent}
+      onOpenChange={setShowAddAgent}
+      onSelectAgent={handleSelectAgent}
+    />
   );
+
+  const selectedUnavailable = value && !clawAgents.some(a => a.slug === value) && !optimisticAgent;
 
   if (compact) {
     return (
@@ -115,7 +144,7 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
         {clawAgents.length > 0
           ? 'Choose which agent writes the draft. Claw agents added to this channel appear here.'
           : 'Add a Claw agent to this channel to use it for drafts. Until then, the built-in Xyne AI is used.'}
-        {value && !clawAgents.some(a => a.slug === value) && (
+        {selectedUnavailable && (
           <span className='block text-amber-600 dark:text-amber-500 mt-1'>
             The selected agent is no longer in this channel — drafts fall back to the default until
             you pick another.

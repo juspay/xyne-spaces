@@ -252,7 +252,7 @@ export const EmailComposer = ({
   const subjectAI = useComposeSubjectAI(channelId ?? null);
   const emails = propEmails;
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
-  const clawAgents = useChannelClawAgents(channelId || null);
+  const { agents: clawAgents } = useChannelClawAgents(channelId || null);
   const draftAgentName =
     clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
   const deskContacts = useDeskContacts(channelId);

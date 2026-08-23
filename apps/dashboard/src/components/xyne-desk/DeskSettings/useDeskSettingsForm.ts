@@ -108,7 +108,7 @@ export function useDeskSettingsForm(
 
   const canManage = isDeskOwner || isChannelAdmin;
 
-  const clawAgents = useChannelClawAgents(channelId);
+  const { agents: clawAgents } = useChannelClawAgents(channelId);
   const [aiFeatureConfig, setAiFeatureConfig] = useState<
     'none' | 'auto-classification' | 'priority' | 'tag-generation'
   >('none');

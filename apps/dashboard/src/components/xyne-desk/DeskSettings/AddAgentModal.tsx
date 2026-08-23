@@ -5,10 +5,16 @@ import { Search, Plus } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 
+export interface SelectedAgentInfo {
+  slug: string;
+  name: string;
+  color?: string;
+}
+
 export interface AddAgentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelectAgent: (slug: string | null) => void;
+  onSelectAgent: (slug: string | null, agent?: SelectedAgentInfo) => void;
 }
 
 export const AddAgentModal: React.FC<AddAgentModalProps> = ({
@@ -33,8 +39,8 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
     return withoutAskAI.filter(a => a.name.toLowerCase().includes(q));
   }, [agents, query]);
 
-  const handleSelect = (slug: string): void => {
-    onSelectAgent(slug);
+  const handleSelect = (agent: SelectedAgentInfo): void => {
+    onSelectAgent(agent.slug, agent);
     setQuery('');
     onOpenChange(false);
   };
@@ -88,7 +94,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
               <button
                 key={agent.slug}
                 type='button'
-                onClick={() => handleSelect(agent.slug)}
+                onClick={() => handleSelect(agent)}
                 className='flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent'
                 data-track-category='DeskSettings'
                 data-track-name='SelectAddAgent'
