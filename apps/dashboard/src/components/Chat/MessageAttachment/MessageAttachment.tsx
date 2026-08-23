@@ -76,6 +76,80 @@ interface MessageAttachmentProps {
   parentMessage?: AttachmentRef['parentMessage'];
 }
 
+type ViewerRawAttachments =
+  QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
+
+// Open or switch the attachment viewer to `targetId`, carrying the full sibling
+// set so the in-viewer next/prev navigation keeps working. UPDATE when the
+// viewer is already open (incl. error state), OPEN when it is closed.
+const openOrSwitchViewer = (params: {
+  targetId: string;
+  fallback: AttachmentRef;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: ViewerRawAttachments;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+  parentMessage?: AttachmentRef['parentMessage'];
+  overlay?: Partial<AttachmentRef>;
+}): void => {
+  const {
+    targetId,
+    fallback,
+    allThreadAttachments,
+    allAttachments,
+    conversationId,
+    channelId,
+    replyCount,
+    parentMessage,
+    overlay,
+  } = params;
+
+  const siblings: AttachmentRef[] =
+    allThreadAttachments ||
+    (allAttachments && allAttachments.length > 0
+      ? allAttachments.map(att => {
+          const ref: AttachmentRef = {
+            attachmentId: att.id,
+            fileName: att.originalFilename,
+            fileUrl: `/attachments/${att.id}/download`,
+            mimeType: att.mimetype,
+            fileSize: att.size,
+            thumbnailUrl: att.thumbnailUrl,
+          };
+          if (conversationId) ref.conversationId = conversationId;
+          if (channelId) ref.channelId = channelId;
+          if (replyCount !== undefined) ref.replyCount = replyCount;
+          if (parentMessage) ref.parentMessage = parentMessage;
+          return ref;
+        })
+      : [fallback]);
+
+  let startIndex = siblings.findIndex(a => a.attachmentId === targetId);
+  if (startIndex === -1) {
+    startIndex = siblings.findIndex(
+      a =>
+        a.fileName === fallback.fileName &&
+        a.fileSize === fallback.fileSize &&
+        a.mimeType === fallback.mimeType,
+    );
+  }
+
+  // Never open the wrong file: if the target is not in the sibling set, show it alone.
+  const base = startIndex === -1 ? [fallback] : siblings;
+  const safeStartIndex = startIndex === -1 ? 0 : startIndex;
+  const attachments = overlay
+    ? base.map((a, i) => (i === safeStartIndex ? { ...a, ...overlay } : a))
+    : base;
+
+  const isOpen = attachmentViewerActor.getSnapshot().value !== 'closed';
+  attachmentViewerActor.send({
+    type: isOpen ? 'UPDATE' : 'OPEN',
+    attachments,
+    startIndex: safeStartIndex,
+  });
+};
+
 //to check the who can delete and delete the attachment
 const useAttachmentDelete = (attachmentId: string, fileName: string, uploadedByUserId: string) => {
   const { user } = useAuthContext();
@@ -511,6 +585,8 @@ const InlineTextFile: React.FC<{
   channelId?: string;
   replyCount?: number;
   extraActions?: React.ReactNode;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: ViewerRawAttachments;
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -520,6 +596,8 @@ const InlineTextFile: React.FC<{
   channelId,
   replyCount,
   extraActions,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const [fileData, setFileData] = useState<File | null>(null);
@@ -605,12 +683,15 @@ const InlineTextFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    // Use UPDATE if the viewer is already open (e.g. switching to this
-    // attachment from another one in the side thread panel); the machine only
-    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
-    attachmentViewerActor.send({
-      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
-      attachments: [attachment],
+    openOrSwitchViewer({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
     });
   };
 
@@ -732,6 +813,8 @@ const InlineCodeFile: React.FC<{
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: ViewerRawAttachments;
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -740,6 +823,8 @@ const InlineCodeFile: React.FC<{
   conversationId,
   channelId,
   replyCount,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const windowWidth = useWindowWidth();
@@ -757,12 +842,15 @@ const InlineCodeFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    // Use UPDATE if the viewer is already open (e.g. switching to this
-    // attachment from another one in the side thread panel); the machine only
-    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
-    attachmentViewerActor.send({
-      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
-      attachments: [attachment],
+    openOrSwitchViewer({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
     });
   };
 
@@ -832,6 +920,8 @@ const InlineVideoPlayer: React.FC<{
   channelId?: string;
   replyCount?: number;
   duration?: number | undefined;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: ViewerRawAttachments;
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -847,6 +937,8 @@ const InlineVideoPlayer: React.FC<{
   channelId,
   replyCount,
   duration,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
@@ -915,8 +1007,7 @@ const InlineVideoPlayer: React.FC<{
     // Capture current video time before opening modal
     const currentTime = videoRef.current?.currentTime;
     const isPlayingInline = videoRef.current ? !videoRef.current.paused : false;
-    // When switching to this video while the viewer is already open, start
-    // playback (the reported expectation for clicking a video in the panel).
+    // Autoplay when switching into an already-open viewer (reported expectation).
     const viewerOpen = attachmentViewerActor.getSnapshot().value !== 'closed';
     const attachment: AttachmentRef = {
       attachmentId,
@@ -931,12 +1022,19 @@ const InlineVideoPlayer: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    // Use UPDATE if the viewer is already open (e.g. switching to this
-    // attachment from another one in the side thread panel); the machine only
-    // handles OPEN from the `closed` state, so a plain OPEN would be dropped.
-    attachmentViewerActor.send({
-      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
-      attachments: [attachment],
+    openOrSwitchViewer({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+      overlay: {
+        autoPlay: startPlayback || isPlayingInline || viewerOpen,
+        ...(currentTime !== undefined && { initialTime: currentTime }),
+      },
     });
   };
 
@@ -1260,6 +1358,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
         {...(extraActions && { extraActions })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );
@@ -1275,6 +1375,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );
@@ -1298,6 +1400,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );
