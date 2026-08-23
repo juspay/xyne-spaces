@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { Headphones, ChevronDown } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
@@ -42,6 +43,7 @@ interface CallTriggerModalProps {
   className?: string;
   disabled?: boolean;
   isMember: boolean;
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link started calls to
 }
 
 export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
@@ -54,6 +56,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   className,
   disabled = false,
   isMember,
+  sdlcLink,
 }) => {
   const { isMobile } = usePlatform();
   const usesCustomTriggerStyle = Boolean(className?.trim());
@@ -62,6 +65,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     channelId,
     targetUserIds,
     callDisplayName,
+    sdlcLink,
   });
 
   // Use the new hook for initiating calls
@@ -115,6 +119,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
       channelId,
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
+      ...(sdlcLink && { sdlcLink }),
       onComplete: handleClose,
     });
   };
@@ -158,6 +163,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         channelName={channelName}
         participantCount={participantCount}
         isMember={isMember}
+        sdlcLink={sdlcLink}
         {...(className ? { className } : {})}
         {...(callDisplayName && { callDisplayName })}
       />

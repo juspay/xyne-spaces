@@ -73,7 +73,7 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole } from '@xyne/shared';
+import { MessageType, CanvasVisibility, CanvasRole, isBaselineCanvasType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -303,10 +303,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
-      const sdlcMetadata = canvasData.metadata as Record<string, unknown> | null | undefined;
       const isAdminEditableSdlcBaseline =
-        sdlcMetadata?.['surface'] === 'SDLC' &&
-        sdlcMetadata['artifactKind'] === 'BASELINE' &&
+        isBaselineCanvasType(canvasData.sdlcArtifact?.artifactType) &&
         Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
 
       if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;

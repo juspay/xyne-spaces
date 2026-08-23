@@ -1998,6 +1998,37 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   })
   .primaryKey("id");
 
+export const sdlcArtifactTable = table("sdlc_artifacts")
+  .columns({
+    workspaceId: string(),
+    artifactId: string(),
+    repoId: string(),
+    artifactType: string(),
+    artifactStatus: string(),
+    workflowExecutionId: string().optional(),
+    generationCommit: string().optional(),
+    sourceReferences: string().optional(),
+    sourcePaths: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("artifactId");
+
+export const sdlcTrackTable = table("sdlc_tracks")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    repoId: string(),
+    name: string(),
+    description: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const lookupValueTable = table("lookup_values")
   .columns({
     id: string(),
@@ -4323,6 +4354,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ["projectId"],
     destField: ["id"],
     destSchema: projectTable,
+  }),
+  sdlcArtifact: one({
+    sourceField: ["id"],
+    destField: ["artifactId"],
+    destSchema: sdlcArtifactTable,
   })
 }));
 
@@ -4421,10 +4457,41 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["repoId"],
     destSchema: sdlcEntityLinkTable,
+  }),
+  sdlcArtifacts: many({
+    sourceField: ["id"],
+    destField: ["repoId"],
+    destSchema: sdlcArtifactTable,
+  }),
+  sdlcTracks: many({
+    sourceField: ["id"],
+    destField: ["repoId"],
+    destSchema: sdlcTrackTable,
   })
 }));
 
 export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  repo: one({
+    sourceField: ["repoId"],
+    destField: ["id"],
+    destSchema: repoTable,
+  })
+}));
+
+export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
+  repo: one({
+    sourceField: ["repoId"],
+    destField: ["id"],
+    destSchema: repoTable,
+  }),
+  canvas: one({
+    sourceField: ["artifactId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  })
+}));
+
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ one }) => ({
   repo: one({
     sourceField: ["repoId"],
     destField: ["id"],
@@ -4945,6 +5012,8 @@ export const schema = createSchema(
       vespaInsertionLogsTable,
       repoTable,
       sdlcEntityLinkTable,
+      sdlcArtifactTable,
+      sdlcTrackTable,
       lookupValueTable,
       formTable,
       formContextMappingTable,
@@ -5084,6 +5153,8 @@ export const schema = createSchema(
       canvasUserStatusTableRelationships,
       repoTableRelationships,
       sdlcEntityLinkTableRelationships,
+      sdlcArtifactTableRelationships,
+      sdlcTrackTableRelationships,
       formTableRelationships,
       globalFieldTableRelationships,
       formFieldsTableRelationships,
@@ -5238,6 +5309,8 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
