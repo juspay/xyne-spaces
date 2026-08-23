@@ -75,7 +75,9 @@ export function parseSdlcSourceReferences(
 ): SdlcStoredSourceReference[] {
   if (!value) return [];
   try {
-    const result = sdlcStoredSourceReferencesSchema.safeParse(JSON.parse(value));
+    const result = sdlcStoredSourceReferencesSchema.safeParse(
+      JSON.parse(value),
+    );
     return result.success ? result.data : [];
   } catch {
     return [];
@@ -88,12 +90,16 @@ export function stringifySdlcSourceReferences(
   return references.length > 0 ? JSON.stringify(references) : null;
 }
 
-export function parseSdlcSourcePaths(value: string | null | undefined): string[] {
+export function parseSdlcSourcePaths(
+  value: string | null | undefined,
+): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed)
-      ? parsed.filter((path): path is string => typeof path === "string" && path.length > 0)
+      ? parsed.filter(
+          (path): path is string => typeof path === "string" && path.length > 0,
+        )
       : [];
   } catch {
     return [];
@@ -149,7 +155,10 @@ export const sdlcDiscussionSchema = z
     linkId: z.string().min(1),
   })
   .superRefine((value, ctx) => {
-    if (value.ownerType === "CANVAS" && (!value.surfaceType || !value.surfaceId)) {
+    if (
+      value.ownerType === "CANVAS" &&
+      (!value.surfaceType || !value.surfaceId)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "CANVAS discussions require surfaceType and surfaceId",
@@ -348,7 +357,9 @@ export const sdlcSourceReferenceInputSchema = z.object({
   startLine: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional(),
 });
-export type SdlcSourceReferenceInput = z.infer<typeof sdlcSourceReferenceInputSchema>;
+export type SdlcSourceReferenceInput = z.infer<
+  typeof sdlcSourceReferenceInputSchema
+>;
 
 export const sdlcSourceReferencesSchema = z
   .array(sdlcSourceReferenceInputSchema)
@@ -554,28 +565,32 @@ const sdlcRunAuthoritySchema = z.union([
   }),
 ]);
 
-export const createSdlcPullRequestSchema = z.object({
-  repoId: z.string().min(1),
-  title: z.string().trim().min(1).max(256),
-  body: z.string().max(65_536).default(""),
-  head: z.string().trim().min(1).max(255),
-  base: z.string().trim().min(1).max(255),
-  commitHash: z
-    .string()
-    .trim()
-    .regex(/^[0-9a-f]{40}$/i),
-}).and(sdlcRunAuthoritySchema);
+export const createSdlcPullRequestSchema = z
+  .object({
+    repoId: z.string().min(1),
+    title: z.string().trim().min(1).max(256),
+    body: z.string().max(65_536).default(""),
+    head: z.string().trim().min(1).max(255),
+    base: z.string().trim().min(1).max(255),
+    commitHash: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-f]{40}$/i),
+  })
+  .and(sdlcRunAuthoritySchema);
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
 
-export const bootstrapSdlcRuntimeCredentialSchema = z.object({
-  agentSlug: z.literal("sdlc-agent"),
-  repoId: z.string().min(1),
-  operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
-  sandboxId: z.string().min(1).max(256),
-  sandboxPublicKey: z.string().min(32).max(1024),
-}).and(sdlcRunAuthoritySchema);
+export const bootstrapSdlcRuntimeCredentialSchema = z
+  .object({
+    agentSlug: z.literal("sdlc-agent"),
+    repoId: z.string().min(1),
+    operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
+    sandboxId: z.string().min(1).max(256),
+    sandboxPublicKey: z.string().min(32).max(1024),
+  })
+  .and(sdlcRunAuthoritySchema);
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
@@ -607,16 +622,16 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
-    if (value.kind === "TECH_DOC" && !value.parentCanvasId) {
+    if ((value.kind === "PRD" || value.kind === "TECH_DOC") && !value.trackId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Tech Doc artifacts require a parent PRD",
+        message: "PRD and Tech Doc artifacts require a track",
       });
     }
-    if (value.trackId && value.kind !== "PRD") {
+    if (value.trackId && value.kind !== "PRD" && value.kind !== "TECH_DOC") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "trackId is only supported for PRD artifacts",
+        message: "trackId is only supported for PRD and Tech Doc artifacts",
       });
     }
   });
@@ -624,15 +639,14 @@ export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
 >;
 
-export const updateSdlcClawArtifactSchema = z
-  .object({
-    repoId: z.string().min(1),
-    kind: z.enum(["PRD", "TECH_DOC"]),
-    canvasId: z.string().min(1),
-    title: z.string().trim().min(1).max(255).optional(),
-    markdown: z.string().min(1).max(5_000_000),
-    sourceReferences: sdlcSourceReferencesSchema,
-  });
+export const updateSdlcClawArtifactSchema = z.object({
+  repoId: z.string().min(1),
+  kind: z.enum(["PRD", "TECH_DOC"]),
+  canvasId: z.string().min(1),
+  title: z.string().trim().min(1).max(255).optional(),
+  markdown: z.string().min(1).max(5_000_000),
+  sourceReferences: sdlcSourceReferencesSchema,
+});
 export type UpdateSdlcClawArtifactInput = z.infer<
   typeof updateSdlcClawArtifactSchema
 >;
@@ -675,6 +689,12 @@ export const createSdlcLinkSchema = z.object({
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
+export const createSdlcTrackSchema = z.object({
+  repoId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).optional(),
+});
+export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
 export function inferRepositoryNameFromUrl(raw: string): string | null {
   const value = raw.trim().replace(/^git@([^:]+):/, "https://$1/");
