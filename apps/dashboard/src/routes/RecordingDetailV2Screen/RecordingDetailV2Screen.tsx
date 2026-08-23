@@ -26,6 +26,7 @@ import {
   clearSummaryRequested,
   getSummaryProgress,
   getSummaryRequest,
+  getSummaryStage,
   markSummaryRequested,
   saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
@@ -69,6 +70,10 @@ import { SummaryGenerationPanel } from './components/SummaryGenerationPill/Summa
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
+import {
+  RecordingGoogleDocsList,
+  parseRecordingGoogleDocLinks,
+} from './components/RecordingGoogleDocsList';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -141,6 +146,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [postToEmailNonce, setPostToEmailNonce] = useState(0);
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
@@ -170,7 +176,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
 
-  const exportGoogleDoc = async (): Promise<void> => {
+  const exportGoogleDoc = async (documentTitle?: string): Promise<void> => {
     if (!recording || isExportingGoogleDoc) return;
 
     // Opening synchronously keeps this user-initiated navigation from being blocked by browsers.
@@ -179,11 +185,31 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     setIsExportingGoogleDoc(true);
     try {
-      const { documentUrl } = await recordingService.exportGoogleDoc(recording.externalId);
+      const { documentUrl, document: createdDocument } = await recordingService.exportGoogleDoc(
+        recording.externalId,
+        documentTitle,
+      );
       if (documentWindow) {
         documentWindow.location.assign(documentUrl);
       } else {
         window.open(documentUrl, '_blank', 'noopener,noreferrer');
+      }
+      // Zero replays the metadata write too, but only after the row round-trips —
+      // the list should show the doc the moment its tab opens.
+      if (createdDocument) {
+        setRecording(prev =>
+          prev
+            ? {
+                ...prev,
+                googleDocs: [
+                  createdDocument,
+                  ...(prev.googleDocs ?? []).filter(
+                    entry => entry.documentId !== createdDocument.documentId,
+                  ),
+                ],
+              }
+            : prev,
+        );
       }
       toast.success('Google Doc created');
       setShowGoogleDocPreviewModal(false);
@@ -208,10 +234,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     if (connected) {
       toast.success('Google email connected');
+      // Remount so the compose context is refetched — in Electron the modal is still
+      // mounted from before the consent screen opened in the system browser.
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
     if (connectionError) {
       toast.error(connectionError);
+      setPostToEmailNonce(nonce => nonce + 1);
       setShowPostToEmailModal(true);
     }
 
@@ -383,7 +413,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const linkedTicketId = typeof rawLinkedTicketId === 'string' ? rawLinkedTicketId : null;
       const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
+      const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
+      const googleDocs = parseRecordingGoogleDocLinks(metadata?.['googleDocs']);
       const next: RecordingDetail = {
         ...prev,
         title: recordingRow.title || prev.title,
@@ -395,8 +427,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
           typeof rawDetailedSummaryCanvasId === 'string'
             ? rawDetailedSummaryCanvasId
             : prev.detailedSummaryCanvasId,
+        detailedSummaryReady:
+          typeof rawDetailedSummaryReady === 'boolean'
+            ? rawDetailedSummaryReady
+            : prev.detailedSummaryReady,
         notesCanvasId:
           prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
+        // An empty list here means metadata hasn't carried the key yet (older
+        // recording, or the export write is still in flight) — keep what we have.
+        googleDocs: googleDocs.length > 0 ? googleDocs : (prev.googleDocs ?? []),
         markedItems: recordingRow.markedItems ?? prev.markedItems,
         summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
         aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
@@ -417,14 +456,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
     const request = getSummaryRequest(recordingId);
     if (!request || recording?.externalId !== recordingId) return;
     const requestedSummaryIsReady = request.templateId
-      ? recording?.summaryTemplateId === request.templateId
-      : !!recording?.detailedSummaryCanvasId;
+      ? recording?.summaryTemplateId === request.templateId && !!recording?.detailedSummaryReady
+      : !!recording?.detailedSummaryReady;
     if (!requestedSummaryIsReady) return;
     setAwaitingSummary(false);
     setPendingSummaryTemplateId(null);
     clearSummaryRequested(recordingId);
   }, [
-    recording?.detailedSummaryCanvasId,
+    recording?.detailedSummaryReady,
     recording?.externalId,
     recording?.summaryTemplateId,
     recordingId,
@@ -539,7 +578,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (!recording || isRegeneratingSummary) return;
 
     // Picking the template the existing summary was already written with is a no-op
-    if (recording.detailedSummaryCanvasId && summaryTemplateId === recording.summaryTemplateId) {
+    if (
+      recording.detailedSummaryCanvasId &&
+      recording.detailedSummaryReady !== false &&
+      summaryTemplateId === recording.summaryTemplateId
+    ) {
       handleTabSelect('summary');
       return;
     }
@@ -565,6 +608,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               summaryTemplateId: result.summaryTemplateId,
               detailedSummaryCanvasId:
                 result.detailedSummaryCanvasId ?? current.detailedSummaryCanvasId,
+              detailedSummaryReady: result.detailedSummaryReady,
             }
           : current,
       );
@@ -668,7 +712,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recording, message, notesCanvasId]);
 
   const handleSummaryProgressPause = useCallback(
-    (progress: number): void => saveSummaryProgress(recordingId, progress),
+    (progress: number, stageIndex: number): void =>
+      saveSummaryProgress(recordingId, progress, stageIndex),
     [recordingId],
   );
 
@@ -704,6 +749,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
     });
   }, [recordingId, transcriptText]);
 
+  // Seeds the summary-request record for the auto-detected pending state (server
+  // summarizing without an explicit "Generate summary" click), so its progress
+  // persists across unmounts the same way an explicit regenerate already does.
+  useEffect(() => {
+    if (!recordingId || recording?.externalId !== recordingId) return;
+    if (awaitingSummary || summaryFailed) return;
+    const hasDetailedSummaryNow =
+      !!recording?.detailedSummaryCanvasId && recording?.detailedSummaryReady !== false;
+    const hasTranscriptNow =
+      !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording?.hasTranscript;
+    if (hasDetailedSummaryNow || !hasTranscriptNow) return;
+    if (getSummaryRequest(recordingId)) return;
+    markSummaryRequested(recordingId);
+  }, [recordingId, recording, recordingRow, transcriptText, awaitingSummary, summaryFailed]);
+
   if (loading) {
     return <RecordingDetailV2Skeleton />;
   }
@@ -725,7 +785,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Polling has given up (or was skipped for an old recording) and there is still no
   // stitched audio, so the control bar shows an unavailable indicator, not a spinner.
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
-  const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
+  // The canvas itself now exists from call-start (so sharing works
+  // immediately) — gate on detailedSummaryReady too, otherwise this would
+  // flip true instantly and skip straight past the shimmer. `null` means the
+  // recording predates this flag (already finished generating long ago), so
+  // only an explicit `false` counts as "still generating".
+  const hasDetailedSummary =
+    !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady !== false;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const summaryTemplateOptions: RecordingSummaryTemplate[] = [
     DEFAULT_SUMMARY_TEMPLATE_OPTION,
@@ -754,6 +820,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Nothing to summarize without a transcript, so the offer waits for one to exist.
   const hasTranscript =
     !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording.hasTranscript;
+
+  const showSummaryShimmer =
+    awaitingSummary || (!hasDetailedSummary && hasTranscript && !summaryFailed);
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -849,6 +918,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   visibleTab={visibleTab}
                   secondTab={secondTab}
                   onSelect={handleTabSelect}
+                  hasSummary={hasDetailedSummary}
                   selectedTemplate={selectedSummaryTemplate}
                   {...(isLive || !isOwner
                     ? {}
@@ -985,7 +1055,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2.5'>
                   <h2 className='text-lg font-semibold text-foreground'>Summary</h2>
-                  {!hasDetailedSummary && !awaitingSummary && (
+                  {!hasDetailedSummary && !showSummaryShimmer && (
                     <span className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground'>
                       Not generated
                     </span>
@@ -1013,17 +1083,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 />
               ) : (
                 <SummaryGenerationPanel
-                  isAwaiting={awaitingSummary}
+                  isAwaiting={showSummaryShimmer}
                   canGenerate={hasTranscript}
                   onGenerate={handleShowSummaryShimmer}
                   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
                   initialProgress={getSummaryProgress(recordingId)}
+                  initialStageIndex={getSummaryStage(recordingId)}
                   onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
+              {/* Owner-only: the docs live in the owner's Drive, so these links are
+                  dead ends for anyone the recording was merely shared with. */}
+              {isOwner ? <RecordingGoogleDocsList documents={recording.googleDocs ?? []} /> : null}
             </section>
           )}
         </div>
@@ -1053,6 +1127,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
           title='Post to channel'
           data-testid='post-recording-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
         >
           <PostRecordingToChannelModal
             recording={recording}
@@ -1071,6 +1146,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           testId='post-recording-to-email-dialog'
         >
           <PostRecordingToEmailModal
+            key={postToEmailNonce}
             recording={recording}
             onClose={() => setShowPostToEmailModal(false)}
           />
@@ -1083,7 +1159,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           onOpenChange={open => !open && setShowGoogleDocPreviewModal(false)}
           title='Preview Google Doc'
           description='Review the recording summary before creating a Google Doc.'
-          className='max-w-[760px] overflow-hidden rounded-xl p-0'
+          className='max-w-[720px] overflow-hidden rounded-[18px] p-0'
           testId='google-doc-preview-dialog'
         >
           <GoogleDocPreviewModal
@@ -1142,7 +1218,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       channelId={canvas.channelId || undefined}
       title={canvas.title}
       editable={true}
-      placeholder='Start typing your notes…'
+      placeholder='Add your notes here, you can view the transcript live in the transcript tab'
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2

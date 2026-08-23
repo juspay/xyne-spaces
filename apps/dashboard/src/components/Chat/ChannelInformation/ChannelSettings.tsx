@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
@@ -46,7 +47,11 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
         if (Object.values(ChannelAddUserPolicy).includes(v as ChannelAddUserPolicy)) {
           onValueChange(v as ChannelAddUserPolicy);
         } else {
-          console.error('Invalid policy value received:', v);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Invalid policy value received:'),
+            error: v,
+          });
         }
       }}
       disabled={disabled}

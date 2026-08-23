@@ -32,6 +32,7 @@
     "@slack/web-api": "8.0.0",
     "@types/pdfkit": "^0.17.6",
     "@xyne/storage": "workspace:*",
+    "@xyne/shared": "workspace:*",
     "bullmq": "^5.72.0",
     "cron-parser": "^4.9.0",
     "exceljs": "^4.4.0",
@@ -63,6 +64,11 @@
     "prisma": "^6.0.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.62.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "@opentelemetry/otlp-transformer": {
+      "protobufjs": "^8.0.1"
+    }
   }
 }

@@ -261,6 +261,18 @@ export async function loadEffectiveCredentials(
   // wrong bot's token. If no agentSlug is in context (admin / health-check
   // paths) we have no agent identity to act as — return null and let the
   // caller decide what to do.
+  // heisenberg: shared/global stdio proxy with no per-user secret. The base
+  // URL comes from deployment config (HEISENBERG_BASE_URL or a code default).
+  if (serverType === "heisenberg") {
+    log.info(`[creds-loader] heisenberg userId=${userId} → global env/default URL`);
+    return {
+      source: "global",
+      connectionId: "env:heisenberg",
+      credentials: { baseUrl: CONFIG.heisenbergBaseUrl },
+      isUserOwned: false,
+    };
+  }
+
   // research-agent-mcp: shared/global stdio proxy configured entirely by
   // environment. There is no user OAuth/login flow and no per-user secret; the
   // spawned MCP child receives RESEARCH_AGENT_MCP_API_KEY from CONFIG.

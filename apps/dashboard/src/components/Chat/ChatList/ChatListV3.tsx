@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { withProfiler } from '../../../utils/withProfiler';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
@@ -492,7 +493,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
         setConversationsState(merged);
         setIsInitialLoadComplete(true);
       })
-      .catch(err => console.error('[V11] initial load error:', err));
+      .catch(err =>
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[V11] initial load error:'),
+          error: err,
+        }),
+      );
   }, []);
 
   useEffect(() => {
@@ -615,7 +622,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
           setFirstItemIndex(prev => prev - newItems.length);
           setConversationsState(merged);
         })
-        .catch(err => console.error('[V11] fetchOlderMessages error:', err));
+        .catch(err =>
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[V11] fetchOlderMessages error:'),
+            error: err,
+          }),
+        );
     },
     [
       channelId,
@@ -677,7 +690,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
           isFetchingRef.current = false;
         })
         .catch(err => {
-          console.error('[V11] fetchNewerMessages error:', err);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[V11] fetchNewerMessages error:'),
+            error: err,
+          });
           isFetchingRef.current = false;
         });
     },

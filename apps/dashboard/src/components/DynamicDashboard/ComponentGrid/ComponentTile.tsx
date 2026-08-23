@@ -438,9 +438,11 @@ class TileBodyErrorBoundary extends ReactComponent<
     return { error };
   }
   override componentDidCatch(error: Error): void {
-    if (typeof console !== 'undefined' && console.error) {
-      console.error('[ComponentTile] render error', error);
-    }
+    logger.error(Event.FRONTEND_ERROR, {
+      type: 'dynamic_dashboard_render',
+      message: 'Component tile render failed',
+      error,
+    });
   }
   override render(): ReactNode {
     if (this.state.error) {
@@ -465,3 +467,4 @@ function LoadingState(): ReactElement {
 }
 
 export default ComponentTile;
+import { Event, logger } from '../../../utils/logger';

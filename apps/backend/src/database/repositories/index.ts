@@ -31,6 +31,11 @@ export {
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
 export { MessageRepository } from './messageRepository';
+export {
+  syncMessageArtifact,
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';

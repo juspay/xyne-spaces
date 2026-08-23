@@ -47,7 +47,7 @@ export function usePreferencesState(enabled: boolean) {
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
     useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
-  const { searchMode, setSearchMode } = useSearchMode();
+  const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
@@ -145,7 +145,6 @@ export function usePreferencesState(enabled: boolean) {
     setShowThreadTags,
     setEnterSendsMessage,
     searchMode,
-    setSearchMode,
     showClawDashboard,
     setShowClawDashboard,
     allowThreadBroadcastMentions,

@@ -2,6 +2,8 @@ import type { ShortcutScope } from './shortcutsRegistry';
 
 export interface ShortcutDefinition {
   keys: string | string[];
+  displayKeys?: string[];
+  electronOnly?: boolean;
   scope?: ShortcutScope;
   priority?: number;
   allowInInputs?: boolean;
@@ -66,6 +68,17 @@ export const shortcuts = {
     allowInInputs: true,
     useKey: true,
   },
+  'global.goToRailItem': {
+    keys: ['mod+1', 'mod+2', 'mod+3', 'mod+4', 'mod+5', 'mod+6', 'mod+7', 'mod+8', 'mod+9'],
+    displayKeys: ['mod+1', 'mod+9'],
+    // In a browser these keys switch tabs, so the rail only claims them in Electron.
+    electronOnly: true,
+    scope: 'global',
+    allowInInputs: true,
+    priority: 50,
+    description: 'Jump to sidebar item 1-9',
+    category: 'Navigation',
+  },
   'global.openActivity': {
     keys: 'mod+shift+a',
     scope: 'global',
@@ -113,7 +126,7 @@ export const shortcuts = {
   'recording.start': {
     keys: 'mod+alt+x',
     scope: 'global',
-    description: 'Start recording',
+    description: 'Start or stop recording',
     category: 'Recording',
     priority: 50,
     preventDefault: true,
@@ -265,6 +278,7 @@ export const shortcuts = {
 
   // ===== COMPOSER SHORTCUTS =====
   'composer.attach': {
+    // Not mod+u: that is TipTap's underline binding inside the composer.
     keys: 'mod+o',
     scope: 'composer',
     allowInInputs: true,

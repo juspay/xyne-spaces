@@ -29,6 +29,8 @@ export interface BasePopoverSelectorProps<T extends BaseSelectorItem> {
   isLoading?: boolean;
   className?: string;
   triggerChar?: string;
+  header?: ReactNode;
+  footer?: ReactNode;
 }
 
 export function BasePopoverSelector<T extends BaseSelectorItem>({
@@ -44,6 +46,8 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
   isLoading = false,
   className = 'w-80',
   triggerChar = '@',
+  header,
+  footer,
 }: BasePopoverSelectorProps<T>): React.JSX.Element | null {
   const zIndexClass = useOverlayZIndex() ?? 'z-50';
   const [isOpen, setIsOpen] = useState(false);
@@ -189,6 +193,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
           onCloseAutoFocus={e => e.preventDefault()}
           data-testid={triggerChar === '#' ? 'channel-search-results' : 'user-search-results'}
         >
+          {header}
           {isLoading ? (
             <div className='p-2 px-3 text-sm text-muted-foreground text-center'>
               {loadingMessage}
@@ -217,6 +222,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
               ))}
             </div>
           )}
+          {footer}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

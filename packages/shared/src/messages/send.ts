@@ -97,6 +97,11 @@ export function sendMessage(
   const fireTimestamp = Date.now();
   updatePending(messageId, { mutatorFired: true, timestamp: fireTimestamp });
 
+  // First fire only: when the caller passes no attachments we OMIT attachmentIds
+  // so a send that under-specifies still hits the mutator's legacy draft-scan
+  // fallback for this same compose context. The durable retry path
+  // (firePendingMutator in pending.ts) deliberately does the opposite and always
+  // passes attachmentIds, because a replay must not scavenge live draft state.
   const attachmentIds = attachments.map(a => a.attachmentId);
   const mutation =
     ref.kind === 'channel'
@@ -108,7 +113,7 @@ export function sendMessage(
             messageId,
             timestamp: fireTimestamp,
             type,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
           }),
         )
       : zero.mutate(
@@ -118,7 +123,7 @@ export function sendMessage(
             type,
             timestamp: fireTimestamp,
             messageId,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
             ...(payload.alsoSendToChannel !== undefined && {
               showInChannel: payload.alsoSendToChannel,
             }),

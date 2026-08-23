@@ -95,6 +95,13 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
       return;
     }
 
+    // Standing anywhere but our entry ends the "already restored this one" guard below.
+    // That guard only exists to stop a close-in-place from immediately re-restoring, and
+    // react-router hands an entry the SAME `location.key` every time it is popped back to
+    // — so without this reset the guard never lifts and an entry can be restored exactly
+    // once per session. Leaving the entry is what makes the next return a fresh visit.
+    if (!isOverlayEntry) restoredKeyRef.current = null;
+
     if (open && !pushedRef.current) {
       pushedRef.current = true;
       navigatingRef.current = false;

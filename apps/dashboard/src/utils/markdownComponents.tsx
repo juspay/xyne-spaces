@@ -68,7 +68,10 @@ const FencedCodeBlock = ({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          message: 'Failed to copy code snippet to clipboard',
+          error,
+        });
       });
   };
 
@@ -326,9 +329,6 @@ export const createMarkdownComponents = (
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
         if (!href) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey) {
-          logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
-        }
         openLink(href, event);
       };
       return (

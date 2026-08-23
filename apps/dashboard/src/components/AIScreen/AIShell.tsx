@@ -73,7 +73,10 @@ export function AIShell({
       </Separator>
 
       <Panel id='ai-main' minSize='30%'>
-        <div ref={mainRef} className='bg-background relative flex h-full min-w-0 flex-1 flex-col'>
+        <div
+          ref={mainRef}
+          className='bg-background relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl'
+        >
           {children}
         </div>
       </Panel>

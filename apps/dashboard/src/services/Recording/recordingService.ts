@@ -133,17 +133,31 @@ export interface RecordingSharingResult {
 export interface RegenerateRecordingSummaryResult {
   summaryTemplateId: string;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean;
+}
+
+/** A Google Doc created from this recording's summary, as stored on call metadata. */
+export interface RecordingGoogleDocLink {
+  documentId: string;
+  title: string;
+  url: string;
+  /** ISO timestamp of when the doc was created. */
+  createdAt: string;
+  createdByUserId: string;
 }
 
 export interface ExportRecordingGoogleDocResult {
   documentId: string;
   documentUrl: string;
+  document: RecordingGoogleDocLink;
 }
 
 export interface RecordingGoogleDocComposeContext {
   canExport: boolean;
   unavailableReason?: string;
   summary: string | null;
+  /** Docs already exported from this recording, newest first. */
+  documents?: RecordingGoogleDocLink[];
 }
 
 interface GoogleRecordingDocConnectionResponse {
@@ -175,7 +189,10 @@ export interface RecordingDetail extends Recording {
   messageId: string | null;
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
+  detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
+  /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
+  googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
@@ -222,6 +239,7 @@ interface InitiateCallResponse {
   callId?: string;
   channelId: string | null;
   notesCanvasId: string;
+  conversationId?: string;
 }
 
 interface RecordingsResponse {
@@ -239,10 +257,15 @@ interface RecordingDetailResponse {
 class RecordingService {
   /**
    * Start a headless recording session
-   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials
+   * Calls backend to initiate a HEADLESS call and returns LiveKit credentials.
+   * When `conversationId` + `channelId` are provided (recording started from a
+   * thread), the backend posts a single anchor message into that conversation
+   * that live-updates as the recording progresses and ends.
    */
   async startRecording(params?: {
     sttModel?: 'google' | 'azure' | 'deepgram';
+    conversationId?: string;
+    channelId?: string;
   }): Promise<RecordingSession> {
     const response: AxiosResponse<InitiateCallResponse> = await apiInstance.post(
       '/calls/initiate',
@@ -250,6 +273,8 @@ class RecordingService {
         isHeadless: true,
         callType: CallType.AUDIO,
         sttModel: params?.sttModel || 'google',
+        ...(params?.conversationId && { conversationId: params.conversationId }),
+        ...(params?.channelId && { channelId: params.channelId }),
       },
     );
 
@@ -318,9 +343,11 @@ class RecordingService {
     return response.data;
   }
 
-  async exportGoogleDoc(callId: string): Promise<ExportRecordingGoogleDocResult> {
+  /** `title` names the new doc; omitted, the backend falls back to the recording title. */
+  async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
       `/calls/recordings/${callId}/export-google-doc`,
+      title ? { title } : {},
     );
     return response.data;
   }
