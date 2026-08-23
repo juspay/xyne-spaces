@@ -2934,7 +2934,12 @@ async function processTask(
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
-    const outputFormat = parseOutputFormat(agentConfig);
+    // Command overlay wins for this run only — never written back to the agent.
+    const outputFormat = parseOutputFormat(
+      taskCommand?.agentConfigOverlay
+        ? { ...(agentConfig ?? {}), ...taskCommand.agentConfigOverlay }
+        : agentConfig,
+    );
     const structuredOutputRef: StructuredOutputRef = {};
     const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode && !isDailyBrief;
     requiresStructuredDelivery = structuredOutputActive;
@@ -3178,7 +3183,9 @@ async function processTask(
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
     const taskCommandToolAvailable =
-      taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
+      taskCommand !== null &&
+      (taskCommand.requiredTool === undefined ||
+        allTools.some((t) => t.name === taskCommand.requiredTool));
     if (taskCommand) {
       // The fenced-```html contract exists for Design Studio's live preview,
       // where the chat UI hides the block. Webhook-originated runs (Spaces
@@ -3194,10 +3201,13 @@ async function processTask(
       activeInjections.push({
         id: `__task-command-${taskCommand.command.slice(1)}`,
         label: `Command: ${taskCommand.command}`,
-        content: (taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction) + surfaceSuffix,
+        content:
+          (taskCommandToolAvailable
+            ? taskCommand.instruction
+            : (taskCommand.missingToolInstruction ?? taskCommand.instruction)) + surfaceSuffix,
       });
       log(
-        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool ?? "(delivery contract)"} (available=${taskCommandToolAvailable})`,
       );
     }
     const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
@@ -3852,7 +3862,7 @@ async function processTask(
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
           activeInjections.length > 0 ? activeInjections : undefined,
-        ...(taskCommand && taskCommandToolAvailable
+        ...(taskCommand?.requiredTool && taskCommandToolAvailable
           ? { requiredTool: { name: taskCommand.requiredTool, nudge: taskCommand.nudge } }
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
