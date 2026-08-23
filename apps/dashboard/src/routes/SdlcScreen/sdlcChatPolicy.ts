@@ -1,14 +1,5 @@
 import type { SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
-const decodeHtmlEntities = (value: string): string =>
-  value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0*39;|&#x0*27;/gi, "'");
-
 export type SdlcChatTab = 'conversations' | 'ai';
 export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
 
@@ -37,8 +28,12 @@ export const sdlcChatLayout = (input: {
   chatParam: string | null;
   discussionParam: string | null;
 }): { activeTab: SdlcChatTab; panelOpen: boolean; panelIds: string[] } => {
+  // 'ai' is a legacy URL tab from when the assistant rendered inside the SDLC
+  // side panel. The assistant is the global XyneAI sidebar now, so the param
+  // no longer opens the SDLC panel — SdlcScreen migrates old ?chat=ai links by
+  // opening the sidebar once and stripping the param.
   const activeTab: SdlcChatTab = input.chatParam === 'ai' ? 'ai' : 'conversations';
-  const panelOpen = activeTab === 'ai' || input.discussionParam === '1';
+  const panelOpen = input.discussionParam === '1';
   return {
     activeTab,
     panelOpen,
@@ -68,8 +63,11 @@ export const sdlcChatNavigationSearch = (input: {
     destination.set('discussion', '1');
     destination.set('chat', 'conversations');
   } else {
+    // Destination has no conversations: close the panel. (Previously this fell
+    // back to the legacy in-panel 'ai' tab, which force-opened the global
+    // assistant sidebar and made its close button appear dead.)
     destination.delete('discussion');
-    destination.set('chat', 'ai');
+    destination.delete('chat');
   }
 
   return `?${destination.toString()}`;
@@ -88,17 +86,6 @@ export const shouldStartFreshSdlcAssistant = (input: {
   input.actorChannelId !== input.repositoryChannelId ||
   input.actorRepositoryId !== input.repositoryId;
 
-export const shouldClearSelectedSdlcConversation = (input: {
-  selectedConversationId: string | null;
-  linkedConversationIds: readonly string[];
-  selectedQueryComplete: boolean;
-  selectedConversationFound: boolean;
-}): boolean => {
-  if (!input.selectedConversationId) return false;
-  if (!input.linkedConversationIds.includes(input.selectedConversationId)) return true;
-  return input.selectedQueryComplete && !input.selectedConversationFound;
-};
-
 export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   repoQueryComplete: boolean;
   discussionOpen: boolean;
@@ -109,26 +96,6 @@ export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
-
-export const escapeSdlcConversationTitle = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-export const sdlcConversationTitleFromHtml = (value: string): string => {
-  const title = decodeHtmlEntities(
-    value
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
-      .replace(/<br\s*\/?>|<\/(p|div|li|h[1-6]|blockquote)>/gi, ' ')
-      .replace(/<[^>]+>/g, ''),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-  return title || 'Untitled';
-};
 
 export const shouldShowSdlcRelatedLink = (input: {
   relationType: SdlcRelationType;

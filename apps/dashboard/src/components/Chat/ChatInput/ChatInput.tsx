@@ -13,6 +13,7 @@ import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
 import {
+  type SdlcDiscussion,
   MessageType,
   ChannelScopeType,
   ChannelVisibility,
@@ -112,6 +113,8 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
+  /** SDLC discussion binding: new channel conversations are linked to this owner. */
+  sdlcDiscussion?: Omit<SdlcDiscussion, 'linkId'>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -133,6 +136,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
+      sdlcDiscussion,
     },
     ref,
   ) => {
@@ -259,6 +263,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
+    // SDLC channels are hidden from the chat directory, so "also send to
+    // channel" has no destination a user could ever see — hide the toggle.
+    const isSdlcChannel = channel?.type === ChannelType.SDLC;
     const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
 
     const bannerScheduledFor = upcomingScheduledInContext ?? recentScheduledFor;
@@ -752,6 +759,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 conversationId: newConversationId,
                 messageId: newMessageId,
                 timestamp: messageCreatedAt,
+                ...(sdlcDiscussion !== undefined && {
+                  sdlcDiscussion: { ...sdlcDiscussion, linkId: uuidv4() },
+                }),
               }),
             );
 
@@ -995,7 +1005,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               blockedExtensions={[...BLOCKED_EXTENSIONS]}
               preserveThreadRoute={!!conversationId}
               {...(conversationId &&
-                !messageId && {
+                !messageId &&
+                !isSdlcChannel && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
                   alsoSendToChannelChecked: alsoSendToChannel,
                   isDMThread: !!isDM,

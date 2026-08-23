@@ -1,8 +1,11 @@
-type CanvasMetadata = Record<string, unknown>;
+import { isBaselineCanvasType } from '@xyne/shared/sdlc';
 
 interface SdlcActivityNavigationActivity {
   canvasId?: string | null;
-  canvas?: { readonly id: string; readonly metadata?: unknown } | null | undefined;
+  canvas?:
+    | { readonly id: string; readonly sdlcArtifact?: { readonly artifactType?: unknown } | null }
+    | null
+    | undefined;
   ticketId?: string | null;
   ticket?: { readonly id: string } | null | undefined;
   conversationId?: string | null;
@@ -16,22 +19,12 @@ interface SdlcActivityNavigationActivity {
     | undefined;
 }
 
-const metadataRecord = (value: unknown): CanvasMetadata =>
-  value && typeof value === 'object' && !Array.isArray(value) ? (value as CanvasMetadata) : {};
-
-const sdlcRepoId = (metadata: unknown): string | null => {
-  const value = metadataRecord(metadata);
-  return value['surface'] === 'SDLC' && typeof value['repoId'] === 'string' && value['repoId']
-    ? value['repoId']
-    : null;
-};
-
-const canvasSection = (metadata: unknown): string | null => {
-  const value = metadataRecord(metadata);
-  if (value['artifactKind'] === 'BASELINE') return 'baseline';
-  if (value['artifactKind'] === 'PRD') return 'prds';
-  if (value['artifactKind'] === 'TECH_DOC') return 'tech-docs';
-  if (value['documentKind'] === 'WIKI') return 'wiki';
+const canvasSection = (artifactType: unknown): string | null => {
+  if (typeof artifactType !== 'string') return null;
+  if (isBaselineCanvasType(artifactType)) return 'baseline';
+  if (artifactType === 'PRD') return 'prds';
+  if (artifactType === 'TECH_DOC') return 'tech-docs';
+  if (artifactType === 'WIKI') return 'wiki';
   return null;
 };
 
@@ -42,15 +35,18 @@ const sdlcPath = (repoId: string, section: string, search?: URLSearchParams): st
 
 export function resolveSdlcActivityTarget(input: {
   activity: SdlcActivityNavigationActivity;
-  channelMetadata: unknown;
+  channelType: string | null | undefined;
+  repoId: string | null | undefined;
   fallbackPath: string;
 }): string {
-  const repoId = sdlcRepoId(input.channelMetadata);
-  if (!repoId) return input.fallbackPath;
+  // SDLC repository channels are identified by channel type; the repo comes
+  // from the repos table (1:1 with the channel), not from channel metadata.
+  if (input.channelType !== 'SDLC' || !input.repoId) return input.fallbackPath;
+  const repoId = input.repoId;
 
   const canvasId = input.activity.canvasId ?? input.activity.canvas?.id;
   if (canvasId) {
-    const section = canvasSection(input.activity.canvas?.metadata);
+    const section = canvasSection(input.activity.canvas?.sdlcArtifact?.artifactType);
     if (section) {
       return sdlcPath(repoId, section, new URLSearchParams({ canvas: canvasId }));
     }
