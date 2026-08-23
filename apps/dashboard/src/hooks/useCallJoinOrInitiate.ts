@@ -6,6 +6,8 @@ import { roomActor } from '../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
+import { isSdlcSurface } from '../config';
+import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 
 interface JoinCallParams {
   callId: string;
@@ -153,6 +155,26 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     onComplete,
   }: InitiateCallParams): void => {
     if (!channelId) return;
+
+    // SDLC lane: the iframe's call overlay is deliberately suppressed, so a call
+    // started here must be owned by the HOST for its mini-view to render globally.
+    // Hand the request across the frame bridge and stop — the host's roomActor
+    // takes it from here. onComplete stays local (it cannot cross the boundary).
+    if (isSdlcSurface) {
+      window.parent?.postMessage(
+        {
+          type: SDLC_FRAME_MESSAGE.initiateCall,
+          channelId,
+          ...(targetUserIds && { targetUserIds }),
+          ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
+        },
+        window.location.origin,
+      );
+      onComplete?.();
+      return;
+    }
 
     // Case 1: User not in any call - initiate directly
     if (!isInCall) {

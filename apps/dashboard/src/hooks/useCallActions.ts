@@ -10,6 +10,8 @@ import { useAuthContextValues } from './useAuth';
 import { isUserActiveInCall } from './useCalls';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
+import { isSdlcSurface } from '../config';
+import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 
 type ActiveCall = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -130,6 +132,25 @@ export const useCallActions = ({
   }, [machineState, zero, isMobile]);
 
   const handleCallClick = (): void => {
+    // SDLC lane: the iframe's call overlay is suppressed, so a call started here
+    // must be owned by the HOST for its mini-view to render globally. Hand the
+    // request across the frame bridge and stop — the host initiates on its own
+    // roomActor and shows the global mini-view.
+    if (isSdlcSurface) {
+      window.parent?.postMessage(
+        {
+          type: SDLC_FRAME_MESSAGE.initiateCall,
+          channelId,
+          ...(targetUserIds && { targetUserIds }),
+          ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
+        },
+        window.location.origin,
+      );
+      return;
+    }
+
     if (hasActiveCallInChannel) {
       // If there's an active call in this channel
       if (isUserInCurrentChannelCall) {
