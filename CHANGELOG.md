@@ -1,3 +1,15 @@
+## [1.206.0-release-20260821.1](https://github.com/juspay/xyne-spaces/compare/v1.205.4-release-20260821.4...v1.206.0-release-20260821.1) (2026-08-23)
+
+
+### Features
+
+* deploy the SDLC surface as an independent lane ([#903](https://github.com/juspay/xyne-spaces/issues/903)) ([e739699](https://github.com/juspay/xyne-spaces/commit/e739699d95d57368626448821d14e2c465415e4c)), closes [#692](https://github.com/juspay/xyne-spaces/issues/692)
+
+
+### Bug Fixes
+
+* use the system channel-naming rule for SDLC repo channels ([#904](https://github.com/juspay/xyne-spaces/issues/904)) ([689fcd4](https://github.com/juspay/xyne-spaces/commit/689fcd490e109307983535209afcbc73c359d1db))
+
 ## [1.205.4-release-20260821.4](https://github.com/juspay/xyne-spaces/compare/v1.205.4-release-20260821.3...v1.205.4-release-20260821.4) (2026-08-21)
 
 
