@@ -10,11 +10,14 @@ export type CapabilityState =
   | 'STALE'
   | 'RUNTIME_FAILED';
 
+export type RepositoryVisibility = 'PUBLIC' | 'PRIVATE' | 'INTERNAL';
+
 export interface CapabilityEvidence {
   capability: VcsCapability;
   state: CapabilityState;
   source: string;
   detail: string;
+  visibility?: RepositoryVisibility;
 }
 
 export interface ParsedRepository {
@@ -32,7 +35,7 @@ export interface ValidatedCredential {
 
 export interface RepositoryInspection {
   repository: ParsedRepository;
-  visibility: 'PUBLIC' | 'PRIVATE' | 'INTERNAL';
+  visibility: RepositoryVisibility;
   defaultBranch: string;
   identityLogin: string | null;
   capabilities: CapabilityEvidence[];
@@ -137,9 +140,12 @@ export interface VcsProviderAdapter {
   validatePullRequestUrl(repository: ParsedRepository, url: string): boolean;
 }
 
+export type RepositoryAccessStatus = 'NOT_CHECKED' | 'READY' | 'BLOCKED' | 'ERROR';
+
 export interface RepositoryAccessCheckResult {
-  queued: boolean;
-  status: string;
+  status: RepositoryAccessStatus;
+  errorMessage: string | null;
+  capabilities: CapabilityEvidence[];
 }
 
 export interface SdlcVcs {
@@ -151,7 +157,7 @@ export interface SdlcVcs {
   ): Promise<unknown>;
   revalidateCredential(actor: SdlcActor, provider: VcsProvider): Promise<unknown>;
   disconnectCredential(actor: SdlcActor, provider: VcsProvider): Promise<void>;
-  queueRepositoryCheck(
+  checkRepositoryAccess(
     actor: SdlcActor,
     repoId: string,
     options?: { force?: boolean }
