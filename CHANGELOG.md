@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.3](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.2...v1.206.0-release-20260821.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* canvas sidebar starred section, selection highlight, and collapse animation ([#934](https://github.com/juspay/xyne-spaces/issues/934)) ([2cfe4a5](https://github.com/juspay/xyne-spaces/commit/2cfe4a56caeda208d8ad622532efdd7a7188c732))
+
 ## [1.206.0-release-20260821.2](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.1...v1.206.0-release-20260821.2) (2026-08-23)
 
 
