@@ -17,7 +17,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
-import { ActivityClassification } from '@xyne/shared';
+import { ActivityClassification, isVisibleUnreadActivity } from '@xyne/shared';
 import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
 import {
   mixpanelService,
@@ -88,22 +88,6 @@ type TabConfig = {
 
 type ActivityCursor = NonNullable<Parameters<typeof queries.userActivitiesPaginatedV2>[0]['start']>;
 
-const isAllVisibleActivity = (activity: ActivityWithRelated): boolean => {
-  const classification = activity.classification ?? ActivityClassification.PENDING;
-  if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') {
-    return false;
-  }
-
-  if (classification === ActivityClassification.SKIP) return false;
-  if (activity.actorAction === 'direct_message') {
-    return (
-      classification === ActivityClassification.ACTIONABLE ||
-      classification === ActivityClassification.FYI
-    );
-  }
-  return true;
-};
-
 const CALL_ACTIVITY_TYPES = [
   'scheduled_call',
   'call_reminder',
@@ -121,7 +105,7 @@ export const isDirectUserMention = (messageContent: string, userId: string): boo
 };
 
 const TABS: TabConfig[] = [
-  { value: 'all', label: 'All', filter: isAllVisibleActivity },
+  { value: 'all', label: 'All', filter: isVisibleUnreadActivity },
   {
     value: 'your_mentions',
     label: 'Your Mentions',
@@ -721,10 +705,8 @@ const ActivityListView = (): ReactElement => {
     }
 
     unreadActivities.forEach(activity => {
-      // 'all' count includes everything visible
-      // Cast to ActivityWithRelated since unreadActivities has slightly different shape
-      // but isAllVisibleActivity only uses fields that exist in both
-      if (isAllVisibleActivity(activity as unknown as ActivityWithRelated)) {
+      // 'all' count uses the shared notification-visibility predicate
+      if (isVisibleUnreadActivity(activity)) {
         counts.all++;
       }
 
