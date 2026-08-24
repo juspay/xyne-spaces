@@ -62,7 +62,7 @@ function customToolSource(tool: ToolDefinition): string | undefined {
   return (tool as { source?: string }).source;
 }
 
-function customToolSelectionKey(tool: ToolDefinition): string {
+export function customToolSelectionKey(tool: ToolDefinition): string {
   return (tool as { selectionKey?: string }).selectionKey ?? tool.name;
 }
 
@@ -125,6 +125,8 @@ export function buildToolCatalog(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
   customSubagents?: CustomSubagentSpec[];
+  /** Presentation tools whose slug is in tools.custom stay eager instead of lazy. */
+  explicitCustomSlugs?: string[];
   /**
    * Whether to catalogue subagent-wrapped read tools.
    *
@@ -177,8 +179,11 @@ export function buildToolCatalog(params: {
   // while it's still working. Catalogue them so load-tools pulls the schema in
   // at the point of use. Write-tool exclusion doesn't apply — they only render.
   // See packages/xyne-claw-shared/src/tools/presentation.ts.
+  //
+  // Explicitly-selected tools (explicitSlugs) are skipped here instead — made eager.
+  const explicitSlugs = new Set(params.explicitCustomSlugs ?? []);
   for (const tool of params.customTools ?? []) {
-    if (isPresentationToolSource(customToolSource(tool))) {
+    if (isPresentationToolSource(customToolSource(tool)) && !explicitSlugs.has(customToolSelectionKey(tool))) {
       addUnique(items, seen, tool, PRESENTATION_CATALOG_SOURCE);
     }
   }
@@ -190,6 +195,8 @@ export function buildFastModeDirectTools(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
   directPickSuffixes?: string[];
+  /** See buildToolCatalog's matching param — must be passed the same list. */
+  explicitCustomSlugs?: string[];
 }): {
   directTools: ToolDefinition[];
   remainingCustomTools: ToolDefinition[];
@@ -212,6 +219,7 @@ export function buildFastModeDirectTools(params: {
     }
   }
 
+  const explicitSlugs = new Set(params.explicitCustomSlugs ?? []);
   for (const tool of params.customTools ?? []) {
     const source = customToolSource(tool);
     // Response-only cards go to the lazy catalog, never to the always-active
@@ -220,7 +228,8 @@ export function buildFastModeDirectTools(params: {
     // otherwise sweep them into remainingCustomTools, and a name that lands in
     // fastAlwaysActiveToolNames is filtered back OUT of the catalog in
     // routes/run.ts. Both halves have to agree or the tool is simply eager.
-    if (isPresentationToolSource(source)) continue;
+    // Explicitly-selected tools fall through instead of `continue`-ing — eager.
+    if (isPresentationToolSource(source) && !explicitSlugs.has(customToolSelectionKey(tool))) continue;
     const wrappedBySubagent = source
       ? findSubagentDefinitionForServer(source) !== undefined
       : false;
