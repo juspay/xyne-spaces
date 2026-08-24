@@ -366,7 +366,7 @@ TAG every opportunity with your OWN word for its shape (kebab-case), reusing a t
 
 Refuting is real progress: a wrong extraction is more expensive than the duplication it replaces.
 
-Deliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. Extend the same file each epoch rather than starting a new one.`
+Deliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. The report MUST also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch rather than starting a new one.`
       : run.kind === "repo-history"
       ? `Read the ledger below before doing anything. You are reconstructing the coding SPEC of this repo — the rules and decisions someone would need to rebuild it — by walking git history OLDEST→NEWEST.
 

@@ -75,6 +75,15 @@ describe("framework ledger close-gate (self-tagged, not occurrence-counted)", ()
   });
 });
 
+
+describe("framework report prompt", () => {
+  it("tells framework runs to include a Tag Index in the markdown report", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../src/routes/run.ts", import.meta.url), "utf8"));
+    expect(source).toContain("Tag Index table");
+    expect(source).toContain("tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost");
+  });
+});
+
 describe("framework end-experiment deliverable gate (markdown, not html)", () => {
   const FUTURE_LEDGER = (deliveredArtifacts: string[]) => vi.fn(async (url: string, init?: { method?: string }) => {
     if (url.endsWith("/ledger")) {
