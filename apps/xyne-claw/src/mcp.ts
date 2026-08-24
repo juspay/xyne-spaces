@@ -8,6 +8,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
 
 import { createLogger } from "./logger.js";
+import { BOT_DM_FALLBACK_REASON, isBotDmSendFailure, withUserSendFallbackReason } from "./bot-dm-fallback-guard.js";
 const log = createLogger("mcp");
 
 /**
@@ -120,6 +121,7 @@ export interface McpToolGroup {
   tools: ToolDefinition[];
   writeTools: string[];
 }
+
 
 // ── Inbound file forwarding (INPUT counterpart of claw-auth file forwarding) ──
 //
@@ -261,6 +263,12 @@ export async function loadMcpToolsForUser(
   const pendingActions: Array<Record<string, unknown>> = [];
   const mcpAttachments: Attachment[] = [];
   const groups: McpToolGroup[] = [];
+  // Trust guardrail: if a bot-DM delivery fails in this run and the model then
+  // proposes a user-attributed Spaces post, make the changed attribution and
+  // destination explicit in the signed approval payload. The LLM can still ask
+  // for the fallback, but the human approval card can no longer look like an
+  // ordinary "send message" approval detached from the failed bot-DM context.
+  let botDmFailureFallbackReason: string | null = null;
 
   for (const server of servers) {
     const tools: ToolDefinition[] = [];
@@ -317,6 +325,12 @@ export async function loadMcpToolsForUser(
             }
           }
           callParams = applyTrustedMcpBindings(callParams, trustedBindings);
+          callParams = withUserSendFallbackReason(
+            server.serverType,
+            mcpTool.name,
+            callParams,
+            botDmFailureFallbackReason,
+          );
           const result = await authFetch<{
             content: string;
             citations?: import("xyne-claw-shared").Citation[];
@@ -343,6 +357,10 @@ export async function loadMcpToolsForUser(
 
           if (result.pendingAction) {
             pendingActions.push(result.pendingAction);
+          }
+
+          if (isBotDmSendFailure(server.serverType, mcpTool.name, callParams, result.content ?? "")) {
+            botDmFailureFallbackReason = BOT_DM_FALLBACK_REASON;
           }
 
           // File forwarding: claw-auth lifted binary output (e.g. a generated

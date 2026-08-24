@@ -119,6 +119,8 @@ const SEND_MESSAGE_TOOL = {
     "" +
     "If the human asks you to write something on THEIR behalf (so it shows up as them), " +
     "use `user-send-message` instead. " +
+    "If a bot DM (`targetUserId`) fails, STOP and report the failure. Do NOT switch to `user-send-message`, " +
+    "a public channel, or any user-attributed fallback unless the human explicitly asks for that new destination and attribution after seeing the failure. " +
     "" +
     "Mention shorthand (server-expanded): `@Name[userId]` for a user, `@Alias[group:GROUP_ID:Group Name]` " +
     "for a group, or `@channel` / `@here` for specials. Resolve userId first via spaces-users / " +
@@ -242,7 +244,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
       return { content: [{ type: "text", text: confirmMsg }] };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { content: [{ type: "text", text: `apps-send-message error: ${msg}` }], isError: true };
+      const fallbackGuard = targetUserId
+        ? " Bot DM failed. Do NOT fall back to posting in a channel/thread or using user-send-message unless the human explicitly approves that new destination and that the message will be sent as them."
+        : "";
+      return { content: [{ type: "text", text: `apps-send-message error: ${msg}.${fallbackGuard}` }], isError: true };
     }
   }
 
