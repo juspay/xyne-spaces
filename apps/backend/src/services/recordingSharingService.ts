@@ -517,12 +517,53 @@ export class RecordingSharingService {
       throw new RecordingSharingError('Recording not found', 404);
     }
     if (call.createdByUserId !== actor.userId) {
-      throw new RecordingSharingError(
-        'Only the recording creator can manage sharing',
-        403,
-      );
+      const hasAccess = await this.hasActiveShare(tx, call.id, actor);
+      if (!hasAccess) {
+        throw new RecordingSharingError(
+          'Only the recording creator or people it is shared with can manage sharing',
+          403,
+        );
+      }
     }
     return call;
+  }
+
+  /**
+   * Mirrors `entityAccessService.hasActiveShare`, but reads through the caller's
+   * transaction so the permission check sees the same snapshot as the write it
+   * guards.
+   */
+  private async hasActiveShare(
+    tx: Prisma.TransactionClient,
+    recordingId: string,
+    actor: RecordingSharingActor,
+  ): Promise<boolean> {
+    const groupMappings = await tx.userGroupMapping.findMany({
+      where: { userId: actor.userId },
+      select: { userGroupId: true },
+    });
+    const channelParticipations = await tx.channelParticipant.findMany({
+      where: { userId: actor.userId },
+      select: { channelId: true },
+    });
+    const userGroupIds = groupMappings.map(mapping => mapping.userGroupId);
+    const channelIds = channelParticipations.map(participation => participation.channelId);
+
+    const share = await tx.entityAccess.findFirst({
+      where: {
+        workspaceId: actor.workspaceId,
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
+        entityId: recordingId,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        OR: [
+          { userId: actor.userId },
+          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    return share !== null;
   }
 
   private async runTransaction<T>(

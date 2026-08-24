@@ -1,10 +1,13 @@
 import { useEffect, useRef } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
+import { isSdlcSurface } from '../config';
+import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 
 interface JoinCallParams {
   callId: string;
@@ -17,6 +20,7 @@ interface InitiateCallParams {
   callDisplayName?: string;
   conversationId?: string;
   artifactMessageId?: string;
+  sdlcLink?: SdlcCallLink;
   onComplete?: () => void;
 }
 
@@ -40,6 +44,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     callDisplayName?: string;
     conversationId?: string;
     artifactMessageId?: string;
+    sdlcLink?: SdlcCallLink;
     onComplete?: () => void;
   } | null>(null);
 
@@ -88,6 +93,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
           ...(action.artifactMessageId && { artifactMessageId: action.artifactMessageId }),
+          ...(action.sdlcLink && { sdlcLink: action.sdlcLink }),
         });
 
         // Call completion callback after sending initiate event
@@ -145,9 +151,30 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     callDisplayName,
     conversationId,
     artifactMessageId,
+    sdlcLink,
     onComplete,
   }: InitiateCallParams): void => {
     if (!channelId) return;
+
+    // SDLC lane: the iframe's call overlay is deliberately suppressed, so a call
+    // started here must be owned by the HOST for its mini-view to render globally.
+    // Hand the request across the frame bridge and stop — the host's roomActor
+    // takes it from here. onComplete stays local (it cannot cross the boundary).
+    if (isSdlcSurface) {
+      window.parent?.postMessage(
+        {
+          type: SDLC_FRAME_MESSAGE.initiateCall,
+          channelId,
+          ...(targetUserIds && { targetUserIds }),
+          ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
+        },
+        window.location.origin,
+      );
+      onComplete?.();
+      return;
+    }
 
     // Case 1: User not in any call - initiate directly
     if (!isInCall) {
@@ -162,6 +189,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),
         ...(artifactMessageId && { artifactMessageId }),
+        ...(sdlcLink && { sdlcLink }),
       });
       onComplete?.();
       return;
@@ -175,6 +203,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
       ...(callDisplayName && { callDisplayName }),
       ...(conversationId && { conversationId }),
       ...(artifactMessageId && { artifactMessageId }),
+      ...(sdlcLink && { sdlcLink }),
       ...(onComplete && { onComplete }),
     };
     roomActor.send({ type: 'DISCONNECT' });

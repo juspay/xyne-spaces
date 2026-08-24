@@ -276,6 +276,7 @@ const electronAPI = {
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
       'app:theme-changed',
+      'call:state-changed',
       'meeting-popup:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',

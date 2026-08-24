@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
-import { PRStatus, PRStatusEvent, TicketStatusV2, type SdlcBaselineKind } from '@xyne/shared';
+import {
+  isBaselineCanvasType, PRStatus, PRStatusEvent, TicketStatusV2, type SdlcBaselineKind } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
@@ -16,7 +17,6 @@ import { BASELINE_DEFINITIONS } from './baselineDefinitions';
 import { baselineWikiState, type BaselineWikiState } from './baselineWikiContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { buildBaselineExecutionPrompt } from './baselinePrompt';
-import { isCompletedBaselineMetadata } from './sdlcBaselineDraft';
 import {
   newSdlcClawDeadline,
   SDLC_CLAW_TIMEOUT_ERROR_CODE,
@@ -25,7 +25,7 @@ import {
   sdlcClawTimeoutMessage,
 } from './sdlcClawDeadline';
 import { shouldHandleSdlcCallback } from './sdlcCallbackPolicy';
-import { allBaselinesApproved } from './sdlcProgressiveGate';
+import { allBaselinesReady } from './sdlcProgressiveGate';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import {
   buildSdlcTicketLifecycleInstruction,
@@ -587,11 +587,11 @@ export class SdlcClawExecutionService {
     });
     if (!active) return;
     if (completed.size === BASELINE_DEFINITIONS.length) {
-      const baselines = await this.prisma.canvas.findMany({
-        where: { channelId: repo.channelId },
-        select: { metadata: true, lastEditedAt: true },
+      const baselines = await this.prisma.sdlcArtifact.findMany({
+        where: { canvas: { is: { channelId: repo.channelId } } },
+        select: { artifactType: true, artifactStatus: true },
       });
-      const terminalPhase = allBaselinesApproved(baselines) ? 'APPROVED' : 'READY_FOR_REVIEW';
+      const terminalPhase = allBaselinesReady(baselines) ? 'APPROVED' : 'READY_FOR_REVIEW';
       await this.finishExecution(executionId, workflowId, {
         ...context,
         phase: terminalPhase,
@@ -752,19 +752,23 @@ as failure.`;
     channelId: string,
     setupExecutionId: string
   ): Promise<Set<SdlcBaselineKind>> {
-    const canvases = await this.prisma.canvas.findMany({
-      where: { channelId },
-      select: { metadata: true },
-    });
     const result = new Set<SdlcBaselineKind>();
-    for (const canvas of canvases) {
-      const metadata = canvas.metadata as Record<string, unknown> | null;
-      if (
-        isCompletedBaselineMetadata(metadata) &&
-        metadata?.setupExecutionId === setupExecutionId &&
-        typeof metadata.baselineKind === 'string'
-      ) {
-        result.add(metadata.baselineKind as SdlcBaselineKind);
+    const entities = await this.prisma.sdlcArtifact.findMany({
+      where: { workflowExecutionId: setupExecutionId },
+      select: { artifactId: true },
+    });
+    if (entities.length === 0) return result;
+    const artifacts = await this.prisma.sdlcArtifact.findMany({
+      where: {
+        artifactId: { in: entities.map((entity) => entity.artifactId) },
+        artifactStatus: 'ACTIVE',
+        canvas: { is: { channelId } },
+      },
+      select: { artifactType: true },
+    });
+    for (const artifact of artifacts) {
+      if (isBaselineCanvasType(artifact.artifactType)) {
+        result.add(artifact.artifactType);
       }
     }
     return result;

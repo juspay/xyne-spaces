@@ -2,6 +2,7 @@ import {
   ChannelFilterMode,
   ChannelScopeType,
   ChannelSortOrder,
+  ChannelType,
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
@@ -95,8 +96,9 @@ export const groupChannelsByScope = (
   const channels: VisibleChannel[] = [];
   const directMessages: VisibleChannel[] = [];
   for (const channel of channelData) {
-    const metadata = channel.metadata as Record<string, unknown> | null | undefined;
-    if (metadata?.['surface'] === 'SDLC' && metadata['hiddenFromChat'] === true) {
+    // SDLC repository channels are system-managed and hidden from chat,
+    // the same way SUPPORT channels are.
+    if (channel.type === ChannelType.SDLC) {
       continue;
     }
     // EMAIL channels live in Xyne Desk, not in the chat directory.
@@ -218,40 +220,49 @@ export const formatChannelLabel = (ch: {
 };
 
 /**
- * Resolve human-readable searchable names for a channel.
+ * Resolve a DM's participant names for BOTH display and search in a single pass.
  *
- * - Regular channels: returns `[channel.name]`
- * - Self-DMs: returns `[currentUserName, 'You']` so the channel is findable by name
- * - Regular DMs / Group DMs: returns the other participants' display names
+ * - `display`: one name per participant (`displayName || name`) — safe to render.
+ * - `search`: superset with both `displayName` AND raw `name` per participant (deduped), so a
+ *   full-name query still matches a short-nickname displayName. Feed to
+ *   filterChannelsBySearchableNames via `searchNames` — never render it (would duplicate names).
  *
- * Canonical implementation — use this everywhere DM names need to be resolved for
- * search/display so self-DM and multi-participant logic stays consistent.
+ * Regular channels → `[channel.name]` for both. Self-DM → own name + 'You'. The current user is
+ * excluded from multi-participant DMs. Canonical resolver — use everywhere DM names are needed.
  */
-export const getDMSearchableNames = (
+export const getDMNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
   usersById: Map<string, { name: string; displayName?: string | null }>,
-): string[] => {
+): { display: string[]; search: string[] } => {
   if (!isDMChannel(channel.scopeType)) {
-    return [channel.name];
+    return { display: [channel.name], search: [channel.name] };
   }
 
   const userIds = parseDMParticipantIds(channel);
   const isSelfDM = userIds.length === 1 && userIds[0] === currentUserId;
 
   if (isSelfDM) {
-    const currentUser = usersById.get(currentUserId);
-    const currentUserName = currentUser ? currentUser.displayName || currentUser.name : undefined;
-    return currentUserName ? [currentUserName, 'You'] : ['You'];
+    const u = usersById.get(currentUserId);
+    const preferred = u ? u.displayName || u.name : undefined;
+    return {
+      display: preferred ? [preferred, 'You'] : ['You'],
+      search: [...new Set([u?.displayName, u?.name, 'You'].filter((n): n is string => !!n))],
+    };
   }
 
-  const otherUserIds = userIds.filter(id => id !== currentUserId);
-  return otherUserIds
-    .map(id => {
-      const u = usersById.get(id);
-      return u ? u.displayName || u.name : undefined;
-    })
-    .filter((n): n is string => !!n);
+  const display: string[] = [];
+  const search: string[] = [];
+  for (const id of userIds) {
+    if (id === currentUserId) continue;
+    const u = usersById.get(id);
+    if (!u) continue;
+    const preferred = u.displayName || u.name;
+    if (preferred) display.push(preferred);
+    if (u.displayName) search.push(u.displayName);
+    if (u.name && u.name !== u.displayName) search.push(u.name);
+  }
+  return { display, search };
 };
 
 /**

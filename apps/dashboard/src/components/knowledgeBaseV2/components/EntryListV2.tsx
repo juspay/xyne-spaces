@@ -4,6 +4,7 @@ import { cn } from '../../../utils/classNames';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { StatusBadgeV2 } from './StatusBadgeV2';
 import { IngestStatusV2 } from './IngestStatusV2';
+import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
 import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 
@@ -25,6 +26,8 @@ interface EntryListV2Props {
   /** When provided, FOLDER rows render a share button next to rename/delete.
    *  The screen only passes this at root (collections view). */
   onShare?: (entry: CollectionChild) => void;
+  /** Opens the per-collection ingestion status drawer (root collections view). */
+  onOpenStatus?: (entry: CollectionChild) => void;
   /** Inline-rename state: id of the row whose name should render as an
    *  editable input, plus the commit / cancel callbacks. */
   editingId?: string | null;
@@ -74,6 +77,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   onDelete,
   onRename,
   onShare,
+  onOpenStatus,
   editingId,
   onRenameCommit,
   onRenameCancel,
@@ -210,27 +214,32 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                     <IngestStatusV2 status={e.ingestionStatus} />
                   </div>
                 ) : (
-                  <button
-                    type='button'
-                    onClick={() => onOpen(e)}
-                    className='flex min-w-0 items-center gap-3 text-left'
-                    data-track-category='knowledge-base'
-                    data-track-name='open-entry'
-                  >
-                    <span className='flex-shrink-0 pr-1'>
-                      {e.type === 'FOLDER' ? (
-                        <div className='flex h-7 w-7 items-center justify-center'>
-                          <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
-                        </div>
-                      ) : (
-                        <StatusBadgeV2 name={e.name} />
-                      )}
-                    </span>
-                    <span className='truncate text-[13.5px] font-medium text-foreground'>
-                      {e.name}
-                    </span>
-                    <IngestStatusV2 status={e.ingestionStatus} />
-                  </button>
+                  <div className='flex min-w-0 items-center gap-2'>
+                    <button
+                      type='button'
+                      onClick={() => onOpen(e)}
+                      className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                      data-track-category='knowledge-base'
+                      data-track-name='open-entry'
+                    >
+                      <span className='flex-shrink-0 pr-1'>
+                        {e.type === 'FOLDER' ? (
+                          <div className='flex h-7 w-7 items-center justify-center'>
+                            <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
+                          </div>
+                        ) : (
+                          <StatusBadgeV2 name={e.name} />
+                        )}
+                      </span>
+                      <span className='truncate text-[13.5px] font-medium text-foreground'>
+                        {e.name}
+                      </span>
+                      {e.type === 'FILE' ? <IngestStatusV2 status={e.ingestionStatus} /> : null}
+                    </button>
+                    {e.type === 'FOLDER' ? (
+                      <CollectionStatusBadgeV2 entry={e} onOpenStatus={onOpenStatus} />
+                    ) : null}
+                  </div>
                 )}
 
                 {/* Other columns */}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
@@ -33,14 +33,15 @@ import {
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
   findNearestVisibleRecording,
+  formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
-import { normalizeRecordingTags } from '../../utils/recordingUtils';
-import { DEFAULT_RECORDING_TITLE } from '@/utils/recordingUtils';
+import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
+import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
@@ -48,13 +49,15 @@ import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 const RecordingsV2Screen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const requestedSummaryTemplateId = searchParams.get('summaryTemplateId');
   const shouldOpenTemplatesFromUrl =
     searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
-  const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
+  const activeListTab: RecordingOwnershipTab =
+    searchParams.get('tab') === 'shared' ? 'shared' : 'created';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -119,9 +122,18 @@ const RecordingsV2Screen = (): ReactElement => {
   }, [handleStartRecording, pendingAutoStart, recordingStatus]);
 
   const availableCreators = useMemo(() => {
-    const creatorIds = new Set(recordings.map(recording => recording.createdByUserId));
-    return users.filter(user => creatorIds.has(user.id));
-  }, [recordings, users]);
+    const ids = new Set<string>();
+    for (const recording of recordings) {
+      for (const id of getRecordingParticipantIds(
+        recording.createdByUserId,
+        recording.recordingParticipants,
+      )) {
+        ids.add(id);
+      }
+    }
+    if (selectedCreatorId) ids.add(selectedCreatorId);
+    return users.filter(user => ids.has(user.id));
+  }, [recordings, users, selectedCreatorId]);
 
   const availableLabels = useMemo(
     () =>
@@ -204,6 +216,21 @@ const RecordingsV2Screen = (): ReactElement => {
     [recordings],
   );
 
+  const setActiveListTab = useCallback(
+    (tab: RecordingOwnershipTab): void => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (tab === 'shared') next.set('tab', 'shared');
+          else next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   const handleTabChange = useCallback(
     (tab: RecordingOwnershipTab): void => {
       if (tab === activeListTab) return;
@@ -213,35 +240,35 @@ const RecordingsV2Screen = (): ReactElement => {
       setSelectedLabels([]);
       setSelectedSharerIds([]);
     },
-    [activeListTab],
+    [activeListTab, setActiveListTab],
   );
 
-  const handleCreatorChange = useCallback(
-    (creatorId: string | null): void => {
-      setSelectedCreatorId(creatorId);
-      if (creatorId) {
-        setActiveListTab(creatorId === currentUser?.id ? 'created' : 'shared');
-      }
-    },
-    [currentUser?.id],
-  );
+  const handleCreatorChange = useCallback((creatorId: string | null): void => {
+    setSelectedCreatorId(creatorId);
+  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenLiveRecordingWindow = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenAskAI = useCallback((): void => {
@@ -249,13 +276,45 @@ const RecordingsV2Screen = (): ReactElement => {
   }, []);
 
   const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
+    // Attach each recording's documents alongside the recording itself, the same
+    // way the detail screen does — otherwise Ask AI opened from the list gets only
+    // the call and has to rediscover the summary and the user's notes. Each canvas
+    // carries its role, because from the row alone the machine-written summary and
+    // the human's notes are indistinguishable.
+    const canvases = selected.flatMap(recording => {
+      const title = recording.title || DEFAULT_RECORDING_TITLE;
+      const { summaryCanvasId, notesCanvasId } = readRecordingCanvasIds(recording.metadata);
+      return [
+        ...(summaryCanvasId
+          ? [
+              {
+                id: summaryCanvasId,
+                canvasId: summaryCanvasId,
+                title: `${title} summary`,
+                canvasRole: 'call-summary' as const,
+              },
+            ]
+          : []),
+        ...(notesCanvasId && notesCanvasId !== summaryCanvasId
+          ? [
+              {
+                id: notesCanvasId,
+                canvasId: notesCanvasId,
+                title: `${title} notes`,
+                canvasRole: 'call-notes' as const,
+              },
+            ]
+          : []),
+      ];
+    });
+
     xyneAIActor.send({
       type: 'OPEN',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
       initialContextSelections: {
-        canvases: [],
+        canvases,
         recordings: selected.map(recording => ({
           id: recording.id,
           title: recording.title || DEFAULT_RECORDING_TITLE,
@@ -514,6 +573,14 @@ const RecordingsV2Screen = (): ReactElement => {
                       <RecordingsV2Pill
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
+                        participantsLabel={formatRecordingParticipants(
+                          getRecordingParticipantIds(
+                            row.recording.createdByUserId,
+                            row.recording.recordingParticipants,
+                          ),
+                          usersById,
+                          currentUser?.id,
+                        )}
                         tags={row.recording.labels.filter(isManualLabel)}
                         resolveLabel={resolveLabel}
                         onOpen={handleOpenRecording}

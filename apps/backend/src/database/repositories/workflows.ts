@@ -208,9 +208,18 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
     });
   }
 
+  /**
+   * All workflow rows in a lineage, keyed by the series' root id. The root
+   * row itself has `automationSeriesId: null` (every other row in the
+   * lineage points `automationSeriesId` at the root's `id`), so it has to be
+   * matched by `id` explicitly or it silently drops out of its own history.
+   */
   async findByautomationSeriesId(automationSeriesId: string): Promise<Workflow[]> {
     return await this.db.workflow.findMany({
-      where: { automationSeriesId, workflowType: 'Automations' },
+      where: {
+        workflowType: 'Automations',
+        OR: [{ automationSeriesId }, { id: automationSeriesId }],
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
