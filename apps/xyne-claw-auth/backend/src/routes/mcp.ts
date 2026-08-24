@@ -716,6 +716,7 @@ function withSubagent(config: AgentToolsConfig, subagentName: string): AgentTool
 async function withSurfaceDefaultToolsConfig(
   config: AgentToolsConfig | undefined,
   sessionId: string,
+  sessionSpacesAppId?: string,
 ): Promise<AgentToolsConfig | undefined> {
   if (!config) return undefined;
 
@@ -735,13 +736,31 @@ async function withSurfaceDefaultToolsConfig(
   // carries Spaces app context counts as a Spaces surface too and gets the same
   // default (a non-Spaces scheduled run, lacking that context, does not).
   const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
+  // The run-context (`getSession`) can come back empty or partial at tool-list
+  // time — a Redis miss or a race — and that silently strips a Spaces-app
+  // agent's Spaces tools (prod 2026-08-24: agent `xyne` kept only its hand-
+  // listed read tools, every write tool + the app-tools server dropped). The
+  // AUTHENTICATED session's own `spacesAppId` is an authoritative signal that
+  // this run belongs to a Spaces app, independent of the run-context. Trust it
+  // as a Spaces surface unless the run is explicitly a non-Spaces one (Slack
+  // delivery, or an explicit api/chat trigger) — so the fallback fixes the
+  // empty-run-context case without granting Spaces tools to true API/chat runs.
+  const sessionIsSpacesApp =
+    !!sessionSpacesAppId &&
+    !runCtx?.slackDelivery &&
+    runCtx?.triggerSource !== "api" &&
+    runCtx?.triggerSource !== "chat";
   const isSpacesSurface =
     runCtx?.triggerSource === "spaces" ||
     runCtx?.triggerSource === "automation" ||
     runCtx?.isAutomation === true ||
     (runCtx?.triggerSource === "scheduled" && hasSpacesContext) ||
-    (runCtx?.triggerSource == null && hasSpacesContext);
+    (runCtx?.triggerSource == null && hasSpacesContext) ||
+    sessionIsSpacesApp;
   if (isSpacesSurface) {
+    if (!hasSpacesContext && sessionIsSpacesApp && runCtx?.triggerSource == null) {
+      log.info(`[mcp/tools] spaces default injected from session spacesAppId (run-context absent) app=${sessionSpacesAppId}`);
+    }
     effective = withSubagent(effective, "spaces");
   }
 
@@ -830,7 +849,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
 
@@ -1293,7 +1312,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const { serverType, tool, params, permission, backendId } = req.body as {
       serverType?: string;
