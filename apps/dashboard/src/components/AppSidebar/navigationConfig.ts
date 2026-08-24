@@ -130,6 +130,29 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
 export const isRequiredToolbarPath = (path: string): boolean =>
   REQUIRED_TOOLBAR_PATHS.includes(path);
 
+// One-line description per toolbar-manageable path, shown under the label in
+// the workspace admin's Toolbar tab — same { name, description } shape as
+// the RESOURCES registry backing the Roles access grid (seed-acl.ts), so an
+// admin sees what they're hiding, not just a bare label.
+export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
+  '/ai': 'AI chat assistant panel',
+  '/chat/dir': 'Channel-based team chat',
+  '/chat/dm': 'Direct messages between users',
+  '/chat/activity': 'Mentions and notification activity feed',
+  '/calls': 'Voice and video calling',
+  '/recordings': 'Call and meeting recordings',
+  '/chat/canvas': 'Personal canvas documents',
+  '/automations': 'Workflow automation triggers and actions',
+  '/scheduled-messages': 'Messages scheduled for later delivery',
+  '/browser': 'In-app browser tabs (desktop app only)',
+  '/apps': 'Installed app integrations',
+  '/guide': 'Product documentation and onboarding guide',
+  '/knowledge-base': 'File and folder knowledge base for Ask AI',
+  '/memory': 'Saved context and memory for AI',
+  '/releaseManager': 'Release and deployment tracking',
+  '/claw-agents': 'Claw AI agents dashboard',
+};
+
 type Permissions = ReturnType<typeof usePermissions>;
 
 // Filters out items the current user cannot access (permission-gated routes and

@@ -3,18 +3,13 @@ import { usePermissions } from './usePermissions';
 import { useAuth } from './useAuth';
 import { WorkspaceRole } from '@xyne/shared';
 import { useUserGroups } from './useUserGroup';
-import { useSelf } from './useUsers';
-import { useCachedQuery } from './useCachedQuery';
-import { queries } from '../zero/queries';
 import {
   NAVIGATION_ITEMS,
   filterNavItemsByPermission,
   type NavigationItem,
 } from '../components/AppSidebar/navigationConfig';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
-
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every(v => typeof v === 'string');
+import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 
 // Navigation items the current user is allowed to see, in canonical order.
 export const useVisibleNavigationItems = (): NavigationItem[] => {
@@ -26,22 +21,10 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   );
   const { showClawDashboard } = useClawDashboardVisibility();
   const isGuest = user?.role === WorkspaceRole.GUEST;
-
-  const self = useSelf();
-  const workspaceId = self?.workspaceId;
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-  const metadata =
-    workspace?.metadata && typeof workspace.metadata === 'object' && !Array.isArray(workspace.metadata)
-      ? (workspace.metadata as Record<string, unknown>)
-      : undefined;
-  const disabledToolbarPaths = isStringArray(metadata?.disabledToolbarPaths)
-    ? new Set(metadata.disabledToolbarPaths)
-    : undefined;
+  const disabledToolbarPaths = useDisabledToolbarPaths();
 
   return useMemo(() => {
-    let permittedItems = filterNavItemsByPermission(
+    const permittedItems = filterNavItemsByPermission(
       NAVIGATION_ITEMS,
       permissions,
       canManageOwnUserGroups,

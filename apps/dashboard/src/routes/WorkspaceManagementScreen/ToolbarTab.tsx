@@ -10,7 +10,7 @@ import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { cn } from '../../utils/classNames';
 import { WorkspaceRole } from '@xyne/shared';
-import { NAVIGATION_ITEMS } from '../../components/AppSidebar/navigationConfig';
+import { NAVIGATION_ITEMS, TOOLBAR_ITEM_DESCRIPTIONS } from '../../components/AppSidebar/navigationConfig';
 import { PATH_TO_RESOURCE } from '../../components/AppSidebar/utils/resourceMapping';
 import { toast } from 'sonner';
 
@@ -158,7 +158,14 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
                     <div className='flex items-center justify-center size-8 rounded-md bg-muted border border-border shrink-0 text-muted-foreground'>
                       <Icon className='size-4' />
                     </div>
-                    <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
+                    <div className='min-w-0'>
+                      <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
+                      {TOOLBAR_ITEM_DESCRIPTIONS[item.path] && (
+                        <p className='text-xs text-muted-foreground truncate'>
+                          {TOOLBAR_ITEM_DESCRIPTIONS[item.path]}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <Switch
                     aria-label={`${enabled ? 'Disable' : 'Enable'} ${item.label} for this workspace`}
