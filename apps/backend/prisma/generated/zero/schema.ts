@@ -1860,31 +1860,20 @@ export const canvasVersionTable = table("canvas_versions")
   })
   .primaryKey("id");
 
-export const canvasSuggestionTable = table("canvas_suggestions")
-  .columns({
-    workspaceId: string(),
-    id: string(),
-    canvasId: string(),
-    baseBlockIds: json(),
-    status: string(),
-    createdBy: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
 export const canvasSuggestionChangeTable = table("canvas_suggestion_changes")
   .columns({
     workspaceId: string(),
     id: string(),
-    suggestionId: string(),
+    canvasId: string(),
+    batchId: string(),
     op: string(),
     blockId: string().optional(),
-    basePos: number().optional(),
+    proposedAnchorId: string().optional(),
+    currentAnchorId: string().optional(),
+    orderIndex: number(),
     beforeContent: json().optional(),
     afterContent: json().optional(),
     status: string(),
-    orderIndex: number(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -4398,10 +4387,10 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasCommentThreadTable,
   }),
-  suggestions: many({
+  suggestionChanges: many({
     sourceField: ["id"],
     destField: ["canvasId"],
-    destSchema: canvasSuggestionTable,
+    destSchema: canvasSuggestionChangeTable,
   }),
   folder: one({
     sourceField: ["folderId"],
@@ -4428,24 +4417,11 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
   })
 }));
 
-export const canvasSuggestionTableRelationships = relationships(canvasSuggestionTable, ({ one, many }) => ({
+export const canvasSuggestionChangeTableRelationships = relationships(canvasSuggestionChangeTable, ({ one }) => ({
   canvas: one({
     sourceField: ["canvasId"],
     destField: ["id"],
     destSchema: canvasTable,
-  }),
-  changes: many({
-    sourceField: ["id"],
-    destField: ["suggestionId"],
-    destSchema: canvasSuggestionChangeTable,
-  })
-}));
-
-export const canvasSuggestionChangeTableRelationships = relationships(canvasSuggestionChangeTable, ({ one }) => ({
-  suggestion: one({
-    sourceField: ["suggestionId"],
-    destField: ["id"],
-    destSchema: canvasSuggestionTable,
   })
 }));
 
@@ -5091,7 +5067,6 @@ export const schema = createSchema(
       canvasFolderTable,
       canvasTable,
       canvasVersionTable,
-      canvasSuggestionTable,
       canvasSuggestionChangeTable,
       canvasCommentThreadTable,
       canvasCommentTable,
@@ -5238,7 +5213,6 @@ export const schema = createSchema(
       canvasFolderTableRelationships,
       canvasTableRelationships,
       canvasVersionTableRelationships,
-      canvasSuggestionTableRelationships,
       canvasSuggestionChangeTableRelationships,
       canvasCommentThreadTableRelationships,
       canvasCommentTableRelationships,
@@ -5392,7 +5366,6 @@ export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_p
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
-export type CanvasSuggestion = Row<typeof schema.tables.canvas_suggestions>;
 export type CanvasSuggestionChange = Row<typeof schema.tables.canvas_suggestion_changes>;
 export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
 export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
