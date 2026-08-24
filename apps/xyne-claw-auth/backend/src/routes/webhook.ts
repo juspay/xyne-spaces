@@ -3749,6 +3749,16 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     ...(msg.resolveMentions ? { resolveMentions: msg.resolveMentions } : {}),
   };
   await setSession(body.sessionId, queuedContext);
+  if (msg.queueReason === "interrupt_followup") {
+    void emitAgentWorkingSignal({
+      conversationId: msg.conversationId,
+      channelId: msg.channelId,
+      agentSlug: msg.agentSlug,
+      spacesAppUserId: agentRow.spacesAppUserId ?? "",
+      appToken,
+      toolLabel: "Picked up your new message — continuing from the summary above…",
+    });
+  }
   clog.info(`[msg-queue] registered queued session context sessionId=${body.sessionId} conv=${msg.conversationId} agent=${msg.agentSlug} workspaceId=${workspaceId ?? "(none)"}`);
 }
 
