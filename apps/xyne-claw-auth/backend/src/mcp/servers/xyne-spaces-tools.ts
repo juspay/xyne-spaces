@@ -4584,9 +4584,9 @@ const spacesEditCanvas: ToolDef = {
     "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>) and the new markdown. " +
     "IMPORTANT: if spaces-read-canvas returned paragraphs prefixed with labels like [b1a2b3c], " +
     "keep every label exactly as given, prefix paragraphs you ADD with [new], and omit a " +
-    "paragraph only if you intend to delete it. Dropping the labels will cause the edit to be " +
-    "rejected. Depending on workspace settings the change may be queued for human approval " +
-    "rather than applied immediately — the response says which.",
+    "paragraph only if you intend to delete it. Dropping a label turns that paragraph into a " +
+    "delete-plus-add (its comments are lost), so keep labels exactly. Edits to existing canvases " +
+    "are queued for human approval rather than applied immediately.",
   inputSchema: {
     type: "object",
     properties: {
