@@ -2,6 +2,7 @@ import {
   ChannelFilterMode,
   ChannelScopeType,
   ChannelSortOrder,
+  ChannelType,
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
@@ -95,6 +96,11 @@ export const groupChannelsByScope = (
   const channels: VisibleChannel[] = [];
   const directMessages: VisibleChannel[] = [];
   for (const channel of channelData) {
+    // SDLC repository channels are system-managed and hidden from chat,
+    // the same way SUPPORT channels are.
+    if (channel.type === ChannelType.SDLC) {
+      continue;
+    }
     // EMAIL channels live in Xyne Desk, not in the chat directory.
     // TODO: filter this out at the source by excluding EMAIL-type channels in the
     // `visibleChannels` query itself, so the client never receives them here.

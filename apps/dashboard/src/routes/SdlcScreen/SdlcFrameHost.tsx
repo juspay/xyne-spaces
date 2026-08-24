@@ -2,6 +2,7 @@ import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { SDLC_APP_BASE_PATH } from '../../config';
+import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useSdlcFrame } from './SdlcFrameContext';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 
@@ -23,6 +24,14 @@ const SdlcFrameHost = (): ReactElement | null => {
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  // The host owns the roomActor, so a call the SDLC frame requests is initiated
+  // here and its mini-view renders in the host's global overlay. Kept in a ref so
+  // the message listener below need not re-subscribe when the callback identity
+  // changes each render.
+  const { initiateCall } = useCallJoinOrInitiate();
+  const initiateCallRef = useRef(initiateCall);
+  initiateCallRef.current = initiateCall;
 
   // Last path each side told the other, so echoes do not loop.
   const lastFromFrameRef = useRef<string | null>(null);
@@ -65,6 +74,17 @@ const SdlcFrameHost = (): ReactElement | null => {
 
       if (message.type === SDLC_FRAME_MESSAGE.ready) {
         setIsReady(true);
+        return;
+      }
+
+      if (message.type === SDLC_FRAME_MESSAGE.initiateCall) {
+        initiateCallRef.current({
+          channelId: message.channelId,
+          ...(message.targetUserIds && { targetUserIds: message.targetUserIds }),
+          ...(message.callDisplayName && { callDisplayName: message.callDisplayName }),
+          ...(message.conversationId && { conversationId: message.conversationId }),
+          ...(message.sdlcLink && { sdlcLink: message.sdlcLink }),
+        });
         return;
       }
 
