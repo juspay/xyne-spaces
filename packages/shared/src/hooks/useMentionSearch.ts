@@ -1,13 +1,13 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ChannelScopeType } from '../zero/schema.js';
-import { queries } from '../zero/queries.js';
-import type { MentionResult } from '../types/mention.js';
-import type { User } from '../machines/stateMachine.js';
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { ChannelScopeType } from "../zero/schema.js";
+import { queries } from "../zero/queries.js";
+import type { MentionResult } from "../types/mention.js";
+import type { User } from "../machines/stateMachine.js";
 import {
   DEFAULT_MENTION_RANKING_CAC_CONFIG,
   MENTION_RANKING_CAC_KEY,
   type MentionRankingCacConfig,
-} from '../config/mentionRankingCacConfig.js';
+} from "../config/mentionRankingCacConfig.js";
 import {
   eligibleSpecials,
   isPrefixMatch,
@@ -15,17 +15,20 @@ import {
   rankCandidates,
   type RankableCandidate,
   type SpecialMentionDescriptor,
-} from '../utils/mentionRanking.js';
-import { getMentionDisplayName, userToMentionResult } from '../utils/mentionUser.js';
-import { useChannel } from './useChannels.js';
-import { useActiveUsers, useActiveUserSearch } from './useUsers.js';
-import { useUserGroupSearch } from './useUserGroupSearch.js';
-import { useChannelRecentSenders } from './useChannelRecentSenders.js';
-import { useVespaChannelParticipants } from './useVespaChannelParticipants.js';
-import { useDmAffinityRank } from './useDmAffinityRank.js';
-import { useCacConfig } from './useCacConfig.js';
-import { useAffinityService } from './useAffinityService.js';
-import { useCachedQuery } from './useCachedQuery.js';
+} from "../utils/mentionRanking.js";
+import {
+  getMentionDisplayName,
+  userToMentionResult,
+} from "../utils/mentionUser.js";
+import { useChannel } from "./useChannels.js";
+import { useActiveUsers, useActiveUserSearch } from "./useUsers.js";
+import { useUserGroupSearch } from "./useUserGroupSearch.js";
+import { useChannelRecentSenders } from "./useChannelRecentSenders.js";
+import { useVespaChannelParticipants } from "./useVespaChannelParticipants.js";
+import { useDmAffinityRank } from "./useDmAffinityRank.js";
+import { useCacConfig } from "./useCacConfig.js";
+import { useAffinityService } from "./useAffinityService.js";
+import { useCachedQuery } from "./useCachedQuery.js";
 
 export interface UseMentionSearchResult {
   results: MentionResult[];
@@ -43,8 +46,8 @@ export interface UseMentionSearchOptions {
 }
 
 function emailLocalPart(email: string | null | undefined): string {
-  if (!email) return '';
-  const at = email.indexOf('@');
+  if (!email) return "";
+  const at = email.indexOf("@");
   return at >= 0 ? email.slice(0, at) : email;
 }
 
@@ -69,10 +72,12 @@ interface UserCandidateCtx {
 }
 
 function buildUserCandidate(u: User, ctx: UserCandidateCtx): RankableCandidate {
-  const isMember = ctx.participantsLoaded && ctx.channelParticipantIds.has(u.id);
+  const isMember =
+    ctx.participantsLoaded && ctx.channelParticipantIds.has(u.id);
   const displayName = getMentionDisplayName(u);
   const isEngagedInContext =
-    ctx.recentInChannelIds.has(u.id) || (ctx.threadParticipantIds?.has(u.id) ?? false);
+    ctx.recentInChannelIds.has(u.id) ||
+    (ctx.threadParticipantIds?.has(u.id) ?? false);
   // A 1:1/self DM isn't a "channel" — never surface the "Not in channel" pill there.
   const membershipFlag = ctx.isOneToOneDm
     ? undefined
@@ -80,7 +85,9 @@ function buildUserCandidate(u: User, ctx: UserCandidateCtx): RankableCandidate {
       ? isMember
       : undefined;
   return {
-    matchFields: [displayName, emailLocalPart(u.email)],
+    // Match on BOTH the (possibly-nickname) displayName AND the raw name, so a full-name query finds
+    // a user whose displayName is a short nickname. matchKind already covers prefix/substring/tokens.
+    matchFields: [displayName, u.name, emailLocalPart(u.email)],
     scoreInputs: {
       isChannelMember: isMember,
       isEngagedInContext,
@@ -115,7 +122,7 @@ function buildGroupCandidate(
     result: {
       id: g.id,
       name: g.name,
-      type: 'group' as const,
+      type: "group" as const,
       ...(g.alias && { alias: g.alias }),
       ...(g.description && { description: g.description }),
       memberCount: 0,
@@ -147,7 +154,7 @@ export const useMentionSearch = (
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
   const { includeSpecialMentions = true, excludeSelf = true } = options;
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Gates the Vespa membership fetch — fires only after the picker has been
   // interacted with, avoiding a network call on every channel open.
@@ -170,7 +177,7 @@ export const useMentionSearch = (
     affinityService
       .prefetch()
       .then(() => {
-        if (!cancelled) setAffinityVersion(v => v + 1);
+        if (!cancelled) setAffinityVersion((v) => v + 1);
       })
       .catch(() => {});
     return (): void => {
@@ -184,7 +191,7 @@ export const useMentionSearch = (
   const usersData = useActiveUserSearch(searchQuery, 100);
   const userGroupsData = useUserGroupSearch(searchQuery, 10);
 
-  const channel = useChannel(channelId || '');
+  const channel = useChannel(channelId || "");
   const isOneToOneDm = channel?.scopeType === ChannelScopeType.DM;
   const isGroupDm = channel?.scopeType === ChannelScopeType.GROUP_DM;
   // DM + group DM know their members locally (channel.name = participant ids),
@@ -193,7 +200,8 @@ export const useMentionSearch = (
   const channelDataReady = channel && channel.id === channelId;
 
   const localParticipantIds = useMemo(
-    () => (usesLocalParticipants && channel?.name ? channel.name.split(',') : null),
+    () =>
+      usesLocalParticipants && channel?.name ? channel.name.split(",") : null,
     [usesLocalParticipants, channel?.name],
   );
   const isSelfDm =
@@ -214,22 +222,33 @@ export const useMentionSearch = (
     vespaParticipantIds !== null &&
     vespaParticipantIds.length === 0;
   const [dbParticipantRows] = useCachedQuery(
-    queries.channelParticipants({ channelId: vespaEmpty ? (channel?.id ?? '') : '' }),
+    queries.channelParticipants({
+      channelId: vespaEmpty ? (channel?.id ?? "") : "",
+    }),
     { enabled: vespaEmpty },
   );
   const dbParticipantIds = useMemo(
-    () => (dbParticipantRows ? dbParticipantRows.map(p => p.userId) : null),
+    () => (dbParticipantRows ? dbParticipantRows.map((p) => p.userId) : null),
     [dbParticipantRows],
   );
   const channelMemberIds =
-    vespaParticipantIds && vespaParticipantIds.length > 0 ? vespaParticipantIds : dbParticipantIds;
+    vespaParticipantIds && vespaParticipantIds.length > 0
+      ? vespaParticipantIds
+      : dbParticipantIds;
 
   // Unified member set: local participants for DM/group-DM, Vespa→DB fallback for channels.
   const memberIds = useMemo(
-    () => new Set(usesLocalParticipants ? (localParticipantIds ?? []) : (channelMemberIds ?? [])),
+    () =>
+      new Set(
+        usesLocalParticipants
+          ? (localParticipantIds ?? [])
+          : (channelMemberIds ?? []),
+      ),
     [usesLocalParticipants, localParticipantIds, channelMemberIds],
   );
-  const membersLoaded = usesLocalParticipants ? true : channelMemberIds !== null;
+  const membersLoaded = usesLocalParticipants
+    ? true
+    : channelMemberIds !== null;
 
   // DM-recency rank — used as the secondary affinity signal when MFU is empty.
   const dmRank = useDmAffinityRank(currentUserId);
@@ -243,21 +262,27 @@ export const useMentionSearch = (
 
   const allUsers = useMemo<MentionResult[]>(() => {
     if (allWorkspaceUsers.length === 0) return [];
-    return allWorkspaceUsers.map(u => userToMentionResult(u, false, undefined));
+    return allWorkspaceUsers.map((u) =>
+      userToMentionResult(u, false, undefined),
+    );
   }, [allWorkspaceUsers]);
 
   const eligibleUsers = useMemo<User[]>(() => {
     const src: User[] = shouldSearch
       ? (usersData ?? [])
       : usesLocalParticipants
-        ? allWorkspaceUsers.filter(u => memberIds.has(u.id) || dmRankAffinity.has(u.id))
+        ? allWorkspaceUsers.filter(
+            (u) => memberIds.has(u.id) || dmRankAffinity.has(u.id),
+          )
         : membersLoaded
-          ? allWorkspaceUsers.filter(u => memberIds.has(u.id))
-          : allWorkspaceUsers.filter(u => dmRankAffinity.has(u.id));
+          ? allWorkspaceUsers.filter((u) => memberIds.has(u.id))
+          : allWorkspaceUsers.filter((u) => dmRankAffinity.has(u.id));
     // Keep yourself only in a self-DM (or when the caller opted out of this
     // chat-specific default, e.g. the automation composer); otherwise you're
     // never a mention candidate.
-    return src.filter(u => (isSelfDm || !excludeSelf ? true : u.id !== currentUserId));
+    return src.filter((u) =>
+      isSelfDm || !excludeSelf ? true : u.id !== currentUserId,
+    );
   }, [
     shouldSearch,
     usersData,
@@ -271,7 +296,10 @@ export const useMentionSearch = (
     excludeSelf,
   ]);
 
-  const candidateIdsKey = useMemo(() => eligibleUsers.map(u => u.id).join(','), [eligibleUsers]);
+  const candidateIdsKey = useMemo(
+    () => eligibleUsers.map((u) => u.id).join(","),
+    [eligibleUsers],
+  );
 
   const mfuAffinity = useMemo(() => {
     if (!currentUserId) return new Map<string, number>();
@@ -310,12 +338,12 @@ export const useMentionSearch = (
       ...(threadParticipantIds && { threadParticipantIds }),
     };
 
-    const userCandidates = eligibleUsers.map(u => buildUserCandidate(u, ctx));
+    const userCandidates = eligibleUsers.map((u) => buildUserCandidate(u, ctx));
 
     // Groups & special mentions are channel / group-DM concepts; a 1:1 DM is not a channel.
-    const groupCandidates = (!isOneToOneDm && shouldSearch ? (userGroupsData ?? []) : []).map(g =>
-      buildGroupCandidate(g, searchQuery),
-    );
+    const groupCandidates = (
+      !isOneToOneDm && shouldSearch ? (userGroupsData ?? []) : []
+    ).map((g) => buildGroupCandidate(g, searchQuery));
     const specialCandidates = includeSpecialMentions
       ? eligibleSpecials({
           isDMChannel: isOneToOneDm,
@@ -323,7 +351,9 @@ export const useMentionSearch = (
         }).map(buildSpecialCandidate)
       : [];
 
-    const cap = shouldSearch ? rankingConfig.queryStateCap : rankingConfig.zeroStateCap;
+    const cap = shouldSearch
+      ? rankingConfig.queryStateCap
+      : rankingConfig.zeroStateCap;
     return rankCandidates(
       [...userCandidates, ...groupCandidates, ...specialCandidates],
       searchQuery,
@@ -348,7 +378,10 @@ export const useMentionSearch = (
     includeSpecialMentions,
   ]);
 
-  const users = useMemo(() => results.filter(r => r.type === 'user'), [results]);
+  const users = useMemo(
+    () => results.filter((r) => r.type === "user"),
+    [results],
+  );
 
   const searchMentions = useCallback((query: string) => {
     setError(null);
@@ -357,7 +390,7 @@ export const useMentionSearch = (
   }, []);
 
   const clearResults = useCallback(() => {
-    setSearchQuery('');
+    setSearchQuery("");
     setError(null);
     setIsMentionRequested(false);
   }, []);
