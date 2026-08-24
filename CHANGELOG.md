@@ -1,3 +1,10 @@
+## [1.212.0](https://github.com/juspay/xyne-spaces/compare/v1.211.3...v1.212.0) (2026-08-24)
+
+
+### Features
+
+* add /spec task command for ticket specification questions ([#921](https://github.com/juspay/xyne-spaces/issues/921)) ([b9142fe](https://github.com/juspay/xyne-spaces/commit/b9142fe656d6d6a97aee712ef9ef6cd1d9a3126c))
+
 ## [1.211.3](https://github.com/juspay/xyne-spaces/compare/v1.211.2...v1.211.3) (2026-08-24)
 
 
