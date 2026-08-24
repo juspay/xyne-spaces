@@ -48,17 +48,41 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
     args: InsertValue<TableSchema<'canvas_folders'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
-    if (!args.projectId && args.channelId) {
-      throw new MutationACLError(
-        'Canvas folder insert failed: channel folders must belong to a project',
-        'canvas_folders',
-      );
-    }
+    // Channel-scoped folder: authorize by channel membership. A projectId is
+    // optional here — the channel canvas UI has no project grouping — but when
+    // one is supplied it is still validated to belong to this workspace.
+    if (args.channelId) {
+      await this.verifyChannelWorkspace(args.channelId, tx);
 
-    if (!args.projectId && !args.channelId) {
+      const channelMembership = await tx.run(
+        zql.channel_participants
+          .where('channelId', args.channelId)
+          .where('userId', this.ctx.userID)
+          .one(),
+      );
+
+      if (!channelMembership) {
+        throw new MutationACLError('Canvas folder insert failed: you must be a member of the channel', 'canvas_folders');
+      }
+
+      if (args.projectId) {
+        await this.verifyProjectWorkspace(
+          args.projectId as string,
+          tx,
+          'Canvas folder insert failed: project not found in this workspace',
+        );
+      }
+
       return;
     }
 
+    // Personal / workspace-root folder: neither channel nor project.
+    if (!args.projectId) {
+      return;
+    }
+
+    // Project-scoped folder (no channel): validate the project, then require the
+    // user to belong to at least one channel in that project.
     const projectId = args.projectId as string;
     const project = await tx.run(zql.projects.where('id', projectId).one());
     if (!project) {
@@ -72,32 +96,6 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
       tx,
       'Canvas folder insert failed: project not found in this workspace',
     );
-
-    if (args.channelId) {
-      await this.verifyChannelWorkspace(args.channelId, tx);
-
-      const channel = await tx.run(zql.channels.where('id', args.channelId).one());
-      if (!channel) {
-        throw new MutationACLError('Canvas folder insert failed: the specified channel does not exist', 'canvas_folders');
-      }
-
-      if (channel.projectId !== projectId) {
-        throw new MutationACLError('Canvas folder insert failed: the specified channel does not belong to the project', 'canvas_folders');
-      }
-
-      const channelMembership = await tx.run(
-        zql.channel_participants
-          .where('channelId', args.channelId)
-          .where('userId', this.ctx.userID)
-          .one(),
-      );
-
-      if (!channelMembership) {
-        throw new MutationACLError('Canvas folder insert failed: you must be a member of the channel', 'canvas_folders');
-      }
-
-      return;
-    }
 
     const projectChannelMembership = await tx.run(
       zql.channels

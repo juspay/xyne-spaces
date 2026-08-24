@@ -562,14 +562,6 @@ export class TicketController {
         });
         return;
       }
-      if (board.projectId !== projectId) {
-        res.status(400).json({
-          error: `Board does not belong to the specified project`,
-          code: 'BOARD_PROJECT_MISMATCH',
-        });
-        return;
-      }
-
       let resolvedStageName: string | undefined;
       if (requestedStageName) {
         const stage = await prismaClient.stage.findFirst({
@@ -621,13 +613,6 @@ export class TicketController {
         res.status(404).json({
           error: `Channel with ID ${resolvedChannelId} not found`,
           code: 'CHANNEL_NOT_FOUND',
-        });
-        return;
-      }
-      if (channel.projectId !== projectId) {
-        res.status(400).json({
-          error: `Channel does not belong to the specified project`,
-          code: 'CHANNEL_PROJECT_MISMATCH',
         });
         return;
       }
@@ -851,13 +836,6 @@ export class TicketController {
           res.status(404).json({
             error: `Board with ID ${boardId} not found`,
             code: 'BOARD_NOT_FOUND',
-          });
-          return;
-        }
-        if (board.projectId !== ticket.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the ticket project',
-            code: 'BOARD_PROJECT_MISMATCH',
           });
           return;
         }
@@ -2093,13 +2071,6 @@ export class TicketController {
           res.status(404).json({
             error: `Board with ID ${boardIdToConfigure} not found`,
             code: 'BOARD_NOT_FOUND',
-          });
-          return;
-        }
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the channel project',
-            code: 'BOARD_PROJECT_MISMATCH',
           });
           return;
         }
