@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }

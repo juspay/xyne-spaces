@@ -487,12 +487,12 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       )}
 
       {/* Edit modal for CREATE_TICKET */}
-      {isCreateTicket && channelId && channel?.projectId && (
+      {isCreateTicket && channelId && (
         <CreateTicketModal
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           channelId={channelId}
-          projectId={channel.projectId}
+          {...(channel?.projectId ? { projectId: channel.projectId } : {})}
           initialTitle={titleSuggestion}
           initialDescription={descriptionSuggestion}
           initialSubTickets={initialSubTickets}

@@ -1130,7 +1130,7 @@ export const surfaceNudgeTable = table('surface_nudges')
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1561,7 +1561,7 @@ export const conversationLabelTable = table('conversation_labels')
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2072,7 +2072,7 @@ export const surfaceLinkTable = table('surface_links')
     targetId: string(),
     linkKind: enumeration<SurfaceLinkKind>(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey('id');
