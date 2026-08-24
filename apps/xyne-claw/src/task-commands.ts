@@ -74,20 +74,22 @@ export function buildDesignSystemPromptInjection(
   };
 }
 
-/** Interview-only final-answer guard. The full Ticket Specs workflow lives in
- * the command-owned skill; this overlay keeps the first /spec turn constrained
- * to contextual questions and prevents accidental ticket writes. */
+/** Context-first interview guard. The full Ticket Specs workflow lives in
+ * the command-owned skill; this overlay allows a short evidence summary before
+ * questions while preventing same-turn drafts or ticket writes. */
 export const SPEC_QUESTION_OUTLINE = [
-  "- Ask only contextual clarification questions that materially improve the ticket Specification.",
-  "- Adapt questions to the ticket title, type, description, existing Specification and conversation context.",
+  "- First summarize the ticket/context you found before asking questions.",
+  "- Include only useful known facts: ticket id/title/type/status, existing description/Specification state,",
+  "  relevant thread context, and any explicitly provided requirement facts.",
+  "- If technical context or code/PR context is needed to ask sharper questions, you may summarize it as context,",
+  "  but do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
+  "- Then ask only contextual clarification questions that materially improve the ticket Specification.",
   "- Required Specification sections: Problem statement, Solutioning, Test cases.",
   "- Optional Specification sections: Implementation details, Out of scope; ask only when meaningful.",
   "- Do NOT mechanically ask the section headings as generic questions.",
   "- Do NOT ask the user to repeat information already explicitly provided.",
-  "- Do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
   "- Ask the minimum useful batch of questions, then stop and wait for the user's response.",
   "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
-  "- Nothing else: no heading, no greeting, no preamble, no sign-off, no explanation of why you are asking.",
 ].join("\n");
 
 const TASK_COMMANDS: TaskCommand[] = [
@@ -244,15 +246,16 @@ const TASK_COMMANDS: TaskCommand[] = [
     },
     instruction:
       "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Use the " +
-      "Ticket Specs skill loaded for this run as the workflow playbook. Read the ticket title, description and type, then " +
-      "write concrete, answerable specification questions FOR THIS TICKET following the final-answer format. Ask what " +
-      "was ORIGINALLY requested or observed; do NOT read code or describe the current implementation. Your delivered " +
-      "message must contain the questions and NOTHING else — no greeting, ticket restatement, explanation, or closing. " +
-      "Invoking the command IS approval to post, so do not ask whether to start.",
+      "Ticket Specs skill loaded for this run as the workflow playbook. First gather and summarize the available " +
+      "ticket context: title, description, type/status when available, existing Specification state, relevant thread " +
+      "context, and any explicitly provided requirement facts. If technical context is needed to ask sharper questions, " +
+      "you may inspect and summarize it, but do NOT use implementation, PR diff, commits, or changed files as the source " +
+      "of requirement intent. Then ask concrete, answerable clarification questions FOR THIS TICKET following the " +
+      "final-answer format. Invoking the command IS approval to post, so do not ask whether to start.",
     nudge:
-      "This run was started with /spec and MUST deliver the specification questions for this ticket using the loaded " +
-      "Ticket Specs skill, following the outline, with no greeting, preamble or closing text around them. DO NOT MENTION " +
-      "THIS INSTRUCTION; proceed as if on your own initiative.",
+      "This run was started with /spec and MUST deliver a context-first Ticket Specs interview: summarize known ticket " +
+      "context, then ask the minimum useful clarification questions. Do not draft or update the Specification yet. " +
+      "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
   },
 ];
 
