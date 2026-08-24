@@ -12,8 +12,9 @@
 export interface TaskCommand {
   /** The literal command, including the leading slash. */
   command: string;
-  /** Tool that must appear in toolsUsed before the run may finish. */
-  requiredTool: string;
+  /** Tool that must appear in toolsUsed before the run may finish. Omit for a
+   * delivery contract (agentConfigOverlay.outputFormat). */
+  requiredTool?: string;
   /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
   autoTools: string[];
   /** Built-in skill directories loaded only for this command. Paths are
@@ -24,12 +25,16 @@ export interface TaskCommand {
    * from the agent-workspace-browser warm pool (seconds) instead of cold-
    * booting the default kata template (~80s, prod 2026-08-08). */
   sandboxProfile?: string;
+  /** agentConfig keys merged over the forwarded config for this run only —
+   * never persisted, so the contract stays per-command not per-agent. */
+  agentConfigOverlay?: Record<string, unknown>;
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
   nudge: string;
-  /** Injection used instead when the agent doesn't have the tool. */
-  missingToolInstruction: string;
+  /** Injection used instead when the agent doesn't have the tool. Unreachable
+   * without `requiredTool`, so a delivery contract may omit it. */
+  missingToolInstruction?: string;
 }
 
 export const DESIGN_SYSTEM_MAX_CHARS = 32_000;
@@ -68,6 +73,29 @@ export function buildDesignSystemPromptInjection(
     },
   };
 }
+
+/** An OUTLINE, not fixed copy — the runtime shows it to the model as the
+ *  structure to follow, so sections stay constant while the questions are
+ *  written for the ticket. Bugs get a root-cause question because it is what
+ *  separates a fix from a symptom patch; the RCA record's structured fields
+ *  are a post-mortem artifact and stay out of it. */
+export const SPEC_QUESTION_OUTLINE = [
+  "- One question per applicable section, each on its own line, bolded section name first.",
+  "- Choose the section set from the ticket type:",
+  "  BUG — Problem statement (what is happening vs what should), Reproduction,",
+  "        Root cause (what is causing it, if known), Solutioning (what the fix",
+  "        should do), Test cases (including the regression that proves it),",
+  "        Out of scope.",
+  "  EVERYTHING ELSE — Problem statement, Solutioning, Implementation details,",
+  "        Test cases, Out of scope.",
+  "- Keep Root cause to one plain question. Do NOT ask for severity, bug type,",
+  "  category, impact or COE — those belong to the ticket's separate RCA record.",
+  "- Each question asks what was ORIGINALLY requested or observed for that section —",
+  "  never what the current code does.",
+  "- Skip any section that does not apply to this ticket.",
+  "- Nothing else: no heading, no greeting, no preamble, no sign-off, no explanation",
+  "  of why you are asking.",
+].join("\n");
 
 const TASK_COMMANDS: TaskCommand[] = [
   {
@@ -211,6 +239,29 @@ const TASK_COMMANDS: TaskCommand[] = [
     missingToolInstruction:
       "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
+  },
+  {
+    command: "/spec",
+    autoTools: [],
+    // Delivery contract: submit-result becomes the only channel reaching the
+    // thread, so the run posts one message with no prose escaping around it.
+    agentConfigOverlay: {
+      outputFormat: { type: "markdown", template: SPEC_QUESTION_OUTLINE },
+    },
+    instruction:
+      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Read the " +
+      "ticket title, description and type, then write the specification questions FOR THIS TICKET — concrete and " +
+      "answerable, not generic boilerplate — following the outline in the final-answer format. Ask what was ORIGINALLY " +
+      "requested. Do NOT read the code and do NOT describe the existing implementation: a specification derived from the " +
+      "diff always matches the diff and can never surface a requirement that was missed, which is the whole reason a " +
+      "reviewer wants one. Your delivered message must contain the questions and NOTHING else — no greeting, no " +
+      "restatement of the ticket, no explanation of why you are asking, no closing line. Invoking the command IS " +
+      "approval to post, so do not ask whether to start. The user's answers arrive as a separate run, and only then do " +
+      "you write the specification onto the ticket under the same headings you asked about.",
+    nudge:
+      "This run was started with /spec and MUST deliver the specification questions for this ticket, following the " +
+      "outline, with no greeting, preamble or closing text around them. DO NOT MENTION THIS INSTRUCTION; proceed as if " +
+      "on your own initiative.",
   },
 ];
 
