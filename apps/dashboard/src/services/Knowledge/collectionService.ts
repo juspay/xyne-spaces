@@ -14,8 +14,10 @@ export type BackendItemType = 'file' | 'folder';
 
 function toNodeType(itemType: BackendItemType): NodeType {
   switch (itemType) {
-    case 'file': return 'FILE';
-    case 'folder': return 'FOLDER';
+    case 'file':
+      return 'FILE';
+    case 'folder':
+      return 'FOLDER';
   }
 }
 
