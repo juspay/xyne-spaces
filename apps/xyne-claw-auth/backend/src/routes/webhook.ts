@@ -2101,7 +2101,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
-        "- `/queue` — show messages waiting behind the current run · `/queue clear` — drop them",
+        "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
         "- `/upgrade [task]` — use the premium model for this conversation",
         "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
         "- `/help` — show this list",
@@ -2251,6 +2251,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Not a short-circuit: it dispatches a normal turn with compactBeforeRun set,
   // so the agent compacts the resumed session and replies with a summary.
   const compactBeforeRun = slash?.kind === "compact";
+  const explicitQueueOnly = slash?.kind === "queueAdd";
 
   // Only goal commands reach the goal relooper; stop/clear/compact are handled
   // here (goalClear was short-circuited above into the full /stop path).
@@ -2272,6 +2273,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       log.warn("Failed to post /goal control reply", { error: err instanceof Error ? err.message : String(err) });
     });
     return;
+  } else if (slash?.kind === "queueAdd") {
+    // `/queue <message>` is an explicit opt-out from same-user interrupt-with-reply.
+    // If a run is active the slot gate below will enqueue it without touching the
+    // active run; if nothing is active we just run the message now.
+    task = slash.message;
   } else if (compactBeforeRun) {
     // The run resumes the session, forces a compaction, and answers this task —
     // a short summary for the user while the context shrinks.
@@ -2366,6 +2372,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug);
     slotToken = slot;
     if (!slot) {
+      const activeRun = await agentRunRepository.findRunningByConversation(payload.conversationId).catch(() => null);
+      const sameUserActiveRun =
+        !explicitQueueOnly &&
+        activeRun?.agentSlug === runAgentSlug &&
+        activeRun.userId === targetUserId
+          ? activeRun
+          : null;
       const queuedMsg: QueuedMessage = {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
         conversationId: payload.conversationId,
@@ -2377,16 +2390,45 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         orgId: agent.orgId,
         task,
         eventType,
+        queueReason: sameUserActiveRun ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
+        interruptMode: sameUserActiveRun ? "interrupt_with_reply" : "queue_only",
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      const notice = enq.enqueued
-        ? `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
-        : enq.deduped
-          ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
-          : enq.full
-            ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
-            : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
+      let interruptRequested = false;
+      if (enq.enqueued && sameUserActiveRun) {
+        try {
+          const interruptRes = await fetch(
+            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sameUserActiveRun.sessionId)}/interrupt-with-reply`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": targetUserId,
+              },
+            },
+          );
+          interruptRequested = interruptRes.ok;
+          if (!interruptRes.ok) {
+            const body = await interruptRes.text().catch(() => "");
+            log.warn(`[msg-queue] interrupt-with-reply rejected session=${sameUserActiveRun.sessionId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
+          }
+        } catch (err) {
+          log.warn("Failed to request interrupt-with-reply", { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      const notice = sameUserActiveRun && interruptRequested
+        ? `⏸️ I’ll wrap up my current reply first, then continue with your new message.`
+        : enq.enqueued
+          ? explicitQueueOnly
+            ? `🕒 Queued after the current run (position ${enq.position}).`
+            : `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
+          : enq.deduped
+            ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
+            : enq.full
+              ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
+              : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
       await spacesAppFetch("/chat/postMessage", {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
@@ -2396,7 +2438,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }, agent.appToken).catch((err) => {
         log.warn("Failed to post queue notice", { error: err instanceof Error ? err.message : String(err) });
       });
-      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
+      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} reason=${queuedMsg.queueReason} interruptRequested=${interruptRequested} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
       return;
     }
   }
