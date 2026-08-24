@@ -858,7 +858,7 @@ const AppRoot = (): ReactElement => {
                             )}
                           <GlobalCallOverlay />
                           <CallLinkInterceptor />
-                        {recordingVersion === 'v2' ? (
+                          {recordingVersion === 'v2' ? (
                             <NoteTakerOverlayHost />
                           ) : (
                             <RecordingOverlay />
