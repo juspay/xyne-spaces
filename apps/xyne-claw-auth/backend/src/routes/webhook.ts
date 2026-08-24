@@ -35,6 +35,7 @@ import {
 } from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
+import { rebaseOnTrustedOrigin } from "../lib/url-guard.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
@@ -2819,13 +2820,23 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         );
 
         const sources: Array<{ label: string; url: string; headers?: Record<string, string> }> = [];
-        if (att.fileUrl && /^https?:\/\//i.test(att.fileUrl)) {
-          sources.push({ label: "fileUrl", url: att.fileUrl });
+        // `fileUrl` is whatever the webhook body says it is. Only fetch it when
+        // it sits on a Spaces origin we already trust — scheme/host/port are
+        // taken from config, the body contributes path + query only. Anything
+        // else falls through to the authenticated download routes below.
+        const trustedFileUrl = att.fileUrl
+          ? rebaseOnTrustedOrigin(att.fileUrl, [CONFIG.spacesInternalUrl, CONFIG.spacesBackendUrl, CONFIG.spacesAppUrl])
+          : null;
+        if (trustedFileUrl) {
+          sources.push({ label: "fileUrl", url: trustedFileUrl.href });
+        } else if (att.fileUrl && /^https?:\/\//i.test(att.fileUrl)) {
+          log.warn(`Attachment ${att.attachmentId}: fileUrl is not on a Spaces origin — skipping direct fetch`);
         }
+        const encodedAttachmentId = encodeURIComponent(att.attachmentId);
         if (userSpacesToken) {
           sources.push({
             label: "user-token",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/attachments/${encodedAttachmentId}/download`,
             headers: {
               Authorization: `Bearer ${userSpacesToken}`,
               ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
@@ -2835,12 +2846,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         }
         sources.push({
           label: "apps-route",
-          url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${att.attachmentId}/download`,
+          url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${encodedAttachmentId}/download`,
           headers: { Authorization: `Bearer ${agent.appToken}` },
         });
         sources.push({
           label: "user-route",
-          url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
+          url: `${CONFIG.spacesInternalUrl}/api/attachments/${encodedAttachmentId}/download`,
           headers: { Authorization: `Bearer ${agent.appToken}` },
         });
 
@@ -2849,6 +2860,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         for (const src of sources) {
           try {
             const dlRes = await fetch(src.url, {
+              redirect: "manual",
               signal: AbortSignal.timeout(15_000),
               ...(src.headers ? { headers: src.headers } : {}),
             });

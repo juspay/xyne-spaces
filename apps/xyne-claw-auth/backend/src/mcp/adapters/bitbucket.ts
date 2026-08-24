@@ -1,6 +1,84 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
 import type { Citation } from "xyne-claw-shared";
 import { prefixChunk } from "./grafana.js";
+import { assertOutboundUrlAllowed, parseHostAllowlist } from "../url-guard.js";
+
+const DEFAULT_BITBUCKET_BASE_URL = "https://bitbucket.juspay.net";
+
+/**
+ * Resolve and validate the Bitbucket Server base URL for a connection.
+ *
+ * `credentials.baseUrl` is a free-text credential field: it is written by
+ * POST /:userId/connections straight from the request body and only checked
+ * for "non-empty string". Every local Bitbucket tool then builds REST URLs
+ * on it, so without validation any authenticated user could aim this
+ * service's Basic-auth requests at loopback / cluster-internal / metadata
+ * hosts. Validate ONCE per tool call (scheme, host allowlist or public
+ * address) and build every request from the returned URL object.
+ *
+ * BITBUCKET_ALLOWED_HOSTS (comma-separated) pins the accepted hosts; hosts
+ * on it skip the address check so an on-prem server on a private range
+ * still works when an operator has explicitly trusted it.
+ */
+export async function resolveBitbucketBase(credentials: Record<string, unknown>): Promise<URL> {
+  const raw = typeof credentials["baseUrl"] === "string" ? credentials["baseUrl"].trim() : "";
+  return assertOutboundUrlAllowed(raw || DEFAULT_BITBUCKET_BASE_URL, {
+    allowedHosts: parseHostAllowlist(process.env["BITBUCKET_ALLOWED_HOSTS"]),
+    label: "Bitbucket base URL",
+  });
+}
+
+/** `https://host[/context]` without a trailing slash — the shape the citation builders take. */
+function bitbucketSiteUrl(base: URL): string {
+  return base.origin + base.pathname.replace(/\/+$/, "");
+}
+
+/**
+ * Build a `/rest/api/1.0/...` URL on a validated base. Caller-supplied values
+ * only ever become individual, percent-encoded PATH segments (plus an
+ * optional query string) on the validated origin; they can never reach the
+ * scheme or host. Dot segments are refused outright because the URL parser
+ * would otherwise collapse `..` back up the path.
+ */
+export function bitbucketApiUrl(
+  base: URL,
+  segments: ReadonlyArray<string | number>,
+  query?: URLSearchParams,
+): string {
+  const encoded = segments.map((seg) => {
+    const s = String(seg);
+    if (s === "" || s === "." || s === "..") {
+      throw new Error(`Bitbucket API path segment ${JSON.stringify(s)} is not allowed`);
+    }
+    return encodeURIComponent(s);
+  });
+  const url = new URL(base.origin);
+  url.pathname = `${base.pathname.replace(/\/+$/, "")}/rest/api/1.0/${encoded.join("/")}`;
+  if (query) url.search = query.toString();
+  return url.href;
+}
+
+/**
+ * Bitbucket Server project keys are `[A-Za-z0-9_]` (personal projects are
+ * `~username`), repo slugs are `[a-z0-9._-]`. Anything else is not a valid
+ * identifier and would only ever be a path-shaping attempt.
+ */
+const BB_IDENT_RE = /^~?[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function requireBitbucketIdent(tool: string, name: string, value: unknown): string {
+  if (typeof value !== "string" || !BB_IDENT_RE.test(value.trim())) {
+    throw new Error(`${tool}: ${name} must be a valid Bitbucket identifier`);
+  }
+  return value.trim();
+}
+
+function requireBitbucketPrId(tool: string, value: unknown): string {
+  const s = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  if (!/^\d{1,12}$/.test(s)) {
+    throw new Error(`${tool}: prId must be a pull request number`);
+  }
+  return s;
+}
 
 export const bitbucketAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -224,11 +302,9 @@ export async function handleUploadPrScreenshot(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-
-  const projectKey = params["projectKey"] as string;
-  const repoSlug = params["repoSlug"] as string;
-  const prId = params["prId"] as string;
+  const projectKey = requireBitbucketIdent("upload-pr-screenshot", "projectKey", params["projectKey"]);
+  const repoSlug = requireBitbucketIdent("upload-pr-screenshot", "repoSlug", params["repoSlug"]);
+  const prId = requireBitbucketPrId("upload-pr-screenshot", params["prId"]);
   const fileData = params["fileData"] as string | undefined;
   const explicitFileName = params["fileName"] as string | undefined;
   const mimeType = (params["mimeType"] as string | undefined) || "image/png";
@@ -247,9 +323,11 @@ export async function handleUploadPrScreenshot(
   const caption = (params["caption"] as string) || fileName;
 
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
+  const base = await resolveBitbucketBase(credentials);
+  const siteUrl = bitbucketSiteUrl(base);
 
   // Upload as repo attachment — Bitbucket Server returns attachment metadata with links
-  const uploadUrl = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/attachments`;
+  const uploadUrl = bitbucketApiUrl(base, ["projects", projectKey, "repos", repoSlug, "attachments"]);
 
   const boundary = "----XyneUpload" + Date.now();
   const bodyParts = [
@@ -289,10 +367,10 @@ export async function handleUploadPrScreenshot(
   }
 
   // The URL from the API may be relative — make it absolute
-  const fullUrl = attachmentUrl.startsWith("http") ? attachmentUrl : `${baseUrl}${attachmentUrl}`;
+  const fullUrl = attachmentUrl.startsWith("http") ? attachmentUrl : `${siteUrl}${attachmentUrl}`;
 
   // Add a PR comment with the embedded image
-  const commentUrl = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/pull-requests/${prId}/comments`;
+  const commentUrl = bitbucketApiUrl(base, ["projects", projectKey, "repos", repoSlug, "pull-requests", prId, "comments"]);
   const commentBody = `![${caption}](${fullUrl})\n\n**${caption}**`;
 
   const commentRes = await fetch(commentUrl, {
@@ -305,7 +383,7 @@ export async function handleUploadPrScreenshot(
   });
 
   const citations: Citation[] = [
-    { kind: "external", url: prUrl(baseUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId}` },
+    { kind: "external", url: prUrl(siteUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId}` },
   ];
 
   if (!commentRes.ok) {
@@ -443,18 +521,17 @@ export async function handleGetPrComments(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-
-  const projectKey = params["projectKey"] as string;
-  const repoSlug = params["repoSlug"] as string;
-  const prId = params["prId"] as string;
+  if (!params["projectKey"] || !params["repoSlug"] || !params["prId"]) {
+    throw new Error("get-pr-comments: projectKey, repoSlug, and prId are required");
+  }
+  const projectKey = requireBitbucketIdent("get-pr-comments", "projectKey", params["projectKey"]);
+  const repoSlug = requireBitbucketIdent("get-pr-comments", "repoSlug", params["repoSlug"]);
+  const prId = requireBitbucketPrId("get-pr-comments", params["prId"]);
   const maxComments = typeof params["maxComments"] === "number" ? (params["maxComments"] as number) : 500;
   const includeDeleted = params["includeDeleted"] === true;
 
-  if (!projectKey || !repoSlug || !prId) {
-    throw new Error("get-pr-comments: projectKey, repoSlug, and prId are required");
-  }
-
+  const base = await resolveBitbucketBase(credentials);
+  const siteUrl = bitbucketSiteUrl(base);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const pageSize = 100;
   const out: FlatComment[] = [];
@@ -463,9 +540,11 @@ export async function handleGetPrComments(
   const maxPages = 200; // hard ceiling — 20k activities is plenty even for huge PRs
 
   while (out.length < maxComments && pagesWalked < maxPages) {
-    const url =
-      `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}` +
-      `/pull-requests/${prId}/activities?start=${start}&limit=${pageSize}`;
+    const url = bitbucketApiUrl(
+      base,
+      ["projects", projectKey, "repos", repoSlug, "pull-requests", prId, "activities"],
+      new URLSearchParams({ start: String(start), limit: String(pageSize) }),
+    );
 
     const res = await fetch(url, {
       method: "GET",
@@ -509,7 +588,7 @@ export async function handleGetPrComments(
     2,
   );
   const citations: Citation[] = [
-    { kind: "external", url: prUrl(baseUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId} comments` },
+    { kind: "external", url: prUrl(siteUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId} comments` },
   ];
   return { content: prefixChunk(1, content), citations };
 }
@@ -539,16 +618,13 @@ export async function handleGetPrTemplate(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-
-  const projectKey = params["projectKey"] as string;
-  const repoSlug = params["repoSlug"] as string;
-  const at = (params["at"] as string | undefined)?.trim() || undefined;
-  const explicitPath = (params["path"] as string | undefined)?.trim() || undefined;
-
-  if (!projectKey || !repoSlug) {
+  if (!params["projectKey"] || !params["repoSlug"]) {
     throw new Error("get-pr-template: projectKey and repoSlug are required");
   }
+  const projectKey = requireBitbucketIdent("get-pr-template", "projectKey", params["projectKey"]);
+  const repoSlug = requireBitbucketIdent("get-pr-template", "repoSlug", params["repoSlug"]);
+  const at = (params["at"] as string | undefined)?.trim() || undefined;
+  const explicitPath = (params["path"] as string | undefined)?.trim() || undefined;
   // Guard the caller-supplied path: encodeURIComponent does NOT encode ".", so a ".." segment
   // would survive as real path traversal. Reject absolute paths and any ".." / empty segment.
   if (
@@ -558,15 +634,20 @@ export async function handleGetPrTemplate(
     throw new Error("get-pr-template: path must be a relative repo path with no '..' or empty segments");
   }
 
+  const base = await resolveBitbucketBase(credentials);
+  const siteUrl = bitbucketSiteUrl(base);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const candidates = explicitPath ? [explicitPath] : DEFAULT_PR_TEMPLATE_PATHS;
   const tried: string[] = [];
 
   for (const path of candidates) {
-    // Encode each path segment to prevent traversal / stray query chars leaking into the URL.
-    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-    let url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/raw/${encodedPath}`;
-    if (at) url += `?at=${encodeURIComponent(at)}`;
+    // Each path segment becomes its own percent-encoded URL segment, so traversal /
+    // stray query chars can't leak into the URL.
+    const url = bitbucketApiUrl(
+      base,
+      ["projects", projectKey, "repos", repoSlug, "raw", ...path.split("/")],
+      at ? new URLSearchParams({ at }) : undefined,
+    );
 
     tried.push(path);
     const res = await fetch(url, {
@@ -587,7 +668,7 @@ export async function handleGetPrTemplate(
     const content = await res.text();
     const body = JSON.stringify({ found: true, path, at: at ?? null, content, triedPaths: tried }, null, 2);
     const citations: Citation[] = [
-      { kind: "external", url: fileUrl(baseUrl, projectKey, repoSlug, path, at), chunkIndex: 1, label: `Bitbucket file ${path}` },
+      { kind: "external", url: fileUrl(siteUrl, projectKey, repoSlug, path, at), chunkIndex: 1, label: `Bitbucket file ${path}` },
     ];
     return { content: prefixChunk(1, body), citations };
   }
@@ -650,13 +731,11 @@ export async function handleListPullRequests(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-
-  const projectKey = params["projectKey"] as string;
-  const repoSlug = params["repoSlug"] as string;
-  if (!projectKey || !repoSlug) {
+  if (!params["projectKey"] || !params["repoSlug"]) {
     throw new Error("list-pull-requests: projectKey and repoSlug are required");
   }
+  const projectKey = requireBitbucketIdent("list-pull-requests", "projectKey", params["projectKey"]);
+  const repoSlug = requireBitbucketIdent("list-pull-requests", "repoSlug", params["repoSlug"]);
 
   const state = ((params["state"] as string) || "MERGED").toUpperCase();
   const order = ((params["order"] as string) || "NEWEST").toUpperCase();
@@ -665,6 +744,7 @@ export async function handleListPullRequests(
   const targetBranchRaw = typeof params["targetBranch"] === "string" ? (params["targetBranch"] as string).trim() : "";
   const target = targetBranchRaw ? normalizeBranchRef(targetBranchRaw) : null;
 
+  const base = await resolveBitbucketBase(credentials);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const pageSize = 100;
   const collected: BbPullRequest[] = [];
@@ -689,7 +769,7 @@ export async function handleListPullRequests(
       qs.set("direction", "INCOMING");
     }
 
-    const url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/pull-requests?${qs.toString()}`;
+    const url = bitbucketApiUrl(base, ["projects", projectKey, "repos", repoSlug, "pull-requests"], qs);
     const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: authHeader, Accept: "application/json" },

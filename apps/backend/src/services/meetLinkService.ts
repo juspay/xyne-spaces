@@ -141,7 +141,7 @@ async function withRetry<T>(
  * Includes retry logic with exponential backoff for transient failures
  */
 export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise<boolean> {
-  const endpoint = `${config.sam.baseUrl}/sam/s2s/meet/${metadata.meetCode}/meta`;
+  const endpoint = `${config.sam.baseUrl}/sam/s2s/meet/${encodeURIComponent(metadata.meetCode)}/meta`;
 
   // Generate notification URL with query params for callback identification (including workspaceId)
   const notificationUrl = generateNotificationUrl(

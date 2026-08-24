@@ -117,7 +117,7 @@ export class PulseService {
   async fetchOrgLeadData(orgId: string): Promise<PulseProduct[]> {
     const { apiUrl } = config.pulse;
     try {
-      const response = await fetch(`${apiUrl}/curie/s2s/organization/lead/data/${orgId}`, {
+      const response = await fetch(`${apiUrl}/curie/s2s/organization/lead/data/${encodeURIComponent(orgId)}`, {
         method: 'POST',
         headers: this.headersNoBody,
         // No body — same pattern as fetchOrgList

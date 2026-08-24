@@ -11,9 +11,17 @@ if (!process.env['VESPA_CONFIG_SERVER_URL']) {
   logger.warn('[schemaHandler] VESPA_CONFIG_SERVER_URL is not set — falling back to http://127.0.0.1:19071');
 }
 
+// Vespa schema names are plain identifiers; anything else is not a schema we
+// serve and must not be interpolated into the config-server path.
+const SCHEMA_NAME_PATTERN = /^[A-Za-z0-9_]+$/;
+
 export const schemaHandler = async (req: Request, res: Response): Promise<void> => {
-  const schemaName = req.query['schema'] as string;
-  const url = `${SCHEMA_BASE_URL}/${schemaName}.sd`;
+  const schemaName = req.query['schema'];
+  if (typeof schemaName !== 'string' || !SCHEMA_NAME_PATTERN.test(schemaName)) {
+    res.status(400).send('Invalid schema name');
+    return;
+  }
+  const url = `${SCHEMA_BASE_URL}/${encodeURIComponent(schemaName)}.sd`;
 
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });

@@ -1,6 +1,7 @@
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 import { decryptSurfaceSecret } from "../../lib/surface-resolver.js";
+import { hostnameOf, parseHttpUrl, rebaseOnTrustedOrigin } from "../../lib/url-guard.js";
 import { postExternalCallback } from "./api.js";
 import {
   RETRY_DELAYS_MS,
@@ -40,31 +41,44 @@ function parseUrl(value: string): URL | null {
   }
 }
 
-/** True only for callback origins owned by claw-auth/claw itself. */
-export function isInternalCallbackOrigin(
-  callbackUrl: string,
-  config: CallbackOriginConfig = {
+function defaultCallbackOriginConfig(): CallbackOriginConfig {
+  return {
     selfUrl: CONFIG.selfUrl,
     internalUrl: CONFIG.internalUrl,
     xyneClawUrl: CONFIG.xyneClawUrl,
     ...(process.env["NODE_ENV"] ? { nodeEnv: process.env["NODE_ENV"] } : {}),
-  },
-): boolean {
-  const candidate = parseUrl(callbackUrl);
-  if (!candidate) return false;
+  };
+}
 
-  const knownOrigins = [config.selfUrl, config.internalUrl, config.xyneClawUrl]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .map(parseUrl)
-    .filter((value): value is URL => value !== null)
-    .map((value) => value.origin);
-  if (knownOrigins.includes(candidate.origin)) return true;
+/**
+ * Resolve a caller-supplied callback/progress URL to one we will actually
+ * POST to. Only origins owned by claw-auth/claw itself qualify; the returned
+ * URL takes scheme/host/port from the configured origin and carries over only
+ * the caller's path + query. Null for any other target.
+ */
+export function resolveInternalCallbackUrl(
+  callbackUrl: string,
+  config: CallbackOriginConfig = defaultCallbackOriginConfig(),
+): URL | null {
+  const knownOrigins = [config.selfUrl, config.internalUrl, config.xyneClawUrl].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  const rebased = rebaseOnTrustedOrigin(callbackUrl, knownOrigins);
+  if (rebased) return rebased;
 
   if (config.nodeEnv === "development") {
-    const hostname = candidate.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    return DEV_LOCAL_HOSTNAMES.has(hostname);
+    const candidate = parseHttpUrl(callbackUrl);
+    if (candidate && DEV_LOCAL_HOSTNAMES.has(hostnameOf(candidate))) return candidate;
   }
-  return false;
+  return null;
+}
+
+/** True only for callback origins owned by claw-auth/claw itself. */
+export function isInternalCallbackOrigin(
+  callbackUrl: string,
+  config: CallbackOriginConfig = defaultCallbackOriginConfig(),
+): boolean {
+  return resolveInternalCallbackUrl(callbackUrl, config) !== null;
 }
 
 /** Validate the deliberately narrow SSRF policy for external result delivery. */

@@ -7,6 +7,7 @@ import { validateSubagentInput, ValidationError as SubagentValidationError } fro
 import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { OutboundUrlError, resolveProviderBaseUrl } from "../lib/url-guard.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
@@ -2813,7 +2814,9 @@ export interface ClaudeModelInfo {
 }
 
 export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, authType?: string): Promise<ClaudeModelInfo[]> {
-  const root = (baseUrl?.trim() || ANTHROPIC_BASE_URL).replace(/\/+$/, "");
+  // baseUrl is caller-configured (request body, or a credential row written
+  // from one) — validate it before it becomes the request host.
+  const root = resolveProviderBaseUrl(baseUrl, ANTHROPIC_BASE_URL);
   // Anthropic OAuth tokens (Pro/Max via `claude setup-token`) authenticate
   // with Authorization: Bearer + anthropic-beta=oauth-2025-04-20. The API
   // key path (Console keys) uses x-api-key. Sending the OAuth token as
@@ -2832,6 +2835,7 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   const res = await fetch(`${root}/v1/models`, {
     method: "GET",
     headers,
+    redirect: "manual",
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -4026,10 +4030,22 @@ router.post(
         if (!baseUrl) baseUrl = cred.baseUrl ?? "";
       }
 
-      const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
+      // baseUrl is caller-configured (body, or a credential row written from
+      // one) — validate it before it becomes the request host.
+      let root: string;
+      try {
+        root = resolveProviderBaseUrl(baseUrl, CONFIG.litellmBaseUrl);
+      } catch (err) {
+        if (err instanceof OutboundUrlError) {
+          res.status(400).json({ success: false, error: err.message });
+          return;
+        }
+        throw err;
+      }
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
       const upstream = await fetch(`${root}/v1/models`, {
         headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
+        redirect: "manual",
         signal: AbortSignal.timeout(20_000),
       });
       if (!upstream.ok) {

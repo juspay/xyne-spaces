@@ -1370,7 +1370,7 @@ export async function downloadClawAttachment(
   contentDisposition: string | null;
   contentLength: string | null;
 }> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/attachments/${attachmentId}/download`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/download`;
   logger.info(`[ClawAgentService] Downloading attachment: ${attachmentId}`);
 
   const response = await fetch(url, {

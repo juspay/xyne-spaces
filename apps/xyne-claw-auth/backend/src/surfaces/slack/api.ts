@@ -8,9 +8,13 @@
  */
 import { WebClient, type WebClientOptions } from "@slack/web-api";
 import { createLogger } from "../../logger.js";
+import { requireHost } from "../../lib/url-guard.js";
 import { RESPONSE_URL_RETRY_DELAY_MS, SLACK_API_MAX_RETRIES, SLACK_API_TIMEOUT_MS } from "./const.js";
 
 const log = createLogger("slack-api");
+
+/** Slack only ever issues response_urls on this host. */
+const RESPONSE_URL_HOSTS: ReadonlySet<string> = new Set(["hooks.slack.com"]);
 
 const clientOptions: WebClientOptions = {
   timeout: SLACK_API_TIMEOUT_MS,
@@ -52,6 +56,15 @@ export async function postResponseUrl(
   responseUrl: string,
   message: { text: string; responseType?: "ephemeral" | "in_channel" },
 ): Promise<boolean> {
+  // The response_url arrives in the slash-command body. Slack signs that body,
+  // but the URL is still request data: only accept Slack's own webhook host
+  // over https, and never follow a redirect off it.
+  const target = requireHost(responseUrl, RESPONSE_URL_HOSTS);
+  if (!target || target.protocol !== "https:") {
+    log.warn("[slack-api] response_url rejected: not a hooks.slack.com https URL");
+    return false;
+  }
+
   const body = JSON.stringify({
     response_type: message.responseType ?? "ephemeral",
     text: message.text,
@@ -60,10 +73,11 @@ export async function postResponseUrl(
   for (let attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt += 1) {
     try {
       // eslint-disable-next-line no-restricted-globals -- documented response_url exemption
-      const response = await fetch(responseUrl, {
+      const response = await fetch(target.href, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
+        redirect: "manual",
         signal: AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
       });
       if (response.ok) return true;

@@ -50,7 +50,7 @@ import {
 } from "../middleware/require-auth.js";
 import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
 import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, resolveInternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
@@ -879,6 +879,14 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     }
     if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
       res.status(400).json({ success: false, error: "callbackUrl is not an allowed target" });
+      return;
+    }
+    // progressUrl is an internal-only sink: every producer (webhook.ts,
+    // agent-chat.ts, run-stream.ts, queue workers, Slack dispatch) builds it
+    // from CONFIG.internalUrl, and progress POSTs carry x-s2s-key. Never let
+    // a caller point them at a foreign origin.
+    if (progressUrl !== undefined && (typeof progressUrl !== "string" || !isInternalCallbackOrigin(progressUrl))) {
+      res.status(400).json({ success: false, error: "progressUrl must target an internal origin" });
       return;
     }
     if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
@@ -1743,10 +1751,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             // callback — synthesizing failure here raced that and mislabeled
             // ~47 live runs/day as "sse stream broken" (prod 2026-07-09).
             log.warn(`[run] proxy: pass-through stream lost; run continues headless (session=${sessionId})`);
+            // effectiveCallbackUrl, not the raw body value: an external
+            // callback is relayed via the injected internal /webhook/result,
+            // and these POSTs carry x-s2s-key + x-session-token.
             armHeadlessFinalizeCheck({
               sessionId,
               sessionToken,
-              callbackUrl,
+              callbackUrl: effectiveCallbackUrl,
               conversationId: typeof conversationId === "string" ? conversationId : undefined,
               agentSlug: typeof agentSlug === "string" ? agentSlug : undefined,
               eventType,
@@ -1754,7 +1765,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             });
           } else {
             await postBrokenSseTerminalCallback({
-              callbackUrl,
+              callbackUrl: effectiveCallbackUrl,
               sessionId,
               sessionToken,
               conversationId: typeof conversationId === "string" ? conversationId : undefined,
@@ -2565,7 +2576,12 @@ async function postBrokenSseTerminalCallback(opts: {
   }
 
   try {
-    const cbRes = await fetch(opts.callbackUrl, {
+    // The callback carries x-s2s-key + x-session-token, so it may only go to
+    // an origin we own; scheme/host/port come from config, the caller's URL
+    // contributes path + query.
+    const target = resolveInternalCallbackUrl(opts.callbackUrl);
+    if (!target) throw new Error("callbackUrl is not an internal origin");
+    const cbRes = await fetch(target.href, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2573,6 +2589,7 @@ async function postBrokenSseTerminalCallback(opts: {
         ...(opts.sessionToken ? { "x-session-token": opts.sessionToken } : {}),
       },
       body: JSON.stringify(body),
+      redirect: "manual",
       signal: AbortSignal.timeout(15_000),
     });
     if (!cbRes.ok) {
@@ -2644,13 +2661,22 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
 
   // Serial dispatch via consumeAlreadyOpenStream's awaited handlers means
   // these POSTs land at progressUrl in the exact order claw emitted them.
+  //
+  // Both sinks carry x-s2s-key, so they are resolved onto an origin we own
+  // (scheme/host/port from config; the caller's URL contributes path + query).
+  // /run already rejected foreign origins at ingress; this is the last line.
+  const progressTarget = progressUrl ? resolveInternalCallbackUrl(progressUrl) : null;
+  if (progressUrl && !progressTarget) {
+    log.warn(`[run] proxy: progressUrl is not an internal origin — progress events dropped (session=${sessionId})`);
+  }
   const postProgress = async (body: Record<string, unknown>): Promise<void> => {
-    if (!progressUrl) return;
+    if (!progressTarget) return;
     try {
-      await fetch(progressUrl, {
+      await fetch(progressTarget.href, {
         method: "POST",
         headers: sharedHeaders,
         body: JSON.stringify({ ...convFallback, ...body }),
+        redirect: "manual",
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
@@ -2715,9 +2741,12 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
         // latency, reasoning, provider, model, etc., and stripping any of
         // those breaks downstream consumers silently (Control Center finalize,
         // digital-twin suffix, etc.).
-        await fetch(callbackUrl, {
+        const callbackTarget = resolveInternalCallbackUrl(callbackUrl);
+        if (!callbackTarget) throw new Error("callbackUrl is not an internal origin");
+        await fetch(callbackTarget.href, {
           method: "POST",
           headers: callbackHeaders,
+          redirect: "manual",
           body: JSON.stringify({
             ...convFallback,
             ...result.result,

@@ -64,11 +64,16 @@ export class MeetCallbackController {
       }
       const payload = validationResult.data;
 
-      // Extract identifiers from query params
-      const xyneTicketId = req.query.xyneTicketId as string;
-      const workspaceId = req.query.workspaceId as string;
-      const threadId = req.query.threadId as string;
-      const meetCode = req.query.meetCode as string;
+      // Extract identifiers from query params. A repeated param (`?meetCode=a&meetCode=b`)
+      // arrives as an array; only accept single string values.
+      const queryString = (key: string): string | undefined => {
+        const value = req.query[key];
+        return typeof value === 'string' ? value : undefined;
+      };
+      const xyneTicketId = queryString('xyneTicketId');
+      const workspaceId = queryString('workspaceId');
+      const threadId = queryString('threadId');
+      const meetCode = queryString('meetCode');
 
       logger.info('[MeetCallbackController] Received callback from SAM', {
         xyneTicketId,
