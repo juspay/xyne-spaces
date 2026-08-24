@@ -2086,7 +2086,7 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
-  projectId   String   // Project (denormalized from channel)
+  projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
@@ -2575,12 +2575,11 @@ model SurfaceNudge {
   state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
-  projectId   String
+  projectId   String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
-  @@index([projectId, state])
   @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
@@ -2709,6 +2708,7 @@ model Call {
   instanceDate     DateTime?   // For recurring instances
   recordingEnabled Boolean     @default(false)
   recordingUrl     String?     // GCS path: recordings/{callId}.mp4
+  recordingParticipants String[] @default([])
   transcript       String?     // Call transcript
   aiSummary        String?     // AI-generated summary
   startedAt        DateTime    @default(now())
@@ -2767,6 +2767,7 @@ model EntityAccess {
   channelId           String?  // Shared with a channel (no FK constraint)
 
   entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  metadata            Json?    // Share-specific metadata
   createdAt           DateTime @default(now())
   updatedAt           DateTime
 
@@ -2977,6 +2978,9 @@ model Canvas {
   commentThreads CanvasCommentThread[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
+  // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
+  // Emulated (relationMode="prisma"), no DB FK.
+  sdlcArtifact SdlcArtifact?
   // Quarto Doc fields - when docType is Quarto
   userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
   repoId       String?          // Repo ID (no FK constraint) - for editing capability
@@ -3218,6 +3222,8 @@ model Repo {
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: Cascade)
   setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
   sdlcEntityLinks SdlcEntityLink[]
+  sdlcArtifacts   SdlcArtifact[]
+  sdlcTracks      SdlcTrack[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
   @@unique([workspaceId, canonicalUrl])
@@ -3249,6 +3255,55 @@ model SdlcEntityLink {
   @@index([repoId, sourceType, sourceId])
   @@index([repoId, targetType, targetId])
   @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// Provenance for SDLC-owned entities (one row per entity).
+// entityType is 'CANVAS' for now; 'TICKET' reserved for future flows.
+// sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]
+model SdlcArtifact {
+  workspaceId         String
+  artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
+  repoId              String
+  artifactType        String   @default("DEFAULT")
+  artifactStatus      String   @default("ACTIVE")
+  workflowExecutionId String?
+  generationCommit    String?
+  sourceReferences    String?
+  sourcePaths         String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  canvas Canvas @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@index([repoId])
+  @@index([workflowExecutionId])
+  @@index([workspaceId])
+  @@index([artifactType, artifactStatus])
+  @@map("sdlc_artifacts")
+  @@schema("public")
+}
+
+// SDLC track: a named workstream inside a repo. Groups PRD canvases and
+// conversations via their nullable trackId columns (one track per item).
+model SdlcTrack {
+  workspaceId String
+  id          String   @id @default(cuid())
+  repoId      String
+  name        String
+  description String?
+  status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([repoId, status])
+  @@index([workspaceId])
+  @@map("sdlc_tracks")
   @@schema("public")
 }
 
@@ -3947,13 +4002,12 @@ model SurfaceLink {
 
   linkKind    String
   createdBy   String
-  projectId   String
+  projectId   String?
   createdAt   DateTime        @default(now())
 
   @@unique([sourceType, sourceId, targetType, targetId, linkKind])
   @@index([sourceType, sourceId])
   @@index([targetType, targetId])
-  @@index([projectId])
   @@map("surface_links")
   @@schema("public")
 }

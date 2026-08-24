@@ -41,7 +41,7 @@ import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
 import { ContextPillRow } from './ContextPillRow';
 import { CONTEXT_PICKER_TOGGLE_ATTR } from './ContextPicker';
-import { ModelSelector } from './ModelSelector';
+import { ModelThinkingSelector } from '../../../AIScreen/ModelThinkingSelector';
 import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
 import type { AgentOption } from './AgentSelector';
 import {
@@ -164,6 +164,9 @@ export interface XyneAIInputBoxProps {
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
   defaultModel?: string | null;
+  /** Per-message thinking level for the combined model+thinking menu. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  onSelectThinking?: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
   /** Currently pinned model, or null for the agent's default. */
   selectedModel?: string | null;
   onSelectModel?: (model: string | null) => void;
@@ -268,6 +271,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       defaultModel = null,
       selectedModel = null,
       onSelectModel,
+      thinkingLevel = null,
+      onSelectThinking,
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
@@ -1858,16 +1863,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       />
                     </div>
                   )}
-                  {/* Model selector — hides itself when the agent exposes no
-                      switchable models. */}
+                  {/* Combined model + thinking menu — same component as the
+                      /ai composer (Recommended row, search, Thinking flyout). */}
                   {onSelectModel && (
                     <div className='flex items-center shrink-0'>
-                      <ModelSelector
-                        selectedModel={selectedModel}
+                      <ModelThinkingSelector
                         models={models}
                         defaultModel={defaultModel}
-                        onSelect={onSelectModel}
-                        compact={true}
+                        selectedModel={selectedModel}
+                        onSelectModel={onSelectModel}
+                        thinkingLevel={thinkingLevel}
+                        onSelectThinking={onSelectThinking ?? (() => {})}
+                        disabled={false}
                       />
                     </div>
                   )}
