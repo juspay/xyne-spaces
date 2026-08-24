@@ -9,8 +9,14 @@ import { useMemo, useState } from 'react';
 import { Brain, Check, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
-import { formatModelLabel } from '../Chat/XyneAISidebar/components/ModelSelector';
 import type { ClawAgentModel } from '../../services/clawAgentModelsService';
+
+/**
+ * Model ids carry a trailing release stamp (`claude-sonnet-4-20250514`) that
+ * adds noise in a narrow pill. Strip it for display only — the full id stays
+ * in the title attribute and is what we send.
+ */
+export const formatModelLabel = (id: string): string => id.replace(/-\d{8}$/, '');
 
 /** Per-run thinking level for the composer. null = the agent's configured
  *  default. Applies to whichever provider serves the run (same precedence as
@@ -54,6 +60,10 @@ export function ModelThinkingSelector({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  // Which side the Thinking flyout opens on. Measured when it opens: in the
+  // right-docked sidebar there is no viewport space to the right of the menu,
+  // so the flyout flips to the left there.
+  const [flyoutSide, setFlyoutSide] = useState<'right' | 'left'>('right');
 
   const selected = useMemo(
     () => models.find(m => m.id === selectedModel) ?? null,
@@ -194,7 +204,13 @@ export function ModelThinkingSelector({
         <div className='relative'>
           <button
             type='button'
-            onClick={() => setThinkingOpen(v => !v)}
+            onClick={e => {
+              const menu = (e.currentTarget as HTMLElement).closest('[class*="bg-popover"]');
+              const rect = (menu ?? e.currentTarget).getBoundingClientRect();
+              // 160px flyout + 6px gap, with a small margin.
+              setFlyoutSide(rect.right + 176 <= window.innerWidth ? 'right' : 'left');
+              setThinkingOpen(v => !v);
+            }}
             data-id='thinking-expand'
             data-track-category='XyneAI'
             data-track-name='TOGGLE_THINKING_MENU'
@@ -215,7 +231,14 @@ export function ModelThinkingSelector({
             </span>
           </button>
           {thinkingOpen && (
-            <div className='absolute bottom-0 right-0 z-50 w-40 translate-x-[calc(100%+6px)] rounded-lg border border-border bg-popover p-1 shadow-lg'>
+            <div
+              className={cn(
+                'absolute bottom-0 z-50 w-40 rounded-lg border border-border bg-popover p-1 shadow-lg',
+                flyoutSide === 'right'
+                  ? 'right-0 translate-x-[calc(100%+6px)]'
+                  : 'left-0 -translate-x-[calc(100%+6px)]',
+              )}
+            >
               {THINKING_LEVEL_OPTIONS.map(o => (
                 <button
                   key={o.label}

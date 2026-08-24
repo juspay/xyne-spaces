@@ -106,9 +106,6 @@ export interface ClawRunRequest {
    *  which would let a crafted request rewrite the agent's tools config.
    *  claw-auth re-validates and no-ops the pin if it can't serve it. */
   providerOverride?: { provider: string; model?: string };
-  /** Per-message provider fast mode (the composer's ⚡ toggle). Forwarded to
-   *  claw-auth's /run/stream, which applies the agent's fast-mode provider
-   *  profile + run-setting overrides for this run. Omitted = agent default. */
   /** Per-message thinking level (composer dropdown). Forwarded to claw-auth's
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
@@ -1062,6 +1059,11 @@ export async function listClawAgentModels(
           pinProvider: result.pinProvider ?? 'litellm',
         };
       }
+      if (result.success) {
+        // Deliberate empty answer (no credential AND no platform list on the
+        // claw side) — the workspace's synced allowed list may still serve.
+        return listWorkspaceAllowedModels(workspaceId);
+      }
     } else {
       const errorText = await response.text();
       logger.error(`[ClawAgentService] listAgentModels claw-auth leg failed: ${response.status} ${errorText}`);
@@ -1069,7 +1071,10 @@ export async function listClawAgentModels(
   } catch (err) {
     logger.error('[ClawAgentService] listAgentModels claw-auth leg error:', err);
   }
-  return listWorkspaceAllowedModels(workspaceId);
+  // Transport failure / 5xx: we cannot know whether the agent has its own
+  // LiteLLM credential, so offering the platform list here would let a pick
+  // bypass that key ("spaces" pins outrank it). Hide the picker instead.
+  return { success: true, data: [], defaultModel: null, pinProvider: 'litellm' };
 }
 
 /**
@@ -1086,9 +1091,12 @@ async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
 }> {
   let data: ClawAgentModel[] = [];
   let defaultModel: string | null = null;
+  const effectiveWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
   try {
     const rows = await db.model.findMany({
-      where: { provider: 'litellm-api' },
+      // The models table is workspace-scoped; without the filter this would
+      // leak another workspace's allowed list.
+      where: { provider: 'litellm-api', workspaceId: effectiveWorkspaceId },
       select: { name: true },
       orderBy: { name: 'asc' },
     });
@@ -1098,10 +1106,13 @@ async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
   }
   try {
     const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      workspaceId ?? config.defaultWorkspaceId,
+      effectiveWorkspaceId,
       OrgLLMServiceAccountPurpose.DEFAULT,
     );
-    defaultModel = credential?.defaultModel ?? null;
+    // The sync strips claude/gemini from the table; a default naming a model
+    // that is not in the menu could never be re-selected once un-picked.
+    const candidate = credential?.defaultModel ?? null;
+    defaultModel = candidate && data.some((m) => m.id === candidate) ? candidate : null;
   } catch (err) {
     logger.error('[ClawAgentService] listWorkspaceAllowedModels credential error:', err);
   }

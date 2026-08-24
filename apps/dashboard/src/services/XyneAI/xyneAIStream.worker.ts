@@ -38,7 +38,6 @@ export interface WorkerStartStreamMessage {
        *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
       instant?: boolean;
       /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
-      speed?: 'standard' | 'fast';
       /** Per-run thinking level (composer dropdown). Absent = agent default. */
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
@@ -65,6 +64,8 @@ export interface WorkerStartStreamMessage {
       agentSlug?: string;
       /** Per-run model pin from the composer's model picker. */
       model?: string;
+      /** pinProvider for `model` — which provider the pin rides. */
+      modelProvider?: 'litellm' | 'spaces';
     };
   };
 }
@@ -188,7 +189,6 @@ async function executeStream(
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         instant: requestBody.instant ?? false,
-        ...(requestBody.speed ? { speed: requestBody.speed } : {}),
         ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
@@ -224,6 +224,8 @@ async function executeStream(
         ...(requestBody.disableTools && { disable_tools: true }),
         ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
         ...(requestBody.model && { model: requestBody.model }),
+        ...(requestBody.model &&
+          requestBody.modelProvider && { modelProvider: requestBody.modelProvider }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

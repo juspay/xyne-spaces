@@ -116,6 +116,10 @@ export interface StreamRequest {
    *  agent's own default. Only meaningful on v2 (v1 resolves its model from
    *  env and ignores the field). */
   model?: string | undefined;
+  /** Which provider the model pin rides ("litellm" = the agent's own
+   *  credential, "spaces" = the platform allowed list). Only meaningful
+   *  alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces';
   showInSidebar?: boolean | undefined;
 }
 
@@ -1091,6 +1095,7 @@ class XyneAIStreamManager {
           ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
+          ...(request.model && request.modelProvider && { modelProvider: request.modelProvider }),
         },
       },
     };

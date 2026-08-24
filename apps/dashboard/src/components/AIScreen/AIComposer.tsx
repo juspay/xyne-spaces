@@ -271,7 +271,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
   });
+  // Reset the pin/thinking picks when the AGENT changes — but not on mount,
+  // where they may be seeded from initialExtras (landing → chat handoff).
+  const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
+    if (prevModelAgentSlug.current === modelAgentSlug) return;
+    prevModelAgentSlug.current = modelAgentSlug;
     setSelectedModel(null);
     setThinkingLevel(null);
   }, [modelAgentSlug]);

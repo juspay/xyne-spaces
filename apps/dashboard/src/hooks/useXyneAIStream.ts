@@ -481,6 +481,8 @@ export const useXyneAIStream = ({
       streamSessionKey,
       agentSlug,
       model,
+      modelProvider,
+      thinkingLevel,
       suppressCompletionToast,
     ],
   );
