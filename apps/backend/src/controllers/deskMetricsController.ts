@@ -15,6 +15,7 @@ import { assertChannelMembership } from '@/utils/channelMembership';
 import {
   aggregateDeskMetrics,
   fillDeskMetrics,
+  mergeAiCategorySlices,
   mergeCustomFieldSlices,
   prunePerDesk,
   type DeskMetricsContribution,
@@ -63,6 +64,8 @@ const queryBodySchema = z
     priorities: z.array(z.nativeEnum(TicketPriority)).optional(),
     userGroupIds: z.array(z.string().min(1)).optional(),
     tagValues: z.array(z.string().min(1)).optional(),
+    aiCategories: z.array(z.string().min(1)).optional(),
+    aiSubCategories: z.array(z.string().min(1)).optional(),
     customFieldFilter: z
       .object({
         keys: z.array(z.string().min(1)).min(1),
@@ -338,6 +341,8 @@ export class DeskMetricsController {
         priorities: body.priorities ?? [],
         userGroupIds: body.userGroupIds ?? [],
         tagValues: body.tagValues ?? [],
+        aiCategories: body.aiCategories ?? [],
+        aiSubCategories: body.aiSubCategories ?? [],
         ...(body.customFieldFilter ? { customFieldFilter: body.customFieldFilter } : {}),
       };
 
@@ -427,6 +432,7 @@ export class DeskMetricsController {
         result.tagBreakdown = merged.tagBreakdown;
       }
       Object.assign(result, mergeCustomFieldSlices(partials));
+      Object.assign(result, mergeAiCategorySlices(partials));
       if (wanted.has('tickets') && includeTickets > 0) {
         result.tickets = merged.tickets.slice(0, includeTickets);
         result.ticketsTruncated = anyDeskTruncated || merged.tickets.length > includeTickets;
@@ -522,6 +528,14 @@ export class DeskMetricsController {
     );
     if (ticketsTruncated) {
       notes.push('Ticket rows were truncated by includeTickets — this is not the full cohort.');
+    }
+    if (wanted.has('aiCategories')) {
+      notes.push(
+        'aiCategoryCounts / aiSubCategoryCounts bucket tickets the classifier never labelled under ' +
+          '"Unclassified" instead of dropping them, so the counts sum to the cohort. A desk with AI ' +
+          'classification switched off therefore reads as entirely Unclassified — report that as ' +
+          '"not classified", never as a real category.',
+      );
     }
     const multiValueFields = customFieldBreakdown.filter(b => b.multiValue).map(b => b.field);
     if (multiValueFields.length > 0) {

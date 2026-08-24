@@ -1,6 +1,8 @@
 import type {
   DeskMetricKey,
   DeskMetricsAgentRow,
+  DeskMetricsAiCategoryCount,
+  DeskMetricsAiSubCategoryCount,
   DeskMetricsCustomFieldBreakdown,
   DeskMetricsCustomFieldSummary,
   DeskMetricsPartial,
@@ -254,6 +256,64 @@ export const mergeCustomFieldSlices = (
                 .sort((a, b) => b.tickets - a.tickets || a.value.localeCompare(b.value)),
             }))
             .sort((a, b) => a.field.localeCompare(b.field)),
+        }
+      : {}),
+  };
+};
+
+/**
+ * Merge the AI-classification slices across desks.
+ */
+export const mergeAiCategorySlices = (
+  partials: DeskMetricsPartial[],
+): {
+  aiCategoryCounts?: DeskMetricsAiCategoryCount[];
+  aiSubCategoryCounts?: DeskMetricsAiSubCategoryCount[];
+} => {
+  const categories = new Map<string, number>();
+  const subCategories = new Map<string, { cat: string; sub: string; count: number }>();
+  let sawCategories = false;
+  let sawSub = false;
+
+  for (const p of partials) {
+    if (p.aiCategoryCounts) {
+      sawCategories = true;
+      for (const r of p.aiCategoryCounts) {
+        categories.set(r.aiCategory, (categories.get(r.aiCategory) ?? 0) + r.count);
+      }
+    }
+    if (p.aiSubCategoryCounts) {
+      sawSub = true;
+      for (const r of p.aiSubCategoryCounts) {
+        const key = `${r.aiCategory}::${r.aiSubCategory}`;
+        const existing = subCategories.get(key);
+        subCategories.set(key, {
+          cat: r.aiCategory,
+          sub: r.aiSubCategory,
+          count: (existing?.count ?? 0) + r.count,
+        });
+      }
+    }
+  }
+
+  return {
+    ...(sawCategories
+      ? {
+          aiCategoryCounts: [...categories.entries()]
+            .map(([aiCategory, count]) => ({ aiCategory, count }))
+            .sort((a, b) => b.count - a.count || a.aiCategory.localeCompare(b.aiCategory)),
+        }
+      : {}),
+    ...(sawSub
+      ? {
+          aiSubCategoryCounts: [...subCategories.values()]
+            .map(v => ({ aiCategory: v.cat, aiSubCategory: v.sub, count: v.count }))
+            .sort(
+              (a, b) =>
+                b.count - a.count ||
+                a.aiCategory.localeCompare(b.aiCategory) ||
+                a.aiSubCategory.localeCompare(b.aiSubCategory),
+            ),
         }
       : {}),
   };

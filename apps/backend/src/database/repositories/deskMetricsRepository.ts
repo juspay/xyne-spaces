@@ -3,6 +3,8 @@ import { DatabaseClient, readReplicaDb } from '../client';
 import {
   DeskMetricKey,
   DeskMetricsAgentRow,
+  DeskMetricsAiCategoryCount,
+  DeskMetricsAiSubCategoryCount,
   DeskMetricsCustomFieldBreakdown,
   DeskMetricsCustomFieldSummary,
   DeskMetricsDeskSummary,
@@ -11,6 +13,7 @@ import {
   DeskMetricsTicketRow,
   TicketPriority,
   TicketStatusV2,
+  UNCLASSIFIED_AI_CATEGORY,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
@@ -57,6 +60,8 @@ export interface DeskMetricsQueryParams {
   priorities: TicketPriority[];
   userGroupIds: string[];
   tagValues: string[];
+  aiCategories?: string[];
+  aiSubCategories?: string[];
   customFieldFilter?: {
     keys: string[];
     perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
@@ -117,6 +122,8 @@ export class DeskMetricsRepository {
       tagValues,
       customFieldFilter,
     } = params;
+    const aiCategories = params.aiCategories ?? [];
+    const aiSubCategories = params.aiSubCategories ?? [];
     const db = this.getDbInstance();
     const { gte, lte } = this.resolveRange(params.timeRange);
 
@@ -267,6 +274,16 @@ export class DeskMetricsRepository {
     if (userGroupIds.length > 0) {
       ticketAttributeConditions.push(
         Prisma.sql`filter_ticket."userGroupId" IN (${Prisma.join(userGroupIds)})`
+      );
+    }
+    if (aiCategories.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."aiCategory" IN (${Prisma.join(aiCategories)})`
+      );
+    }
+    if (aiSubCategories.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."aiSubCategory" IN (${Prisma.join(aiSubCategories)})`
       );
     }
     const ticketAttributeExists =
@@ -432,6 +449,8 @@ export class DeskMetricsRepository {
       tagBreakdown,
       customFields,
       customFieldBreakdown,
+      aiCategoryCountRows,
+      aiSubCategoryCountRows,
     ] = await Promise.all([
       needsAggregate ? this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql) : null,
       ticketLimit ? this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, ticketLimit + 1) : null,
@@ -460,6 +479,8 @@ export class DeskMetricsRepository {
       wanted.has('tags') ? this.tagBreakdown(db, cohortCte) : null,
       wanted.has('customFields') ? this.customFieldSummary(db, cohortCte) : null,
       breakdownFields.length > 0 ? this.customFieldBreakdown(db, cohortCte, breakdownFields) : null,
+      wanted.has('aiCategories') ? this.aiCategoryCounts(db, cohortCte) : null,
+      wanted.has('aiCategories') ? this.aiSubCategoryCounts(db, cohortCte) : null,
     ]);
 
     const result: DeskMetricsPartial = {
@@ -489,6 +510,8 @@ export class DeskMetricsRepository {
     if (tagBreakdown) result.tagBreakdown = tagBreakdown;
     if (customFields) result.customFields = customFields;
     if (customFieldBreakdown) result.customFieldBreakdown = customFieldBreakdown;
+    if (aiCategoryCountRows) result.aiCategoryCounts = aiCategoryCountRows;
+    if (aiSubCategoryCountRows) result.aiSubCategoryCounts = aiSubCategoryCountRows;
     if (tickets && ticketLimit) {
       result.ticketsTruncated = tickets.length > ticketLimit;
       result.tickets = tickets.slice(0, ticketLimit);
@@ -538,6 +561,52 @@ export class DeskMetricsRepository {
         metricsEnabled: p.metricsEnabled === true,
       }))
       .sort((a, b) => (a.channelName ?? '').localeCompare(b.channelName ?? ''));
+  }
+
+  /**
+   * Ticket counts per AI category over the cohort.
+   */
+  private async aiCategoryCounts(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<DeskMetricsAiCategoryCount[]> {
+    const rows = await db.$queryRaw<Array<{ ai_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT COALESCE(t."aiCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_category,
+               COUNT(*)::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        GROUP BY 1
+        ORDER BY count DESC, ai_category ASC
+      `
+    );
+    return rows.map(r => ({ aiCategory: r.ai_category, count: r.count }));
+  }
+
+  private async aiSubCategoryCounts(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<DeskMetricsAiSubCategoryCount[]> {
+    const rows = await db.$queryRaw<
+      Array<{ ai_category: string; ai_sub_category: string; count: number }>
+    >(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT COALESCE(t."aiCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_category,
+               COALESCE(t."aiSubCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_sub_category,
+               COUNT(*)::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        GROUP BY 1, 2
+        ORDER BY count DESC, ai_category ASC, ai_sub_category ASC
+      `
+    );
+    return rows.map(r => ({
+      aiCategory: r.ai_category,
+      aiSubCategory: r.ai_sub_category,
+      count: r.count,
+    }));
   }
 
   /**
