@@ -638,6 +638,7 @@ const PARENT_PARALLELISM_PREAMBLE = [
   "- If you genuinely need multiple subagent calls, fire them in the SAME assistant turn (per the parallelism rule above) — never one-at-a-time across turns.",
   "- For a narrow, factual lookup, check whether a direct (non-`[Subagent ...]`) tool can answer it before reaching for the subagent.",
   "- **Background.** If a subagent call exposes a `run_in_background` option, set it when the work is slow AND independent of your immediate next step: you get an instant acknowledgement and keep working, and its result is delivered back to you automatically before you finish. Do NOT wait or poll for it. Use blocking (leave it unset) when you need the result to decide your very next move.",
+  "- **Reuse the session for RELATED follow-ups.** When a subagent result ends with a `_Follow-up:_ ... session_id: \"...\"` footer, that handle resumes the SAME child session with its full prior context. If your next question builds on that run (a refinement, a drill-down, \"now check X in the same repo\"), pass that exact `session_id` back instead of re-asking cold — the subagent skips re-deriving context it already has, which cuts redundant internal tool calls and latency on the follow-up. Omit `session_id` (fresh session) for an UNRELATED question, and never pass a `session_id` that a DIFFERENT subagent returned.",
   "",
   "---",
   "",
