@@ -8,7 +8,6 @@ import {
   UserTwo,
   UserDefault,
   Hashtag,
-  Lock02Close,
   TicketToken,
   FolderDefault,
   File02Text,
@@ -25,6 +24,7 @@ import {
   CheckTickSingle,
   FilterFunnel,
 } from '@xyne/icons';
+import ChatLock from '../../icons/ChatLock';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -2055,7 +2055,7 @@ const ChannelCommandMenu = ({
       }
     }
     if (channel.visibility === ChannelVisibility.PRIVATE) {
-      return <Lock02Close size={16} />;
+      return <ChatLock />;
     }
     return <Hashtag size={16} />;
   };
@@ -4422,10 +4422,9 @@ const ChannelCommandMenu = ({
                               >
                                 {isChannelTab &&
                                   (item.isPrivate ? (
-                                    <Lock02Close
-                                      size={16}
-                                      className='text-muted-foreground flex-shrink-0'
-                                    />
+                                    <span className='text-muted-foreground flex-shrink-0'>
+                                      <ChatLock />
+                                    </span>
                                   ) : (
                                     <Hashtag
                                       size={16}

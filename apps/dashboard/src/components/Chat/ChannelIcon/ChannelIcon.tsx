@@ -1,6 +1,7 @@
 import { ChannelScopeType, ChannelVisibility, Channel } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { Hashtag, LockClose } from '@xyne/icons';
+import { Hashtag } from '@xyne/icons';
+import ChatLock from '../../icons/ChatLock';
 import Avatar, { type AvatarSize } from '../../ui/Avatar/Avatar';
 import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils';
 
@@ -33,7 +34,11 @@ const ChannelIcon = ({
     if (channel.visibility === ChannelVisibility.PUBLIC) {
       return <Hashtag size={16} className={glyphClassName} />;
     }
-    return <LockClose size={16} className={glyphClassName} />;
+    return (
+      <span className={glyphClassName}>
+        <ChatLock />
+      </span>
+    );
   }
 
   if (channel.scopeType === ChannelScopeType.DM) {
