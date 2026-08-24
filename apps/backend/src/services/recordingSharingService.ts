@@ -163,18 +163,24 @@ export class RecordingSharingService {
     access: GrantableEntityUserAccess,
     messageContent?: string,
   ): Promise<RecordingSharingResult> {
-    // Resolve user DM channels before the transaction.
+    await this.runTransaction(async tx => {
+      const recording = await this.loadManageableRecording(tx, callId, actor);
+      await this.validateTargets(tx, recording, actor.workspaceId, targets);
+    });
+
+    // Resolve a separate 1:1 DM for each user.
     const dmChannelIds = new Map<string, string>();
-    for (const target of targets) {
-      if (target.type === 'user') {
-        const channelId = await repositories.channels.findOrCreateDMChannel(
-          actor.userId,
-          [target.id],
-          repositories.channelParticipants,
-          actor.workspaceId,
-        );
-        dmChannelIds.set(target.id, channelId);
-      }
+    const userIds = [
+      ...new Set(targets.flatMap(target => (target.type === 'user' ? [target.id] : []))),
+    ];
+    for (const userId of userIds) {
+      const channelId = await repositories.channels.findOrCreateDMChannel(
+        actor.userId,
+        [userId],
+        repositories.channelParticipants,
+        actor.workspaceId,
+      );
+      dmChannelIds.set(userId, channelId);
     }
 
     const { shares, activities } = await this.runTransaction(async tx => {
