@@ -1713,6 +1713,9 @@ importers:
       '@xyne/storage':
         specifier: workspace:*
         version: link:../../../packages/storage
+      '@xyne/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
       bullmq:
         specifier: ^5.72.0
         version: 5.81.2(redis@5.12.1(@opentelemetry/api@1.9.1))

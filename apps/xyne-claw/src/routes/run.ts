@@ -9,6 +9,7 @@ import {
   pushInvocation,
   pushDebugProgress,
   applyCopilotProxyIfNeeded,
+  ProviderStallError,
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
@@ -40,6 +41,7 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
+import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -1779,6 +1781,7 @@ async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1792,6 +1795,7 @@ async function processTask(
       agentSlug,
       mcpOutputDir,
       (att) => pushAttachment(progressUrl, sessionId, att),
+      trustedSdlcBindings,
     );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
@@ -1865,48 +1869,68 @@ async function processTask(
       !Array.isArray(trustedSdlcContext["repository"])
         ? (trustedSdlcContext["repository"] as Record<string, unknown>)
         : undefined;
-    const trustedSdlcPermissions =
-      trustedSdlcContext?.["permissions"] &&
-      typeof trustedSdlcContext["permissions"] === "object" &&
-      !Array.isArray(trustedSdlcContext["permissions"])
-        ? (trustedSdlcContext["permissions"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcGates =
-      trustedSdlcContext?.["gates"] &&
-      typeof trustedSdlcContext["gates"] === "object" &&
-      !Array.isArray(trustedSdlcContext["gates"])
-        ? (trustedSdlcContext["gates"] as Record<string, unknown>)
-        : undefined;
     const trustedSdlcExecution =
       trustedSdlcContext?.["execution"] &&
       typeof trustedSdlcContext["execution"] === "object" &&
       !Array.isArray(trustedSdlcContext["execution"])
         ? (trustedSdlcContext["execution"] as Record<string, unknown>)
         : undefined;
+    const trustedSdlcWiki =
+      trustedSdlcContext?.["wiki"] &&
+      typeof trustedSdlcContext["wiki"] === "object" &&
+      !Array.isArray(trustedSdlcContext["wiki"])
+        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
+        : undefined;
+    const isTrustedSdlcWikiRun =
+      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
     if (trustedSdlcRepository) {
       if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
       if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
       if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
       if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (trustedSdlcPermissions?.["writeRequested"] === true) meta["sdlcRepositoryWrite"] = "true";
       if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
         meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
       }
       if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
         meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
       }
-      // Runtime credentials are granted per dispatched EXECUTION (setup/
+      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
+        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
+      }
+      // Runtime credentials are issued per dispatched execution (setup/
       // artifact/work). Chat-surface runs carry repository context but no
       // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-grant guard in sandbox-repo-setup. Gate on the
-      // full triple so chat runs degrade to baseline-canvas access instead.
+      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
+      // execution identifiers so chat runs degrade to baseline-canvas access.
       if (
-        typeof trustedSdlcGates?.["accessCredentialRevision"] === "number" &&
         typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
         typeof trustedSdlcExecution?.["sessionId"] === "string"
       ) {
         meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
+          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
+      } else if (
+        trustedSdlcContext?.["operation"] === "interactive" &&
+        typeof trustedSdlcContext["interactiveGrant"] === "string"
+      ) {
+        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
+        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
+      }
+    }
+    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
+      meta["sdlcWikiRun"] = "true";
+      if (typeof trustedSdlcWiki["role"] === "string") {
+        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
+      }
+      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
+        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
+          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
+        );
+      }
+      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
+        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
+      }
+      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
+        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
       }
     }
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
@@ -3420,9 +3444,12 @@ async function processTask(
       return customList.some((s) => s.startsWith("sandbox-"));
     })();
     if (sandboxEnabledForPrompt) {
+      const isSdlcRepositoryContext = Boolean(meta["sdlcRepositoryId"]);
       const sandboxLines: string[] = [
         "## Sandbox usage",
-        "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
+        isSdlcRepositoryContext
+          ? "This SDLC repository uses one write-capable workspace. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
+          : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
@@ -4726,7 +4753,27 @@ async function processTask(
       logErr(
         `Session failed (transient — all providers unavailable): ${err instanceof Error ? err.message : String(err)}`,
       );
-      const terminal = transientProviderCallback(requiresStructuredDelivery);
+      const stallProgress = err instanceof ProviderStallError
+        ? {
+            idleMs: err.idleMs,
+            completedToolCount: err.toolInvocations.length,
+            ...(err.toolInvocations.at(-1)
+              ? {
+                  lastTool: {
+                    name: err.toolInvocations.at(-1)!.toolName,
+                    failed: err.toolInvocations.at(-1)!.isError,
+                    ...(err.toolInvocations.at(-1)!.isError
+                      ? { error: err.toolInvocations.at(-1)!.result }
+                      : {}),
+                  },
+                }
+              : {}),
+          }
+        : undefined;
+      const terminal = transientProviderCallback(
+        requiresStructuredDelivery,
+        stallProgress,
+      );
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
@@ -4734,6 +4781,15 @@ async function processTask(
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
         ...terminal,
+        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
+          ? { toolsUsed: err.toolsUsed }
+          : {}),
+        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
+          ? { toolInvocations: err.toolInvocations }
+          : {}),
+        ...(err instanceof ProviderStallError
+          ? { tokenUsage: err.tokenUsage }
+          : {}),
         provider: callbackProvider,
         model: callbackModel,
       });
