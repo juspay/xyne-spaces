@@ -26,6 +26,7 @@ import {
   formatFileSize,
   getFileExtension,
   isImageFile,
+  isSvgFile,
   isVideoFile,
   downloadAttachment,
   getFileIcon,
@@ -133,8 +134,10 @@ const Preview: React.FC<{
   onImageBlobUrlChange,
 }) => {
   const isImage = isImageFile(mimeType);
+  const isSvg = isSvgFile(mimeType);
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
+  const isSvgWithThumbnail = isSvg && !!thumbnailUrl;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
 
@@ -172,7 +175,7 @@ const Preview: React.FC<{
 
   useEffect(() => {
     // Fetch image, video thumbnail, or document thumbnail
-    if (!isImage && !(isVideo && thumbnailUrl) && !isDocumentWithThumbnail) {
+    if (!isImage && !isSvgWithThumbnail && !(isVideo && thumbnailUrl) && !isDocumentWithThumbnail) {
       setIsLoading(false);
       return;
     }
@@ -200,7 +203,7 @@ const Preview: React.FC<{
         // For videos/documents with thumbnails, use the thumbnail endpoint
         // For images, use download endpoint (pass ID, createPreviewUrl will resolve it)
         const source =
-          (isVideo || isDocumentWithThumbnail) && thumbnailUrl
+          (isVideo || isDocumentWithThumbnail || isSvgWithThumbnail) && thumbnailUrl
             ? `/attachments/${attachmentId}/thumbnail`
             : attachmentId;
 
@@ -231,6 +234,7 @@ const Preview: React.FC<{
     isImage,
     isVideo,
     isDocumentWithThumbnail,
+    isSvgWithThumbnail,
     thumbnailUrl,
     compact,
     calculatedWidth,
@@ -264,9 +268,9 @@ const Preview: React.FC<{
   }
 
   // Show image, video thumbnail, or document thumbnail preview
-  if (isImage || (isVideo && thumbnailUrl) || isDocumentWithThumbnail) {
+  if (isImage || isSvgWithThumbnail || (isVideo && thumbnailUrl) || isDocumentWithThumbnail) {
     if (error || !imageBlobUrl) {
-      if (isDocumentWithThumbnail) {
+      if (isDocumentWithThumbnail || isSvg) {
         const ext = getFileExtension(mimeType);
         const size = formatFileSize(fileSize);
         const docIcon = getFileIcon(mimeType, 20);
@@ -381,7 +385,7 @@ const Preview: React.FC<{
       );
     }
 
-    return isImage ? (
+    return isImage || isSvgWithThumbnail ? (
       <img
         src={imageBlobUrl}
         alt={fileName}
