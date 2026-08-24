@@ -38,6 +38,35 @@ describe("/framework command", () => {
     expect(parseExperimentCommand("/security-scan findings")).toMatchObject({ sub: "findings" });
   });
 
+
+  it("requires framework reports to include a tag index", async () => {
+    const { buildEpochTask } = await import("./experiment.js");
+    const run = {
+      id: "exp-1",
+      agentId: "agent-1",
+      conversationId: "conv-1",
+      status: "running",
+      mode: "participant",
+      kind: "framework",
+      focus: "apps/backend",
+      deadlineAt: new Date(Date.now() + 60_000),
+      epoch: 1,
+      sandboxNote: null,
+      deliveredArtifacts: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      provider: null,
+      model: null,
+      branch: null,
+      pullRequestUrl: null,
+      userId: null,
+      workspaceId: null,
+    };
+    const task = buildEpochTask(run as Parameters<typeof buildEpochTask>[0], "");
+    expect(task).toContain("Tag Index table");
+    expect(task).toContain("tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost");
+  });
+
   it("accepts a provider/model pin like the others", () => {
     const c = parseExperimentCommand("/framework 3h provider=litellm model=glm-private-claw focus=packages");
     expect(c).toMatchObject({ kind: "framework", provider: "litellm", model: "glm-private-claw" });
