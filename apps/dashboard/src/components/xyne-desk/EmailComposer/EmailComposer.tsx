@@ -66,6 +66,7 @@ import { useComposeDraftOperations, type ComposeDraftRecord } from '../../../hoo
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
+import { useResolvedDraftAgent } from '../../../hooks/useResolvedDraftAgent';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
@@ -253,8 +254,13 @@ export const EmailComposer = ({
   const emails = propEmails;
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const clawAgents = useChannelClawAgents(channelId || null);
+  // Resolve against channel agents first, then the full accessible-agents list —
+  // the auto-draft agent may have been picked from the desk's "Add agent" modal
+  // and is not necessarily a participant of this channel, so a channel-only
+  // lookup would wrongly fall back to "Xyne AI".
   const draftAgentName =
-    clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
+    useResolvedDraftAgent(channelPreference?.autoDraftAgentSlug ?? null, clawAgents)?.name ??
+    'Xyne AI';
   const deskContacts = useDeskContacts(channelId);
   const {
     saveDraft,

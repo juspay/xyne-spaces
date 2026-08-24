@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bot, Plus, Sparkles } from 'lucide-react';
 import type { ChannelClawAgent } from '../../../hooks/useChannelClawAgents';
+import { useResolvedDraftAgent } from '../../../hooks/useResolvedDraftAgent';
 import { AddAgentModal } from './AddAgentModal';
 import {
   Select,
@@ -23,7 +24,7 @@ export interface AutoDraftAgentPickerProps {
 }
 
 /**
- * Draft agent selector for Auto AI draft — built-in Xyne AI (null) or a channel Claw agent.
+ * Draft agent selector for Auto AI draft — built-in Xyne AI (null) or a Claw agent.
  */
 export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   value,
@@ -33,6 +34,14 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   compact = false,
 }) => {
   const [showAddAgent, setShowAddAgent] = useState(false);
+
+  // The selected agent can be picked from the "Add agent" modal (the full
+  // accessible-agents catalogue), not only from this channel's participants.
+  // Resolve its identity so the collapsed Select shows the real agent name
+  // instead of falling back to the "Default (Xyne AI)" placeholder.
+  const resolvedSelected = useResolvedDraftAgent(value, clawAgents);
+  const selectedIsExternal =
+    value !== null && !clawAgents.some(a => a.slug === value) && resolvedSelected !== null;
 
   const select = (
     <Select
@@ -63,7 +72,7 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
             </span>
           </span>
         </SelectItem>
-        {clawAgents.length > 0 && <SelectSeparator />}
+        {(clawAgents.length > 0 || selectedIsExternal) && <SelectSeparator />}
         {clawAgents.map(agent => (
           <SelectItem key={agent.slug} value={agent.slug} className='rounded-[8px]'>
             <span className='flex items-center gap-2'>
@@ -75,6 +84,21 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
             </span>
           </SelectItem>
         ))}
+        {selectedIsExternal && resolvedSelected && (
+          <SelectItem
+            key={resolvedSelected.slug}
+            value={resolvedSelected.slug}
+            className='rounded-[8px]'
+          >
+            <span className='flex items-center gap-2'>
+              <span
+                className='inline-block h-2.5 w-2.5 shrink-0 rounded-full'
+                style={{ backgroundColor: resolvedSelected.color || 'var(--desk-accent)' }}
+              />
+              <span>{resolvedSelected.name}</span>
+            </span>
+          </SelectItem>
+        )}
         <SelectSeparator />
         <SelectItem
           value={ADD_AGENT_OPTION}
@@ -114,11 +138,11 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
       <p className='text-desk-helper'>
         {clawAgents.length > 0
           ? 'Choose which agent writes the draft. Claw agents added to this channel appear here.'
-          : 'Add a Claw agent to this channel to use it for drafts. Until then, the built-in Xyne AI is used.'}
-        {value && !clawAgents.some(a => a.slug === value) && (
+          : 'Add a Claw agent to use it for drafts. Until then, the built-in Xyne AI is used.'}
+        {value && !resolvedSelected && (
           <span className='block text-amber-600 dark:text-amber-500 mt-1'>
-            The selected agent is no longer in this channel — drafts fall back to the default until
-            you pick another.
+            The selected agent is no longer available — drafts fall back to the default until you
+            pick another.
           </span>
         )}
       </p>
