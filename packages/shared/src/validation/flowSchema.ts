@@ -526,6 +526,145 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+/** A bare label, or a label plus the secondary line the option card renders under it. */
+export const userQuestionOptionSchema = z.union([
+  z.string().min(1),
+  z.object({ label: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+]);
+
+export const userQuestionItemSchema = z.discriminatedUnion('type', [
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('open_ended'), placeholder: z.string().optional(), required: z.boolean().optional() }).strict(),
+]);
+
+export const userQuestionPropsSchema = z.object({
+  title: z.string().min(1),
+  questions: z.array(userQuestionItemSchema).min(1).max(8),
+  // Absent on cards posted before terminal question states were introduced;
+  // the renderer interprets absence as `pending`.
+  phase: z.enum(['pending', 'answered', 'declined']).optional(),
+  answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
+  /** Optional notes are scoped to the individual prompt id. */
+  notes: z.record(z.string()).optional(),
+  decidedAt: z.string().optional(),
+  submitAction: flowActionSchema.optional(),
+  dismissAction: flowActionSchema.optional(),
+}).strict();
+
+export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.literal('user_question'), props: userQuestionPropsSchema });
+export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
+export type UserQuestionOption = z.infer<typeof userQuestionOptionSchema>;
+export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
+
+export const codePropsSchema = z
+  .object({
+    code: z.string().min(1),
+    language: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const codeComponentSchema = baseComponentSchema.extend({
+  type: z.literal('code'),
+  props: codePropsSchema,
+});
+
+export const diffPropsSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().min(1),
+  })
+  .strict();
+
+export const diffComponentSchema = baseComponentSchema.extend({
+  type: z.literal('diff'),
+  props: diffPropsSchema,
+});
+
+export const ticketStatusSchema = z.enum(['TODO', 'STARTED', 'PAUSED', 'CANCELLED', 'COMPLETED']);
+export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const ticketPropsSchema = z
+  .object({
+    xyneId: z.string().min(1).optional(),
+    ticketId: z.string().min(1).optional(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    status: ticketStatusSchema,
+    priority: ticketPrioritySchema,
+    stageName: z.string().min(1).optional(),
+    eta: z.string().optional(),
+    url: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    conversationId: z.string().min(1).optional(),
+    assigneeId: z.string().min(1).optional(),
+    phase: z.enum(['proposed', 'created']).optional(),
+    approveAction: flowActionSchema.optional(),
+    approveContinueAction: flowActionSchema.optional(),
+    declineAction: flowActionSchema.optional(),
+  })
+  .strict();
+
+export const ticketComponentSchema = baseComponentSchema.extend({
+  type: z.literal('ticket'),
+  props: ticketPropsSchema,
+});
+
+export const chartPointSchema = z
+  .object({ label: z.string().min(1), value: z.number().finite() })
+  .strict();
+
+export const chartSeriesPointSchema = z
+  .object({
+    x: z.string().min(1),
+    y: z.number().finite(),
+    series: z.string().min(1).optional(),
+  })
+  .strict();
+
+const CHART_MAX_POINTS = 200;
+
+const categoryChartSchema = <T extends 'bar' | 'pie' | 'donut'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      points: z.array(chartPointSchema).min(1).max(24),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+const seriesChartSchema = <T extends 'line' | 'area'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      series: z.array(chartSeriesPointSchema).min(1).max(CHART_MAX_POINTS),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+export const chartPropsSchema = z.discriminatedUnion('type', [
+  categoryChartSchema('bar'),
+  categoryChartSchema('pie'),
+  categoryChartSchema('donut'),
+  seriesChartSchema('line'),
+  seriesChartSchema('area'),
+]);
+
+export const chartComponentSchema = baseComponentSchema.extend({
+  type: z.literal('chart'),
+  props: chartPropsSchema,
+});
+
+export type CodeProps = z.infer<typeof codePropsSchema>;
+export type DiffProps = z.infer<typeof diffPropsSchema>;
+export type TicketProps = z.infer<typeof ticketPropsSchema>;
+export type TicketArtifactStatus = z.infer<typeof ticketStatusSchema>;
+export type TicketArtifactPriority = z.infer<typeof ticketPrioritySchema>;
+export type ChartProps = z.infer<typeof chartPropsSchema>;
+export type ChartType = ChartProps['type'];
+export type ChartPoint = z.infer<typeof chartPointSchema>;
+export type ChartSeriesPoint = z.infer<typeof chartSeriesPointSchema>;
+
 // ── Agent artifact ────────────────────────────────────────────────────────────
 // ONE node renders every agent surface. The identity block (name / slug /
 // description / model / capabilities / system prompt) is INVARIANT across
@@ -668,6 +807,11 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    userQuestionComponentSchema,
+    codeComponentSchema,
+    diffComponentSchema,
+    ticketComponentSchema,
+    chartComponentSchema,
     agentComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
