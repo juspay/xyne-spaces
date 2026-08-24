@@ -24,6 +24,7 @@ import {
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -140,6 +141,7 @@ export const NotificationHandler: React.FC = () => {
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
@@ -609,6 +611,11 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
     return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
+    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForTeardown);
   }, [isElectron]);
 
   // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands

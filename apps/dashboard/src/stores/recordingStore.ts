@@ -29,6 +29,24 @@ let transcriptIdCounter = 0;
 // stop first so its callback cannot be mistaken for a server-side failure.
 const intentionallyDisconnectedRooms = new WeakSet<Room>();
 
+const PAGE_UNLOAD_GRACE_MS = 5000;
+let pageUnloading = false;
+let pageUnloadingReset: ReturnType<typeof setTimeout> | null = null;
+
+if (typeof window !== 'undefined') {
+  const markPageUnloading = (): void => {
+    pageUnloading = true;
+    if (pageUnloadingReset) clearTimeout(pageUnloadingReset);
+    pageUnloadingReset = setTimeout(() => {
+      pageUnloading = false;
+      pageUnloadingReset = null;
+    }, PAGE_UNLOAD_GRACE_MS);
+  };
+  for (const event of ['beforeunload', 'pagehide', 'freeze']) {
+    window.addEventListener(event, markPageUnloading);
+  }
+}
+
 export interface TranscriptEntry {
   id: number;
   speaker: string;
@@ -290,6 +308,7 @@ export const recordingStore = createStore({
 
       const handleRoomDisconnected = (): void => {
         if (intentionallyDisconnectedRooms.delete(room)) return;
+        if (pageUnloading) return;
 
         const current = recordingStore.getSnapshot().context;
         if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
@@ -308,6 +327,7 @@ export const recordingStore = createStore({
         try {
           const data = JSON.parse(metadata) as { recordingStartFailure?: unknown };
           if (data.recordingStartFailure !== true) return;
+          if (pageUnloading) return;
 
           const current = recordingStore.getSnapshot().context;
           if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;

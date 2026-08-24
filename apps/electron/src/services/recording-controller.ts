@@ -305,6 +305,30 @@ export function stopRecording(trigger: RecordingTrigger): void {
   log.info(`[RecordingController] Stop requested from ${trigger}`);
 }
 
+export async function stopRecordingForReload(timeoutMs = 3000): Promise<void> {
+  if (!isRecordingInProgress()) return;
+
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  mainWindow.webContents.send('recording:stop-for-teardown');
+  log.info('[RecordingController] Stop requested before reload');
+
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
+    const finish = (): void => {
+      if (timer) clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = onRecordingStateChange(() => {
+      if (!isRecordingInProgress()) finish();
+    });
+    timer = setTimeout(finish, timeoutMs);
+  });
+}
+
 export function pauseRecordingFromOutside(trigger: RecordingTrigger): void {
   if (!active || paused) return;
   const mainWindow = getMainWindow();
@@ -347,6 +371,10 @@ export function setRecordingStarting(next: boolean): void {
     startingRecording = false;
     log.warn('[RecordingController] Recording start was not confirmed by the renderer');
   }, STARTING_RECORDING_TIMEOUT_MS);
+}
+
+export function isRecordingInProgress(): boolean {
+  return active || startingRecording;
 }
 
 // Calls enable the mic the same way recordings do, so the meeting detector must
