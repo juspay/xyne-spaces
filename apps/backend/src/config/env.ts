@@ -1089,9 +1089,6 @@ export const config = {
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },
-  canvasSuggestions: {
-    enabled: envVars.ENABLE_CANVAS_SUGGESTIONS as boolean,
-  },
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,
     encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,

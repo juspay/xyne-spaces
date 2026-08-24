@@ -3331,18 +3331,18 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
-  /** Pending agent suggestions for a canvas (with ordered changes), visible only to users who can see the canvas. */
-  canvasSuggestions: defineQuery(
+  /** Unresolved suggestion changes for a canvas; the panel groups them by batchId and shows batches with a pending row. */
+  canvasSuggestionChanges: defineQuery(
     z.object({ canvasId: z.string() }),
     ({ ctx, args: { canvasId } }) => {
-      return zql.canvas_suggestions
+      return zql.canvas_suggestion_changes
         .where('canvasId', canvasId)
-        .where('status', 'PENDING')
+        .where('status', 'IN', ['PENDING', 'STALE'])
         .whereExists('canvas', canvas =>
           applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
         )
-        .related('changes', changes => changes.orderBy('orderIndex', 'asc'))
-        .orderBy('createdAt', 'desc');
+        .orderBy('createdAt', 'asc')
+        .orderBy('orderIndex', 'asc');
     },
   ),
 

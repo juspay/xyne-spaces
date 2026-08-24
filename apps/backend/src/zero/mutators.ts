@@ -9945,7 +9945,7 @@ export function createMutators(
       ),
     },
     canvasSuggestion: {
-      /** Accept or reject one change; accepting conflict-checks the block, then applies via asyncTask (as canvasVersion.restore). */
+      /** Accept or reject one change. Reject is immediate; accept applies via asyncTask, which writes the final status. */
       resolveChange: defineMutator(
         z.object({
           changeId: z.string(),
@@ -9953,69 +9953,52 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { changeId, accept, timestamp } }) => {
-          const change = await tx.run(
-            zql.canvas_suggestion_changes.where('id', changeId).one()
-          );
+          const change = await tx.run(zql.canvas_suggestion_changes.where('id', changeId).one());
           if (!change) {
             throw new Error('Suggestion change not found');
           }
-
-          const suggestion = await tx.run(
-            zql.canvas_suggestions.where('id', change.suggestionId).one()
-          );
-          if (!suggestion) {
-            throw new Error('Suggestion not found');
-          }
-
-          const canvas = await tx.run(zql.canvases.where('id', suggestion.canvasId).one());
+          const canvas = await tx.run(zql.canvases.where('id', change.canvasId).one());
           if (!canvas) {
             throw new Error('Canvas not found');
           }
-
           const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
           if (!canEdit) {
             throw new Error('You do not have permission to edit this canvas');
           }
 
-          await tx.mutate.canvas_suggestion_changes.update({
-            id: change.id,
-            status: accept ? 'ACCEPTED' : 'REJECTED',
-                        updatedAt: timestamp,
-          });
-
-          if (accept) {
-            asyncTasks.push(async () => {
-              try {
-                const { applySuggestionChanges } = await import('@/services/canvas/applySuggestion');
-                await applySuggestionChanges([change.id], authData.sub);
-              } catch (error) {
-                logger.error('[MUTATOR-SUGGESTION-ACCEPT] Failed to apply change:', error);
-              }
+          if (!accept) {
+            await tx.mutate.canvas_suggestion_changes.update({
+              id: change.id,
+              status: 'REJECTED',
+              updatedAt: timestamp,
             });
+            return;
           }
+
+          await tx.mutate.canvas_suggestion_changes.update({ id: change.id, updatedAt: timestamp });
+          asyncTasks.push(async () => {
+            try {
+              const { applySuggestionChanges } = await import('@/services/canvas/suggestions');
+              await applySuggestionChanges([change.id], authData.sub);
+            } catch (error) {
+              logger.error('[MUTATOR-SUGGESTION-ACCEPT] Failed to apply change:', error);
+            }
+          });
         }
       ),
 
-      /** Accept several changes as one batch: single read, conflict pass, snapshot, and Y-Sweet write. */
+      /** Accept several changes as one batch: single read, conflict pass, snapshot, one Y-Sweet write. */
       acceptChanges: defineMutator(
         z.object({
           changeIds: z.array(z.string()).min(1).max(200),
           timestamp: z.number(),
         }),
         async ({ tx, args: { changeIds, timestamp } }) => {
-          const first = await tx.run(
-            zql.canvas_suggestion_changes.where('id', changeIds[0] as string).one()
-          );
+          const first = await tx.run(zql.canvas_suggestion_changes.where('id', changeIds[0] as string).one());
           if (!first) {
             throw new Error('Suggestion change not found');
           }
-          const suggestion = await tx.run(
-            zql.canvas_suggestions.where('id', first.suggestionId).one()
-          );
-          if (!suggestion) {
-            throw new Error('Suggestion not found');
-          }
-          const canvas = await tx.run(zql.canvases.where('id', suggestion.canvasId).one());
+          const canvas = await tx.run(zql.canvases.where('id', first.canvasId).one());
           if (!canvas) {
             throw new Error('Canvas not found');
           }
@@ -10025,20 +10008,16 @@ export function createMutators(
           }
 
           for (const changeId of changeIds) {
-            await tx.mutate.canvas_suggestion_changes.update({
-              id: changeId,
-                            updatedAt: timestamp,
-            });
+            await tx.mutate.canvas_suggestion_changes.update({ id: changeId, updatedAt: timestamp });
           }
 
-          // One task for the whole batch; applySuggestionChanges writes the real statuses.
+          // One task for the whole batch; applySuggestionChanges writes the final statuses.
           asyncTasks.push(async () => {
             try {
-              const { applySuggestionChanges } = await import('@/services/canvas/applySuggestion');
+              const { applySuggestionChanges } = await import('@/services/canvas/suggestions');
               const result = await applySuggestionChanges(changeIds, authData.sub);
               logger.info(
-                `[MUTATOR-SUGGESTION-ACCEPT-BATCH] applied=${result.applied} ` +
-                  `conflicted=${result.conflicted} stale=${result.stale}`
+                `[MUTATOR-SUGGESTION-ACCEPT-BATCH] applied=${result.applied} stale=${result.stale}`
               );
             } catch (error) {
               logger.error('[MUTATOR-SUGGESTION-ACCEPT-BATCH] Failed:', error);
@@ -10047,20 +10026,14 @@ export function createMutators(
         }
       ),
 
-      /** Accept every change still pending in a batch. */
+      /** Accept every pending change on the canvas — all batches. */
       acceptAll: defineMutator(
         z.object({
-          suggestionId: z.string(),
+          canvasId: z.string(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { suggestionId, timestamp } }) => {
-          const suggestion = await tx.run(
-            zql.canvas_suggestions.where('id', suggestionId).one()
-          );
-          if (!suggestion) {
-            throw new Error('Suggestion not found');
-          }
-          const canvas = await tx.run(zql.canvases.where('id', suggestion.canvasId).one());
+        async ({ tx, args: { canvasId, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
             throw new Error('Canvas not found');
           }
@@ -10069,26 +10042,22 @@ export function createMutators(
             throw new Error('You do not have permission to edit this canvas');
           }
 
-          const changes = await tx.run(
-            zql.canvas_suggestion_changes.where('suggestionId', suggestionId)
+          const pending = await tx.run(
+            zql.canvas_suggestion_changes.where('canvasId', canvasId).where('status', 'PENDING')
           );
-          const pendingIds = changes.filter(c => c.status === 'PENDING').map(c => c.id);
-          if (!pendingIds.length) return;
+          if (!pending.length) return;
 
-          for (const changeId of pendingIds) {
-            await tx.mutate.canvas_suggestion_changes.update({
-              id: changeId,
-                            updatedAt: timestamp,
-            });
+          for (const row of pending) {
+            await tx.mutate.canvas_suggestion_changes.update({ id: row.id, updatedAt: timestamp });
           }
 
+          const ids = pending.map(row => row.id);
           asyncTasks.push(async () => {
             try {
-              const { applySuggestionChanges } = await import('@/services/canvas/applySuggestion');
-              const result = await applySuggestionChanges(pendingIds, authData.sub);
+              const { applySuggestionChanges } = await import('@/services/canvas/suggestions');
+              const result = await applySuggestionChanges(ids, authData.sub);
               logger.info(
-                `[MUTATOR-SUGGESTION-ACCEPT-ALL] applied=${result.applied} ` +
-                  `conflicted=${result.conflicted} stale=${result.stale}`
+                `[MUTATOR-SUGGESTION-ACCEPT-ALL] applied=${result.applied} stale=${result.stale}`
               );
             } catch (error) {
               logger.error('[MUTATOR-SUGGESTION-ACCEPT-ALL] Failed:', error);
@@ -10097,47 +10066,68 @@ export function createMutators(
         }
       ),
 
-      /** Close a whole batch without touching the document. */
+      /** Reject every pending change on the canvas without touching the document. */
       rejectAll: defineMutator(
         z.object({
-          suggestionId: z.string(),
+          canvasId: z.string(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { suggestionId, timestamp } }) => {
-          const suggestion = await tx.run(
-            zql.canvas_suggestions.where('id', suggestionId).one()
-          );
-          if (!suggestion) {
-            throw new Error('Suggestion not found');
-          }
-
-          const canvas = await tx.run(zql.canvases.where('id', suggestion.canvasId).one());
+        async ({ tx, args: { canvasId, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
             throw new Error('Canvas not found');
           }
-
           const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
           if (!canEdit) {
             throw new Error('You do not have permission to edit this canvas');
           }
 
-          const changes = await tx.run(
-            zql.canvas_suggestion_changes.where('suggestionId', suggestionId)
+          const pending = await tx.run(
+            zql.canvas_suggestion_changes.where('canvasId', canvasId).where('status', 'PENDING')
           );
-          for (const change of changes) {
-            if (change.status !== 'PENDING') continue;
+          for (const row of pending) {
             await tx.mutate.canvas_suggestion_changes.update({
-              id: change.id,
+              id: row.id,
               status: 'REJECTED',
-                            updatedAt: timestamp,
+              updatedAt: timestamp,
             });
           }
+        }
+      ),
 
-          await tx.mutate.canvas_suggestions.update({
-            id: suggestionId,
-            status: 'REJECTED',
-                        updatedAt: timestamp,
-          });
+      /** Forward pending anchors past deleted blocks. Reported by the editor; idempotent by the anchor match. */
+      blockDeleted: defineMutator(
+        z.object({
+          canvasId: z.string(),
+          events: z
+            .array(z.object({ deletedId: z.string(), previousAliveId: z.string().nullable() }))
+            .min(1)
+            .max(100),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { canvasId, events, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+          const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
+          if (!canEdit) {
+            throw new Error('You do not have permission to edit this canvas');
+          }
+
+          const pending = await tx.run(
+            zql.canvas_suggestion_changes.where('canvasId', canvasId).where('status', 'PENDING')
+          );
+          for (const event of events) {
+            for (const row of pending) {
+              if (row.currentAnchorId !== event.deletedId) continue;
+              await tx.mutate.canvas_suggestion_changes.update({
+                id: row.id,
+                currentAnchorId: event.previousAliveId,
+                updatedAt: timestamp,
+              });
+            }
+          }
         }
       ),
     },
