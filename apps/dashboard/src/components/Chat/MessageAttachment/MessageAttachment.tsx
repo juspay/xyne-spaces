@@ -1170,6 +1170,9 @@ const InlineVideoPlayer: React.FC<{
               role='button'
               tabIndex={0}
               aria-label={`Open ${fileName} preview`}
+              data-track-category='MESSAGE'
+              data-track-name='OPEN_ATTACHMENT_PREVIEW'
+              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
               onClick={() => openModal({ startPlayback: true })}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
