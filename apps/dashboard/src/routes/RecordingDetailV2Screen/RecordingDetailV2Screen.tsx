@@ -661,6 +661,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (!recording) return;
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
     const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+    // Both canvases are attached with an explicit role: from the row alone the
+    // agent cannot tell the machine-written summary from the user's own notes,
+    // and it must weigh them differently.
     const canvasSelections = [
       ...(recording.detailedSummaryCanvasId
         ? [
@@ -668,6 +671,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               id: recording.detailedSummaryCanvasId,
               canvasId: recording.detailedSummaryCanvasId,
               title: `${recording.title || 'Recording'} summary`,
+              canvasRole: 'call-summary' as const,
             },
           ]
         : []),
@@ -677,6 +681,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               id: notesCanvasId,
               canvasId: notesCanvasId,
               title: `${recording.title || 'Recording'} notes`,
+              canvasRole: 'call-notes' as const,
             },
           ]
         : []),
