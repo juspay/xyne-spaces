@@ -1,5 +1,5 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
+import { ANDROID_PACKAGE_NAME_PATTERN, normalizeChannelName } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
@@ -471,12 +471,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   }, [duplicateCheck, form]);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const value = e.target.value;
-    // Convert spaces to hyphens, then remove special characters, keep only alphanumeric, hyphens, and underscores
-    const cleanValue = value
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-_]/g, '');
+    const cleanValue = normalizeChannelName(e.target.value);
     form.setFieldValue('name', cleanValue);
     setChannelName(cleanValue);
   };

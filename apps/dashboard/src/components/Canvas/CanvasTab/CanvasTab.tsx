@@ -26,7 +26,7 @@ import {
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { isBaselineCanvasType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   ArrowLeft,
   Archive,
@@ -194,12 +194,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
-      const metadata = targetCanvas.metadata as Record<string, unknown> | null | undefined;
-      if (
-        isChannelAdmin &&
-        metadata?.['surface'] === 'SDLC' &&
-        metadata['artifactKind'] === 'BASELINE'
-      ) {
+      if (isChannelAdmin && isBaselineCanvasType(targetCanvas.sdlcArtifact?.artifactType)) {
         return CanvasRole.EDITOR;
       }
       const inheritedRoles = participants
