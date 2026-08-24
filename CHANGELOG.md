@@ -1,3 +1,10 @@
+## [1.213.1](https://github.com/juspay/xyne-spaces/compare/v1.213.0...v1.213.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* resolve mixed-case login emails ([#68](https://github.com/juspay/xyne-spaces/issues/68)) ([e572ead](https://github.com/juspay/xyne-spaces/commit/e572ead6e77b31674066de9f9ee5cfb7f158d9ba))
+
 ## [1.213.0](https://github.com/juspay/xyne-spaces/compare/v1.212.0...v1.213.0) (2026-08-24)
 
 
