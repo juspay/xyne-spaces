@@ -35,10 +35,10 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   const zero = useZero();
   const { isMobile } = usePlatform();
 
-  // Store pending action and completion callback
+  // Store pending action and completion callback. Joins no longer queue here —
+  // the machine switches calls on its own — so this is the initiate path only.
   const pendingActionRef = useRef<{
-    type: 'JOIN_CALL' | 'INITIATE_CALL';
-    callId?: string;
+    type: 'INITIATE_CALL';
     channelId?: string;
     targetUserIds?: string[];
     callDisplayName?: string;
@@ -72,17 +72,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         });
       }
 
-      if (action.type === 'JOIN_CALL' && action.callId) {
-        roomActor.send({
-          type: 'JOIN_CALL',
-          callId: action.callId,
-          zero,
-          viewMode: isMobile ? 'full' : 'mini',
-        });
-
-        // Call completion callback after sending join event
-        action.onComplete?.();
-      } else if (action.type === 'INITIATE_CALL' && action.channelId) {
+      if (action.type === 'INITIATE_CALL' && action.channelId) {
         roomActor.send({
           type: 'INITIATE_CALL',
           channelId: action.channelId,
@@ -114,32 +104,26 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   };
 
   /**
-   * Join a specific call
+   * Join a specific call.
+   *
+   * Sent straight to the machine, in a call or not: it is the one place that
+   * knows which call this session is in, so it is where "already in this call"
+   * and "switch out of the current one" get decided. `allowSwitch` carries the
+   * intent this hook has always had — every caller is a user asking to be in
+   * the call — so a different call still ends the current one and joins.
    */
   const joinCall = ({ callId, onComplete }: JoinCallParams): void => {
     if (!callId) return;
 
-    // Case 1: User not in any call - join directly
-    if (!isInCall) {
-      requestMediaPermissions();
-      roomActor.send({
-        type: 'JOIN_CALL',
-        callId,
-        zero,
-        viewMode: isMobile ? 'full' : 'mini',
-      });
-      onComplete?.();
-      return;
-    }
-
-    // Case 2: User is in another call - disconnect first, then join
-    pendingActionRef.current = {
+    requestMediaPermissions();
+    roomActor.send({
       type: 'JOIN_CALL',
       callId,
-      ...(onComplete && { onComplete }),
-    };
-    roomActor.send({ type: 'DISCONNECT' });
-    // Note: onComplete will be called after join completes (in useEffect)
+      zero,
+      viewMode: isMobile ? 'full' : 'mini',
+      allowSwitch: true,
+    });
+    onComplete?.();
   };
 
   /**

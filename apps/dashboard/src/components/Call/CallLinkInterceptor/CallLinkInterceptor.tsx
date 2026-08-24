@@ -1,30 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
-import { isElectronApp } from '../../../utils/electronApp';
-import { roomActor } from '../../../machines/roomMachine';
+import { useIsInCallInThisSession } from '../../../hooks/useCalls';
 import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
-
-/**
- * True when this tab is already in the call the link points at. `joinCall`
- * would otherwise tear the room down and rebuild it, dropping the user out of a
- * call they are sitting in.
- */
-function isAlreadyInCall(callId: string): boolean {
-  const snapshot = roomActor.getSnapshot();
-  if (
-    !snapshot.matches('joining') &&
-    !snapshot.matches('connecting') &&
-    !snapshot.matches('connected')
-  ) {
-    return false;
-  }
-  // `callId` is what JOIN_CALL was given; `externalId` is what the join response
-  // came back with. For an invite link the two are the same value, but the
-  // context only holds both once the call is connected.
-  return snapshot.context.externalId === callId || snapshot.context.callId === callId;
-}
 
 /**
  * Opens Xyne call invite links inside Spaces instead of letting them navigate.
@@ -46,10 +25,16 @@ function isAlreadyInCall(callId: string): boolean {
 export function CallLinkInterceptor(): null {
   const { user, isAuthenticated } = useAuth();
   const { joinCall } = useCallJoinOrInitiate();
+  const isInCallInThisSession = useIsInCallInThisSession(user?.id);
 
   const openCallLink = useCallback(
     (callId: string, href: string): void => {
-      if (isAlreadyInCall(callId)) {
+      // Nothing for the link to do — this session is already in that call — and
+      // skipping it spares the round trip below. `roomMachine` guards the join
+      // itself; this only spares the click. A user in the call on another
+      // device falls through on purpose: joining here is how the call switches
+      // over to this one.
+      if (isInCallInThisSession(callId)) {
         return;
       }
       void resolveCallLinkTarget(callId, href, user?.workspaceId).then(target => {
@@ -60,7 +45,7 @@ export function CallLinkInterceptor(): null {
         window.location.assign(target.url);
       });
     },
-    [user?.workspaceId, joinCall],
+    [user?.workspaceId, joinCall, isInCallInThisSession],
   );
 
   // `joinCall` is rebuilt on every roomActor update, so the listeners below read
@@ -113,8 +98,12 @@ export function CallLinkInterceptor(): null {
   // Links that never reach a renderer click — deep links, notification actions,
   // anchors followed inside the browser panel — are handed back by the Electron
   // main process rather than opening a browser panel for a call the app hosts.
+  //
+  // Desktop-only by absence, not by a platform check: the web build has no
+  // `electronAPI` to subscribe to, and nothing there opens a call link outside
+  // the click above, which is intercepted on every platform.
   useEffect(() => {
-    if (!isAuthenticated || !isElectronApp()) {
+    if (!isAuthenticated) {
       return undefined;
     }
     const onOpenCallLink = window.electronAPI?.onOpenCallLink;

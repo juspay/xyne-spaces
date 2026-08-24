@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { QueryResultType } from '@rocicorp/zero';
 import { roomActor } from '../machines/roomMachine';
 import { queries } from '../zero/queries';
@@ -206,6 +206,57 @@ export const useChannelHasActiveCall = (channelId: string): boolean => {
     () =>
       activeCalls?.some(call => (call.callUpdatesChannel ?? call.channelId) === channelId) ?? false,
     [activeCalls, channelId],
+  );
+};
+
+/**
+ * Whether this session is already sitting in the call `externalId` points at —
+ * the question a "join this call" entry point has to answer before it does
+ * anything, since rejoining a call you are in tears the room down and rebuilds
+ * it.
+ *
+ * Both signals are needed, because either one alone answers a different
+ * question:
+ * - the call's participant row is the call's own answer to "is this user in
+ *   it", but it is one row per user, not per device: a user who joined from
+ *   their phone must still be able to open the link on desktop and have the
+ *   call follow them here;
+ * - `roomActor` knows which call this session is on, but not whether the call
+ *   still counts the user as a participant — someone removed from a call they
+ *   still have open should be able to join again.
+ *
+ * So an active participant elsewhere reads as false, and the caller goes on to
+ * join, which is what moves the call to this device.
+ *
+ * Returns a checker rather than a boolean because the caller — a link click, a
+ * deep link — only learns which call it is asking about at event time.
+ *
+ * @param userId - The current user's ID
+ * @returns (externalId) => true when this session holds that call and the call
+ *          still lists the user as ACCEPTED
+ */
+export const useIsInCallInThisSession = (
+  userId: string | undefined,
+): ((externalId: string) => boolean) => {
+  const activeCalls = useActiveCalls();
+  // `callId` is what JOIN_CALL was given, `externalId` what the join response
+  // came back with; for an invite link they are the same value, but the context
+  // only holds both once the call is connected.
+  const sessionCallId = useSelector(roomActor, state =>
+    state.matches('joining') || state.matches('connecting') || state.matches('connected')
+      ? (state.context.externalId ?? state.context.callId)
+      : null,
+  );
+
+  return useCallback(
+    (externalId: string): boolean => {
+      if (!userId || !externalId || sessionCallId !== externalId) return false;
+      const call = findActiveCall(activeCalls ?? [], externalId) as
+        | ActiveCallWithRelations
+        | undefined;
+      return isUserActiveInCall(call?.participants ?? [], userId);
+    },
+    [activeCalls, sessionCallId, userId],
   );
 };
 
