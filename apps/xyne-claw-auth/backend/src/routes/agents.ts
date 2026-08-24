@@ -1081,7 +1081,7 @@ router.post(
     try {
       const caller = req.agentContext!.agent;
       const requesterId = getRequesterId(req);
-      const { calleeSlug, identityMode } = (req.body ?? {}) as {
+      const { calleeSlug, identityMode, requestReason } = (req.body ?? {}) as {
         calleeSlug?: string;
         identityMode?: string;
         requestReason?: string;

@@ -62,7 +62,7 @@ describe("/framework command", () => {
       userId: null,
       workspaceId: null,
     };
-    const task = buildEpochTask(run as Parameters<typeof buildEpochTask>[0], "");
+    const task = buildEpochTask(run as unknown as Parameters<typeof buildEpochTask>[0], "");
     expect(task).toContain("Tag Index table");
     expect(task).toContain("tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost");
   });
