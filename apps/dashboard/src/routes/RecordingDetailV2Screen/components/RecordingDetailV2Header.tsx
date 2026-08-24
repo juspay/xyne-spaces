@@ -2,7 +2,7 @@ import { type ReactElement, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { MinimizeLineArrow, Share02, Spinner } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
@@ -214,7 +214,6 @@ export const RecordingDetailV2Header = ({
               data-track-category='RecordingDetailV2'
               data-track-name='breadcrumb_recordings'
             >
-              <UturnLeft className='size-3.5' variant='Stroke' aria-hidden='true' />
               Recordings
             </button>
           </li>
