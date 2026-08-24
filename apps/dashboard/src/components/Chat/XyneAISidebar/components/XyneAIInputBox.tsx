@@ -190,6 +190,12 @@ export interface XyneAIInputBoxProps {
   fileScopes?: { id: string; name: string }[];
   /** Replace the selected file set (id = each file's Vespa docId / fileId UUID). */
   onFileScopesChange?: (fileScopes: { id: string; name: string }[]) => void;
+  /** Folders scoped in from the collection picker. Resolved to their
+   *  recursive file list server-side, at send time (see
+   *  xyneAIControllerV2.ts) — Vespa's collectionId filter only ever matches
+   *  a doc's ROOT collection, so a folder id alone isn't filterable there. */
+  folderScopes?: { id: string; name: string }[];
+  onFolderScopesChange?: (folderScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
 }
 
@@ -263,6 +269,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       kbOpenNonce,
       fileScopes = [],
       onFileScopesChange,
+      folderScopes = [],
+      onFolderScopesChange,
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
@@ -607,6 +615,22 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         }
       },
       [fileScopes, onFileScopesChange, navStack, onSelectedCollectionsChange],
+    );
+
+    const handleFolderSingleClick = useCallback(
+      (folder: { id: string; name: string }) => {
+        if (collectionClickTimer.current) return; // a double-click is in progress
+        collectionClickTimer.current = setTimeout(() => {
+          collectionClickTimer.current = null;
+          const isSelected = folderScopes.some(f => f.id === folder.id);
+          onFolderScopesChange?.(
+            isSelected
+              ? folderScopes.filter(f => f.id !== folder.id)
+              : [...folderScopes, { id: folder.id, name: folder.name }],
+          );
+        }, 220);
+      },
+      [folderScopes, onFolderScopesChange],
     );
 
     // Thread info state - track if user has removed it
@@ -1701,6 +1725,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           {...(onRemoveChannel && { onRemoveChannel })}
           fileScopes={fileScopes}
           {...(onFileScopesChange && { onFileScopesChange })}
+          folderScopes={folderScopes}
+          {...(onFolderScopesChange && { onFolderScopesChange })}
           collections={selectedCollections}
           onRemoveCollection={handleRemoveCollection}
           attachments={selectedAttachments}
@@ -1967,21 +1993,28 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   </div>
                 ) : (
                   <div className='py-1'>
-                    {currentSubfolders.map(folder => (
-                      <button
-                        key={folder.id}
-                        type='button'
-                        onDoubleClick={() => openNode(folder)}
-                        className='w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent'
-                        title='Double-click to open'
-                        data-track-category='XyneAI'
-                        data-track-name='OPEN_KB_FOLDER'
-                      >
-                        <FolderDefault className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
-                        <span className='flex-1 truncate'>{folder.name}</span>
-                        <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
-                      </button>
-                    ))}
+                    {currentSubfolders.map(folder => {
+                      const isSelected = folderScopes.some(f => f.id === folder.id);
+                      return (
+                        <button
+                          key={folder.id}
+                          type='button'
+                          onClick={() => handleFolderSingleClick(folder)}
+                          onDoubleClick={() => openNode(folder)}
+                          className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
+                            isSelected ? 'bg-accent' : ''
+                          }`}
+                          title='Click to select · double-click to open'
+                          data-track-category='XyneAI'
+                          data-track-name='SELECT_KB_FOLDER'
+                        >
+                          <FolderDefault className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                          <span className='flex-1 truncate'>{folder.name}</span>
+                          {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                          <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
+                        </button>
+                      );
+                    })}
                     {currentFiles.map(file => {
                       const isSelected = fileScopes.some(f => f.id === file.fileId);
                       return (

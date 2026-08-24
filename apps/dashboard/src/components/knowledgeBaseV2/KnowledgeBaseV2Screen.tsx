@@ -971,24 +971,33 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // Only rendered when `!isAtRoot` (i.e. a collection is open), so we always
   // have a real collectionId to scope to. The channelId comes from the global
   // collections cache because V2 doesn't carry it in the URL.
+  //
+  // Inside a sub-folder (spParentId set), attach BOTH chips — the folder
+  // (for scope) and its collection (for context) — same "harmless overlap"
+  // the composer's own picker already allows when you select a collection
+  // and one of its folders together. At the collection root there's no
+  // folder to add, so just the collection chip shows, as before.
   const handleOpenAI = useCallback((): void => {
     if (!collectionId) return;
     const owning = globalCollections.byId(collectionId);
+    const currentFolder = spParentId ? nodes[spParentId] : undefined;
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
       kbCollectionId: collectionId,
       kbChannelId: owning?.scopeId ?? null,
+      ...(currentFolder && { kbFolderId: currentFolder.id, kbFolderName: currentFolder.name }),
     });
-  }, [collectionId, globalCollections]);
+  }, [collectionId, globalCollections, spParentId, nodes]);
 
   // Per-row Ask AI (hover action on every folder/file, next to Share). A
   // file gets precise scoping via kbDocId/kbDocName — the machine already
   // supports asking about one specific document (same path FileViewerLayout
-  // uses from inside the viewer). A folder has no equivalent per-folder
-  // scope in the machine, so it falls back to the collection it belongs to
-  // — at root that's the folder itself (a top-level collection); inside one,
-  // it's the active `collectionId` — matching handleOpenAI's own scoping.
+  // uses from inside the viewer). A folder row attaches BOTH itself
+  // (kbFolderId) and its collection (kbCollectionId) when it's a genuine
+  // sub-folder inside an open collection — same "harmless overlap" as
+  // handleOpenAI; at root, `entry` IS a root collection (isAtRoot only
+  // lists root collections), so it scopes as just a collection instead.
   const onAskAIAboutEntry = useCallback(
     (entry: CollectionChild): void => {
       if (entry.type === 'FILE') {
@@ -1003,13 +1012,24 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         });
         return;
       }
-      const owningId = isAtRoot ? entry.id : (collectionId ?? entry.id);
-      const owning = globalCollections.byId(owningId);
+      if (isAtRoot) {
+        const owning = globalCollections.byId(entry.id);
+        xyneAIActor.send({
+          type: 'OPEN',
+          startFreshChat: true,
+          kbCollectionId: entry.id,
+          kbChannelId: owning?.scopeId ?? null,
+        });
+        return;
+      }
+      const owning = collectionId ? globalCollections.byId(collectionId) : null;
       xyneAIActor.send({
         type: 'OPEN',
         startFreshChat: true,
-        kbCollectionId: owningId,
+        kbCollectionId: collectionId ?? null,
         kbChannelId: owning?.scopeId ?? null,
+        kbFolderId: entry.id,
+        kbFolderName: entry.name,
       });
     },
     [collectionId, globalCollections, isAtRoot],

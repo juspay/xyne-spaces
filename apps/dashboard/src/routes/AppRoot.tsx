@@ -424,6 +424,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
+  const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
+  const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -682,6 +684,8 @@ const AppRoot = (): ReactElement => {
                                     kbChannelId={xyneAIKbChannelId ?? ''}
                                     kbDocId={xyneAIKbDocId ?? ''}
                                     kbDocName={xyneAIKbDocName ?? ''}
+                                    kbFolderId={xyneAIKbFolderId ?? ''}
+                                    kbFolderName={xyneAIKbFolderName ?? ''}
                                     kbOpenNonce={xyneAIKbOpenNonce}
                                     researchContext={xyneAIResearchContext}
                                     initialQuery={xyneAIInitialQuery ?? undefined}
@@ -922,6 +926,8 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
+                            kbFolderId={xyneAIKbFolderId ?? ''}
+                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
@@ -954,6 +960,8 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
+                            kbFolderId={xyneAIKbFolderId ?? ''}
+                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}

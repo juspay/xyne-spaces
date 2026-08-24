@@ -78,6 +78,9 @@ export interface StreamRequest {
   channelIds: string[];
   collectionIds?: string[];
   fileIds?: string[];
+  /** Folder scopes from the composer picker — resolved to their recursive
+   *  file list server-side (see xyneAIControllerV2.ts). */
+  folderIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
@@ -1045,6 +1048,8 @@ class XyneAIStreamManager {
           ...(request.collectionIds &&
             request.collectionIds.length > 0 && { collectionIds: request.collectionIds }),
           ...(request.fileIds && request.fileIds.length > 0 && { fileIds: request.fileIds }),
+          ...(request.folderIds &&
+            request.folderIds.length > 0 && { folderIds: request.folderIds }),
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),
           ...(request.ticketIds &&
