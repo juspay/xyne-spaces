@@ -342,7 +342,7 @@ function ModelThinkingMenu({
                 </span>
               </button>
               {thinkingOpen && (
-                <div className="absolute right-0 top-0 z-50 w-36 translate-x-[calc(100%+8px)] rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]">
+                <div className="absolute bottom-0 right-0 z-50 w-36 translate-x-[calc(100%+8px)] rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]">
                   {CHAT_THINKING_OPTIONS.map((o) => (
                     <button
                       key={o.label}
