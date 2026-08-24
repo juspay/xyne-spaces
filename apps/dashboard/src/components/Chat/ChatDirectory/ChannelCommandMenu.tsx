@@ -2160,6 +2160,22 @@ const ChannelCommandMenu = ({
     cleanedSearchText,
   ]);
 
+  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
+  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
+  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
+  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
+  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
+  // rule hasStrongUserMatch/hasStrongChannelMatch use.
+  const hasStrongStarredMatch = useMemo(() => {
+    if (hasFromOrInFilter) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
+    return starredMatches.some(item =>
+      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
+    );
+  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
+
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
@@ -2845,7 +2861,7 @@ const ChannelCommandMenu = ({
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
   const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred = canHoist && !hasFromOrInFilter && searchText.trim().length > 0;
+  const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
