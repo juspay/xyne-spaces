@@ -555,9 +555,7 @@ type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
 /**
  * The desk toolbar collapses filter triggers into the "Filters" popover when the row runs
- * out of room (Ask AI opening, sidebar expanding, small window). Priority order is
- * highest-value first; the row drops from the *end* of this list, so Status folds away
- * before Priority, which folds away before Assignee.
+ * out of room
  */
 const COLLAPSIBLE_FILTER_IDS = ['assignee', 'priority', 'stages'] as const;
 type CollapsibleFilterId = (typeof COLLAPSIBLE_FILTER_IDS)[number];
@@ -574,11 +572,6 @@ const COLLAPSIBLE_FILTER_META: Record<
 /** Row width below which the toolbar's secondary controls drop their text labels. */
 const TOOLBAR_COMPACT_WIDTH = 820;
 
-/**
- * Shared visual for a collapsible filter trigger. The hidden measuring twin renders the
- * same component as the real bar, so the fit calculation uses the exact widths the real
- * triggers would occupy.
- */
 const DeskFilterTrigger = ({
   id,
   active,
@@ -923,13 +916,6 @@ const SupportScreen = (): ReactElement => {
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
 
-  // --- Toolbar priority+ overflow -------------------------------------------------------
-  // The filter row shares one line with the view controls and Compose. When the row is too
-  // narrow (Ask AI open, sidebar expanded, small window) the filter triggers fold into the
-  // "Filters" popover from the right instead of overlapping the actions on the right.
-  //
-  // Everything is measured off the *row*, not the viewport: Ask AI is user-resizable, so the
-  // same window width can leave wildly different room here.
   const filterRowRef = useRef<HTMLDivElement>(null);
   const filterRowActionsRef = useRef<HTMLDivElement>(null);
   const filterStaticLeftRef = useRef<HTMLDivElement>(null);
