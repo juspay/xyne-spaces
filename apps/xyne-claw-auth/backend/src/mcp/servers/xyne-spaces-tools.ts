@@ -7287,10 +7287,11 @@ async function directVespaIdentity(
   const devUser = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_USER_ID"] ?? "").trim();
   const devWorkspace = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_WORKSPACE_ID"] ?? "").trim();
   const userId = devUser || ctxUserId;
-  // Skip the Spaces-DB lookup when the workspace is pinned: an overridden user
-  // id generally has no row in the LOCAL Spaces DB, so the lookup would return
-  // null and the tool would refuse the query.
-  const workspaceId = devWorkspace || (await getWorkspaceIdForUser(userId));
+  // Env-first workspace resolution: the tool server's spawn env already carries
+  // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
+  // Falls back to the Spaces-DB user row when no env set.
+  const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
+  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
   if (devUser || devWorkspace) {
     log.warn(
       `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
