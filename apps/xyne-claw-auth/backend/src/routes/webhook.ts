@@ -552,6 +552,7 @@ import {
   spacesAppFetchGet,
   spacesAppFetchMultipart,
   SpacesApiError,
+  isFlowSchemaRejection,
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
@@ -1402,8 +1403,12 @@ async function postWriteApprovalAction(args: {
   };
 
   const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  // The rich `ticket` FlowUI component is only rendered by newer Spaces
+  // backends; older deployments reject it. Track when we used it so a flow-
+  // schema rejection can fall back to the generic approval card below.
+  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
   const writeFlow = withSpacesAppId(
-    pendingActionPayload.tool === "spaces-create-ticket" && ticketTitle
+    usedRichTicketCard
       ? buildTicketProposalFlow({
           title: ticketTitle,
           ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
@@ -1449,16 +1454,37 @@ async function postWriteApprovalAction(args: {
     }
   }
 
-  await spacesAppFetch("/chat/postMessage", {
-    channelId: ctx.channelId,
-    // Same empty-conversationId guard as the result post: an API/event-triggered
-    // run has no thread, so posting the approval card with conversationId: ""
-    // 400s in Spaces' channel-validation middleware and the card silently never
-    // appears. Omit when empty → the card posts as a top-level channel message.
-    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
-    flow: writeFlow,
-    userId: ctx.spacesAppUserId,
-  }, token);
+  const postCard = (flow: unknown): Promise<unknown> =>
+    spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      // Same empty-conversationId guard as the result post: an API/event-triggered
+      // run has no thread, so posting the approval card with conversationId: ""
+      // 400s in Spaces' channel-validation middleware and the card silently never
+      // appears. Omit when empty → the card posts as a top-level channel message.
+      ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+
+  try {
+    await postCard(writeFlow);
+  } catch (err) {
+    // The rich `ticket` component isn't rendered by every deployed Spaces
+    // backend; when it isn't, /chat/postMessage rejects the ENTIRE card with a
+    // 400 "Invalid flowJSON" (unknown component discriminator) and the approval
+    // never appears (prod 2026-08-24, arya-doctor spaces-create-ticket). Degrade
+    // to the generic approve/decline card, which uses only universally-supported
+    // component types and carries the identical signed action, so the write can
+    // still be approved. ONLY a flow-schema 400 triggers this — any other error
+    // (auth, channel validation, network) re-throws so the caller's skip/target
+    // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
+    // with no code change.
+    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    clog.warn(
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+    );
+    await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
+  }
 }
 
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──

@@ -36,6 +36,21 @@ export class SpacesApiError extends Error {
   }
 }
 
+/**
+ * True when a Spaces `/chat/postMessage` rejected a FlowUI card because it used
+ * a component type the deployed backend doesn't recognize — a 400 whose body is
+ * an "Invalid flowJSON" discriminator error. The signal to retry with a card
+ * built only from universally-supported components. Deliberately narrow: any
+ * other 400 (channel validation, empty conversation) or status returns false.
+ */
+export function isFlowSchemaRejection(err: unknown): boolean {
+  return (
+    err instanceof SpacesApiError &&
+    err.status === 400 &&
+    /invalid\s*flowjson|flowjson|discriminator/i.test(err.message)
+  );
+}
+
 function resolveBaseUrl(override?: string): string {
   const raw = override
     ?? process.env["XYNE_SPACES_URL"]

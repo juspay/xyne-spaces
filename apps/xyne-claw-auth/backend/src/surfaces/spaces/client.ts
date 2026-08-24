@@ -8,11 +8,11 @@
 import { CONFIG } from "../../config.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
-import { SpacesApiError } from "../../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError, isFlowSchemaRejection } from "../../mcp/servers/xyne-spaces-client.js";
 
-// Re-export so callers (webhook.ts) can branch on `err.status` from the same
-// module they import the fetch helpers.
-export { SpacesApiError };
+// Re-export so callers (webhook.ts) can branch on `err.status` / detect a
+// flow-schema rejection from the same module they import the fetch helpers.
+export { SpacesApiError, isFlowSchemaRejection };
 
 const log = createLogger("spaces-client");
 
