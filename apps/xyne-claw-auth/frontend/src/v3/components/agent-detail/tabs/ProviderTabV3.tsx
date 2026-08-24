@@ -61,25 +61,18 @@ const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter"
 
 /* ─────────────────────────────────────────────────────────────────────
  * Ordered provider list + "Available providers" chips. Used twice: for the
- * standard provider order and for the fast-mode profile's own order. With
- * `models` the fast view also lets each selected provider pin a model for
- * fast mode (same credential key, different model); blank = the model saved
- * on the credential.
+ * standard provider order and for the fast-mode profile's own order (which
+ * is "same as standard, different order" — credentials and models come from
+ * the shared credential rows plus the fast-mode override card below).
  * ───────────────────────────────────────────────────────────────────── */
 function ProviderOrderEditor({
   order,
   onChange,
-  models,
-  onModelChange,
-  modelPlaceholder,
   readOnly,
   idPrefix,
 }: {
   order: string[];
   onChange: (next: string[]) => void;
-  models?: Record<string, string>;
-  onModelChange?: (provider: string, model: string) => void;
-  modelPlaceholder?: (provider: string) => string;
   readOnly?: boolean;
   idPrefix: string;
 }) {
@@ -114,19 +107,6 @@ function ProviderOrderEditor({
               <span className="flex-1 text-[13px] font-medium text-xyne-fg-primary">
                 {PROVIDER_DISPLAY[p] ?? p}
               </span>
-              {models && onModelChange && p !== "spaces" && (
-                <input
-                  value={models[p] ?? ""}
-                  onChange={(e) => onModelChange(p, e.target.value)}
-                  placeholder={modelPlaceholder?.(p) ?? "model from credential"}
-                  spellCheck={false}
-                  autoComplete="off"
-                  disabled={readOnly}
-                  aria-label={`Fast-mode model for ${PROVIDER_DISPLAY[p] ?? p}`}
-                  title="Model to use in fast mode on this provider (same credential). Blank = the model saved on the credential."
-                  className="w-[200px] rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 font-mono text-[12px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
-                />
-              )}
               {!readOnly && (
                 <div className="flex items-center gap-0.5">
                   <button
@@ -316,19 +296,12 @@ export function ProviderTabV3({ agent, userId }: Props) {
     const order = custom && Array.isArray(raw?.["providerOrder"])
       ? (raw!["providerOrder"] as unknown[]).filter((p): p is string => typeof p === "string" && (ALL_PROVIDERS as string[]).includes(p))
       : [];
-    const models: Record<string, string> = {};
-    const rawModels = custom ? raw?.["models"] : undefined;
-    if (rawModels && typeof rawModels === "object") {
-      for (const [k, v] of Object.entries(rawModels as Record<string, unknown>)) if (typeof v === "string" && v.trim()) models[k] = v.trim();
-    }
-    return { mode: (custom ? "custom" : "inherit") as "custom" | "inherit", order, models };
+    return { mode: (custom ? "custom" : "inherit") as "custom" | "inherit", order };
   })();
   const [fastProfileMode, setFastProfileMode] = useState<"inherit" | "custom">(seedFastProfile.mode);
   const [savedFastProfileMode, setSavedFastProfileMode] = useState<"inherit" | "custom">(seedFastProfile.mode);
   const [fastOrder, setFastOrder] = useState<string[]>(seedFastProfile.order);
   const [savedFastOrder, setSavedFastOrder] = useState<string[]>(seedFastProfile.order);
-  const [fastModels, setFastModels] = useState<Record<string, string>>(seedFastProfile.models);
-  const [savedFastModels, setSavedFastModels] = useState<Record<string, string>>(seedFastProfile.models);
   /** Which provider setup the card is showing: standard or fast mode. */
   const [providerView, setProviderView] = useState<"standard" | "fast">("standard");
 
@@ -348,8 +321,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
     automationMode !== savedAutomationMode ||
     fastMode !== savedFastMode ||
     fastProfileMode !== savedFastProfileMode ||
-    JSON.stringify(fastOrder) !== JSON.stringify(savedFastOrder) ||
-    JSON.stringify(fastModels) !== JSON.stringify(savedFastModels);
+    JSON.stringify(fastOrder) !== JSON.stringify(savedFastOrder);
 
   const [creds, setCreds] = useState<AgentProviderCredentialStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -617,12 +589,17 @@ export function ProviderTabV3({ agent, userId }: Props) {
       else delete ms.speed;
       if (Object.keys(ms).length > 0) cfg.modelSettings = ms;
       else delete cfg.modelSettings;
-      // Fast-mode provider profile. Omit entirely when inheriting (the
-      // default) so the JSON stays minimal; blank model pins are dropped.
+      // Fast-mode provider profile — "same as standard, different order".
+      // Only providers/providerOrder are owned here; the run-setting overrides
+      // (fastModeProfile.modelSettings, edited on the Spaces card below) are
+      // preserved. Per-provider model pins are no longer offered — saving
+      // drops any legacy `models` key.
+      const prevProfile = (cfg.fastModeProfile as Record<string, unknown> | undefined) ?? {};
+      const keptOverrides = prevProfile["modelSettings"] ? { modelSettings: prevProfile["modelSettings"] } : {};
       if (fastProfileMode === "custom") {
-        const models: Record<string, string> = {};
-        for (const [k, v] of Object.entries(fastModels)) if (fastOrder.includes(k) && v.trim()) models[k] = v.trim();
-        cfg.fastModeProfile = { providers: "custom", providerOrder: fastOrder, ...(Object.keys(models).length ? { models } : {}) };
+        cfg.fastModeProfile = { providers: "custom", providerOrder: fastOrder, ...keptOverrides };
+      } else if (Object.keys(keptOverrides).length > 0) {
+        cfg.fastModeProfile = keptOverrides;
       } else {
         delete cfg.fastModeProfile;
       }
@@ -640,7 +617,6 @@ export function ProviderTabV3({ agent, userId }: Props) {
       setSavedFastMode(fastMode);
       setSavedFastProfileMode(fastProfileMode);
       setSavedFastOrder([...fastOrder]);
-      setSavedFastModels({ ...fastModels });
       setOrderSaved(true);
       // The button morphs to "Saved" briefly, then this resets to false —
       // since the dirty check now reads clean, the button drops back to
@@ -967,14 +943,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
             {fastProfileMode === "inherit" ? (
               <ProviderOrderEditor order={providerOrder} onChange={() => {}} readOnly idPrefix="fast-inherit" />
             ) : (
-              <ProviderOrderEditor
-                order={fastOrder}
-                onChange={setFastOrder}
-                models={fastModels}
-                onModelChange={(provider, model) => setFastModels((m) => ({ ...m, [provider]: model }))}
-                modelPlaceholder={(provider) => creds.find((c) => c.provider === provider && c.configured)?.model ?? "model from credential"}
-                idPrefix="fast"
-              />
+              <ProviderOrderEditor order={fastOrder} onChange={setFastOrder} idPrefix="fast" />
             )}
           </>
         )}
