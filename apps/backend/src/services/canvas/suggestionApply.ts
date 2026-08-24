@@ -15,13 +15,11 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
 export interface SuggestionRowLike {
   id: string;
-  batchId: string;
   op: string; // insert | replace | delete | move
   blockId: string | null;
   proposedAnchorId: string | null;
   currentAnchorId: string | null;
   orderIndex: number;
-  beforeContent: unknown;
   afterContent: unknown;
   createdAt: Date;
 }
@@ -37,7 +35,8 @@ const idOf = (b: BlockNoteBlock): string | undefined => (b as { id?: string }).i
 export async function applyOps(
   current: BlockNoteBlock[],
   rows: SuggestionRowLike[],
-  toBlocks: (markdown: string) => Promise<BlockNoteBlock[]>
+  toBlocks: (markdown: string) => Promise<BlockNoteBlock[]>,
+  siblingOrder: Map<string, number> = new Map()
 ): Promise<ApplyOutcome> {
   const working: BlockNoteBlock[] = [...current];
   const applied: string[] = [];
@@ -96,8 +95,14 @@ export async function applyOps(
     return { ok: false };
   };
 
-  const placeAfter = (block: BlockNoteBlock, anchorId: string | null): void => {
-    const at = anchorId === null ? 0 : findIdx(anchorId) + 1;
+  const placeAfter = (block: BlockNoteBlock, anchorId: string | null, orderIndex: number): void => {
+    let at = anchorId === null ? 0 : findIdx(anchorId) + 1;
+    for (;;) {
+      const id = at < working.length ? idOf(working[at] as BlockNoteBlock) : undefined;
+      const siblingIndex = id === undefined ? undefined : siblingOrder.get(id);
+      if (siblingIndex === undefined || siblingIndex >= orderIndex) break;
+      at++;
+    }
     working.splice(at, 0, block);
   };
 
@@ -114,7 +119,7 @@ export async function applyOps(
         continue;
       }
       const [block] = working.splice(srcIdx, 1); // same object: id + content survive
-      placeAfter(block as BlockNoteBlock, anchor.anchorId);
+      placeAfter(block as BlockNoteBlock, anchor.anchorId, row.orderIndex);
       applied.push(row.id);
     } else {
       const anchor = resolveAnchor(row);
@@ -129,7 +134,7 @@ export async function applyOps(
         stale.push(row.id);
         continue;
       }
-      placeAfter({ ...(next as object), id: row.id } as BlockNoteBlock, anchor.anchorId);
+      placeAfter({ ...(next as object), id: row.id } as BlockNoteBlock, anchor.anchorId, row.orderIndex);
       applied.push(row.id);
     }
   }
