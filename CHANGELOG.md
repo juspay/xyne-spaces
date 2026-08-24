@@ -1,3 +1,10 @@
+## [1.216.0](https://github.com/juspay/xyne-spaces/compare/v1.215.0...v1.216.0) (2026-08-24)
+
+
+### Features
+
+* waveform identity and in-place transcript modal for recordings ([#976](https://github.com/juspay/xyne-spaces/issues/976)) ([00429b8](https://github.com/juspay/xyne-spaces/commit/00429b856c4f66b9c62ea326f8ba3297564b2101)), closes [#1a1a1](https://github.com/juspay/xyne-spaces/issues/1a1a1)
+
 ## [1.215.0](https://github.com/juspay/xyne-spaces/compare/v1.214.0...v1.215.0) (2026-08-24)
 
 
