@@ -76,8 +76,9 @@ interface MessageAttachmentProps {
   parentMessage?: AttachmentRef['parentMessage'];
 }
 
-type ViewerRawAttachments =
-  QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
+type ViewerRawAttachments = QueryResultType<
+  typeof queries.conversationMessagesV2
+>[number]['attachments'];
 
 // Open or switch the attachment viewer to `targetId`, carrying the full sibling
 // set so the in-viewer next/prev navigation keeps working. UPDATE when the
