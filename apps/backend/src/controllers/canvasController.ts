@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
+import type { Tag } from '@prisma/client';
+import { AttachmentEntityType, ActivityClassification, CanvasRole, TagMethod } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -10,12 +11,84 @@ import { notificationService } from '../services/notificationService.js';
 import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
+import { tagRepository } from '@/database/repositories/tagRepository';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
+import { initializeYSweetDoc, syncToYSweet } from '../utils/ysweetUtils.js';
+import {
+  convertMarkdownToBlockNote,
+  convertBlockNoteToMarkdown,
+  getCanvasUrl,
+  getCanvasById,
+} from '../services/canvasService.js';
+
+const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
+const CANVAS_LABEL_CATEGORY = 'generic';
+const MAX_CANVAS_LABEL_BULK_IDS = 200;
+// Shared cap for both add (names) and remove (labelIds): how many labels one
+// request can mutate at once.
+const MAX_CANVAS_LABELS_PER_REQUEST = 20;
+const DEFAULT_CANVAS_LABEL_SUGGESTIONS_LIMIT = 50;
+const MAX_CANVAS_LABEL_SUGGESTIONS_LIMIT = 100;
+
+const CanvasLabelBodySchema = z.object({
+  // Canvas labels are freeform user labels, unlike configured desk tags.
+  names: z.array(z.string().min(1).max(64)).min(1).max(MAX_CANVAS_LABELS_PER_REQUEST),
+});
+
+const CanvasLabelIdsBodySchema = z.object({
+  labelIds: z.array(z.string().min(1)).min(1).max(MAX_CANVAS_LABELS_PER_REQUEST),
+});
+
+const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
+
+const normalizeCanvasLabelKey = (name: string): string =>
+  normalizeCanvasLabelName(name).toLowerCase();
+
+const parseCanvasIds = (value: unknown): string[] => {
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, MAX_CANVAS_LABEL_BULK_IDS);
+};
+
+const parseNonNegativeIntParam = (value: unknown, fallback: number): number => {
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const isUniqueConstraintError = (error: unknown): boolean => {
+  if (error && typeof error === 'object') {
+    const { code, cause } = error as { code?: unknown; cause?: unknown };
+    if (code === 'P2002' || code === '23505' || code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return true;
+    }
+    if (cause && cause !== error && isUniqueConstraintError(cause)) {
+      return true;
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /unique|constraint|duplicate/i.test(message);
+};
+
+const toCanvasLabelResponse = (row: Tag) => ({
+  id: row.id,
+  canvasId: row.sourceId,
+  name: row.tag,
+  createdAt: row.createdAt.getTime(),
+});
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -24,7 +97,511 @@ export class CanvasController {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
 
-    createCanvas = async (req: Request, res: Response): Promise<void> => {
+  private async assertCanvasAccess(
+    req: Request,
+    res: Response,
+    canvasId: string,
+    requireEditAccess = false
+  ): Promise<string | null> {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return null;
+    }
+
+    const auth = await canvasAuthService.checkCanvasAccess(canvasId, userId);
+    if (!auth.canvas?.id) {
+      res.status(404).json({ error: 'Canvas not found' });
+      return null;
+    }
+
+    const prisma = DatabaseClient.getInstance();
+    const canvas = await prisma.canvas.findUnique({
+      where: { id: auth.canvas.id },
+      select: { id: true, workspaceId: true },
+    });
+
+    if (!canvas || canvas.workspaceId !== workspaceId) {
+      res.status(404).json({ error: 'Canvas not found' });
+      return null;
+    }
+
+    const hasAccess = requireEditAccess ? auth.canEdit : auth.canView;
+    if (!hasAccess) {
+      res.status(403).json({ error: 'Permission denied' });
+      return null;
+    }
+
+    return canvas.id;
+  }
+
+  getCanvasLabelSuggestions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const query =
+        typeof req.query.query === 'string' ? normalizeCanvasLabelKey(req.query.query) : '';
+      const offset = parseNonNegativeIntParam(req.query.offset, 0);
+      const limit = Math.min(
+        parseNonNegativeIntParam(req.query.limit, DEFAULT_CANVAS_LABEL_SUGGESTIONS_LIMIT),
+        MAX_CANVAS_LABEL_SUGGESTIONS_LIMIT
+      );
+
+      const rows = await tagRepository.distinctTagsByCategory(
+        workspaceId,
+        CANVAS_LABEL_SOURCE_TYPE,
+        CANVAS_LABEL_CATEGORY,
+        query || undefined,
+        { skip: offset, take: limit }
+      );
+
+      const seen = new Set<string>();
+      const labels: string[] = [];
+      for (const labelName of rows) {
+        const key = normalizeCanvasLabelKey(labelName);
+        if (!key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        labels.push(labelName);
+      }
+
+      res.status(200).json({ labels, offset, limit });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to fetch label suggestions:', error);
+      res.status(500).json({ error: 'Failed to fetch canvas label suggestions' });
+    }
+  };
+
+  getCanvasLabels = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const requestedCanvasIds = parseCanvasIds(req.query.canvasIds);
+      if (requestedCanvasIds.length === 0) {
+        res.status(400).json({ error: 'canvasIds query param is required' });
+        return;
+      }
+
+      // Keyed by a Map, not a plain object: requestedCanvasId is untrusted user
+      // input (from the canvasIds query param), and writing it as a dynamic
+      // object property (obj[requestedCanvasId] = ...) goes through the
+      // Object.prototype.__proto__ setter for that exact key, allowing
+      // prototype pollution (CodeQL js/remote-property-injection). Map keys
+      // have no such special-cased property.
+      const labelsByCanvasId = new Map<string, ReturnType<typeof toCanvasLabelResponse>[]>(
+        requestedCanvasIds.map((canvasId) => [canvasId, []])
+      );
+
+      const canonicalToRequested = new Map<string, string[]>();
+
+      // This query is doing two jobs at once, and both are required - there's no
+      // Tag-table-only shortcut here:
+      //
+      // 1. ID resolution. `requestedCanvasIds` can contain either a canonical
+      //    canvas id, or a legacy `viewAccessId`/`editAccessId` share-link id
+      //    (old chat message URLs, y-sweet client cache, bookmarks predating the
+      //    canonical-id migration - see canvasAuthService.checkCanvasAccess for
+      //    the same fallback on the single-canvas path). `tags.sourceId` is
+      //    always the canonical id, so if a legacy id isn't resolved to its
+      //    canonical id first, the later `tagRepository` lookup finds nothing
+      //    and labels silently vanish for that canvas. Example: user opens an
+      //    old shared link `/canvas/<viewAccessId>`; without this OR-match, that
+      //    id never maps to a canvas row and every label lookup for it 404s in
+      //    practice even though the canvas and its labels both exist.
+      //
+      // 2. Permission data. Whether the user canView/canEdit a canvas depends on
+      //    `createdBy`, `visibility`, `channelId`, `projectId` - none of which
+      //    exist on the Tag row (which only stores `sourceId` = canvas id).
+      //    `canvasParticipant` alone can't answer "is this canvas public" or
+      //    "what channel does it belong to" either - only the `canvas` table has
+      //    these columns, so an access decision requires reading them from here
+      //    regardless of how the id was resolved.
+      const prisma = DatabaseClient.getInstance();
+      const canvases = await prisma.canvas.findMany({
+        where: {
+          OR: [
+            { id: { in: requestedCanvasIds } },
+            { viewAccessId: { in: requestedCanvasIds } },
+            { editAccessId: { in: requestedCanvasIds } },
+          ],
+        },
+        select: {
+          id: true,
+          createdBy: true,
+          visibility: true,
+          channelId: true,
+          folderId: true,
+          projectId: true,
+          workspaceId: true,
+          viewAccessId: true,
+          editAccessId: true,
+        },
+      });
+
+      // Map any identifier (id, viewAccessId, editAccessId) -> canonical id
+      const anyToCanonical = new Map<string, string>();
+      for (const c of canvases) {
+        anyToCanonical.set(c.id, c.id);
+        if (c.viewAccessId) anyToCanonical.set(c.viewAccessId, c.id);
+        if (c.editAccessId) anyToCanonical.set(c.editAccessId, c.id);
+      }
+
+      // Build candidate canonical IDs filtered by workspace and request mapping
+      const candidateCanonicalIds: string[] = [];
+      for (const requestedCanvasId of requestedCanvasIds) {
+        const canonical = anyToCanonical.get(requestedCanvasId);
+        if (!canonical) continue;
+        const canvasRow = canvases.find((x) => x.id === canonical);
+        if (!canvasRow || canvasRow.workspaceId !== workspaceId) continue;
+        if (!candidateCanonicalIds.includes(canonical)) candidateCanonicalIds.push(canonical);
+        const requestedIds = canonicalToRequested.get(canonical) ?? [];
+        requestedIds.push(requestedCanvasId);
+        canonicalToRequested.set(canonical, requestedIds);
+      }
+
+      // Now perform access checks in-memory for the candidate canonical IDs.
+      const candidateIds = candidateCanonicalIds;
+      if (candidateIds.length === 0) {
+        res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
+        return;
+      }
+
+      // Fetch user role and group memberships (constant number of queries)
+      const userRow = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      const workspaceRole = userRow?.role;
+
+      const groupMappings = await prisma.userGroupMapping.findMany({
+        where: { userId },
+        select: { userGroupId: true },
+      });
+      const groupIds = groupMappings.map((m) => m.userGroupId);
+
+      // Participants for the canvases: user-specific and group-specific
+      const participantWhere: any = { canvasId: { in: candidateIds }, OR: [{ userId }] };
+      if (groupIds.length) participantWhere.OR.push({ userGroupId: { in: groupIds } });
+      const participants = await prisma.canvasParticipant.findMany({
+        where: participantWhere,
+        select: { canvasId: true, role: true, userGroupId: true, userId: true },
+      });
+
+      // Channel-related participants (for shared channel roles)
+      const canvasChannelParticipants = await prisma.canvasParticipant.findMany({
+        where: { canvasId: { in: candidateIds }, channelId: { not: null } },
+        select: { canvasId: true, channelId: true, role: true },
+      });
+
+      const channelIds = Array.from(
+        new Set(
+          canvases
+            .filter((c) => c.channelId && candidateIds.includes(c.id))
+            .map((c) => c.channelId!)
+        )
+      );
+      const projectIds = Array.from(
+        new Set(
+          canvases
+            .filter((c) => c.projectId && candidateIds.includes(c.id))
+            .map((c) => c.projectId!)
+        )
+      );
+
+      const channelMemberships = channelIds.length
+        ? await prisma.channelParticipant.findMany({
+            where: { channelId: { in: channelIds }, userId },
+            select: { channelId: true },
+          })
+        : [];
+      const channelMembershipSet = new Set(channelMemberships.map((c) => c.channelId));
+
+      const guestAccessWhereOr: any[] = [];
+      if (channelIds.length)
+        guestAccessWhereOr.push({
+          accessibleEntityType: 'CHANNEL',
+          accessibleEntityId: { in: channelIds },
+        });
+      if (projectIds.length)
+        guestAccessWhereOr.push({
+          accessibleEntityType: 'PROJECT',
+          accessibleEntityId: { in: projectIds },
+        });
+
+      const guestAccessRows = guestAccessWhereOr.length
+        ? await prisma.guestAccess.findMany({
+            where: { workspaceId, userId, OR: guestAccessWhereOr },
+            select: { accessibleEntityType: true, accessibleEntityId: true },
+          })
+        : [];
+
+      const guestChannelSet = new Set(
+        guestAccessRows
+          .filter((g) => g.accessibleEntityType === 'CHANNEL')
+          .map((g) => g.accessibleEntityId)
+      );
+      const guestProjectSet = new Set(
+        guestAccessRows
+          .filter((g) => g.accessibleEntityType === 'PROJECT')
+          .map((g) => g.accessibleEntityId)
+      );
+
+      const roleRank = (role: CanvasRole | undefined): number =>
+        role === CanvasRole.OWNER
+          ? 3
+          : role === CanvasRole.EDITOR
+            ? 2
+            : role === CanvasRole.VIEWER
+              ? 1
+              : 0;
+      const strongerRole = (a: { role: CanvasRole } | null, b: { role: CanvasRole } | null) => {
+        if (!a) return b;
+        if (!b) return a;
+        return roleRank(a.role) >= roleRank(b.role) ? a : b;
+      };
+
+      const allowedCanonicalIds: string[] = [];
+      for (const canonicalId of candidateIds) {
+        const canvasRow = canvases.find((c) => c.id === canonicalId)!;
+        const isCreator = canvasRow.createdBy === userId;
+
+        const participant = participants.find(
+          (p) => p.canvasId === canonicalId && p.userId === userId
+        );
+
+        const groupParticipantEntries = participants.filter(
+          (p) => p.canvasId === canonicalId && p.userGroupId
+        );
+        let strongestGroup: { role: CanvasRole } | null = null;
+        for (const gp of groupParticipantEntries) {
+          strongestGroup = strongerRole(strongestGroup, { role: gp.role as CanvasRole });
+        }
+
+        // Channel-shared role
+        const channelParticipants = canvasChannelParticipants.filter(
+          (p) => p.canvasId === canonicalId && p.channelId
+        );
+        let strongestChannelRole: { role: CanvasRole } | null = null;
+        for (const cp of channelParticipants) {
+          const chanId = cp.channelId!;
+          const hasEffectiveChannelAccess =
+            channelMembershipSet.has(chanId) ||
+            (workspaceRole === 'GUEST' && guestChannelSet.has(chanId));
+          if (hasEffectiveChannelAccess) {
+            strongestChannelRole = strongerRole(strongestChannelRole, {
+              role: cp.role as CanvasRole,
+            });
+          }
+        }
+
+        const entityRole = strongerRole(strongestGroup, strongestChannelRole);
+        const effectiveRole = participant?.role ?? entityRole?.role;
+        const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
+        const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
+        const hasViewerRole = effectiveRole === CanvasRole.VIEWER;
+
+        const hasPublicVisibilityAccess = (() => {
+          if (canvasRow.visibility !== 'PUBLIC') return false;
+          if (workspaceRole === 'GUEST') {
+            if (canvasRow.channelId) return guestChannelSet.has(canvasRow.channelId);
+            if (canvasRow.projectId) return guestProjectSet.has(canvasRow.projectId);
+            return false;
+          }
+          return true;
+        })();
+
+        const hasGuestContainerAccess = (() => {
+          if (workspaceRole !== 'GUEST') return false;
+          if (canvasRow.channelId && guestChannelSet.has(canvasRow.channelId)) return true;
+          if (!canvasRow.projectId) return false;
+          return guestProjectSet.has(canvasRow.projectId);
+        })();
+
+        const canEdit = isCreator || hasOwnerRole || hasEditorRole;
+        const canView =
+          canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;
+
+        if (canView) {
+          allowedCanonicalIds.push(canonicalId);
+        }
+      }
+
+      if (allowedCanonicalIds.length === 0) {
+        res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
+        return;
+      }
+
+      const rows = await tagRepository.findActiveTagsBySourceIds(
+        allowedCanonicalIds,
+        workspaceId,
+        CANVAS_LABEL_SOURCE_TYPE,
+        CANVAS_LABEL_CATEGORY
+      );
+
+      for (const row of rows) {
+        const label = toCanvasLabelResponse(row);
+        const requestedIds = canonicalToRequested.get(row.sourceId) ?? [row.sourceId];
+        for (const requestedCanvasId of requestedIds) {
+          labelsByCanvasId.set(requestedCanvasId, [
+            ...(labelsByCanvasId.get(requestedCanvasId) ?? []),
+            label,
+          ]);
+        }
+      }
+
+      res.status(200).json({ labels: Object.fromEntries(labelsByCanvasId) });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to fetch labels:', error);
+      res.status(500).json({ error: 'Failed to fetch canvas labels' });
+    }
+  };
+
+  addCanvasLabel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { canvasId } = req.params;
+      if (!canvasId) {
+        res.status(400).json({ error: 'Canvas ID is required' });
+        return;
+      }
+
+      const canonicalCanvasId = await this.assertCanvasAccess(req, res, canvasId, true);
+      if (!canonicalCanvasId) {
+        return;
+      }
+
+      const userId = req.user!.id!;
+      const workspaceId = req.user!.workspaceId!;
+
+      const parsedBody = CanvasLabelBodySchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'At least one label name is required' });
+        return;
+      }
+
+      const seenKeys = new Set<string>();
+      const requestedLabels: { name: string; key: string }[] = [];
+      for (const rawName of parsedBody.data.names) {
+        const name = normalizeCanvasLabelName(rawName);
+        const key = normalizeCanvasLabelKey(name);
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        requestedLabels.push({ name, key });
+      }
+      if (requestedLabels.length === 0) {
+        res.status(400).json({ error: 'Label name cannot be empty' });
+        return;
+      }
+
+      const existingRows = await tagRepository.findActiveTags(
+        canonicalCanvasId,
+        CANVAS_LABEL_SOURCE_TYPE,
+        CANVAS_LABEL_CATEGORY
+      );
+      const existingByKey = new Map(
+        existingRows.map((row) => [normalizeCanvasLabelKey(row.tag), row])
+      );
+
+      const labels: ReturnType<typeof toCanvasLabelResponse>[] = [];
+      for (const { name, key } of requestedLabels) {
+        const existing = existingByKey.get(key);
+        if (existing) {
+          labels.push(toCanvasLabelResponse(existing));
+          continue;
+        }
+
+        try {
+          const label = await tagRepository.insertTagRow({
+            sourceId: canonicalCanvasId,
+            sourceType: CANVAS_LABEL_SOURCE_TYPE,
+            workspaceId,
+            configKey: null,
+            tagCategory: CANVAS_LABEL_CATEGORY,
+            tag: name,
+            method: TagMethod.MANUAL,
+            reason: null,
+            createdBy: userId,
+            updatedBy: userId,
+          });
+          existingByKey.set(key, label);
+          labels.push(toCanvasLabelResponse(label));
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            const fallback = await tagRepository.findActiveTag(
+              canonicalCanvasId,
+              CANVAS_LABEL_SOURCE_TYPE,
+              CANVAS_LABEL_CATEGORY,
+              name
+            );
+            if (fallback) {
+              labels.push(toCanvasLabelResponse(fallback));
+              continue;
+            }
+          }
+          throw error;
+        }
+      }
+
+      res.status(200).json({ labels });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to add label:', error);
+      res.status(500).json({ error: 'Failed to add canvas label' });
+    }
+  };
+
+  removeCanvasLabel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { canvasId } = req.params;
+      if (!canvasId) {
+        res.status(400).json({ error: 'Canvas ID is required' });
+        return;
+      }
+
+      const canonicalCanvasId = await this.assertCanvasAccess(req, res, canvasId, true);
+      if (!canonicalCanvasId) {
+        return;
+      }
+
+      const parsedBody = CanvasLabelIdsBodySchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'At least one label ID is required' });
+        return;
+      }
+
+      const userId = req.user!.id!;
+      const workspaceId = req.user!.workspaceId!;
+      const labelIds = Array.from(new Set(parsedBody.data.labelIds));
+
+      const existingRows = await tagRepository.findByIds(labelIds, workspaceId);
+      const removableIds = existingRows
+        .filter(
+          (row) =>
+            row.sourceId === canonicalCanvasId &&
+            row.sourceType === CANVAS_LABEL_SOURCE_TYPE &&
+            row.tagCategory === CANVAS_LABEL_CATEGORY
+        )
+        .map((row) => row.id);
+
+      await Promise.all(removableIds.map((id) => tagRepository.softDeleteTagRow(id, userId)));
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[CANVAS-LABELS] Failed to remove label:', error);
+      res.status(500).json({ error: 'Failed to remove canvas label' });
+    }
+  };
+
+  createCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -55,8 +632,8 @@ export class CanvasController {
             title,
             content: [],
             workspaceId: req.user!.workspaceId!,
-            createdBy: creatorId,  // <-- AUTHENTICATED USER
-            channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
+            createdBy: creatorId, // <-- AUTHENTICATED USER
+            channelId: channelId || null, // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
             isTemplate: false,
             isCollaborative: true,
@@ -71,7 +648,7 @@ export class CanvasController {
             id: participantId,
             canvasId,
             workspaceId: req.user!.workspaceId!,
-            userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
+            userId: creatorId, // <-- AUTHENTICATED USER IS OWNER
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
@@ -123,7 +700,7 @@ export class CanvasController {
         await canvasAuthService.requireEditAccess(canvasId, userId);
       } catch (error) {
         logger.warn(`[CANVAS-UPLOAD] Permission denied for user ${userId} on canvas ${canvasId}`, {
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(403).json({ error: 'Permission denied' });
@@ -151,7 +728,10 @@ export class CanvasController {
       const uploadResults = await uploadFiles([file]);
 
       if (!uploadResults || uploadResults.length === 0) {
-        logger.error('[CANVAS-UPLOAD] The file upload service did not return a valid result for file:', { fileName: file.originalname });
+        logger.error(
+          '[CANVAS-UPLOAD] The file upload service did not return a valid result for file:',
+          { fileName: file.originalname }
+        );
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
         return;
@@ -242,8 +822,15 @@ export class CanvasController {
         return;
       }
 
-      const { mentionType, mentionId, blockId, commentThreadId, canvasTitle, mentionContext, slackUrl } =
-        validatedBody.data;
+      const {
+        mentionType,
+        mentionId,
+        blockId,
+        commentThreadId,
+        canvasTitle,
+        mentionContext,
+        slackUrl,
+      } = validatedBody.data;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -283,7 +870,7 @@ export class CanvasController {
 
       // Resolve mentioned users
       const mentionedUsers: { userId: string; mentionSource: 'direct' | 'group' }[] = [];
-      
+
       if (mentionType === 'user' && mentionId !== userId) {
         mentionedUsers.push({ userId: mentionId, mentionSource: 'direct' });
       } else if (mentionType === 'group') {
@@ -301,8 +888,8 @@ export class CanvasController {
       }
 
       // Batch check canvas access for all mentioned users in a single query
-      const uniqueUserIds = [...new Set(mentionedUsers.map(u => u.userId))];
-      
+      const uniqueUserIds = [...new Set(mentionedUsers.map((u) => u.userId))];
+
       // Fetch canvas details, canvas participants, sender name, and mentioned users' emails in one batch
       const [canvas, canvasParticipants, sender, mentionedUserRecords] = await Promise.all([
         db.canvas.findUnique({
@@ -322,12 +909,11 @@ export class CanvasController {
           select: { id: true, email: true },
         }),
       ]);
-      
+
       // Determine which users have access (canvas creator or canvas participant)
-      const canvasParticipantIds = new Set(canvasParticipants.map(p => p.userId));
-      const usersWithAccessIds = uniqueUserIds.filter(uid => 
-        uid === canvas?.createdBy || 
-        canvasParticipantIds.has(uid)
+      const canvasParticipantIds = new Set(canvasParticipants.map((p) => p.userId));
+      const usersWithAccessIds = uniqueUserIds.filter(
+        (uid) => uid === canvas?.createdBy || canvasParticipantIds.has(uid)
       );
 
       if (usersWithAccessIds.length === 0) {
@@ -336,14 +922,17 @@ export class CanvasController {
       }
 
       // Filter to users with access and create activities
-      const mentionedUsersWithAccess = mentionedUsers.filter(u => usersWithAccessIds.includes(u.userId));
-      const activities = mentionedUsersWithAccess.map(u => ({
+      const mentionedUsersWithAccess = mentionedUsers.filter((u) =>
+        usersWithAccessIds.includes(u.userId)
+      );
+      const activities = mentionedUsersWithAccess.map((u) => ({
         id: uuidv4(),
         userId: u.userId,
         actorId: userId,
         actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
         actionSource: mentionContext === 'comment' ? 'canvas_comment' : 'canvas',
-        actionSourceId: mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
+        actionSourceId:
+          mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
         channelId: canvasChannelId ?? undefined,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
@@ -355,8 +944,8 @@ export class CanvasController {
       const usersWithAccessSet = new Set(usersWithAccessIds);
       const userEmailMap = new Map(
         mentionedUserRecords
-          .filter(u => u.email && usersWithAccessSet.has(u.id))
-          .map(u => [u.id, u.email!])
+          .filter((u) => u.email && usersWithAccessSet.has(u.id))
+          .map((u) => [u.id, u.email!])
       );
       const mentionedEmails = Array.from(userEmailMap.values());
 
@@ -378,12 +967,19 @@ export class CanvasController {
           blockId,
           commentThreadId,
           canvasChannelId ?? undefined,
-          mentionContext,
+          mentionContext
         );
 
-        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
+        slackRecipientEmails = getSlackRecipientEmails(
+          mentionedEmails,
+          deliveredUserIds,
+          userEmailMap
+        );
       } catch (error) {
-        logger.error('[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients', { error });
+        logger.error(
+          '[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients',
+          { error }
+        );
       }
 
       // Step 3: Send Slack notifications only to users who didn't receive app notification
@@ -391,7 +987,7 @@ export class CanvasController {
         slackRecipientEmails,
         senderName,
         canvasTitle ?? 'Canvas',
-        slackUrl!,
+        slackUrl!
       );
 
       res.status(200).json({
