@@ -175,9 +175,9 @@ export function createOAuth2Client(
   redirectUri?: string
 ): InstanceType<typeof google.auth.OAuth2> {
   return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri || process.env.GOOGLE_REDIRECT_URI || getGoogleIntegrationRedirectUri()
+    appConfig.email.clientId,
+    appConfig.email.clientSecret,
+    redirectUri || appConfig.google.redirectUri || getGoogleIntegrationRedirectUri()
   );
 }
 
@@ -705,7 +705,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
       const ticket = await oauth2Client.verifyIdToken({
         idToken: tokens.id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: appConfig.email.clientId,
       });
       const payload = ticket.getPayload();
       const emailAddress = payload?.email?.trim().toLowerCase();

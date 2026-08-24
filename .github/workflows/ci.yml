@@ -55,6 +55,12 @@ jobs:
       - name: Validate Zero <> Prisma column parity
         run: node scripts/validate-zero-column-parity.mjs --ci-mode
 
+      # Every process.env read should be declared in the Joi schema, and every
+      # declared key should appear in .env.example. The schema is `.unknown()`,
+      # so nothing else catches a variable that skips it.
+      - name: Env schema coverage
+        run: pnpm --filter xyne-spaces-backend run check:env-schema
+
       # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
       - name: Typecheck + build
         run: pnpm --filter xyne-spaces-backend run build

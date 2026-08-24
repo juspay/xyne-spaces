@@ -175,7 +175,7 @@ export class ConversationService {
    * Threshold is VESPA_BACKFILL_AGE_DAYS (default 365 days).
    */
   private pickVespaQueue(createdAt?: Date) {
-    const ageDays = Number(process.env.VESPA_BACKFILL_AGE_DAYS ?? 365);
+    const ageDays = config.vespa.backfillAgeDays;
     const thresholdMs = ageDays * 24 * 60 * 60 * 1000;
     const isHistorical = !!createdAt && createdAt.getTime() < Date.now() - thresholdMs;
     return isHistorical ? vespaBackfillQueue : vespaQueue;

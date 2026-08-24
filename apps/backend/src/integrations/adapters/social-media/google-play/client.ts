@@ -4,6 +4,7 @@ import type { ExternalSource } from '@prisma/client';
 import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { GOOGLE_PLAY_SCOPE } from './constants';
+import { config } from '@/config/env';
 
 const GOOGLE_PLAY_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -47,8 +48,8 @@ function timestampToDate(value?: androidpublisher_v3.Schema$Timestamp): Date {
 
 export class GooglePlayClient {
   private createOAuthClient(credentials?: GooglePlayCredentials, redirectUri?: string) {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const clientId = config.email.clientId;
+    const clientSecret = config.email.clientSecret;
     if (!clientId || !clientSecret) throw new Error('Google OAuth is not configured');
     const client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
     if (credentials) {

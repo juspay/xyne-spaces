@@ -8,7 +8,7 @@ import { classifyAndTagThread } from '@/services/messageClassification';
  * Wait this long before classifying. Short enough to read as immediate, long enough that a
  * burst of replies collapses into one pass instead of one call per message.
  */
-const DEBOUNCE_MS = Number(process.env['MESSAGE_CLASSIFICATION_DEBOUNCE_MS'] ?? 30_000);
+const DEBOUNCE_MS = config.messageClassifier.debounceMs;
 
 const QUEUE_NAME = 'message-classification';
 const JOB_NAME = 'classify-message';

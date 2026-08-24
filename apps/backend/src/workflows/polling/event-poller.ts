@@ -55,7 +55,7 @@ export class EventPoller {
   }
 
   private async pollAndPromote(): Promise<void> {
-    const allowedWorkflowType = process.env.WORKFLOW_TYPE
+    const allowedWorkflowType = appConfig.workers.type
     const waitingExecutions = await repositories.workflowExecutions.findByStatus(
       WorkflowExecutionStatus.WAIT_FOR_EVENT,
       allowedWorkflowType,

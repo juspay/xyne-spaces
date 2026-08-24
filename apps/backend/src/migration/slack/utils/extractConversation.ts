@@ -162,7 +162,7 @@ function toUnixTimestamp(dateInput: string): string {
  * Get Slack Web API client
  */
 function getSlackClient(): WebClient {
-  const token = process.env.SLACK_BOT_TOKEN;
+  const token = config.slackBotToken;
   if (!token) {
     throw new Error('SLACK_BOT_TOKEN environment variable is not set');
   }
@@ -514,7 +514,7 @@ async function getUserInfoInner(slackUID: string, cache: UserInfoCache, workspac
     });
   }
 
-  const token = botToken || process.env.SLACK_BOT_TOKEN;
+  const token = botToken || config.slackBotToken;
   if (!token) {
     throw new Error('No bot token available for user lookup');
   }
@@ -830,7 +830,7 @@ async function resolveHuddleParticipantName(uid: string, botToken?: string): Pro
     return huddleParticipantNameCache.get(uid)!;
   }
 
-  const token = botToken || process.env.SLACK_BOT_TOKEN || '';
+  const token = botToken || config.slackBotToken || '';
   let name: string | null = null;
   try {
     const info = await fetchSlackUserInfo(uid, token);
@@ -866,7 +866,7 @@ async function resolveHuddleRoom(room: any, botToken?: string): Promise<any> {
 }
 
 async function extractMessageContent(msg: any, isBotContext: boolean = false, botToken?: string, workspaceId?: string): Promise<string> {
-  const token = botToken || process.env.SLACK_BOT_TOKEN || '';
+  const token = botToken || config.slackBotToken || '';
 
   if (!isBotContext) {
     // Normal (human) messages: text plus any forwarded/shared attachments.

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { config } from '@/config/env';
 
 const ALGORITHM = 'aes-256-gcm';
 const VERSION = 2;
@@ -14,7 +15,7 @@ export interface CredentialEnvelope {
 }
 
 function encryptionKey(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY;
+  const raw = config.auth.encryptionKey;
   if (!raw) throw new Error('ENCRYPTION_KEY not found in environment variables');
   const key = Buffer.from(raw, 'hex');
   if (key.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex characters)');

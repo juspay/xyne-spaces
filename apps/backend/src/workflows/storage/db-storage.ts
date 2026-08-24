@@ -35,7 +35,6 @@ import {logger} from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
 import { getStorageService } from '@/services/storage';
-import { config } from '@/config/env';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose, AttachmentEntityType, MessageType, WorkflowExecutionMode } from '@xyne/shared';
 
@@ -215,7 +214,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
       // AGENTIC STEP: Create MessageAttachment entry ONCE
       const gcsPath = `workflows/${workflowExecutionId}/${stepName}.json`;
-      const gcsUrl = getStorageService(config.gcs.workflowStepsBucketName).buildStorageUri(gcsPath);
+      const gcsUrl = getStorageService(appConfig.gcs.workflowStepsBucketName).buildStorageUri(gcsPath);
 
       // Check if MessageAttachment already exists for this step
       const existingAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(
@@ -236,7 +235,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
           uploadedByUserId: 'system',
           createdBy: 'system',
           conversationId: null,
-          workspaceId: config.defaultWorkspaceId,
+          workspaceId: appConfig.defaultWorkspaceId,
           metadata: {
             workflowExecutionId,
             checkpointId: stepName,
@@ -1826,8 +1825,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
     try {
       // Import GCS service factory and config
       const { getStorageService } = await import('@/services/storage');
-      const { config } = await import('@/config/env');
-      const storageService = getStorageService(config.gcs.workflowStepsBucketName);
+      const storageService = getStorageService(appConfig.gcs.workflowStepsBucketName);
 
       // Try per-step file only: workflows/{executionId}/{checkpointId}.json
       const gcsPath = `workflows/${workflowExecutionId}/${checkpointId}.json`;
@@ -1889,7 +1887,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
       // Fetch from GCS using the attachment URL
       const { getStorageService } = await import('@/services/storage');
-      const storageService = getStorageService(config.gcs.workflowStepsBucketName);
+      const storageService = getStorageService(appConfig.gcs.workflowStepsBucketName);
 
       for (const attachment of attachments) {
         if (attachment.url && attachment.url.startsWith('gs://')) {

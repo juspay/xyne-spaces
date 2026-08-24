@@ -47,7 +47,7 @@ let _parsed: BotConfigMap | null = null;
 function getParsedConfigs(): BotConfigMap {
   if (_parsed) return _parsed;
 
-  const raw = process.env.MIGRATION_SLACK_BOT_CONFIGS || '{}';
+  const raw = config.migrationSlackBotConfigs || '{}';
   try {
     const parsed = JSON.parse(raw) as BotConfigMap;
 

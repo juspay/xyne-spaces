@@ -16,6 +16,7 @@ import {
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt } from './prompt';
+import { config } from '@/config/env';
 
 const TAG = '[MessageClassification]';
 
@@ -25,7 +26,7 @@ const TAG = '[MessageClassification]';
  * threshold no longer buys anything, and a one-message thread still has a clear type.
  */
 export const MIN_THREAD_SIZE = Number(
-  process.env['MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE'] ?? 1,
+  config.messageClassifier.minThreadSize ?? 1,
 );
 
 /** Upper bound on messages sent to the model in one pass. */
@@ -149,7 +150,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   });
   const rootIsBot = rootMessage?.msgType === 'BOT';
 
-  const modelName = process.env['MESSAGE_CLASSIFIER_MODEL'] ?? 'gpt-4o-mini';
+  const modelName = config.messageClassifier.model ?? 'gpt-4o-mini';
   const { acts, threadTypes } = await classifyThread(
     {
       thread_messages: threadMessages,

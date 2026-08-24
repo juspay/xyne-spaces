@@ -4,6 +4,7 @@ import pLimit from 'p-limit';
 import { consoleLogger, getErrorMessage } from '../utils';
 import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
 import type { InsertDocument, VespaSchema } from '../types';
+import { config as appConfig } from '@/config/env';
 
 type VespaConfigValues = {
   namespace?: string;
@@ -67,7 +68,7 @@ class VespaClient {
     // (update/delete) and queries are unaffected. Tunable via VESPA_FEED_TIMEOUT_MS;
     // keep it >= the gateway timeout in front of Vespa so the gateway decides first.
     this.feedTimeoutMs =
-      config?.feedTimeoutMs ?? (Number(process.env.VESPA_FEED_TIMEOUT_MS) || 180_000);
+      config?.feedTimeoutMs ?? appConfig.vespa.feedTimeoutMs;
 
     this.concurrencyLimit = pLimit(config?.maxConcurrentRequests || 10);
 

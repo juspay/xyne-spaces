@@ -2,6 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { parseNotificationKeywords, NotificationLevel, NotificationType } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -20,7 +21,7 @@ const DEFAULT_DM_NOTIFICATION_LEVEL: NotificationLevel = NotificationLevel.ALL;
 // the mobile list. Empty env (the default) makes this a zero-cost no-op, so prod
 // logs are never flooded for the full recipient set of a channel-wide message.
 const NOTIFICATION_TRACE_USER_IDS: ReadonlySet<string> = new Set(
-  (process.env.NOTIFICATION_TRACE_USER_IDS ?? '')
+  (config.observability.notificationTraceUserIds ?? '')
     .split(',')
     .map(id => id.trim())
     .filter(Boolean),

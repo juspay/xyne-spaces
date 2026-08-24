@@ -16,6 +16,7 @@ import {
   getCallJobs
 } from '@/services/otel';
 import { repositories } from '@/database/repositories';
+import { config } from '@/config/env';
 
 // Utility function
 function getMessageTypeFromEvent(eventType: string | undefined): 'dm' | 'channel' {
@@ -34,10 +35,10 @@ export class NotificationWorker {
   constructor() {
     // Use the same Redis configuration as redisService
     const redisConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-      ...(process.env.REDIS_TLS === 'true' && {
+      host: config.redis.host || 'localhost',
+      port: config.redis.port,
+      ...(config.redis.password && { password: config.redis.password }),
+      ...(config.redis.tls && {
         tls: {
           rejectUnauthorized: false
         }

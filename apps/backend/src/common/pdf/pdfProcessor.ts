@@ -145,16 +145,14 @@ const getErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
 function getConfiguredDoclingBaseTimeoutMs(): number {
-  const raw = process.env.DOCLING_TIMEOUT_MS
-  if (!raw) return DEFAULT_DOCLING_TIMEOUT_FALLBACK_MS
-  const parsed = Number.parseInt(raw, 10)
+  const parsed = config.docling.timeoutMs
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DOCLING_TIMEOUT_FALLBACK_MS
 }
 
 const DOCLING_BASE_TIMEOUT_MS = getConfiguredDoclingBaseTimeoutMs()
 
 const getDoclingTempRoot = (): string => {
-  const dir = process.env.DOCLING_TEMP_RESULTS_DIR || config.doclingScheduler.storageRoot
+  const dir = config.docling.tempResultsDir || config.doclingScheduler.storageRoot
   return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir)
 }
 
@@ -165,7 +163,7 @@ const writeJsonAtomically = async (targetPath: string, payload: unknown) => {
 }
 
 const getQpdfTimeoutMs = (): number => {
-  const parsed = Number.parseInt(process.env.QPDF_TIMEOUT_MS || '', 10)
+  const parsed = config.pdf.qpdfTimeoutMs;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000
 }
 

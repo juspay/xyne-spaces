@@ -23,7 +23,7 @@ export class JwtService {
   private readonly audience = 'xyne-user';
 
   constructor() {
-    const secret = process.env.JWT_SECRET;
+    const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }

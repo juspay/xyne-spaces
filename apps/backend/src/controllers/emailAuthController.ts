@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { config } from '@/config/env';
 import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
@@ -233,7 +234,7 @@ export class EmailAuthController {
             10 * 60,
           );
 
-          const isProduction = process.env.NODE_ENV === 'production';
+          const isProduction = config.env === 'production';
           const cookieBase = {
             httpOnly: true,
             secure: isProduction,
@@ -253,7 +254,7 @@ export class EmailAuthController {
                 accessToken: null,
                 jwtId: pendingAuthJwtId,
               },
-              process.env.JWT_SECRET!,
+              config.jwt.secret!,
               { expiresIn: '10m' },
             ),
             {
@@ -289,7 +290,7 @@ export class EmailAuthController {
             10 * 60,
           );
 
-          const isProduction = process.env.NODE_ENV === 'production';
+          const isProduction = config.env === 'production';
           const cookieBase = {
             httpOnly: true,
             secure: isProduction,
@@ -309,7 +310,7 @@ export class EmailAuthController {
                 accessToken: null,
                 jwtId: pendingAuthJwtId,
               },
-              process.env.JWT_SECRET!,
+              config.jwt.secret!,
               { expiresIn: '10m' },
             ),
             {
@@ -353,7 +354,7 @@ export class EmailAuthController {
       }
 
       // Cookie base (used below for both invitation-pending and normal flows)
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = {
         httpOnly: true,
         secure: isProduction,
@@ -387,7 +388,7 @@ export class EmailAuthController {
               accessToken: null,
               jwtId: pendingAuthJwtId,
             },
-            process.env.JWT_SECRET!,
+            config.jwt.secret!,
             { expiresIn: '10m' },
           ),
           {
@@ -1138,7 +1139,7 @@ export class EmailAuthController {
         10 * 60,
       );
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = {
         httpOnly: true,
         secure: isProduction,
@@ -1158,7 +1159,7 @@ export class EmailAuthController {
             accessToken: null,
             jwtId: pendingAuthJwtId,
           },
-          process.env.JWT_SECRET!,
+          config.jwt.secret!,
           { expiresIn: '10m' },
         ),
         {
