@@ -1,4 +1,5 @@
 import React, { ReactElement } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { PhoneDefault, PhoneCancel } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
@@ -19,6 +20,7 @@ interface CallTriggerProps {
   participantCount?: number | undefined;
   callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
   isMember: boolean; // Whether the current user is a member of the channel
 }
 
@@ -43,6 +45,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   participantCount,
   callDisplayName,
   conversationId,
+  sdlcLink,
   isMember,
 }) => {
   const {
@@ -56,6 +59,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
     targetUserIds,
     callDisplayName,
     conversationId,
+    sdlcLink,
   });
 
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =

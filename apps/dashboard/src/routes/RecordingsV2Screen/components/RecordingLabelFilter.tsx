@@ -4,7 +4,7 @@ import { SearchableMultiSelect } from '../../../components/ui/SearchableMultiSel
 import type { SearchableMultiSelectOption } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import { Button } from '../../../components/ui/Button/Button';
 import { cn } from '../../../utils/classNames';
-import { getRecordingTagDotColor } from '../../../utils/recordingUtils';
+import { getTagDotColor } from '../../../utils/tagTheme';
 
 interface RecordingLabelFilterProps {
   labels: string[];
@@ -37,7 +37,7 @@ export function RecordingLabelFilter({
           label: displayLabel,
           icon: (
             <span
-              className={cn('size-2 shrink-0 rounded-full', getRecordingTagDotColor(displayLabel))}
+              className={cn('size-2 shrink-0 rounded-full', getTagDotColor(displayLabel))}
               aria-hidden='true'
             />
           ),

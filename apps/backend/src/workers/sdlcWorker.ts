@@ -3,7 +3,6 @@ import { config } from '@/config/env';
 import { sdlcAdmission } from '@/queues/sdlcAdmission';
 import { sdlcQueue, type SdlcJobData } from '@/queues/sdlcQueue';
 import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
-import { sdlcVcs } from '@/sdlc/vcs/SdlcVcsService';
 import { sdlcWikiExecutionService } from '@/sdlc/wiki/SdlcWikiExecutionService';
 import { logger } from '@/utils/logger';
 
@@ -51,6 +50,18 @@ class SdlcWorker {
   }
 
   private async process(job: Bull.Job<SdlcJobData>): Promise<unknown> {
+    // Redis is not typed: an access-check job left from before they moved inline would
+    // otherwise fall through to the WIKI branch with an undefined executionId.
+    if (!['SETUP', 'WORK', 'WIKI'].includes(job.data.type)) {
+      logger.warn('[SDLC-WORKER] discarding unsupported job', {
+        jobId: job.id,
+        type: job.data.type,
+      });
+      job.discard();
+      await sdlcAdmission.unregisterPending(job.data.repoId, String(job.id));
+      return { discarded: true };
+    }
+
     const permit = await sdlcAdmission.tryAcquire({
       repoId: job.data.repoId,
       jobId: String(job.id),
@@ -73,27 +84,10 @@ class SdlcWorker {
       await sdlcAdmission.unregisterPending(job.data.repoId, String(job.id));
       if (job.data.type === 'WIKI') {
         await sdlcWikiExecutionService.failDispatch(job.data.executionId, error);
-      } else if (job.data.type !== 'ACCESS_CHECK') {
+      } else {
         await sdlcClawExecutionService.failDispatch(job.data.executionId, error);
       }
       throw error;
-    }
-
-    if (job.data.type === 'ACCESS_CHECK') {
-      try {
-        return await sdlcVcs.performRepositoryCheck(job.data);
-      } catch (error) {
-        const realFailures = (job.data.realFailures ?? 0) + 1;
-        await job.update({ ...job.data, realFailures });
-        if (realFailures >= 3) {
-          job.discard();
-        } else {
-          await sdlcAdmission.registerPending(job.data.repoId, String(job.id));
-        }
-        throw error;
-      } finally {
-        await sdlcAdmission.release(permit.permitId);
-      }
     }
 
     try {

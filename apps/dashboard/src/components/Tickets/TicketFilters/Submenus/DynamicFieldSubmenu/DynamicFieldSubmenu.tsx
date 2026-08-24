@@ -112,7 +112,11 @@ export const DynamicFieldSubmenu = ({
             </div>
           )}
         </div>
-        <div className='max-h-80 overflow-y-auto p-1'>
+        <div
+          className='max-h-80 overflow-y-auto p-1'
+          onWheel={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+        >
           {filteredOptions.length > 0 ? (
             <div className='space-y-0.5'>
               {filteredOptions.map(option => {

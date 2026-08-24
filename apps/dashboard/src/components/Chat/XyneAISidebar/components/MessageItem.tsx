@@ -137,6 +137,9 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   if (citation.kind === 'canvas') {
     return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
   }
+  if (citation.kind === 'recording') {
+    return citation.label ? `Recording — ${citation.label}` : 'Recording';
+  }
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
   }
