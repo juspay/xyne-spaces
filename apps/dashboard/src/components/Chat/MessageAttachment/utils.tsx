@@ -10,8 +10,6 @@ import { downloadFile } from '../../../services/clients/fileFetchService';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { JSX } from 'react/jsx-runtime';
 
-
-
 export interface AttachmentViewerRawAttachment {
   id: string;
   originalFilename: string;
