@@ -12,9 +12,17 @@ export interface ActEntry {
   description: string;
 }
 
+/**
+ * Which of the three independent axes a thread type belongs to. Explicit rather than
+ * positional: the prompt generates one section per axis, and deriving that from array
+ * position meant every insertion silently reshuffled the prompt.
+ */
+export type ThreadAxis = 'outcome' | 'answer' | 'signal';
+
 export interface VocabularyEntry extends ActEntry {
   label: string;
   color: string;
+  axis: ThreadAxis;
 }
 
 /**
@@ -60,23 +68,25 @@ export const MESSAGE_ACTS: readonly ActEntry[] = [
 ];
 
 /**
- * How a thread is classified, on two independent axes that share this one vocabulary.
+ * How a thread is classified, on three independent axes that share this one vocabulary.
  *
- * The first seven are OUTCOME types — what "done" would mean for the thread. A thread
- * carries exactly one.
+ * OUTCOME types are what "done" would mean for the thread. A thread carries exactly one.
  *
- * The rest are ANSWER types — what question the thread's content answers for someone who
- * was never in it. A thread carries any number, and most carry none: the bar is that a
- * reader could get their question answered by this thread alone, so tag what it answers,
- * not what it discusses.
+ * ANSWER types are what question the thread's content answers for someone who was never in
+ * it. A thread carries any number, and most carry none: the bar is that a reader could get
+ * their question answered by this thread alone, so tag what it answers, not what it
+ * discusses.
  *
- * The two are independent — a thread can be an ISSUE whose resolution is also a HOW_TO.
+ * SIGNAL types rate how valuable the thread is and to whom, independent of what it answers.
+ * A thread can be an ISSUE that is also a HOW_TO and also a GOLD_NUGGET.
+ *
  * Descriptions are prompt copy, so the "not" clauses matter as much as the definitions:
  * near-misses are what the classifier gets wrong, and each one here is load-bearing.
  */
 export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'ISSUE',
+    axis: 'outcome',
     label: 'Issue',
     color: '#ef4444',
     description:
@@ -84,6 +94,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'ALERT',
+    axis: 'outcome',
     label: 'Alert',
     color: '#f59e0b',
     description:
@@ -91,6 +102,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'QUESTION',
+    axis: 'outcome',
     label: 'Question',
     color: '#f97316',
     description:
@@ -98,6 +110,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'REQUEST',
+    axis: 'outcome',
     label: 'Request',
     color: '#3b82f6',
     description:
@@ -105,6 +118,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'FEATURE_REQUEST',
+    axis: 'outcome',
     label: 'Feature request',
     color: '#8b5cf6',
     description:
@@ -112,6 +126,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'DISCUSSION',
+    axis: 'outcome',
     label: 'Discussion',
     color: '#6b7280',
     description:
@@ -119,6 +134,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'ANNOUNCEMENT',
+    axis: 'outcome',
     label: 'Announcement',
     color: '#14b8a6',
     description:
@@ -131,6 +147,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   // ─── Answer types — what a reader could learn from this thread ──────────────
   {
     name: 'HOW_TO',
+    axis: 'answer',
     label: 'How-to',
     color: '#0891b2',
     description:
@@ -143,6 +160,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'WHAT_HAPPENED',
+    axis: 'answer',
     label: 'What happened',
     color: '#b45309',
     description:
@@ -154,6 +172,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'WHY_DECISION',
+    axis: 'answer',
     label: 'Why (decision)',
     color: '#4f46e5',
     description:
@@ -164,6 +183,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'WHAT_IS',
+    axis: 'answer',
     label: 'What is',
     color: '#059669',
     description:
@@ -175,6 +195,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'KNOWN_ISSUE',
+    axis: 'answer',
     label: 'Known issue',
     color: '#be123c',
     description:
@@ -185,6 +206,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'REFERENCE',
+    axis: 'answer',
     label: 'Reference',
     color: '#334155',
     description:
@@ -196,6 +218,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'EXAMPLE',
+    axis: 'answer',
     label: 'Example',
     color: '#65a30d',
     description:
@@ -206,6 +229,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   },
   {
     name: 'POLICY_LIMIT',
+    axis: 'answer',
     label: 'Policy / limit',
     color: '#c026d3',
     description:
@@ -213,6 +237,34 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
       'durations, rate limits, settlement cutoffs, retry policies, compliance thresholds. NOT a ' +
       'limit being asked about, disputed or guessed at ("I think it is 15K?"), NOT a limit ' +
       'being breached during an incident (that is WHAT_HAPPENED).',
+  },
+
+  // ─── Signal types — how valuable the thread is, and to whom ─────────────────
+  {
+    name: 'GOLD_NUGGET',
+    axis: 'signal',
+    label: 'Gold nugget',
+    color: '#a16207',
+    description:
+      'An advanced, non-obvious insight worth keeping: a solution to a genuinely hard ' +
+      'technical or operational problem, the deep "why" behind a counter-intuitive design ' +
+      'choice or system behaviour, a hard-fought lesson learned, an edge-case bug diagnosis, ' +
+      'or a masterclass-level breakdown. High-signal and reference-worthy even when only ' +
+      'domain experts would need it. NOT routine updates, NOT a bare PR or doc link, NOT a ' +
+      'simple QA answer, NOT a mandatory operational policy (that is POLICY_LIMIT).',
+  },
+  {
+    name: 'MUST_READ',
+    axis: 'signal',
+    label: 'Must read',
+    color: '#b91c1c',
+    description:
+      'Critical baseline knowledge essential for onboarding or daily execution: a major ' +
+      'architectural shift, a breaking change, a core system workflow, or a team-wide ' +
+      'standard, security protocol or production safety guideline. Applies broadly to the ' +
+      'whole engineering or product team rather than a small subset of experts. NOT ' +
+      'specialised edge-case debugging or a deep optional write-up (that is GOLD_NUGGET), ' +
+      'NOT casual channel banter.',
   },
 ];
 
@@ -241,7 +293,7 @@ export const MESSAGE_ACT_NAMES = [
 /**
  * Thread types as a const tuple — z.enum needs a literal tuple. Order is display order, and
  * it is also the chip sort order via `rank()` in both mutator copies, so outcome types stay
- * first and answer types trail them.
+ * first, answer types follow, and signal types trail them.
  */
 export const THREAD_TYPE_NAMES = [
   'ISSUE',
@@ -259,8 +311,14 @@ export const THREAD_TYPE_NAMES = [
   'REFERENCE',
   'EXAMPLE',
   'POLICY_LIMIT',
+  'GOLD_NUGGET',
+  'MUST_READ',
 ] as const;
 
 /** Built-in thread type by name; undefined for a free-form tag. */
 export const threadTypeEntry = (name: string): VocabularyEntry | undefined =>
   THREAD_TYPES.find(entry => entry.name === name);
+
+/** Thread types on one axis, in declaration order. Used to generate the prompt sections. */
+export const threadTypesByAxis = (axis: ThreadAxis): readonly VocabularyEntry[] =>
+  THREAD_TYPES.filter(entry => entry.axis === axis);

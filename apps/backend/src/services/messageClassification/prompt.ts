@@ -1,4 +1,4 @@
-import { MESSAGE_ACTS, NO_ACT, THREAD_TYPES } from '@xyne/shared';
+import { MESSAGE_ACTS, NO_ACT, THREAD_TYPES, threadTypesByAxis } from '@xyne/shared';
 
 /**
  * The classifier prompt is GENERATED from the vocabularies rather than written out by hand,
@@ -16,6 +16,20 @@ const numbered = (entries: readonly { name: string; description: string }[]): st
 
 const ACT_NAMES = MESSAGE_ACTS.map(entry => entry.name);
 const THREAD_TYPE_CHOICES = THREAD_TYPES;
+
+/**
+ * Axis membership is read off the vocabulary rather than spelled out here, for the same
+ * reason the tag list is: a hand-written "any of A, B, C" in the prose silently stops
+ * matching the moment someone adds an entry.
+ */
+const names = (axis: Parameters<typeof threadTypesByAxis>[0]): string =>
+  threadTypesByAxis(axis)
+    .map(entry => entry.name)
+    .join(', ');
+
+const OUTCOME_NAMES = names('outcome');
+const ANSWER_NAMES = names('answer');
+const SIGNAL_NAMES = names('signal');
 
 export const buildClassifierPrompt = (): string => `You classify workplace chat messages.
 
@@ -72,13 +86,13 @@ dominant act.
 
 ## Second task — the thread as a whole
 
-Also classify the ENTIRE thread, on TWO independent axes.
+Also classify the ENTIRE thread, on THREE independent axes.
 
 ${numbered(THREAD_TYPE_CHOICES)}
 
 ### Axis 1 — outcome (one, rarely two)
 
-Pick ONE of ISSUE, ALERT, QUESTION, REQUEST, FEATURE_REQUEST, DISCUSSION, ANNOUNCEMENT by
+Pick ONE of ${OUTCOME_NAMES} by
 what "done" would mean for the thread. Return a second one only when the thread genuinely
 is two things at once (a bug report that also requests a feature) — never more than two.
 
@@ -97,9 +111,8 @@ When no other type fits, DISCUSSION.
 
 ### Axis 2 — answer types (usually NONE)
 
-Then add any of HOW_TO, WHAT_HAPPENED, WHY_DECISION, WHAT_IS, KNOWN_ISSUE, REFERENCE,
-EXAMPLE, POLICY_LIMIT that apply. These are independent of the outcome — an ISSUE whose
-resolution spells out the fix is both ISSUE and HOW_TO.
+Then add any of ${ANSWER_NAMES} that apply. These are independent of the outcome — an ISSUE
+whose resolution spells out the fix is both ISSUE and HOW_TO.
 
 The bar is high and most threads clear none of it: add one ONLY if someone who was never in
 this thread could get their question answered by THIS THREAD ALONE. Tag what the thread
@@ -113,10 +126,31 @@ WHY_DECISION, and a value someone is unsure about is not POLICY_LIMIT.
 
 ANNOUNCEMENT is an outcome, not an answer type — a release note is ANNOUNCEMENT alone.
 
+### Axis 3 — significance (usually none)
+
+Finally, add any of ${SIGNAL_NAMES} that apply. These rate how VALUABLE the thread is and to
+whom — not what it answers — so they are independent of both axes above and of each other. A
+thread can be an ISSUE, a HOW_TO and a GOLD_NUGGET at once.
+
+Judge the thread's best content, not its average: one masterclass reply in an otherwise
+ordinary thread still earns GOLD_NUGGET.
+
+These two are not a quality score to sprinkle on anything useful, and they are not
+interchangeable — they differ in WHO needs the thread:
+- GOLD_NUGGET is deep and narrow: hard-won expertise a specialist would want, even if most
+  of the team never needs it.
+- MUST_READ is broad and basic: baseline knowledge nearly everyone on the team needs, even
+  when the content itself is not technically deep.
+
+A thread that is merely correct, helpful, or well written earns neither. The great majority
+of threads get none of these — returning none is the normal, correct outcome. Do not add one
+to look thorough, and do not add both unless the thread genuinely is deep expertise AND
+team-wide required reading.
+
 ## Output
 
 {
-  "threadTypes": [the outcome type first, then any answer types — from ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
+  "threadTypes": [the outcome type first, then any answer types, then any significance types — from ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
   "classifications": [
     { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}, or exactly ["${NO_ACT}"]] }
   ]
