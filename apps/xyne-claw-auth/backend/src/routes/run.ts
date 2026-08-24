@@ -180,8 +180,6 @@ type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automati
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
-  if (requested === "api") return "api";
-  if (requested === "chat") return "chat";
   if (eventType === "automation") return "automation";
   if (eventType === "scheduled_job") return "scheduled";
   return "spaces";
@@ -1306,6 +1304,19 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             };
           }
           effectiveProviderOrder = [];
+        } else if (runOverride.provider === "litellm" && runOverride.model?.trim()) {
+          // No agent litellm credential — the pick came off the platform
+          // allowed-model list (litellm-models' claw fallback). Apply it as a
+          // "spaces" pin so it still takes effect instead of silently no-oping.
+          effectiveProvider = "spaces";
+          mergedAgentConfig = {
+            ...mergedAgentConfig,
+            modelSettings: {
+              ...((mergedAgentConfig["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+              model: runOverride.model.trim(),
+            },
+          };
+          effectiveProviderOrder = [];
         }
       }
     }
@@ -1350,7 +1361,6 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           spacesAppId: agent.spacesAppId ?? "",
           spacesAppUserId: agent.spacesAppUserId ?? "",
           rootAgentSlug: agentSlug || "assistant",
-          triggerSource: defaultTriggerSource,
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),
           ...(defaultTriggerSource === "slack" && slackDelivery ? { slackDelivery } : {}),
