@@ -12,7 +12,7 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { Channel } from '@xyne/shared';
-import { useCmdkDefaultRankProfiles } from '../../../hooks/useCmdkSearchConfig';
+import { useCmdkDefaultRankProfiles, cmdkTabKeyForDocType } from '../../../hooks/useCmdkSearchConfig';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
@@ -253,7 +253,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const isRankActive = filters.rankProfile !== '';
   const rankProfileLabel =
     rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ??
-    defaultRankProfileFor(filters.docType);
+    defaultRankProfileFor(cmdkTabKeyForDocType(filters.docType));
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';

@@ -388,6 +388,11 @@ export class SearchService {
           channelWeights = userDoc?.fields?.channelWeights || {};
           userWeights = userDoc?.fields?.userWeights || {};
           personalizationUserEmail = userDoc?.fields?.email || undefined;
+          if (!personalizationUserEmail) {
+            // mail's involvement (B1) rank terms bind the caller's email; without it they are
+            // skipped and mail personalization silently degrades to channel affinity only.
+            this.logger.warn(`No email on Vespa user doc ${userId}; mail involvement rank terms skipped`);
+          }
           this.logger.info(`Fetched personalization weights for user ${userId}`);
         } catch (error) {
           this.logger.warn(

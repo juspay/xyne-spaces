@@ -44,7 +44,15 @@ export function useCmdkDefaultRankProfiles(): (tab: string) => string {
   }, [config]);
 }
 
-/** Legacy accessor for the ALL tab, used by SearchFilterBar's label. */
-export function useCmdkAllDefaultRankProfile(): string {
-  return useCmdkDefaultRankProfiles()('all');
+/**
+ * tabDefaultRankProfiles is keyed by TabType value, but SearchFilterBar works in docType
+ * vocabulary ('files', 'people') which differs for two tabs. Normalize so one CAC spelling
+ * (the TabType one) governs both the search behavior and the filter-chip label.
+ */
+const DOC_TYPE_TO_TAB_KEY: Record<string, string> = {
+  files: 'attachments',
+  people: 'users',
+};
+export function cmdkTabKeyForDocType(docType: string): string {
+  return DOC_TYPE_TO_TAB_KEY[docType] ?? docType;
 }
