@@ -17,7 +17,7 @@ function normalizeOption(option: unknown): string | UserQuestionOption | null {
 }
 
 export const ASK_QUESTION_CONFIG_SCHEMA = {
-  CLAW_AUTH_URL: {
+  XYNE_CLAW_AUTH_URL: {
     label: "Claw Auth Service URL",
     default: "http://localhost:3003",
     required: true as const,
@@ -77,7 +77,19 @@ export const askUserQuestion: ToolDefinition = {
     if (new Set(questions.map(question => question.id)).size !== questions.length) return "Error: each question id must be unique.";
 
     const meta = context.meta ?? {};
-    const authUrl = context.config["CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    // XYNE_CLAW_AUTH_URL is the name every deployment actually exports (and what
+    // every other tool reads). CLAW_AUTH_URL is in PLATFORM_ONLY_CONFIG_KEYS, so
+    // it can never come from agent config, and no manifest sets it — in prod it
+    // always fell through to localhost:3003, where nothing listens, and the POST
+    // died as an opaque "fetch failed". The old key stays in the chain for any
+    // environment still exporting it.
+    const authUrl = (
+      context.config["XYNE_CLAW_AUTH_URL"] ??
+      process.env["XYNE_CLAW_AUTH_URL"] ??
+      context.config["CLAW_AUTH_URL"] ??
+      process.env["CLAW_AUTH_URL"] ??
+      "http://localhost:3003"
+    ).replace(/\/+$/, "");
     const questionId = crypto.randomUUID();
 
     // Store question in xyne-claw-auth Redis
@@ -108,7 +120,13 @@ export const askUserQuestion: ToolDefinition = {
       const data = (await res.json()) as { success: boolean; error?: string };
       if (!data.success) return `Error storing question: ${data.error ?? "unknown"}`;
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      // undici collapses every network-level failure into a bare "fetch failed";
+      // the actual reason (ECONNREFUSED, DNS, TLS) only lives on .cause. Include
+      // the target so a misconfigured URL is visible from the tool result alone.
+      const message = err instanceof Error ? err.message : String(err);
+      const cause =
+        err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+      return `Error posting question to ${authUrl}: ${message}${cause}`;
     }
 
     // Push to pendingQuestions collector so it's included in callback
