@@ -2768,6 +2768,7 @@ model EntityAccess {
   channelId           String?  // Shared with a channel (no FK constraint)
 
   entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  metadata            Json?    // Share-specific metadata
   createdAt           DateTime @default(now())
   updatedAt           DateTime
 

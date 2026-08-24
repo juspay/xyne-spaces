@@ -4,6 +4,7 @@ import {
   addReplyToData,
   EntityUserAccess,
   parseRepliesMd,
+  serializeInitialMessageMd,
   serializeRepliesMd,
   ShareableEntityType,
   type GrantableEntityUserAccess,
@@ -12,8 +13,10 @@ import {
   ConversationParticipation,
   MessageType,
 } from '@xyne/shared';
-import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
+import { sanitizeMessageContent } from '@/utils/contentUtils';
+import { logger } from '@/utils/logger';
 import {
   recordingSharingNotificationService,
   type RecordingAccessActivity,
@@ -29,6 +32,8 @@ export type RecordingSharingCommand =
       action: 'grant';
       targets: RecordingShareTarget[];
       access?: GrantableEntityUserAccess;
+      /** Optional share message. */
+      messageContent?: string;
     }
   | { action: 'revoke'; targets: RecordingShareTarget[] }
   | { action: 'link_ticket'; ticketId: string }
@@ -52,12 +57,21 @@ interface LoadedRecording {
   title: string | null;
   metadata: Prisma.JsonValue;
   createdByUserId: string;
+  startedAt: Date;
+  endedAt: Date | null;
 }
 
 interface AccessChange {
   share: EntityAccess;
   activated: boolean;
 }
+
+type RecordingShareIntent = 'direct_share' | 'ticket_link';
+
+const RECORDING_SHARE_INTENT = {
+  DIRECT_SHARE: 'direct_share',
+  TICKET_LINK: 'ticket_link',
+} as const satisfies Record<string, RecordingShareIntent>;
 
 export class RecordingSharingError extends Error {
   constructor(
@@ -69,18 +83,38 @@ export class RecordingSharingError extends Error {
   }
 }
 
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
 const asMetadata = (value: Prisma.JsonValue): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+// Posted conversation details stored on the access row.
+interface SharePost {
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+}
+
+const getShareIntent = (value: Prisma.JsonValue): RecordingShareIntent | null => {
+  const intent = asMetadata(value)['intent'];
+  return intent === RECORDING_SHARE_INTENT.DIRECT_SHARE ||
+    intent === RECORDING_SHARE_INTENT.TICKET_LINK
+    ? intent
+    : null;
+};
+
+const asSharePost = (value: Prisma.JsonValue): SharePost | null => {
+  const record = asMetadata(value);
+  return typeof record['channelId'] === 'string' &&
+    typeof record['conversationId'] === 'string' &&
+    typeof record['messageId'] === 'string'
+    ? {
+        channelId: record['channelId'],
+        conversationId: record['conversationId'],
+        messageId: record['messageId'],
+      }
+    : null;
+};
 
 const targetWhere = (target: RecordingShareTarget): Prisma.EntityAccessWhereInput =>
   target.type === 'user'
@@ -106,7 +140,13 @@ export class RecordingSharingService {
   ): Promise<RecordingSharingResult> {
     switch (command.action) {
       case 'grant':
-        return this.grant(callId, actor, command.targets, command.access ?? EntityUserAccess.VIEW);
+        return this.grant(
+          callId,
+          actor,
+          command.targets,
+          command.access ?? EntityUserAccess.VIEW,
+          command.messageContent,
+        );
       case 'revoke':
         return this.revoke(callId, actor, command.targets);
       case 'link_ticket':
@@ -121,7 +161,22 @@ export class RecordingSharingService {
     actor: RecordingSharingActor,
     targets: RecordingShareTarget[],
     access: GrantableEntityUserAccess,
+    messageContent?: string,
   ): Promise<RecordingSharingResult> {
+    // Resolve user DM channels before the transaction.
+    const dmChannelIds = new Map<string, string>();
+    for (const target of targets) {
+      if (target.type === 'user') {
+        const channelId = await repositories.channels.findOrCreateDMChannel(
+          actor.userId,
+          [target.id],
+          repositories.channelParticipants,
+          actor.workspaceId,
+        );
+        dmChannelIds.set(target.id, channelId);
+      }
+    }
+
     const { shares, activities } = await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
       await this.validateTargets(tx, recording, actor.workspaceId, targets);
@@ -129,10 +184,44 @@ export class RecordingSharingService {
       const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
       const activities: RecordingAccessActivity[] = [];
       for (const target of targets) {
-        const change = await this.setAccess(tx, recording, actor.workspaceId, target, access);
+        const change = await this.setAccess(
+          tx,
+          recording,
+          actor.workspaceId,
+          target,
+          access,
+          RECORDING_SHARE_INTENT.DIRECT_SHARE,
+        );
         shares.push({ id: change.share.id, target, access: change.share.entityUserAccess });
         if (change.activated && target.type !== 'channel') {
           activities.push({ shareId: change.share.id, action: 'recording_shared' });
+        }
+
+        // Post once for channel and user shares.
+        if (
+          (target.type === 'channel' || target.type === 'user') &&
+          !asSharePost(change.share.metadata)
+        ) {
+          const channelId = target.type === 'channel' ? target.id : dmChannelIds.get(target.id);
+          if (!channelId) {
+            throw new RecordingSharingError('Unable to resolve DM channel for user', 500);
+          }
+          const post = await this.createRecordingPostMessage(
+            tx,
+            recording,
+            actor,
+            channelId,
+            messageContent,
+          );
+          await tx.entityAccess.update({
+            where: { id: change.share.id },
+            data: {
+              metadata: {
+                intent: RECORDING_SHARE_INTENT.DIRECT_SHARE,
+                ...post,
+              } as Prisma.InputJsonValue,
+            },
+          });
         }
       }
       return { shares, activities };
@@ -142,78 +231,246 @@ export class RecordingSharingService {
     return { action: 'grant', shares };
   }
 
+  /** Creates the recording share conversation. */
+  private async createRecordingPostMessage(
+    tx: Prisma.TransactionClient,
+    recording: LoadedRecording,
+    actor: RecordingSharingActor,
+    channelId: string,
+    messageContent?: string,
+  ): Promise<SharePost> {
+    const conversationId = randomUUID();
+    const messageId = randomUUID();
+    const title = recording.title?.trim() || 'Untitled Recording';
+    // Store the recording title as the anchor content.
+    const durationMs = recording.endedAt
+      ? recording.endedAt.getTime() - recording.startedAt.getTime()
+      : null;
+    const trimmedMessageContent = messageContent?.trim();
+    const sanitizedMessageContent = trimmedMessageContent
+      ? sanitizeMessageContent(trimmedMessageContent)
+      : undefined;
+    const now = new Date();
+    const metadata = {
+      messageSubtype: 'recording_share_post',
+      callId: recording.externalId,
+      isRecordingMessage: true,
+      operation: 'recording_ended',
+      durationMs,
+      ...(sanitizedMessageContent ? { messageContent: sanitizedMessageContent } : {}),
+    };
+
+    // Store the initial message snapshot for conversation lists.
+    const initialMessageMd = serializeInitialMessageMd({
+      messageId,
+      conversationId,
+      workspaceId: actor.workspaceId,
+      senderId: actor.userId,
+      content: title,
+      msgType: MessageType.USER,
+      hasAttachment: false,
+      edited: false,
+      isDeleted: false,
+      showInChannel: false,
+      visibleTo: null,
+      createdAt: now.getTime(),
+      metadata: JSON.stringify(metadata),
+      nudgeCount: null,
+      isSent: true,
+      reactions_md: null,
+      link_preview_md: null,
+      childConversationId: null,
+    });
+
+    await tx.conversation.create({
+      data: {
+        conversationId,
+        channelId,
+        workspaceId: actor.workspaceId,
+        createdBy: actor.userId,
+        initialMessageId: messageId,
+        createdAt: now,
+        lastActivityAt: now,
+        initial_message_md: initialMessageMd,
+      },
+    });
+    await tx.message.create({
+      data: {
+        messageId,
+        conversationId,
+        workspaceId: actor.workspaceId,
+        senderId: actor.userId,
+        content: title,
+        msgType: MessageType.USER,
+        createdAt: now,
+        metadata,
+      },
+    });
+    await tx.conversationParticipant.create({
+      data: {
+        id: randomUUID(),
+        workspaceId: actor.workspaceId,
+        conversationId,
+        channelId,
+        userId: actor.userId,
+        participationType: ConversationParticipation.AUTHOR,
+        isSubscribed: true,
+        joinedAt: now,
+        lastReadAt: now,
+      },
+    });
+
+    return { channelId, conversationId, messageId };
+  }
+
+  /** Deletes a recording share conversation or tombstones its message. */
+  private async deleteRecordingPostMessage(
+    tx: Prisma.TransactionClient,
+    post: SharePost,
+  ): Promise<void> {
+    const conversation = await tx.conversation.findFirst({
+      where: {
+        conversationId: post.conversationId,
+        channelId: post.channelId,
+        initialMessageId: post.messageId,
+      },
+      select: { conversationId: true },
+    });
+    if (!conversation) return;
+
+    const replyCount = await tx.message.count({
+      where: {
+        conversationId: post.conversationId,
+        messageId: { not: post.messageId },
+      },
+    });
+
+    await Promise.all([
+      tx.messageAttachment.deleteMany({ where: { entityId: post.messageId } }),
+      tx.reaction.deleteMany({ where: { messageId: post.messageId } }),
+      tx.reactionCount.deleteMany({ where: { messageId: post.messageId } }),
+    ]);
+
+    if (replyCount === 0) {
+      await tx.conversationParticipant.deleteMany({
+        where: { conversationId: post.conversationId },
+      });
+      await tx.message.deleteMany({ where: { messageId: post.messageId } });
+      await tx.conversation.delete({ where: { conversationId: post.conversationId } });
+      return;
+    }
+
+    const message = await tx.message.findUnique({
+      where: { messageId: post.messageId },
+      select: { senderId: true, createdAt: true, workspaceId: true },
+    });
+    if (!message) return;
+
+    await tx.message.update({
+      where: { messageId: post.messageId },
+      data: {
+        isDeleted: true,
+        content: '',
+        hasAttachment: false,
+        edited: false,
+        link_preview_md: '',
+      },
+    });
+    // Update the conversation preview tombstone.
+    const tombstoneMd = serializeInitialMessageMd({
+      messageId: post.messageId,
+      conversationId: post.conversationId,
+      workspaceId: message.workspaceId,
+      senderId: message.senderId,
+      content: '',
+      msgType: MessageType.USER,
+      hasAttachment: false,
+      edited: false,
+      isDeleted: true,
+      showInChannel: false,
+      visibleTo: null,
+      createdAt: message.createdAt.getTime(),
+      metadata: null,
+      nudgeCount: null,
+      isSent: true,
+      reactions_md: null,
+      link_preview_md: '',
+      childConversationId: null,
+    });
+    await tx.conversation.update({
+      where: { conversationId: post.conversationId },
+      data: { initial_message_md: tombstoneMd },
+    });
+  }
+
   private async revoke(
     callId: string,
     actor: RecordingSharingActor,
     targets: RecordingShareTarget[],
   ): Promise<RecordingSharingResult> {
-    const { shares, activities, ticketUnlinked } = await this.runTransaction(async tx => {
+    logger.info('[RecordingSharingService] Revoke access request received', {
+      callId,
+      actorUserId: actor.userId,
+      workspaceId: actor.workspaceId,
+      targets,
+    });
+
+    const { shares, activities } = await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
       const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
       const activities: RecordingAccessActivity[] = [];
-      const metadata = asMetadata(recording.metadata);
-      const linkedTicketId = metadata['linkedTicketId'];
-      const linkedMessageId = metadata['linkedTicketMessageId'];
-      let linkedTicketChannelId: string | null = null;
-      if (typeof linkedTicketId === 'string' || typeof linkedMessageId === 'string') {
-        if (typeof linkedTicketId !== 'string' || typeof linkedMessageId !== 'string') {
-          throw new RecordingSharingError('Recording ticket link metadata is incomplete', 409);
-        }
-        const linkedTicket = await tx.ticket.findFirst({
-          where: { id: linkedTicketId, workspaceId: actor.workspaceId },
-          select: { channelId: true },
-        });
-        if (!linkedTicket) throw new RecordingSharingError('Linked ticket not found', 409);
-        linkedTicketChannelId = linkedTicket.channelId;
-      }
-
-      let ticketUnlinked = false;
       const uniqueTargets = [
         ...new Map(targets.map(target => [`${target.type}:${target.id}`, target])).values(),
       ];
 
       for (const target of uniqueTargets) {
-        if (target.type === 'channel' && target.id === linkedTicketChannelId) {
-          const removedLink = await this.removeLinkedTicket(tx, recording, actor, target.id);
-          shares.push({
-            id: removedLink.share.id,
+        const existing = await this.findShare(
+          tx,
+          recording.id,
+          actor.workspaceId,
+          target,
+          RECORDING_SHARE_INTENT.DIRECT_SHARE,
+        );
+        if (!existing) {
+          logger.info('[RecordingSharingService] Revoke target had no direct-share row', {
+            callId,
             target,
-            access: removedLink.share.entityUserAccess,
           });
-          ticketUnlinked = true;
           continue;
         }
 
-        const existing = await this.findShare(tx, recording.id, actor.workspaceId, target);
-        if (!existing) continue;
+        const sharePost = asSharePost(existing.metadata);
+        logger.info('[RecordingSharingService] Evaluating revoke target', {
+          callId,
+          target,
+          sharePostExists: !!sharePost,
+          currentAccess: existing.entityUserAccess,
+        });
+
+        if (sharePost) {
+          await this.deleteRecordingPostMessage(tx, sharePost);
+        }
+
         const wasActive = existing.entityUserAccess !== EntityUserAccess.REVOKED;
-        const share =
-          !wasActive
-            ? existing
-            : await tx.entityAccess.update({
-                where: { id: existing.id },
-                data: {
-                  entityUserAccess: EntityUserAccess.REVOKED,
-                  updatedAt: new Date(),
-                },
-              });
+        const share = await tx.entityAccess.update({
+          where: { id: existing.id },
+          data: {
+            entityUserAccess: EntityUserAccess.REVOKED,
+            metadata: { intent: RECORDING_SHARE_INTENT.DIRECT_SHARE },
+            updatedAt: new Date(),
+          },
+        });
         await this.syncCanvasAccess(tx, recording, actor.workspaceId, target, 'revoke');
         shares.push({ id: share.id, target, access: share.entityUserAccess });
         if (wasActive && target.type !== 'channel') {
           activities.push({ shareId: share.id, action: 'recording_access_revoked' });
         }
       }
-      return { shares, activities, ticketUnlinked };
+      return { shares, activities };
     });
 
     await recordingSharingNotificationService.publish(actor.userId, activities);
-    return {
-      action: 'revoke',
-      shares,
-      ...(ticketUnlinked
-        ? { linkedTicketId: null, linkedTicketMessageId: null }
-        : {}),
-    };
+    return { action: 'revoke', shares };
   }
 
   private async linkTicket(
@@ -252,31 +509,37 @@ export class RecordingSharingService {
       if (!channel) throw new RecordingSharingError('Ticket channel not found', 409);
 
       const target: RecordingShareTarget = { type: 'channel', id: ticket.channelId };
-      await this.setAccess(
+      const ticketAccess = await this.setAccess(
         tx,
         recording,
         actor.workspaceId,
         target,
         EntityUserAccess.VIEW,
+        RECORDING_SHARE_INTENT.TICKET_LINK,
       );
 
       const messageId = randomUUID();
       const now = new Date();
-      const recordingUrl = `${config.frontendUrl.replace(/\/$/, '')}/${actor.workspaceId}/recordings/${recording.externalId}`;
       const title = recording.title?.trim() || 'Untitled Recording';
-      const content = `<p>🎥 <strong>${escapeHtml(title)}</strong><br/><a href="${escapeHtml(recordingUrl)}">View recording</a></p>`;
+      // Use the recording title as the anchor content.
+      const durationMs = recording.endedAt
+        ? recording.endedAt.getTime() - recording.startedAt.getTime()
+        : null;
       await tx.message.create({
         data: {
           messageId,
           conversationId: ticket.conversationId,
           workspaceId: actor.workspaceId,
           senderId: actor.userId,
-          content,
+          content: title,
           msgType: MessageType.USER,
           metadata: {
             messageSubtype: 'recording_ticket_link',
             callId: recording.externalId,
             ticketId,
+            isRecordingMessage: true,
+            operation: 'recording_ended',
+            durationMs,
           },
         },
       });
@@ -324,6 +587,17 @@ export class RecordingSharingService {
         },
       });
 
+      await tx.entityAccess.update({
+        where: { id: ticketAccess.share.id },
+        data: {
+          metadata: {
+            intent: RECORDING_SHARE_INTENT.TICKET_LINK,
+            ticketId,
+            messageId,
+          },
+        },
+      });
+
       await tx.call.update({
         where: { id: recording.id },
         data: {
@@ -352,6 +626,12 @@ export class RecordingSharingService {
     callId: string,
     actor: RecordingSharingActor,
   ): Promise<RecordingSharingResult> {
+    logger.info('[RecordingSharingService] Unlink ticket request received', {
+      callId,
+      actorUserId: actor.userId,
+      workspaceId: actor.workspaceId,
+    });
+
     await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
       await this.removeLinkedTicket(tx, recording, actor);
@@ -401,6 +681,13 @@ export class RecordingSharingService {
       messageMetadata['callId'] !== recording.externalId ||
       messageMetadata['ticketId'] !== linkedTicketId
     ) {
+      logger.warn('[RecordingSharingService] Linked ticket message validation failed', {
+        callId: recording.externalId,
+        recordingId: recording.id,
+        linkedTicketId,
+        linkedMessageId,
+        messageMetadata,
+      });
       throw new RecordingSharingError('Linked ticket message does not match this recording', 409);
     }
 
@@ -414,10 +701,25 @@ export class RecordingSharingService {
     if (!conversation) throw new RecordingSharingError('Linked ticket conversation not found', 409);
 
     const target: RecordingShareTarget = { type: 'channel', id: ticket.channelId };
-    const existingShare = await this.findShare(tx, recording.id, actor.workspaceId, target);
-    if (!existingShare || existingShare.entityUserAccess === EntityUserAccess.REVOKED) {
+    const existingShare = await this.findShare(
+      tx,
+      recording.id,
+      actor.workspaceId,
+      target,
+      RECORDING_SHARE_INTENT.TICKET_LINK,
+    );
+    if (!existingShare) {
       throw new RecordingSharingError('Linked ticket access not found', 409);
     }
+
+    logger.info('[RecordingSharingService] Removing linked ticket', {
+      callId: recording.externalId,
+      recordingId: recording.id,
+      targetChannelId: ticket.channelId,
+      linkedTicketId,
+      linkedMessageId,
+    });
+
     const revokedShare = await tx.entityAccess.update({
       where: { id: existingShare.id },
       data: {
@@ -507,6 +809,8 @@ export class RecordingSharingService {
         callType: true,
         workspaceId: true,
         createdByUserId: true,
+        startedAt: true,
+        endedAt: true,
       },
     });
     if (
@@ -615,13 +919,14 @@ export class RecordingSharingService {
     }
   }
 
-  private findShare(
+  private async findShare(
     tx: Prisma.TransactionClient,
     recordingId: string,
     workspaceId: string,
     target: RecordingShareTarget,
+    intent: RecordingShareIntent,
   ): Promise<EntityAccess | null> {
-    return tx.entityAccess.findFirst({
+    const shares = await tx.entityAccess.findMany({
       where: {
         workspaceId,
         shareableEntityType: ShareableEntityType.NOTE_TAKER,
@@ -629,6 +934,7 @@ export class RecordingSharingService {
         ...targetWhere(target),
       },
     });
+    return shares.find(share => getShareIntent(share.metadata) === intent) ?? null;
   }
 
   private async setAccess(
@@ -637,13 +943,20 @@ export class RecordingSharingService {
     workspaceId: string,
     target: RecordingShareTarget,
     access: GrantableEntityUserAccess,
+    intent: RecordingShareIntent,
   ): Promise<AccessChange> {
-    const existing = await this.findShare(tx, recording.id, workspaceId, target);
+    const existing = await this.findShare(tx, recording.id, workspaceId, target, intent);
     const activated = !existing || existing.entityUserAccess === EntityUserAccess.REVOKED;
     const share = existing
       ? await tx.entityAccess.update({
           where: { id: existing.id },
-          data: { entityUserAccess: access, updatedAt: new Date() },
+          data: {
+            entityUserAccess: access,
+            ...(existing.entityUserAccess === EntityUserAccess.REVOKED
+              ? { metadata: { intent } }
+              : {}),
+            updatedAt: new Date(),
+          },
         })
       : await tx.entityAccess.create({
           data: {
@@ -652,6 +965,7 @@ export class RecordingSharingService {
             shareableEntityType: ShareableEntityType.NOTE_TAKER,
             entityId: recording.id,
             entityUserAccess: access,
+            metadata: { intent },
             updatedAt: new Date(),
             ...targetData(target),
           },
@@ -694,6 +1008,17 @@ export class RecordingSharingService {
           update: {},
         });
       } else {
+        const remainingAccess = await tx.entityAccess.findFirst({
+          where: {
+            workspaceId,
+            shareableEntityType: ShareableEntityType.NOTE_TAKER,
+            entityId: recording.id,
+            entityUserAccess: { not: EntityUserAccess.REVOKED },
+            ...targetWhere(target),
+          },
+          select: { id: true },
+        });
+        if (remainingAccess) continue;
         await tx.canvasParticipant.deleteMany({ where: { canvasId, ...targetFields } });
       }
     }

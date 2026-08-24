@@ -245,6 +245,29 @@ export const logRecordingError = (context: string, error: unknown): void => {
   });
 };
 
+/** Recording share post details. */
+export interface RecordingSharePost {
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+}
+
+export const isRecordingTicketLinkShare = (metadata: unknown): boolean => {
+  if (!metadata || typeof metadata !== 'object') return false;
+  return (metadata as Record<string, unknown>)['intent'] === 'ticket_link';
+};
+
+/** Reads post details from share metadata. */
+export const getRecordingSharePost = (metadata: unknown): RecordingSharePost | null => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const { channelId, conversationId, messageId } = metadata as Record<string, unknown>;
+  return typeof channelId === 'string' &&
+    typeof conversationId === 'string' &&
+    typeof messageId === 'string'
+    ? { channelId, conversationId, messageId }
+    : null;
+};
+
 /**
  * STT model labels for display
  */
