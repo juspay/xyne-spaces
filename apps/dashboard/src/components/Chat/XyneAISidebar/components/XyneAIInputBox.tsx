@@ -40,6 +40,7 @@ import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
 import { ContextPillRow } from './ContextPillRow';
+import { RecordingTranscriptModal } from './RecordingTranscriptModal';
 import { CONTEXT_PICKER_TOGGLE_ATTR } from './ContextPicker';
 import { ModelThinkingSelector } from '../../../AIScreen/ModelThinkingSelector';
 import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
@@ -621,6 +622,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Browser context state
     const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
+    // Recording pill → its transcript, read in place over the composer.
+    const [transcriptCallId, setTranscriptCallId] = useState<string | null>(null);
 
     // Update activeThreadInfo when threadInfo prop changes
     useEffect(() => {
@@ -831,12 +834,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
     };
 
-    // Recordings have a real linkable detail route; fall back to the shared
-    // conversation when the search result didn't carry the recording id.
+    // The transcript is what the pill actually attached, so show it in a modal
+    // rather than routing away from the half-written question. Falls back to the
+    // shared conversation when the search result didn't carry the recording id.
     const handleRecordingContextClick = (recording: SelectedRecording): void => {
       if (recording.externalId) {
-        void navigate(`/recordings/${recording.externalId}`);
-        if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+        setTranscriptCallId(recording.externalId);
         return;
       }
       handleTranscriptContextClick(recording);
@@ -1715,6 +1718,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onRecordingClick={handleRecordingContextClick}
           activities={selectedActivities}
           {...(onActivitiesChange && { onActivitiesChange })}
+        />
+
+        <RecordingTranscriptModal
+          callId={transcriptCallId}
+          onClose={() => setTranscriptCallId(null)}
         />
 
         {/* MentionSelector for "@" trigger in editor (user mentions) */}
