@@ -211,7 +211,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
-    const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
+    const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
+      useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
@@ -323,6 +324,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       setShowFormatToolbar(defaultFormattingToolbarOpen);
       setShowMobileFormattingToolbar(defaultFormattingToolbarOpen);
     }, [defaultFormattingToolbarOpen]);
+
+    const updateFormattingToolbarPreference = useCallback(
+      (value: boolean): void => {
+        setShowFormatToolbar(value);
+        setShowMobileFormattingToolbar(value);
+        setDefaultFormattingToolbarOpen(value);
+      },
+      [setDefaultFormattingToolbarOpen],
+    );
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -1593,8 +1603,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 onChannelClick={() => {
                   editor?.chain().focus().run();
                 }}
-                onShowFormattingToolbar={() => setShowMobileFormattingToolbar(true)}
-                onCloseFormattingToolbar={() => setShowMobileFormattingToolbar(false)}
+                onShowFormattingToolbar={() => updateFormattingToolbarPreference(true)}
+                onCloseFormattingToolbar={() => updateFormattingToolbarPreference(false)}
                 showEmojiPicker={features.emojiPicker}
                 onEmojiSelect={handleEmojiSelect}
                 hideSendButton={hideSendButton}
@@ -1900,7 +1910,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     >
                       <button
                         type='button'
-                        onClick={() => setShowFormatToolbar(prev => !prev)}
+                        onClick={() => updateFormattingToolbarPreference(!showFormatToolbar)}
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
