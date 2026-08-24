@@ -453,7 +453,7 @@ export const recordingStore = createStore({
       };
     },
 
-    stopRecording: (context): RecordingState => {
+    stopRecording: (context, event?: { silent?: boolean }): RecordingState => {
       const durationMs = context.startTime
         ? calculateRecordingElapsedMs(
             context.startTime,
@@ -479,12 +479,16 @@ export const recordingStore = createStore({
         playAudio(AUDIO_PATHS.RECORDING_END);
       }
 
-      // Show toast
-      const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
-      toast.success('Recording stopped', {
-        description: `Recording saved (${duration})`,
-        duration: 3000,
-      });
+      // A caller about to navigate away (workspace switch, reload) shows this
+      // toast itself once the destination page mounts — this one would just be
+      // torn down mid-display by the hard navigation before it's legible.
+      if (!event?.silent) {
+        const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
+        toast.success('Recording stopped', {
+          description: `Recording saved (${duration})`,
+          duration: 3000,
+        });
+      }
 
       // Reset state
       return {

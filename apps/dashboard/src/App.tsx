@@ -24,6 +24,7 @@ import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
 import {
@@ -112,6 +113,7 @@ const App = (): ReactElement => {
                     </main>
                     <SwitchLoadingOverlay />
                     <RecordingInterruptGuard />
+                    <WorkspaceSwitchToastListener />
                     <Toaster
                       position='top-right'
                       richColors

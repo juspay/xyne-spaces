@@ -7,7 +7,7 @@ import { recordingStore } from '../../../stores/recordingStore';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import {
   getRecordingStatus,
-  stopRecordingForTeardown,
+  stopRecordingForNavigation,
   useRecordingStore,
 } from '../../../hooks/useRecordingStore';
 
@@ -50,7 +50,7 @@ export async function confirmRecordingInterrupt(
 
 async function stopActiveRecording(): Promise<void> {
   const { room } = recordingStore.getSnapshot().context;
-  stopRecordingForTeardown();
+  stopRecordingForNavigation();
 
   if (!room || room.state === ConnectionState.Disconnected) return;
 

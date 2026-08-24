@@ -20,6 +20,7 @@ import { queryCacheActor, type Conversation } from '../../machines/queryCacheMac
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
   sendRecordingEvent,
+  stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
@@ -615,7 +616,7 @@ export const NotificationHandler: React.FC = () => {
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
-    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForTeardown);
+    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForNavigation);
   }, [isElectron]);
 
   // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands

@@ -359,9 +359,10 @@ const AppRoot = (): ReactElement => {
   // do not expose a reliable lid-close event, so retain only the actual page
   // unload safeguard below.
   useEffect(() => {
-    window.addEventListener('pagehide', stopRecordingForTeardown);
+    const handlePageHide = (): void => stopRecordingForTeardown();
+    window.addEventListener('pagehide', handlePageHide);
     return (): void => {
-      window.removeEventListener('pagehide', stopRecordingForTeardown);
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, []);
 
