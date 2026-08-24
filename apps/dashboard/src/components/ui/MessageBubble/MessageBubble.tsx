@@ -9,6 +9,8 @@ import {
   parsePreviewMd,
   parseForwardedMessageXml,
   isForwardedMessageXml,
+  parseForwardedThreadXml,
+  isForwardedThreadXml,
   parseReactionsMd,
   ReactionsData,
   parseTicketMd,
@@ -545,6 +547,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
   const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
+  const isForwardedThread = isForwardedMessage && isForwardedThreadXml(message.content);
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
 
@@ -555,6 +558,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return null;
   }, [isForwardedMessage, message.content]);
+
+  const forwardedThreadData = useMemo(() => {
+    if (isForwardedThread) {
+      return parseForwardedThreadXml(message.content);
+    }
+    return null;
+  }, [isForwardedThread, message.content]);
 
   // Query the original conversation only when this is a forwarded desk-ticket
   // message with empty content (email body lives in the email table, not in
@@ -581,7 +591,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return forwardedMessageData.content;
   }, [forwardedMessageData, forwardedOriginalConversation]);
   const recordingShare = useRecordingShareMessage(
-    isForwardedMessage ? resolvedForwardedContent : message.content,
+    forwardedMessageData ? resolvedForwardedContent : message.content,
   );
 
   const systemMessageStyles: React.CSSProperties = {
@@ -1324,6 +1334,83 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     />
                   )}
                 </>
+              ) : forwardedThreadData ? (
+                <div className='space-y-2'>
+                  {forwardedThreadData.optionalText && (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(forwardedThreadData.optionalText)}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={forwardedThreadData.optionalText}
+                          showEdited={false}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <RenderMessageWithHTML
+                          message={DOMPurify.sanitize(forwardedThreadData.optionalText)}
+                          showEdited={false}
+                          preserveThreadRoute={context === 'thread'}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <div className='border-l-4 border-l-muted-foreground/30 pl-3 py-2 bg-muted/30 rounded-r-md space-y-2'>
+                    <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+                      <span className='font-medium text-foreground'>Forwarded thread</span>
+                      <span>·</span>
+                      <span>
+                        {forwardedThreadData.totalMessageCount} messages
+                        {forwardedThreadData.attachmentCount > 0
+                          ? ` · ${forwardedThreadData.attachmentCount} attachment${forwardedThreadData.attachmentCount === 1 ? '' : 's'}`
+                          : ''}
+                      </span>
+                    </div>
+                    <div className='space-y-2'>
+                      {forwardedThreadData.previewMessages.map(previewMessage => (
+                        <div key={previewMessage.messageId} className='border-l border-border pl-2'>
+                          <div className='flex items-center gap-2 mb-1 text-xs'>
+                            <span className='font-medium text-foreground'>
+                              {previewMessage.senderName}
+                            </span>
+                            <span className='text-muted-foreground visual-regression-hide'>
+                              {formatRelativeTimestamp(previewMessage.createdAt)}
+                            </span>
+                            {previewMessage.attachmentCount > 0 && (
+                              <span className='text-muted-foreground'>
+                                {previewMessage.attachmentCount} attachment
+                                {previewMessage.attachmentCount === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </div>
+                          {previewMessage.content && (
+                            <div className='jp-message-html text-muted-foreground'>
+                              <RenderMessageWithHTML
+                                message={previewMessage.content}
+                                showEdited={false}
+                                preserveThreadRoute={context === 'thread'}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {forwardedThreadData.totalMessageCount >
+                      forwardedThreadData.previewMessages.length && (
+                      <p className='text-xs text-muted-foreground'>
+                        +{forwardedThreadData.totalMessageCount - forwardedThreadData.previewMessages.length}{' '}
+                        more messages in the original thread
+                      </p>
+                    )}
+                    {forwardedThreadData.originalChannelId && (
+                      <PostedInLink
+                        originalChannelId={forwardedThreadData.originalChannelId}
+                        originalConversationId={forwardedThreadData.originalConversationId}
+                        originalMessageId={forwardedThreadData.originalInitialMessageId}
+                      />
+                    )}
+                  </div>
+                </div>
               ) : isForwardedMessage && forwardedMessageData ? (
                 // Forwarded message display (parsed from XML)
                 <div className='flex flex-col gap-2'>

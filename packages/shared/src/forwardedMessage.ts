@@ -23,6 +23,34 @@ export interface ForwardedMessageData {
 }
 
 /**
+ * A bounded snapshot of a thread forwarded as a single message/card.
+ * The source of truth remains the original conversation; previewMessages is
+ * intentionally capped by the backend to avoid copying large/private threads.
+ */
+export interface ForwardedThreadPreviewMessage {
+  messageId: string;
+  senderId: string;
+  senderName: string;
+  createdAt: number;
+  content: string;
+  attachmentCount: number;
+}
+
+export interface ForwardedThreadData {
+  originalConversationId: string;
+  originalChannelId: string | null;
+  originalInitialMessageId: string;
+  originalCreatedAt: number;
+  originalSenderId: string;
+  originalSenderName: string;
+  optionalText: string | null;
+  previewMessages: ForwardedThreadPreviewMessage[];
+  totalMessageCount: number;
+  replyCount: number;
+  attachmentCount: number;
+}
+
+/**
  * XML Parser instance configured for forwarded messages
  */
 const xmlParser = new XMLParser({
@@ -141,5 +169,102 @@ export function parseForwardedMessageXml(xml: string): ForwardedMessageData | nu
 export function isForwardedMessageXml(content: string): boolean {
   if (!content) return false;
   const trimmed = content.trim();
-  return trimmed.startsWith('<ForwardedMessage>') && trimmed.endsWith('</ForwardedMessage>');
+  return (
+    trimmed.startsWith('<ForwardedMessage>') && trimmed.endsWith('</ForwardedMessage>')
+  );
+}
+
+/** Creates XML for a forwarded thread card. */
+export function createForwardedThreadXml(data: ForwardedThreadData): string {
+  const xmlObject = {
+    ForwardedThread: {
+      OriginalConversationId: data.originalConversationId,
+      OriginalChannelId: data.originalChannelId ?? '',
+      OriginalInitialMessageId: data.originalInitialMessageId,
+      OriginalCreatedAt: data.originalCreatedAt,
+      OriginalSenderId: data.originalSenderId,
+      OriginalSenderName: data.originalSenderName,
+      OptionalText: data.optionalText ?? '',
+      TotalMessageCount: data.totalMessageCount,
+      ReplyCount: data.replyCount,
+      AttachmentCount: data.attachmentCount,
+      PreviewMessagesJson: JSON.stringify(data.previewMessages),
+    },
+  };
+
+  return xmlBuilder.build(xmlObject);
+}
+
+/** Parses forwarded-thread XML. */
+export function parseForwardedThreadXml(xml: string): ForwardedThreadData | null {
+  if (!isForwardedThreadXml(xml)) return null;
+
+  try {
+    const parsed = xmlParser.parse(xml);
+    const forwardedThread = parsed?.ForwardedThread;
+    if (!forwardedThread) return null;
+
+    const originalConversationId = String(forwardedThread.OriginalConversationId || '');
+    const originalInitialMessageId = String(
+      forwardedThread.OriginalInitialMessageId || '',
+    );
+    const originalSenderId = String(forwardedThread.OriginalSenderId || '');
+    if (!originalConversationId || !originalInitialMessageId || !originalSenderId) {
+      return null;
+    }
+
+    let previewMessages: ForwardedThreadPreviewMessage[] = [];
+    try {
+      const rawPreview = String(forwardedThread.PreviewMessagesJson || '[]');
+      const parsedPreview = JSON.parse(rawPreview);
+      if (Array.isArray(parsedPreview)) {
+        previewMessages = parsedPreview
+          .filter(
+            (item): item is ForwardedThreadPreviewMessage =>
+              item &&
+              typeof item.messageId === 'string' &&
+              typeof item.senderId === 'string' &&
+              typeof item.senderName === 'string' &&
+              typeof item.createdAt === 'number' &&
+              typeof item.content === 'string' &&
+              typeof item.attachmentCount === 'number',
+          )
+          .slice(0, 8);
+      }
+    } catch {
+      previewMessages = [];
+    }
+
+    const originalChannelId = String(forwardedThread.OriginalChannelId || '');
+    const optionalText = String(forwardedThread.OptionalText || '');
+    const originalSenderName = String(forwardedThread.OriginalSenderName || '');
+
+    return {
+      originalConversationId,
+      originalChannelId: originalChannelId || null,
+      originalInitialMessageId,
+      originalCreatedAt:
+        parseInt(String(forwardedThread.OriginalCreatedAt || '0'), 10) || 0,
+      originalSenderId,
+      originalSenderName: originalSenderName || 'Unknown User',
+      optionalText: optionalText || null,
+      previewMessages,
+      totalMessageCount:
+        parseInt(String(forwardedThread.TotalMessageCount || '0'), 10) ||
+        previewMessages.length,
+      replyCount:
+        parseInt(String(forwardedThread.ReplyCount || '0'), 10) ||
+        Math.max(0, previewMessages.length - 1),
+      attachmentCount: parseInt(String(forwardedThread.AttachmentCount || '0'), 10) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Checks if a string is forwarded-thread XML. */
+export function isForwardedThreadXml(content: string): boolean {
+  if (!content) return false;
+  const trimmed = content.trim();
+  return trimmed.startsWith('<ForwardedThread>') && trimmed.endsWith('</ForwardedThread>');
 }

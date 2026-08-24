@@ -64,6 +64,7 @@ import {
   FormFieldType,
   MessageAttachment,
   createForwardedMessageXml,
+  createForwardedThreadXml,
   parseForwardedMessageXml,
   type BoardMetadata,
   SavedConfigContextType,
@@ -2776,6 +2777,128 @@ export function createMutators(
           });
         },
       ),
+      forwardThread: defineMutator(
+        z.object({
+          sourceConversationId: z.string(),
+          targetChannelId: z.string(),
+          optionalMessage: z.string().max(10000, 'Optional message too long').optional(),
+          conversationId: z.string(),
+          messageId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            sourceConversationId,
+            targetChannelId,
+            optionalMessage,
+            conversationId,
+            messageId,
+            timestamp,
+          },
+        }) => {
+          const sourceConversation = await tx.run(
+            zql.conversations.where('conversationId', sourceConversationId).one(),
+          );
+          if (!sourceConversation) throw new Error('Source thread not found');
+
+          const originParticipation = await tx.run(
+            zql.channel_participants
+              .where('channelId', sourceConversation.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!originParticipation) {
+            throw new Error('You are not a participant of the source thread channel');
+          }
+
+          const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
+          if (!targetChannel) throw new Error('Target channel not found');
+
+          const targetParticipation = await tx.run(
+            zql.channel_participants
+              .where('channelId', targetChannelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!targetParticipation) {
+            throw new Error('You are not a participant of the target channel');
+          }
+
+          const sourceMessages = await tx.run(
+            zql.messages
+              .where('conversationId', sourceConversationId)
+              .where(({ or, cmp }) =>
+                or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', authData.sub)),
+              )
+              .orderBy('createdAt', 'asc')
+              .related('attachments'),
+          );
+          if (sourceMessages.length === 0) throw new Error('Source thread has no visible messages');
+
+          const previewSourceMessages = sourceMessages.slice(0, 8);
+          const senderIds = Array.from(new Set(previewSourceMessages.map(m => m.senderId)));
+          const senders = await Promise.all(
+            senderIds.map(async senderId => tx.run(zql.users.where('id', senderId).one())),
+          );
+          const senderById = new Map(senders.filter(Boolean).map(sender => [sender!.id, sender!]));
+          const rootMessage = sourceMessages.find(m => m.messageId === sourceConversation.initialMessageId) ?? sourceMessages[0]!;
+          const rootSender = senderById.get(rootMessage.senderId) ?? await tx.run(zql.users.where('id', rootMessage.senderId).one());
+          const attachmentCount = sourceMessages.reduce((sum, msg) => sum + (msg.attachments?.length ?? 0), 0);
+
+          const xmlContent = createForwardedThreadXml({
+            originalConversationId: sourceConversation.conversationId,
+            originalChannelId: sourceConversation.channelId,
+            originalInitialMessageId: sourceConversation.initialMessageId,
+            originalCreatedAt: rootMessage.createdAt as number,
+            originalSenderId: rootMessage.senderId,
+            originalSenderName: rootSender?.name || 'Unknown User',
+            optionalText: optionalMessage || null,
+            previewMessages: previewSourceMessages.map(msg => ({
+              messageId: msg.messageId,
+              senderId: msg.senderId,
+              senderName: senderById.get(msg.senderId)?.name || 'Unknown User',
+              createdAt: msg.createdAt as number,
+              content: msg.isDeleted ? 'This message was deleted' : msg.content,
+              attachmentCount: msg.attachments?.length ?? 0,
+            })),
+            totalMessageCount: sourceMessages.length,
+            replyCount: Math.max(0, sourceMessages.length - 1),
+            attachmentCount,
+          });
+
+          const now = timestamp;
+          await tx.mutate.conversations.insert({
+            conversationId,
+            channelId: targetChannelId,
+            workspaceId: authData.workspaceId,
+            createdBy: authData.sub,
+            initialMessageId: messageId,
+            lastActivityAt: now,
+            replyCount: 0,
+            pinned: false,
+            metadata: {},
+            createdAt: now,
+          });
+
+          await tx.mutate.messages.insert({
+            messageId,
+            conversationId,
+            workspaceId: authData.workspaceId,
+            senderId: authData.sub,
+            content: xmlContent,
+            msgType: MessageType.FORWARDED,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: false,
+            createdAt: now,
+            metadata: {},
+          });
+        },
+      ),
+
       forwardMessage: defineMutator(
         z.object({
           targetChannelId: z.string(),
