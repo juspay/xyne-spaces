@@ -7,7 +7,7 @@ import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -350,6 +350,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
+      /** Per-message provider fast mode (Spaces composer ⚡ toggle). Overrides
+       *  the agent's modelSettings.speed for THIS run only; absent = agent
+       *  default. Invalid values are ignored rather than 400d — this route is
+       *  a pass-through for several callers. */
+      speed: rawSpeed,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -425,7 +430,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
     // resolver the headless + automation paths use). Body-supplied values win
     // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    const speedOverride = rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
+    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
@@ -880,6 +887,26 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: agentRow.description,
       },
     };
+    // Fast mode: forward the agent's model settings (with the effective speed)
+    // and fast-mode profile so claw applies the speed + run-setting overrides.
+    // ONLY when this run is fast — this route otherwise forwards no stored
+    // modelSettings, and standard runs must stay byte-identical to today.
+    if (effectiveSpeed === "fast") {
+      const storedConfig = (agentRow.config as Record<string, unknown> | null) ?? {};
+      const storedModelSettings = storedConfig["modelSettings"];
+      enrichedAgentConfig["modelSettings"] = {
+        ...(storedModelSettings && typeof storedModelSettings === "object" && !Array.isArray(storedModelSettings)
+          ? storedModelSettings as Record<string, unknown>
+          : {}),
+        speed: "fast",
+      };
+      const profile = parseFastModeProfile(storedConfig);
+      if (storedConfig["fastModeProfile"] !== undefined && storedConfig["fastModeProfile"] !== null) {
+        enrichedAgentConfig["fastModeProfile"] = storedConfig["fastModeProfile"];
+      }
+      log.info(`[run-stream] fast mode for ${slug} (override=${speedOverride ?? "agent-default"}, profile=${profile.providers})`);
+    }
+
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
