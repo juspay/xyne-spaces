@@ -5,6 +5,20 @@ export type { IngestionStatus };
 export type NodeType = 'FILE' | 'FOLDER';
 export type CollectionRole = 'VIEWER' | 'EDITOR' | 'OWNER';
 
+/** The backend's own item-type vocabulary (lowercase, e.g. searchItems'
+ *  itemType field) — distinct from NodeType (the frontend's normalized,
+ *  uppercase vocabulary). Named so toNodeType can switch over it exhaustively:
+ *  if this union ever grows, toNodeType fails to compile until it's updated,
+ *  instead of the new value silently falling through to 'FILE'. */
+export type BackendItemType = 'file' | 'folder';
+
+function toNodeType(itemType: BackendItemType): NodeType {
+  switch (itemType) {
+    case 'file': return 'FILE';
+    case 'folder': return 'FOLDER';
+  }
+}
+
 export interface CollectionChild {
   id: string;
   name: string;
@@ -101,7 +115,7 @@ export async function searchCollectionItems(
     items: Array<{
       id: string;
       name: string;
-      itemType: 'folder' | 'file';
+      itemType: BackendItemType;
       createdAt: string;
       updatedAt: string;
       ingestionStatus: IngestionStatus;
@@ -117,7 +131,7 @@ export async function searchCollectionItems(
   return response.data.items.map(item => ({
     id: item.id,
     name: item.name,
-    type: item.itemType === 'folder' ? 'FOLDER' : ('FILE' as NodeType),
+    type: toNodeType(item.itemType),
     updatedAt: item.updatedAt,
     ingestionStatus: item.ingestionStatus,
     size: item.fileSize ? parseInt(item.fileSize, 10) || 0 : 0,
