@@ -95,6 +95,7 @@ import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 interface RecordingNavState {
   recordingIds?: string[];
+  from?: string;
 }
 
 const AUDIO_POLL_INTERVAL_MS = 10_000;
@@ -319,6 +320,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // j/k keyboard navigation between recordings
   const navState = location.state as RecordingNavState | null;
   const recordingIds = navState?.recordingIds;
+  const backTo = navState?.from ?? '/recordings';
   const currentIndex = useMemo(
     () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
     [recordingId, recordingIds],
@@ -537,8 +539,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   const handleMinimize = useCallback((): void => {
     sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
-    void navigate('/recordings');
-  }, [navigate]);
+    void navigate(backTo);
+  }, [backTo, navigate]);
 
   /**
    * The panels differ wildly in height — a long transcript against a short notes
@@ -780,7 +782,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       <RecordingLoadError
         failure={resolvedFailure}
         viewerEmail={currentUser?.email}
-        onBack={() => void navigate('/recordings')}
+        onBack={() => void navigate(backTo)}
       />
     );
   }
@@ -892,6 +894,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
             <RecordingDetailV2Header
               recording={recording}
               isLive={isLive}
+              backTo={backTo}
               titleState={titleState}
               onTitleUpdated={handleTitleUpdated}
               onLabelsUpdated={handleLabelsUpdated}

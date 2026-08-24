@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
@@ -48,13 +48,15 @@ import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 const RecordingsV2Screen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const requestedSummaryTemplateId = searchParams.get('summaryTemplateId');
   const shouldOpenTemplatesFromUrl =
     searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
-  const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
+  const activeListTab: RecordingOwnershipTab =
+    searchParams.get('tab') === 'shared' ? 'shared' : 'created';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -204,6 +206,21 @@ const RecordingsV2Screen = (): ReactElement => {
     [recordings],
   );
 
+  const setActiveListTab = useCallback(
+    (tab: RecordingOwnershipTab): void => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (tab === 'shared') next.set('tab', 'shared');
+          else next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   const handleTabChange = useCallback(
     (tab: RecordingOwnershipTab): void => {
       if (tab === activeListTab) return;
@@ -213,7 +230,7 @@ const RecordingsV2Screen = (): ReactElement => {
       setSelectedLabels([]);
       setSelectedSharerIds([]);
     },
-    [activeListTab],
+    [activeListTab, setActiveListTab],
   );
 
   const handleCreatorChange = useCallback(
@@ -223,25 +240,31 @@ const RecordingsV2Screen = (): ReactElement => {
         setActiveListTab(creatorId === currentUser?.id ? 'created' : 'shared');
       }
     },
-    [currentUser?.id],
+    [currentUser?.id, setActiveListTab],
   );
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenLiveRecordingWindow = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenAskAI = useCallback((): void => {

@@ -28,6 +28,7 @@ import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTick
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
+  backTo: string;
   titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
@@ -60,6 +61,7 @@ const HeaderTitle = ({
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
+  backTo,
   titleState,
   onTitleUpdated,
   onLabelsUpdated,
@@ -203,7 +205,7 @@ export const RecordingDetailV2Header = ({
           <li>
             <button
               type='button'
-              onClick={() => void navigate('/recordings')}
+              onClick={() => void navigate(backTo)}
               className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
               data-track-category='RecordingDetailV2'
               data-track-name='breadcrumb_recordings'
