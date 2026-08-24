@@ -180,6 +180,8 @@ type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automati
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
+  if (requested === "api") return "api";
+  if (requested === "chat") return "chat";
   if (eventType === "automation") return "automation";
   if (eventType === "scheduled_job") return "scheduled";
   return "spaces";
@@ -1348,6 +1350,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           spacesAppId: agent.spacesAppId ?? "",
           spacesAppUserId: agent.spacesAppUserId ?? "",
           rootAgentSlug: agentSlug || "assistant",
+          triggerSource: defaultTriggerSource,
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),
           ...(defaultTriggerSource === "slack" && slackDelivery ? { slackDelivery } : {}),

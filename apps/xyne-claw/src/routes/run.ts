@@ -1924,6 +1924,28 @@ async function processTask(
 
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
+
+    // Surface-default tool injection, per run only. Slack already injects its
+    // subagent in claw-auth before dispatch; Spaces runs arrive directly from
+    // the Spaces webhook and need the same default here so mention/automation
+    // runs can read the room without mutating the stored agent config. A missing
+    // tools object means the agent is unrestricted, so do not create one.
+    const effectiveTools = effectiveConfig["tools"];
+    if (
+      (eventType === "APP_MENTIONED" || eventType === "DIRECT_MESSAGE" || eventType === "USER_MENTIONED" || eventType === "automation") &&
+      effectiveTools &&
+      typeof effectiveTools === "object" &&
+      !Array.isArray(effectiveTools)
+    ) {
+      const toolsObj = effectiveTools as Record<string, unknown>;
+      const subagents = Array.isArray(toolsObj["subagents"])
+        ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
+        : [];
+      if (!subagents.includes("spaces")) {
+        effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
+      }
+    }
+
     // Parent agent's provider config — looked up from user's provider credentials.
     // We also reuse it to drive custom:create-ppt so PPT generation uses the
     // same user credential/model instead of shared env keys.
