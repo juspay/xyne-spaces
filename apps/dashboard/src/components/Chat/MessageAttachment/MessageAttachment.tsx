@@ -1165,7 +1165,19 @@ const InlineVideoPlayer: React.FC<{
           {loading ? (
             <div className='bg-muted animate-pulse flex items-center justify-center w-full h-full' />
           ) : !hasClickedPlay || isMobile ? (
-            <div className='relative h-full'>
+            <div
+              className='relative h-full cursor-pointer'
+              role='button'
+              tabIndex={0}
+              aria-label={`Open ${fileName} preview`}
+              onClick={() => openModal({ startPlayback: true })}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openModal({ startPlayback: true });
+                }
+              }}
+            >
               {thumbnailBlobUrl && !thumbnailError ? (
                 <img src={thumbnailBlobUrl} alt={fileName} className='w-full h-full object-cover' />
               ) : (
@@ -1183,7 +1195,8 @@ const InlineVideoPlayer: React.FC<{
                 onTouchStart={e => e.stopPropagation()}
               >
                 <button
-                  onClick={() => {
+                  onClick={e => {
+                    e.stopPropagation();
                     if (isMobile) {
                       openModal({ startPlayback: true });
                     } else {
@@ -1209,7 +1222,10 @@ const InlineVideoPlayer: React.FC<{
               {!isMobile && (
                 <div className='absolute bottom-4 right-3 opacity-0 group-hover:opacity-100 transition-opacity'>
                   <button
-                    onClick={() => openModal()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      openModal();
+                    }}
                     className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
