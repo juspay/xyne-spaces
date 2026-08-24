@@ -215,6 +215,8 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
+import useMeasure from '../../hooks/useMeasure';
+import useOverflowFit from '../../hooks/useOverflowFit';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
@@ -551,6 +553,61 @@ interface DemergeEmailResponse {
 
 type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
+/**
+ * The desk toolbar collapses filter triggers into the "Filters" popover when the row runs
+ * out of room (Ask AI opening, sidebar expanding, small window). Priority order is
+ * highest-value first; the row drops from the *end* of this list, so Status folds away
+ * before Priority, which folds away before Assignee.
+ */
+const COLLAPSIBLE_FILTER_IDS = ['assignee', 'priority', 'stages'] as const;
+type CollapsibleFilterId = (typeof COLLAPSIBLE_FILTER_IDS)[number];
+
+const COLLAPSIBLE_FILTER_META: Record<
+  CollapsibleFilterId,
+  { label: string; icon: React.ComponentType<{ className?: string }> }
+> = {
+  assignee: { label: 'Assignee', icon: User },
+  priority: { label: 'Priority', icon: BarChart4Icon },
+  stages: { label: 'Status', icon: Circle },
+};
+
+/** Row width below which the toolbar's secondary controls drop their text labels. */
+const TOOLBAR_COMPACT_WIDTH = 820;
+
+/**
+ * Shared visual for a collapsible filter trigger. The hidden measuring twin renders the
+ * same component as the real bar, so the fit calculation uses the exact widths the real
+ * triggers would occupy.
+ */
+const DeskFilterTrigger = ({
+  id,
+  active,
+  open,
+  className,
+  ...props
+}: {
+  id: CollapsibleFilterId;
+  active?: boolean;
+  open?: boolean;
+} & React.ComponentProps<'button'>): ReactElement => {
+  const { label, icon: Icon } = COLLAPSIBLE_FILTER_META[id];
+  return (
+    <Button
+      variant='outline'
+      size='sm'
+      className={cn('rounded-[10px] border-border hover:bg-muted text-muted-foreground', className)}
+      {...props}
+    >
+      <div className='flex items-center gap-1.5'>
+        <Icon className='w-3 h-3 p-px font-medium' />
+        <span className='font-medium'>{label}</span>
+        {active && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
+        <ChevronDown className={cn('w-3 h-3 ml-1 transition-transform', open && 'rotate-180')} />
+      </div>
+    </Button>
+  );
+};
+
 const SupportScreen = (): ReactElement => {
   const {
     workspaceId,
@@ -851,22 +908,89 @@ const SupportScreen = (): ReactElement => {
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
   const hasPriorityFilter = !!(filters.priority && filters.priority.length > 0);
   const hasStagesFilter = !!(filters.stages && filters.stages.length > 0);
-  const hasMoreFiltersActive = !!(
-    filters.assigned ||
-    filters.hasAiDraft === true ||
-    (filters.aiCategory && filters.aiCategory.length > 0) ||
-    (filters.generatedTags && filters.generatedTags.length > 0) ||
-    (filters.userGroups && filters.userGroups.length > 0) ||
-    (filters.createdBy && filters.createdBy.length > 0) ||
-    filters.lastEmailAtStart !== undefined ||
-    filters.lastEmailAtEnd !== undefined ||
-    filters.createdDateStart !== undefined ||
-    filters.createdDateEnd !== undefined ||
-    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
-    (!selectedLabel && !!filters.conversationLabelId)
-  );
+  const moreFiltersActiveCount =
+    (filters.assigned ? 1 : 0) +
+    (filters.hasAiDraft === true ? 1 : 0) +
+    (filters.aiCategory && filters.aiCategory.length > 0 ? 1 : 0) +
+    (filters.generatedTags && filters.generatedTags.length > 0 ? 1 : 0) +
+    (filters.userGroups && filters.userGroups.length > 0 ? 1 : 0) +
+    (filters.createdBy && filters.createdBy.length > 0 ? 1 : 0) +
+    (filters.lastEmailAtStart !== undefined || filters.lastEmailAtEnd !== undefined ? 1 : 0) +
+    (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined ? 1 : 0) +
+    (filters.dynamicFields ? Object.keys(filters.dynamicFields).length : 0) +
+    (!selectedLabel && filters.conversationLabelId ? 1 : 0);
+  const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  // --- Toolbar priority+ overflow -------------------------------------------------------
+  // The filter row shares one line with the view controls and Compose. When the row is too
+  // narrow (Ask AI open, sidebar expanded, small window) the filter triggers fold into the
+  // "Filters" popover from the right instead of overlapping the actions on the right.
+  //
+  // Everything is measured off the *row*, not the viewport: Ask AI is user-resizable, so the
+  // same window width can leave wildly different room here.
+  const filterRowRef = useRef<HTMLDivElement>(null);
+  const filterRowActionsRef = useRef<HTMLDivElement>(null);
+  const filterStaticLeftRef = useRef<HTMLDivElement>(null);
+  const { width: filterRowWidth } = useMeasure({ ref: filterRowRef, observeResize: true });
+  const { width: filterRowActionsWidth } = useMeasure({
+    ref: filterRowActionsRef,
+    observeResize: true,
+  });
+  const { width: filterStaticLeftWidth } = useMeasure({
+    ref: filterStaticLeftRef,
+    observeResize: true,
+  });
+
+  // Secondary controls drop their labels purely as a function of row width. Deriving this
+  // from the collapse result instead would feed the actions' width back into the fit loop
+  // and let the two oscillate.
+  const isToolbarCompact = filterRowWidth > 0 && filterRowWidth < TOOLBAR_COMPACT_WIDTH;
+
+  // px-4 either side, plus a small margin so we fold one trigger early rather than land
+  // flush against the actions group.
+  const filterFitWidth = Math.max(
+    0,
+    filterRowWidth - filterRowActionsWidth - filterStaticLeftWidth - 32 - 16,
+  );
+
+  const { measureRef: filterMeasureRef, visibleCount: visibleFilterCount } =
+    useOverflowFit<HTMLDivElement>({
+      itemCount: COLLAPSIBLE_FILTER_IDS.length,
+      containerWidth: filterFitWidth,
+      gap: 8, // matches the row's `gap-2`
+      minVisible: 0,
+    });
+
+  const collapsedFilterIds = useMemo(
+    () => COLLAPSIBLE_FILTER_IDS.slice(visibleFilterCount),
+    [visibleFilterCount],
+  );
+  const hasCollapsedFilters = collapsedFilterIds.length > 0;
+
+  const isFilterVisibleOnBar = useCallback(
+    (id: CollapsibleFilterId): boolean => COLLAPSIBLE_FILTER_IDS.indexOf(id) < visibleFilterCount,
+    [visibleFilterCount],
+  );
+
+  // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
+  // still announces itself instead of silently disappearing.
+  const collapsedActiveFilterCount = useMemo(() => {
+    const activeById: Record<CollapsibleFilterId, boolean> = {
+      assignee: hasAssigneeFilter,
+      priority: hasPriorityFilter,
+      stages: hasStagesFilter,
+    };
+    const foldedActive = collapsedFilterIds.filter(id => activeById[id]).length;
+    return foldedActive + moreFiltersActiveCount;
+  }, [
+    collapsedFilterIds,
+    hasAssigneeFilter,
+    hasPriorityFilter,
+    hasStagesFilter,
+    moreFiltersActiveCount,
+  ]);
 
   const handleFilterChange = useCallback(
     (key: keyof TicketFilters, value: unknown): void => {
@@ -958,12 +1082,18 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
-  // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
-  // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
-  // active (`selectedLabel`): the whole list is already scoped to that label, so a second
-  // label picker is redundant.
+  // Assignee, Priority and Stages/Status are top-level popover buttons while the row has
+  // room for them, and fold in here (highest-priority first) once it doesn't — see
+  // `collapsedFilterIds`. The rest of the filters always live in this menu. The "Label"
+  // filter is hidden while a sidebar label view is active (`selectedLabel`): the whole list
+  // is already scoped to that label, so a second label picker is redundant.
   const filterMenuItems = useMemo(() => {
     const items = [
+      ...collapsedFilterIds.map(id => ({
+        id: id as string,
+        label: COLLAPSIBLE_FILTER_META[id].label,
+        icon: COLLAPSIBLE_FILTER_META[id].icon,
+      })),
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
@@ -981,7 +1111,7 @@ const SupportScreen = (): ReactElement => {
       items.push({ id: 'conversationLabel', label: 'Label', icon: TagIcon });
     }
     return items;
-  }, [deskDynamicFields, selectedLabel]);
+  }, [collapsedFilterIds, deskDynamicFields, selectedLabel]);
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
@@ -1001,6 +1131,32 @@ const SupportScreen = (): ReactElement => {
       );
     }
     switch (activeSubmenu) {
+      case 'assignee':
+        return (
+          <UserSubmenu
+            key='assignee-submenu'
+            selectedUsers={filters.assignee || []}
+            onChange={(users: string[]) => handleFilterChange('assignee', users)}
+            label='Assignee'
+          />
+        );
+      case 'priority':
+        return (
+          <PrioritySubmenu
+            selectedPriorities={filters.priority || []}
+            onChange={(priorities: TicketPriority[]) => handleFilterChange('priority', priorities)}
+            availablePriorities={availablePriorities}
+          />
+        );
+      case 'stages':
+        return (
+          <StagesSubmenu
+            selectedStages={filters.stages || []}
+            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+            availableStages={availableStages}
+            isLoading={!!deskBoardId && channelBoardDetailDetails.type !== 'complete'}
+          />
+        );
       case 'aiCategory':
         return (
           <AICategorySubmenu
@@ -1152,9 +1308,23 @@ const SupportScreen = (): ReactElement => {
     handleCreatedDateRangeChange,
     handleDynamicFieldChange,
     availableAiCategories,
+    availablePriorities,
+    availableStages,
+    deskBoardId,
+    channelBoardDetailDetails.type,
     deskDynamicFields,
     selectedChannelId,
   ]);
+
+  useEffect(() => {
+    if (
+      activeSubmenu &&
+      COLLAPSIBLE_FILTER_IDS.includes(activeSubmenu as CollapsibleFilterId) &&
+      !collapsedFilterIds.includes(activeSubmenu as CollapsibleFilterId)
+    ) {
+      setActiveSubmenu(null);
+    }
+  }, [activeSubmenu, collapsedFilterIds]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
@@ -2812,8 +2982,54 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                   </div>
-                  <div className='flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'>
-                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <div
+                    ref={filterRowRef}
+                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                  >
+                    {isSelectedChannelJoined && (
+                      <div
+                        aria-hidden
+                        className='pointer-events-none invisible absolute left-0 top-0 -z-10 flex items-center gap-2'
+                      >
+                        <div ref={filterMeasureRef} className='flex items-center gap-2'>
+                          <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
+                          <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
+                          <DeskFilterTrigger id='stages' active={hasStagesFilter} />
+                          <span />
+                        </div>
+                        <div ref={filterStaticLeftRef} className='flex items-center gap-2'>
+                          {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                            <span className='p-1.5'>
+                              <Search size={16} />
+                            </span>
+                          )}
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='rounded-[10px] border-border text-muted-foreground'
+                          >
+                            <div className='flex items-center gap-1.5'>
+                              <ListFilter className='w-3 h-3 font-medium' />
+                              <span className='font-medium'>More Filters</span>
+                              <span className='w-1.5 h-1.5 rounded-full' />
+                            </div>
+                          </Button>
+                          {hasAnyFilterActive && (
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              className='rounded-[10px] border-border text-muted-foreground'
+                            >
+                              <div className='flex items-center gap-1.5'>
+                                <X className='w-3 h-3' />
+                                <span className='font-medium'>Clear</span>
+                              </div>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className='flex items-center gap-2 min-w-0 flex-1 overflow-hidden'>
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
@@ -2829,123 +3045,87 @@ const SupportScreen = (): ReactElement => {
                       )}
                       {isSelectedChannelJoined && (
                         <>
-                          <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('assignee') && (
+                            <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='assignee'
+                                  active={hasAssigneeFilter}
+                                  open={assigneeOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <User className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Assignee</span>
-                                  {hasAssigneeFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      assigneeOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
-                            >
-                              <UserSubmenu
-                                key='assignee-popover-submenu'
-                                selectedUsers={filters.assignee || []}
-                                onChange={(users: string[]) =>
-                                  handleFilterChange('assignee', users)
-                                }
-                                label='Assignee'
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <UserSubmenu
+                                  key='assignee-popover-submenu'
+                                  selectedUsers={filters.assignee || []}
+                                  onChange={(users: string[]) =>
+                                    handleFilterChange('assignee', users)
+                                  }
+                                  label='Assignee'
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('priority') && (
+                            <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='priority'
+                                  active={hasPriorityFilter}
+                                  open={priorityOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <BarChart4Icon className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Priority</span>
-                                  {hasPriorityFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      priorityOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <PrioritySubmenu
-                                selectedPriorities={filters.priority || []}
-                                onChange={(priorities: TicketPriority[]) =>
-                                  handleFilterChange('priority', priorities)
-                                }
-                                availablePriorities={availablePriorities}
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <PrioritySubmenu
+                                  selectedPriorities={filters.priority || []}
+                                  onChange={(priorities: TicketPriority[]) =>
+                                    handleFilterChange('priority', priorities)
+                                  }
+                                  availablePriorities={availablePriorities}
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('stages') && (
+                            <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='stages'
+                                  active={hasStagesFilter}
+                                  open={stagesOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <Circle className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Status</span>
-                                  {hasStagesFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      stagesOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <StagesSubmenu
-                                selectedStages={filters.stages || []}
-                                onChange={(stages: string[]) =>
-                                  handleFilterChange('stages', stages)
-                                }
-                                availableStages={availableStages}
-                                isLoading={
-                                  !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
-                                }
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <StagesSubmenu
+                                  selectedStages={filters.stages || []}
+                                  onChange={(stages: string[]) =>
+                                    handleFilterChange('stages', stages)
+                                  }
+                                  availableStages={availableStages}
+                                  isLoading={
+                                    !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                  }
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
                           <Popover.Root open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
                             <Popover.Trigger asChild>
@@ -2959,10 +3139,18 @@ const SupportScreen = (): ReactElement => {
                               >
                                 <div className='flex items-center gap-1.5'>
                                   <ListFilter className='w-3 h-3 font-medium' />
-                                  <span className='font-medium'>More Filters</span>
-                                  {hasMoreFiltersActive && (
+                                  <span className='font-medium'>
+                                    {hasCollapsedFilters ? 'Filters' : 'More Filters'}
+                                  </span>
+                                  {hasCollapsedFilters ? (
+                                    collapsedActiveFilterCount > 0 && (
+                                      <span className='ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold leading-none text-white'>
+                                        {collapsedActiveFilterCount}
+                                      </span>
+                                    )
+                                  ) : hasMoreFiltersActive ? (
                                     <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
+                                  ) : null}
                                 </div>
                               </Button>
                             </Popover.Trigger>
@@ -3041,6 +3229,9 @@ const SupportScreen = (): ReactElement => {
                                   const Icon = item.icon;
                                   const isActive = activeSubmenu === item.id;
                                   const isFilterActive =
+                                    (item.id === 'assignee' && hasAssigneeFilter) ||
+                                    (item.id === 'priority' && hasPriorityFilter) ||
+                                    (item.id === 'stages' && hasStagesFilter) ||
                                     (item.id === 'aiCategory' &&
                                       !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
                                     (item.id === 'generatedTags' &&
@@ -3135,7 +3326,7 @@ const SupportScreen = (): ReactElement => {
                         </>
                       )}
                     </div>
-                    <div className='flex items-center gap-2 shrink-0'>
+                    <div ref={filterRowActionsRef} className='flex items-center gap-2 shrink-0'>
                       {/* Table column picker — built-in columns + the board's custom fields */}
                       {viewMode === 'table' && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
@@ -3144,10 +3335,14 @@ const SupportScreen = (): ReactElement => {
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              title={isToolbarCompact ? 'Columns' : undefined}
+                              aria-label='Columns'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                <span className='font-medium'>Columns</span>
+                                {/* Label drops before any filter folds — this is secondary
+                                    chrome, and the icon plus tooltip carries it fine. */}
+                                {!isToolbarCompact && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
                           </Popover.Trigger>
