@@ -7618,10 +7618,11 @@ async function directVespaIdentity(
   const devUser = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_USER_ID"] ?? "").trim();
   const devWorkspace = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_WORKSPACE_ID"] ?? "").trim();
   const userId = devUser || ctxUserId;
-  // Skip the Spaces-DB lookup when the workspace is pinned: an overridden user
-  // id generally has no row in the LOCAL Spaces DB, so the lookup would return
-  // null and the tool would refuse the query.
-  const workspaceId = devWorkspace || (await getWorkspaceIdForUser(userId));
+  // Env-first workspace resolution: the tool server's spawn env already carries
+  // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
+  // Falls back to the Spaces-DB user row when no env set.
+  const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
+  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
   if (devUser || devWorkspace) {
     log.warn(
       `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
@@ -8707,6 +8708,7 @@ const DESK_METRIC_KEYS = [
   "trend",
   "agents",
   "tags",
+  "aiCategories",
   "customFields",
   "tickets",
 ] as const;
@@ -8808,6 +8810,10 @@ const spacesDeskMetrics: ToolDef = {
     "user can see. Call with no desk argument to list the available desks. " +
     "ASK FOR ONLY THE METRICS YOU NEED via `metrics` — each key is a separate database query, and the " +
     "default runs all of them. " +
+    "For \"what are the tickets about\" / classify / categorise questions use metrics:[\"aiCategories\"], " +
+    "which returns exact ticket counts per AI category AND per (category, sub-category) pair over the " +
+    "whole cohort — do not enumerate tickets and tally the labels yourself. Narrow with the " +
+    "`aiCategories` / `aiSubCategories` filters. " +
     "For custom (form) field questions: run metrics:[\"customFields\"] to discover which fields the desk " +
     "carries, then pass `customFieldBreakdown` with the exact names to get a value distribution, or " +
     "`customFieldFilter` to scope any other metric to tickets matching a field value. " +
@@ -8897,6 +8903,20 @@ const spacesDeskMetrics: ToolDef = {
           "Restrict to tickets carrying these desk-email tags, each as 'category:tag' (e.g. " +
           "'issue_type:refund'). Get the real values from a tags-enabled run first.",
       },
+      aiCategories: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to tickets the AI classifier put in these top-level categories (exact match). " +
+          "Run metrics:[\"aiCategories\"] first to see the real labels on this desk.",
+      },
+      aiSubCategories: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to these AI sub-categories (exact match). Independent of aiCategories — " +
+          "setting both requires BOTH to match.",
+      },
       customFieldBreakdown: {
         type: "array",
         items: { type: "string" },
@@ -8957,7 +8977,15 @@ const spacesDeskMetrics: ToolDef = {
         }
       }
 
-      for (const key of ["assigneeIds", "stageNames", "priorities", "userGroupIds", "tagValues"]) {
+      for (const key of [
+        "assigneeIds",
+        "stageNames",
+        "priorities",
+        "userGroupIds",
+        "tagValues",
+        "aiCategories",
+        "aiSubCategories",
+      ]) {
         const value = args[key];
         if (Array.isArray(value) && value.length > 0) body[key] = value;
       }

@@ -769,7 +769,25 @@ function buildAreaClauses(
   }
 
   // 2. Baseline area constraints.
-  clauses.push(...area.baseConditions);
+  // The ONYX_BENCH_VESPA lane rewrites some of them to match bench vespa's ingest conventions
+  if ((process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true") {
+    for (const c of area.baseConditions) {
+      // bench ingest stamps chat_message docs with docType=sourceType ("slack") instead of "message"
+      if (areaName === "message" && c === 'docType contains "message"') {
+        clauses.push('(docType contains "message" or docType contains "slack")');
+        continue;
+      }
+      // bench ingest wrote subApp="transcript" lowercase and file.sd declares
+      // subApp { match: exact } — case-sensitive — so accept both spellings
+      if (c === 'subApp contains "TRANSCRIPT"') {
+        clauses.push('(subApp contains "TRANSCRIPT" or subApp contains "transcript")');
+        continue;
+      }
+      clauses.push(c);
+    }
+  } else {
+    clauses.push(...area.baseConditions);
+  }
 
   // 2a. Workspace isolation — every schema carries workspaceId (top-level, or
   // imported from channelRef on chat_message/ticket). Always scope so a query

@@ -148,6 +148,7 @@ export async function dispatchSlackRun(input: {
     spacesAppId: "",
     spacesAppUserId: "",
     rootAgentSlug: input.agent.slug,
+    triggerSource: "slack",
     slackDelivery,
   });
   return body.sessionId;

@@ -1420,17 +1420,22 @@ function resolveCustomSubagentTools(
 
   if (directNames.size > 0) {
     for (const group of groups) {
-      const writeSet = new Set(group.writeTools.map(String));
       for (const t of group.tools) {
         const name = extractToolName(t.name);
-        if (directNames.has(name) && !writeSet.has(name)) out.push(t);
+        // Include write tools too. Their ToolDefinition still queues a signed
+        // pendingAction via the parent run's MCP wrapper; it does not execute
+        // until the human approval card is approved in claw-auth.
+        if (directNames.has(name)) out.push(t);
       }
     }
   }
   if (customSlugs.size > 0 && customTools) {
     for (const t of customTools) {
       const slug = customToolSlug(t);
-      if (customSlugs.has(slug) && !isCustomWriteTool(t)) out.push(t);
+      // Custom write tools follow the same signed pendingAction path as MCP
+      // writes, so custom subagents can now own the full workflow while the
+      // approval gate remains outside the child LLM.
+      if (customSlugs.has(slug)) out.push(t);
     }
   }
   return out;
@@ -1439,7 +1444,9 @@ function resolveCustomSubagentTools(
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
  * Also wraps custom tools whose `source` matches a subagent definition.
- * Write tools (from adapter's writeTools) stay as direct tools in the parent agent.
+ * Write tools are included in the subagent palette and still use the parent
+ * run's signed pendingAction approval gate; they are also hoisted as direct
+ * tools for backwards compatibility with existing parent-driven approvals.
  * Server types without a matching SubagentDefinition pass through as direct tools.
  */
 export function buildSubagentTools(
@@ -1483,25 +1490,25 @@ export function buildSubagentTools(
     const def = findSubagentDefinitionForServer(group.serverType);
 
     if (def) {
-      // Split write tools out as direct (they need user approval in the parent agent)
       const writeSet = new Set(group.writeTools.map(String));
-      const readTools = group.tools.filter((t) => !writeSet.has(extractToolName(t.name)));
       const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t.name)));
 
-      if (readTools.length > 0) {
+      if (group.tools.length > 0) {
         const skills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
-        subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, skills, providerResolution, progressCtx));
+        subagentTools.push(makeSubagentTool(def, [...group.tools, ...bonus], skillTriggers, skills, providerResolution, progressCtx));
 
-        // Hoist user-picked reads into the parent's direct palette too. The
+        // Hoist user-picked tools into the parent's direct palette too. The
         // subagent wrapper above already contains them — this just exposes a
         // second path so the parent agent can call e.g. `bitbucket__get_pull_request`
         // without going through the `bitbucket` subagent. Picked-as-direct +
         // picked-as-subagent both work; the parent-level filter in run.ts
         // decides which path actually surfaces to the model.
-        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        const hoisted = group.tools.filter((t) => isDirectPick(t.name));
         if (hoisted.length > 0) directTools.push(...hoisted);
       }
+      // Backwards compatibility: keep write tools visible at parent level for
+      // agents/prompts that already perform parent-driven approval flows.
       directTools.push(...writeTools);
     } else {
       // No subagent definition for this server type — keep all as direct
@@ -1538,15 +1545,10 @@ export function buildSubagentTools(
       if (def && tools.length > 0) {
         const customSkills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
         const filteredTools = tools;
-        // Custom write tools (e.g. google-sheets-create/append/update) must
-        // remain parent-level approval tools. Do not put them in child LLM
-        // palettes: the child can otherwise queue writes and then speak as if
-        // it completed the whole multi-step write flow after approval.
-        const readTools = filteredTools.filter((t) => !isCustomWriteTool(t));
         const writeTools = filteredTools.filter(isCustomWriteTool);
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
-        if (readTools.length > 0 || bonus.length > 0) {
-          subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
+        if (filteredTools.length > 0 || bonus.length > 0) {
+          subagentTools.push(makeSubagentTool(def, [...filteredTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
         }
 
         // Same individual-pick hoist as the built-in MCP branch above: any
@@ -1557,8 +1559,10 @@ export function buildSubagentTools(
         // check that bitbucket/spaces direct picks use — one config knob,
         // one mental model. The tool stays accessible inside the subagent
         // wrapper too.
-        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        const hoisted = filteredTools.filter((t) => isDirectPick(t.name));
         if (hoisted.length > 0) directTools.push(...hoisted);
+        // Backwards compatibility for existing prompts that expect custom write
+        // tools to be parent-level approval tools.
         remainingCustomTools.push(...writeTools);
       } else {
         remainingCustomTools.push(...tools);

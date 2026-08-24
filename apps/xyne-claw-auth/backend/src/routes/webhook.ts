@@ -576,6 +576,8 @@ import {
   spacesAppFetch,
   spacesAppFetchGet,
   spacesAppFetchMultipart,
+  SpacesApiError,
+  isFlowSchemaRejection,
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
@@ -795,12 +797,15 @@ async function pendingActionTargetValidation(
       );
       return { error: null };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/Spaces app API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+      // Branch on the typed HTTP status, not message text. Only a definitive 404
+      // rejects a conversation target; everything else (403 included, preserving
+      // prior behavior) fails open so the Spaces API stays the final judge.
+      const status = err instanceof SpacesApiError ? err.status : undefined;
+      if (status === 404) {
         return { error: `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread` };
       }
       clog.warn(
-        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(err instanceof Error ? err.message : String(err)).slice(0, 240)}`,
       );
       return { error: null };
     }
@@ -812,19 +817,17 @@ async function pendingActionTargetValidation(
     const channel = (await spacesAppFetch("/channel/info", { channelId }, appToken)) as { name?: string } | undefined;
     return channel?.name ? { error: null, channelName: channel.name } : { error: null };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (
-      /Spaces app API 404/i.test(msg) ||
-      /CHANNEL_NOT_FOUND/i.test(msg) ||
-      (/channel not found/i.test(msg) && /\b404\b/.test(msg))
-    ) {
+    // Same typed-status branch as the queue-time validator (mcp/validators.ts):
+    // 404 → not found, 403 → not accessible, anything else fails open.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 404) {
       return { error: `channel ${channelId} not found — use a real Spaces channel id` };
     }
-    if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+    if (status === 403) {
       return { error: `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access` };
     }
     clog.warn(
-      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(err instanceof Error ? err.message : String(err)).slice(0, 240)}`,
     );
     return { error: null };
   }
@@ -1425,8 +1428,12 @@ async function postWriteApprovalAction(args: {
   };
 
   const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  // The rich `ticket` FlowUI component is only rendered by newer Spaces
+  // backends; older deployments reject it. Track when we used it so a flow-
+  // schema rejection can fall back to the generic approval card below.
+  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
   const writeFlow = withSpacesAppId(
-    pendingActionPayload.tool === "spaces-create-ticket" && ticketTitle
+    usedRichTicketCard
       ? buildTicketProposalFlow({
           title: ticketTitle,
           ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
@@ -1472,16 +1479,37 @@ async function postWriteApprovalAction(args: {
     }
   }
 
-  await spacesAppFetch("/chat/postMessage", {
-    channelId: ctx.channelId,
-    // Same empty-conversationId guard as the result post: an API/event-triggered
-    // run has no thread, so posting the approval card with conversationId: ""
-    // 400s in Spaces' channel-validation middleware and the card silently never
-    // appears. Omit when empty → the card posts as a top-level channel message.
-    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
-    flow: writeFlow,
-    userId: ctx.spacesAppUserId,
-  }, token);
+  const postCard = (flow: unknown): Promise<unknown> =>
+    spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      // Same empty-conversationId guard as the result post: an API/event-triggered
+      // run has no thread, so posting the approval card with conversationId: ""
+      // 400s in Spaces' channel-validation middleware and the card silently never
+      // appears. Omit when empty → the card posts as a top-level channel message.
+      ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+
+  try {
+    await postCard(writeFlow);
+  } catch (err) {
+    // The rich `ticket` component isn't rendered by every deployed Spaces
+    // backend; when it isn't, /chat/postMessage rejects the ENTIRE card with a
+    // 400 "Invalid flowJSON" (unknown component discriminator) and the approval
+    // never appears (prod 2026-08-24, arya-doctor spaces-create-ticket). Degrade
+    // to the generic approve/decline card, which uses only universally-supported
+    // component types and carries the identical signed action, so the write can
+    // still be approved. ONLY a flow-schema 400 triggers this — any other error
+    // (auth, channel validation, network) re-throws so the caller's skip/target
+    // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
+    // with no code change.
+    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    clog.warn(
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+    );
+    await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
+  }
 }
 
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
@@ -1707,7 +1735,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // a command missing here ships with the mention un-stripped, so claw never
   // sees it at byte zero and the whole contract silently degrades (bit /design
   // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
-  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard)(?:\s|$)/i.test(taskCommandText);
+  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard|spec)(?:\s|$)/i.test(taskCommandText);
   const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
@@ -2067,6 +2095,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "- `/dashboard <brief>` — live-data dashboard snapshot, refreshable on a schedule",
         "- `/explainer <topic>` — narrated explainer video",
         "- `/record-skill` — turn a recorded walkthrough into a reusable skill",
+        "- `/spec <ticket>` — interview you, then write the specification onto the ticket",
         "",
         "*Controlling this thread*",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
@@ -2700,6 +2729,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           spacesAppUserId: agent.spacesAppUserId,
           traceId,
           rootAgentSlug: agent.slug,
+          triggerSource: "spaces",
           escalatedProvider,
           // Preserve other prior-session fields where helpful.
           ...(priorSession?.workflowId ? { workflowId: priorSession.workflowId } : {}),
@@ -3078,6 +3108,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       spacesAppUserId: agent.spacesAppUserId,
       traceId,
       rootAgentSlug: agent.slug,
+      triggerSource: "spaces",
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(escalatedProvider ? { escalatedProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
@@ -4020,6 +4051,7 @@ export async function handleAutomationWebhook(
       // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
       // MCP swap on this (not on the resolveMentions proxy).
       isAutomation: true,
+      triggerSource: "automation",
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
@@ -4855,6 +4887,63 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   if (payload.status === "completed" && resultWithCitations.trim() && memorySearchCount > 0) {
     const label = memorySearchCount === 1 ? "time" : "times";
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
+  }
+
+  // Pending write-action footer: a DETERMINISTIC, per-action-honest correction.
+  // Write tools now live in child subagent palettes too, so a parent (or child)
+  // can queue a signed write and then narrate as if it already ran. The write is
+  // execution-gated (nothing runs until the approval card is approved), but two
+  // things could still mislead the user: (1) the narration claims success, and
+  // (2) the approval card is SKIPPED when the target channel isn't app-accessible
+  // (see the loop below, which validates and `continue`s). Before that skip was
+  // silent — the user saw "queued, approve it" and no card ever came.
+  //
+  // Fix: validate every queued write HERE, against the same target-validation the
+  // card loop uses, and (a) stash the result so the loop reuses it — the footer
+  // can never claim a card the loop then drops — and (b) split the footer into
+  // "actually queued" vs "could NOT be queued (with reason)". A rejected action
+  // is stated as a failure, so there is no silent "queued" exit. The warning
+  // fires even on an empty result (seeding the message) because a dropped card
+  // must always be surfaced.
+  const pendingActionList = Array.isArray(
+    (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions,
+  )
+    ? (payload as { pendingActions: Array<Record<string, unknown>> }).pendingActions
+    : [];
+  const pendingActionValidation = new Map<
+    Record<string, unknown>,
+    { error: string | null; channelName?: string }
+  >();
+  if (ctx && payload.status === "completed" && pendingActionList.length > 0) {
+    for (const action of pendingActionList) {
+      const v = await pendingActionTargetValidation(action, ctx, ctx.appToken).catch(
+        () => ({ error: null as string | null }),
+      );
+      pendingActionValidation.set(action, v);
+    }
+    const toolOf = (a: Record<string, unknown>): string =>
+      typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
+    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
+
+    const lines: string[] = [];
+    if (queued.length > 0) {
+      const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
+      const noun = queued.length === 1 ? "action is" : "actions are";
+      lines.push(
+        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+      );
+    }
+    for (const action of rejected) {
+      const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
+      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+    }
+    if (lines.length > 0) {
+      const body = lines.map((l) => `_${l}_`).join("\n\n");
+      resultWithCitations = resultWithCitations.trim()
+        ? `${resultWithCitations.trimEnd()}\n\n${body}`
+        : body;
+    }
   }
 
   // When an active /goal loop is running, prefix every turn's user-facing reply
@@ -6773,7 +6862,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (pendingActionsPayload?.length) {
       let approvalCardsSent = 0;
       for (const action of pendingActionsPayload) {
-        const targetValidation = await pendingActionTargetValidation(action, ctx, token);
+        // Reuse the validation computed for the footer above so the message and
+        // the card can never disagree; fall back only if it wasn't classified
+        // (e.g. a non-completed status path that skipped the footer).
+        const targetValidation =
+          pendingActionValidation.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
         if (targetValidation.error) {
           log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
           continue;
@@ -6907,6 +7000,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             chainDepth: currentDepth + 1,
             rootAgentSlug,
             workflowId: binding.workflowId,
+            triggerSource: "spaces",
             ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
           };
           await setSession(runBody.sessionId, targetContext);

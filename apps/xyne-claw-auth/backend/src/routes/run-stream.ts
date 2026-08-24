@@ -7,7 +7,7 @@ import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -350,6 +350,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
+      /** Per-message provider fast mode (Spaces composer ⚡ toggle). Overrides
+       *  the agent's modelSettings.speed for THIS run only; absent = agent
+       *  default. Invalid values are ignored rather than 400d — this route is
+       *  a pass-through for several callers. */
+      speed: rawSpeed,
+      /** Per-message thinking level (Spaces composer dropdown). Merged over the
+       *  agent's modelSettings for this run; invalid values are ignored. */
+      thinkingLevel: rawThinkingLevel,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -425,7 +433,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
     // resolver the headless + automation paths use). Body-supplied values win
     // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    const speedOverride = rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"];
+    const thinkingOverride = typeof rawThinkingLevel === "string" && THINKING_LEVELS.includes(rawThinkingLevel)
+      ? rawThinkingLevel
+      : undefined;
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
+    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
@@ -880,6 +894,49 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: agentRow.description,
       },
     };
+    // Fast mode: forward the agent's model settings (with the effective speed)
+    // and fast-mode profile so claw applies the speed + run-setting overrides.
+    // ONLY when this run is fast — this route otherwise forwards no stored
+    // modelSettings, and standard runs must stay byte-identical to today.
+    if (effectiveSpeed === "fast" || thinkingOverride) {
+      const storedConfig = (agentRow.config as Record<string, unknown> | null) ?? {};
+      const storedModelSettings = storedConfig["modelSettings"];
+      // Fast runs carry the agent's full model settings (this route otherwise
+      // forwards none) so the speed + fast-profile overrides apply in claw. A
+      // standard run with ONLY a thinking override forwards just that field —
+      // anything more would change behavior for settings this path never
+      // honored before. The per-message thinking override wins over both the
+      // stored value and the fast profile's override.
+      enrichedAgentConfig["modelSettings"] = {
+        ...(effectiveSpeed === "fast" && storedModelSettings && typeof storedModelSettings === "object" && !Array.isArray(storedModelSettings)
+          ? storedModelSettings as Record<string, unknown>
+          : {}),
+        ...(effectiveSpeed === "fast" ? { speed: "fast" } : {}),
+        ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
+      };
+      if (effectiveSpeed === "fast") {
+        const profile = parseFastModeProfile(storedConfig);
+        if (storedConfig["fastModeProfile"] !== undefined && storedConfig["fastModeProfile"] !== null) {
+          // Drop the profile's own thinking override when the user picked one
+          // for this message — claw overlays profile.modelSettings over
+          // modelSettings on fast runs, and the per-message choice must win.
+          const rawProfile = storedConfig["fastModeProfile"];
+          enrichedAgentConfig["fastModeProfile"] = thinkingOverride && rawProfile && typeof rawProfile === "object" && !Array.isArray(rawProfile) && (rawProfile as Record<string, unknown>)["modelSettings"]
+            ? {
+                ...(rawProfile as Record<string, unknown>),
+                modelSettings: {
+                  ...((rawProfile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+                  thinkingLevel: thinkingOverride,
+                },
+              }
+            : rawProfile;
+        }
+        log.info(`[run-stream] fast mode for ${slug} (override=${speedOverride ?? "agent-default"}, profile=${profile.providers}${thinkingOverride ? `, thinking=${thinkingOverride}` : ""})`);
+      } else {
+        log.info(`[run-stream] thinking override for ${slug}: ${thinkingOverride}`);
+      }
+    }
+
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,

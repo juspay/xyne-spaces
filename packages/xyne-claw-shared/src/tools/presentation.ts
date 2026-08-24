@@ -27,8 +27,6 @@
 export const PRESENTATION_TOOL_SOURCES: ReadonlySet<string> = new Set([
   // post-code-block / post-diff / post-chart
   "custom:code-artifacts",
-  // visualize — renders a fenced ```chart block for the reply body
-  "custom:visualize",
 ]);
 
 /** Catalog source label used for presentation tools in the fast-mode catalog. */

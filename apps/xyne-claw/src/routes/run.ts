@@ -1948,6 +1948,38 @@ async function processTask(
 
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
+
+    // Surface-default tool injection, per run only. Slack already injects its
+    // subagent in claw-auth before dispatch; Spaces runs arrive directly from
+    // the Spaces webhook and need the same default here so mention/automation/
+    // scheduled runs can read the room without mutating the stored agent config.
+    // Scheduled jobs post into a Spaces channel too, so they get the same spaces
+    // default as an interactive mention. A missing tools object means the agent
+    // is unrestricted, so do not create one.
+    const effectiveTools = effectiveConfig["tools"];
+    const isSpacesSurfaceEvent =
+      eventType === "APP_MENTIONED" ||
+      eventType === "DIRECT_MESSAGE" ||
+      eventType === "USER_MENTIONED" ||
+      eventType === "automation" ||
+      eventType === "scheduled_job" ||
+      eventType === "scheduled" ||
+      (conversationId?.startsWith("scheduled_") ?? false);
+    if (
+      isSpacesSurfaceEvent &&
+      effectiveTools &&
+      typeof effectiveTools === "object" &&
+      !Array.isArray(effectiveTools)
+    ) {
+      const toolsObj = effectiveTools as Record<string, unknown>;
+      const subagents = Array.isArray(toolsObj["subagents"])
+        ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
+        : [];
+      if (!subagents.includes("spaces")) {
+        effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
+      }
+    }
+
     // Parent agent's provider config — looked up from user's provider credentials.
     // We also reuse it to drive custom:create-ppt so PPT generation uses the
     // same user credential/model instead of shared env keys.
@@ -2958,7 +2990,12 @@ async function processTask(
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
-    const outputFormat = parseOutputFormat(agentConfig);
+    // Command overlay wins for this run only — never written back to the agent.
+    const outputFormat = parseOutputFormat(
+      taskCommand?.agentConfigOverlay
+        ? { ...(agentConfig ?? {}), ...taskCommand.agentConfigOverlay }
+        : agentConfig,
+    );
     const structuredOutputRef: StructuredOutputRef = {};
     const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode && !isDailyBrief;
     requiresStructuredDelivery = structuredOutputActive;
@@ -3202,7 +3239,9 @@ async function processTask(
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
     const taskCommandToolAvailable =
-      taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
+      taskCommand !== null &&
+      (taskCommand.requiredTool === undefined ||
+        allTools.some((t) => t.name === taskCommand.requiredTool));
     if (taskCommand) {
       // The fenced-```html contract exists for Design Studio's live preview,
       // where the chat UI hides the block. Webhook-originated runs (Spaces
@@ -3218,10 +3257,13 @@ async function processTask(
       activeInjections.push({
         id: `__task-command-${taskCommand.command.slice(1)}`,
         label: `Command: ${taskCommand.command}`,
-        content: (taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction) + surfaceSuffix,
+        content:
+          (taskCommandToolAvailable
+            ? taskCommand.instruction
+            : (taskCommand.missingToolInstruction ?? taskCommand.instruction)) + surfaceSuffix,
       });
       log(
-        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool ?? "(delivery contract)"} (available=${taskCommandToolAvailable})`,
       );
     }
     const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
@@ -3879,7 +3921,7 @@ async function processTask(
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
           activeInjections.length > 0 ? activeInjections : undefined,
-        ...(taskCommand && taskCommandToolAvailable
+        ...(taskCommand?.requiredTool && taskCommandToolAvailable
           ? { requiredTool: { name: taskCommand.requiredTool, nudge: taskCommand.nudge } }
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),

@@ -801,6 +801,39 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
   }
 });
 
+// Platform fallback for the model picker: list models off claw's platform
+// LiteLLM key (S2S — the key never leaves claw). Fail-soft: any failure yields
+// an empty list so the picker hides instead of erroring the chat page.
+async function listPlatformModels(): Promise<{
+  success: true;
+  data: Array<{ id: string; name: string }>;
+  defaultModel: string | null;
+  pinProvider: "spaces";
+}> {
+  const empty = { success: true as const, data: [], defaultModel: null, pinProvider: "spaces" as const };
+  if (!CONFIG.xyneClawS2sKey) return empty;
+  try {
+    const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/litellm/models`;
+    const upstream = await fetch(url, {
+      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => "");
+      log.error(`[agent-chat] platform models via claw failed: ${upstream.status} ${text.slice(0, 200)}`);
+      return empty;
+    }
+    const payload = (await upstream.json()) as { data?: Array<{ id?: string; name?: string }>; defaultModel?: string | null };
+    const data = (payload.data ?? [])
+      .filter((m): m is { id: string; name?: string } => Boolean(m.id))
+      .map((m) => ({ id: m.id, name: m.name ?? m.id }));
+    return { success: true, data, defaultModel: payload.defaultModel ?? null, pinProvider: "spaces" };
+  } catch (err) {
+    log.error("[agent-chat] platform models via claw error:", err);
+    return empty;
+  }
+}
+
 // GET /:slug/litellm-models — models the agent's shared LiteLLM credential can
 // access, for the per-chat model switcher. Any authenticated chat participant
 // may call this (the router is mounted under requireAuth): it lists models off
@@ -822,8 +855,36 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       return;
     }
     const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "litellm").catch(() => null);
-    if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
-      res.json({ success: true, data: [], defaultModel: null });
+    const hasCred = Boolean(cred?.encryptedKey && cred?.iv && cred?.authTag);
+
+    // The picker follows the agent's provider ORDER: whichever of spaces /
+    // litellm would serve a no-pin run supplies both the model list and the
+    // "Recommended" default, so the label always matches what actually runs.
+    //   [spaces, litellm…]    → platform list; default = modelSettings.model
+    //                           (the agent's Spaces model) ?? platform default
+    //   [litellm, …] + cred   → the credential's list; default = cred.model
+    //   no order + cred       → litellm (bare-credential fallback, mirrors
+    //                           resolveAgentProviderConfigs)
+    //   otherwise             → spaces (keyless platform default, via claw —
+    //                           LITELLM_API_KEY stays on the claw pod, same
+    //                           pattern as entity-llm). pinProvider tells the
+    //                           composer which providerOverride a pick rides.
+    const agentCfg = (agent.config ?? {}) as Record<string, unknown>;
+    const rawOrder = agentCfg["providerOrder"];
+    const order = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
+    const relevant = order.filter((e) => e === "spaces" || (e === "litellm" && hasCred));
+    // No order → the platform default serves (strict ranking: a credential
+    // that was saved but never selected as a provider never routes a run).
+    // Legacy config.provider = "litellm" still counts as an explicit selection.
+    const legacyProvider = typeof agentCfg["provider"] === "string" ? agentCfg["provider"] : undefined;
+    const primary = relevant[0] ?? (order.length === 0 && legacyProvider === "litellm" && hasCred ? "litellm" : "spaces");
+
+    if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
+      const platform = await listPlatformModels();
+      const ms = agentCfg["modelSettings"] as Record<string, unknown> | undefined;
+      const rawSpacesModel = ms?.["model"];
+      const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
+      res.json({ ...platform, defaultModel: spacesModel ?? platform.defaultModel });
       return;
     }
     const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
@@ -842,10 +903,14 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .filter((m): m is { id: string } => Boolean(m.id))
       .map((m) => ({ id: m.id, name: m.id }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    res.json({ success: true, data: models, defaultModel: cred.model ?? null });
+    res.json({ success: true, data: models, defaultModel: cred.model ?? null, pinProvider: "litellm" });
   } catch (err) {
     log.error("[agent-chat] litellm-models error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch models" });
+    // fetch() network failures bury the real reason (ENOTFOUND, ECONNREFUSED)
+    // in err.cause — surface it so a prod 500 body is diagnosable on sight.
+    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+    const message = err instanceof Error ? err.message : "Failed to fetch models";
+    res.status(500).json({ success: false, error: `${message}${cause}` });
   }
 });
 
@@ -871,6 +936,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designSelection,
       researchContext,
       speed: rawSpeed,
+      thinkingLevel: rawThinkingLevel,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -899,12 +965,23 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
        *  modelSettings.speed for this run only — same credential, same model,
        *  Anthropic's faster tier. Omitted = agent default. */
       speed?: "standard" | "fast";
+      /** Per-message thinking level (the composer's model menu). Rides the
+       *  agent's modelSettings.thinkingLevel for this run only. */
+      thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
     const speedOverride: "standard" | "fast" | undefined =
       rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
     if (rawSpeed !== undefined && !speedOverride) {
       res.status(400).json({ success: false, error: 'speed must be "standard" or "fast"' });
+      return;
+    }
+    const CHAT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+    const thinkingOverride = typeof rawThinkingLevel === "string" && (CHAT_THINKING_LEVELS as readonly string[]).includes(rawThinkingLevel)
+      ? rawThinkingLevel as (typeof CHAT_THINKING_LEVELS)[number]
+      : undefined;
+    if (rawThinkingLevel !== undefined && !thinkingOverride) {
+      res.status(400).json({ success: false, error: `thinkingLevel must be one of: ${CHAT_THINKING_LEVELS.join(", ")}` });
       return;
     }
 
@@ -1372,9 +1449,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Resolution: personal user provider always wins. Otherwise providerOrder
     // (canonical) takes over, with legacy config.provider as fallback for
     // agents that haven't migrated yet.
+    // STRICT RANKING — top first. "spaces" is keyless and can always serve,
+    // so an explicit spaces entry wins over lower-ranked saved credentials
+    // (mirrors resolveAgentProviderConfigs).
     let resolvedParentProvider = personalProvider;
     if (!resolvedParentProvider && agentProviderOrder.length > 0) {
-      resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+      resolvedParentProvider = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
@@ -1419,20 +1499,48 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           resolvedParentProvider = override.provider;
           if (override.model?.trim()) providerConfigs[override.provider] = { ...cfg, model: override.model.trim() };
           runtimeProviderOrder = [];
+        } else if (override.provider === "litellm" && override.model?.trim()) {
+          // No agent litellm credential — the pick came off the platform
+          // allowed-model list (litellm-models' claw fallback). Apply it as a
+          // "spaces" pin so it still takes effect instead of silently no-oping.
+          resolvedParentProvider = "spaces";
+          runAgentConfig = {
+            ...(runAgentConfig ?? {}),
+            modelSettings: {
+              ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+              model: override.model.trim(),
+            },
+          };
+          runtimeProviderOrder = [];
         }
       }
     }
 
-    // Per-message fast-mode toggle wins over the agent's saved
-    // modelSettings.speed for this run only (not persisted to the agent).
-    if (speedOverride) {
+    // Per-message fast-mode / thinking overrides win over the agent's saved
+    // modelSettings for this run only (not persisted to the agent). The
+    // thinking pick also outranks the fast profile's thinking override —
+    // claw overlays fastModeProfile.modelSettings over modelSettings on fast
+    // runs, so mirror the choice into the profile too when one exists.
+    if (speedOverride || thinkingOverride) {
       runAgentConfig = {
         ...(runAgentConfig ?? {}),
         modelSettings: {
           ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
-          speed: speedOverride,
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
         },
       };
+      const profile = runAgentConfig["fastModeProfile"];
+      if (thinkingOverride && profile && typeof profile === "object" && !Array.isArray(profile)
+          && (profile as Record<string, unknown>)["modelSettings"]) {
+        runAgentConfig["fastModeProfile"] = {
+          ...(profile as Record<string, unknown>),
+          modelSettings: {
+            ...((profile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+            thinkingLevel: thinkingOverride,
+          },
+        };
+      }
     }
     const effectiveAgentConfig = disableTools
       ? {

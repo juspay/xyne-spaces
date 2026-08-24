@@ -699,27 +699,72 @@ async function loadSlackSurfaceCredentials(
   };
 }
 
+function withSubagent(config: AgentToolsConfig, subagentName: string): AgentToolsConfig {
+  const subagents = Array.isArray(config.subagents)
+    ? config.subagents.filter((value): value is string => typeof value === "string")
+    : [];
+  if (subagents.includes(subagentName)) return config;
+  return { ...config, subagents: [...subagents, subagentName] };
+}
+
 /**
- * Mirror the per-run Slack subagent injection at the claw-auth enforcement
- * boundary. MCP listing/call routes load the agent's stored config, not the
- * agentConfig override forwarded to claw, so without this the virtual Slack
- * group is created and then immediately filtered back out.
+ * Mirror per-run surface tool injection at the claw-auth enforcement boundary.
+ * MCP listing/call routes load the agent's stored config, not the agentConfig
+ * override forwarded to claw, so without this a surface-default virtual group
+ * is created and then immediately filtered back out.
  */
-async function withSlackSurfaceToolsConfig(
+async function withSurfaceDefaultToolsConfig(
   config: AgentToolsConfig | undefined,
   sessionId: string,
+  sessionSpacesAppId?: string,
 ): Promise<AgentToolsConfig | undefined> {
   if (!config) return undefined;
 
   const { getSession } = await import("./webhook.js");
   const runCtx = await getSession(sessionId).catch(() => null);
-  if (!runCtx?.slackDelivery?.surfaceAgentId || !runCtx.slackDelivery.teamId) return config;
 
-  const subagents = Array.isArray(config.subagents)
-    ? config.subagents.filter((value): value is string => typeof value === "string")
-    : [];
-  if (subagents.includes("slack")) return config;
-  return { ...config, subagents: [...subagents, "slack"] };
+  let effective = config;
+  if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
+    effective = withSubagent(effective, "slack");
+  }
+
+  // Spaces-originated runs already carry the agent's Spaces app/user context in
+  // the session and credential fallback. Give those runs the Spaces subagent by
+  // default, matching Slack's surface-default injection, without mutating the
+  // stored agent config or granting Spaces tools to API/chat runs. Scheduled
+  // jobs post their result into a Spaces channel, so a scheduled run that
+  // carries Spaces app context counts as a Spaces surface too and gets the same
+  // default (a non-Spaces scheduled run, lacking that context, does not).
+  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
+  // The run-context (`getSession`) can come back empty or partial at tool-list
+  // time — a Redis miss or a race — and that silently strips a Spaces-app
+  // agent's Spaces tools (prod 2026-08-24: agent `xyne` kept only its hand-
+  // listed read tools, every write tool + the app-tools server dropped). The
+  // AUTHENTICATED session's own `spacesAppId` is an authoritative signal that
+  // this run belongs to a Spaces app, independent of the run-context. Trust it
+  // as a Spaces surface unless the run is explicitly a non-Spaces one (Slack
+  // delivery, or an explicit api/chat trigger) — so the fallback fixes the
+  // empty-run-context case without granting Spaces tools to true API/chat runs.
+  const sessionIsSpacesApp =
+    !!sessionSpacesAppId &&
+    !runCtx?.slackDelivery &&
+    runCtx?.triggerSource !== "api" &&
+    runCtx?.triggerSource !== "chat";
+  const isSpacesSurface =
+    runCtx?.triggerSource === "spaces" ||
+    runCtx?.triggerSource === "automation" ||
+    runCtx?.isAutomation === true ||
+    (runCtx?.triggerSource === "scheduled" && hasSpacesContext) ||
+    (runCtx?.triggerSource == null && hasSpacesContext) ||
+    sessionIsSpacesApp;
+  if (isSpacesSurface) {
+    if (!hasSpacesContext && sessionIsSpacesApp && runCtx?.triggerSource == null) {
+      log.info(`[mcp/tools] spaces default injected from session spacesAppId (run-context absent) app=${sessionSpacesAppId}`);
+    }
+    effective = withSubagent(effective, "spaces");
+  }
+
+  return effective;
 }
 
 async function loadEffectiveCredentialsWithSpacesFallback(
@@ -804,7 +849,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
 
@@ -1267,7 +1312,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const { serverType, tool, params, permission, backendId } = req.body as {
       serverType?: string;

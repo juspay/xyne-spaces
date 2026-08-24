@@ -1333,6 +1333,19 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             };
           }
           effectiveProviderOrder = [];
+        } else if (runOverride.provider === "litellm" && runOverride.model?.trim()) {
+          // No agent litellm credential — the pick came off the platform
+          // allowed-model list (litellm-models' claw fallback). Apply it as a
+          // "spaces" pin so it still takes effect instead of silently no-oping.
+          effectiveProvider = "spaces";
+          mergedAgentConfig = {
+            ...mergedAgentConfig,
+            modelSettings: {
+              ...((mergedAgentConfig["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+              model: runOverride.model.trim(),
+            },
+          };
+          effectiveProviderOrder = [];
         }
       }
     }

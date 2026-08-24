@@ -71,6 +71,15 @@ function sanitizeAgent<T extends Record<string, unknown>>(agent: T): T {
 function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<string, string>): Record<string, unknown> {
   const owner = agent["owner"] as { id?: string; name?: string; email?: string } | null | undefined;
   const orgId = typeof agent["orgId"] === "string" ? agent["orgId"] : null;
+  // Derived flag for chat surfaces (Spaces Ask AI composer): whether this
+  // agent has fast mode configured — a fast-mode provider profile and/or a
+  // default speed in its model settings. The light list never exposes the
+  // config itself, so consumers get just the boolean.
+  const cfg = agent["config"] as Record<string, unknown> | null | undefined;
+  const ms = cfg?.["modelSettings"] as Record<string, unknown> | undefined;
+  const fastModeConfigured =
+    ms?.["speed"] === "fast" || ms?.["speed"] === "standard" ||
+    (cfg?.["fastModeProfile"] !== undefined && cfg?.["fastModeProfile"] !== null);
   return {
     id: agent["id"],
     slug: agent["slug"],
@@ -87,6 +96,7 @@ function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<str
     isDefault: agent["isDefault"],
     activePromptVersion: agent["activePromptVersion"],
     kbScope: agent["kbScope"],
+    fastModeConfigured,
     modelId: agent["modelId"],
     spacesAppId: agent["spacesAppId"],
     spacesAppUserId: agent["spacesAppUserId"],
