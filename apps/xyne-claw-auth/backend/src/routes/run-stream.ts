@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
@@ -244,7 +245,7 @@ export async function persistRunStreamResult(args: {
         .update(args.assistantMessageId, { content: args.content, status: args.status })
         .catch(async (err: unknown) => {
           log.warn(
-            `[run-stream] placeholder update failed (${err instanceof Error ? err.message : String(err)}); creating fresh row`,
+            `[run-stream] placeholder update failed (${errMsg(err)}); creating fresh row`,
           );
           return chatMessageRepository.create({
             conversationId: args.conversationId,
@@ -298,7 +299,7 @@ export async function persistRunStreamResult(args: {
           size: row.size,
         });
       } catch (attErr) {
-        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, errMsg(attErr));
       }
     }
   }
@@ -565,7 +566,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist edit-user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist edit-user message:", errMsg(msgErr));
         }
       }
     } else {
@@ -598,7 +599,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
     }
@@ -619,7 +620,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           orgId,
         });
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to pre-create assistant placeholder:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to pre-create assistant placeholder:", errMsg(msgErr));
       }
     }
 
@@ -677,7 +678,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           });
           persistedUserAttachmentIds.push(row.id);
         } catch (attErr) {
-          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, errMsg(attErr));
         }
       }
 
@@ -689,7 +690,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             userId,
           );
         } catch (linkErr) {
-          log.warn("[run-stream] Failed to link user attachments to message:", linkErr instanceof Error ? linkErr.message : String(linkErr));
+          log.warn("[run-stream] Failed to link user attachments to message:", errMsg(linkErr));
         }
       }
     }
@@ -760,7 +761,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           } catch (fetchErr) {
             log.warn(
               `[run-stream] Failed to rehydrate prior attachment ${row.originalFilename} (${row.id}):`,
-              fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+              errMsg(fetchErr),
             );
           }
         }
@@ -772,7 +773,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (queryErr) {
         log.warn(
           "[run-stream] Failed to query prior conversation attachments:",
-          queryErr instanceof Error ? queryErr.message : String(queryErr),
+          errMsg(queryErr),
         );
       }
     }
@@ -1087,7 +1088,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed", orgId });
         }
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to persist error assistant message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to persist error assistant message:", errMsg(msgErr));
       }
 
       res.write(`event: error\ndata: ${JSON.stringify({
@@ -1111,7 +1112,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         task: task.trim(),
         conversationId: convId,
         fastMode: fastModeEnabled,
-      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
     }
 
     const result = await resultPromise;
@@ -1358,7 +1359,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
             };
           }
         } catch (lookupErr) {
-          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, lookupErr instanceof Error ? lookupErr.message : String(lookupErr));
+          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, errMsg(lookupErr));
         }
       }
     }
@@ -1389,7 +1390,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(assistantMessageId ? { assistantMessageId } : {}),
         });
       } catch (msgErr) {
-        log.warn(`[run-stream] Failed to persist assistant message:`, msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn(`[run-stream] Failed to persist assistant message:`, errMsg(msgErr));
       }
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
@@ -1418,7 +1419,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {
-        log.warn(`[run-stream] Failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr));
+        log.warn(`[run-stream] Failed to finalize agent run:`, errMsg(finalizeErr));
       }
     }
 
@@ -1538,7 +1539,7 @@ internalRouter.post(
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
       res.json({ success: true });
     } catch (err) {
-      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));
       res.status(500).json({ success: false, error: "Failed to persist follow-up suggestions" });
     }
   },
@@ -1594,7 +1595,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       task: task.trim(),
       conversationId: convId,
       fastMode: runRequestBody["fastMode"] === true,
-    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", errMsg(e)));
   };
 
   const consumeResult = await consumeClawStream({
@@ -1670,7 +1671,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           },
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
-        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${err instanceof Error ? err.message : String(err)}`));
+        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${errMsg(err)}`));
       },
       onProgressLabel: (sessionId, payload) => {
         // Same reasoning as onSandboxPreview — progress labels feed the Spaces
@@ -1756,7 +1757,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         log.warn(`[run-stream/sse] failed-callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
       }
     } catch (err) {
-      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${errMsg(err)}`);
     }
     return;
   }

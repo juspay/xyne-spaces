@@ -1,4 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { Redis } from "ioredis";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
@@ -267,7 +268,7 @@ async function anyAttemptDelivered(state: RunRecoveryState): Promise<boolean> {
     return delivered > 0;
   } catch (err) {
     log.warn(
-      `[run-recovery] delivered-check failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[run-recovery] delivered-check failed root=${state.rootSessionId}: ${errMsg(err)}`,
     );
     return false;
   }
@@ -352,7 +353,7 @@ async function deferSandboxRetry(
   await scheduleDispatch(state.rootSessionId, "sandbox_unavailable — waiting for write capacity", delayMs);
   if (state.sandboxDeferrals === 1) {
     await notifySandboxDeferred(state).catch((err) => {
-      log.warn(`[run-recovery] sandbox-deferred notice failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[run-recovery] sandbox-deferred notice failed root=${state.rootSessionId}: ${errMsg(err)}`);
     });
   }
   log.info(`[run-recovery] sandbox unavailable deferred root=${state.rootSessionId} deferral=${state.sandboxDeferrals}/${CONFIG.maxSandboxDeferrals} retryInMs=${delayMs}`);
@@ -500,7 +501,7 @@ export async function cancelRunRecovery(sessionId: string): Promise<boolean> {
       .getJob(dispatchJobId(rootSessionId))
       .then((job) => (job ? job.remove() : undefined)),
   ]).catch((err) =>
-    log.warn(`[run-recovery] cancel cleanup partial for root=${rootSessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`[run-recovery] cancel cleanup partial for root=${rootSessionId}: ${errMsg(err)}`),
   );
 
   log.info(`[run-recovery] cancelled recovery root=${rootSessionId} via /stop (dropped watchdog + dispatch)`);
@@ -579,7 +580,7 @@ async function markExhausted(state: RunRecoveryState, reason: string): Promise<v
   }
 
   await notifyExhausted(state).catch((err) => {
-    log.warn("[run-recovery] Failed to notify exhausted run:", err instanceof Error ? err.message : String(err));
+    log.warn("[run-recovery] Failed to notify exhausted run:", errMsg(err));
   });
 }
 
@@ -656,7 +657,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
         state.retryScheduled = false;
         state.lastHeartbeatAt = Date.now();
         await enqueueLockContentionRun(state).catch((enqueueErr) => {
-          log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)}`);
+          log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${errMsg(enqueueErr)}`);
         });
         await saveState(state);
         await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
@@ -684,7 +685,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
 
     log.info(`[run-recovery] Retry dispatched root=${state.rootSessionId} attempt=${state.retriesUsed}/${state.maxRetries} newSession=${newSessionId}`);
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorMsg = errMsg(err);
     if (state.retriesUsed >= state.maxRetries) {
       await markExhausted(state, `retry dispatch exception: ${errorMsg}`);
       return;
@@ -795,7 +796,7 @@ async function purgeAllRecoveryState(): Promise<void> {
     }
     log.warn(`[run-recovery] PURGE_ON_START: deleted ${purged} recovery key(s) — nothing will re-arm this boot. Unset RUN_RECOVERY_PURGE_ON_START after this deploy.`);
   } catch (err) {
-    log.error("[run-recovery] purge failed:", err instanceof Error ? err.message : String(err));
+    log.error("[run-recovery] purge failed:", errMsg(err));
   }
 }
 
@@ -852,7 +853,7 @@ async function rearmRunningRecoveries(): Promise<void> {
       log.info(`[run-recovery] Startup re-arm: re-scheduled ${rearmed}/${running} running recoveries (${expired} stale → exhausted)`);
     }
   } catch (err) {
-    log.error("[run-recovery] Startup re-arm scan failed:", err instanceof Error ? err.message : String(err));
+    log.error("[run-recovery] Startup re-arm scan failed:", errMsg(err));
   }
 }
 
@@ -941,7 +942,7 @@ export function startHandoffSignalConsumer(): void {
           log.info(`[handoff-signal] consumed session=${sessionId} — no re-dispatch (stale/duplicate/no recovery state)`);
         }
       } catch (err) {
-        log.error(`[handoff-signal] consume loop error: ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[handoff-signal] consume loop error: ${errMsg(err)}`);
         await new Promise((resolve) => setTimeout(resolve, 2_000));
       }
     }
@@ -1093,13 +1094,13 @@ export async function handleRunHandoff(sessionId: string): Promise<{ rootSession
       throw new Error(body.error ?? `HTTP ${runRes.status}`);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const errMsg = msg ? `handoff dispatch failed: ${msg}` : "handoff dispatch failed";
-    state.lastError = errMsg;
+    const msg = errMsg(err);
+    const errText = msg ? `handoff dispatch failed: ${msg}` : "handoff dispatch failed";
+    state.lastError = errText;
     state.retryScheduled = true;
     state.lastHeartbeatAt = Date.now();
     await saveState(state);
-    await scheduleDispatch(state.rootSessionId, errMsg, state.retryBackoffMs);
+    await scheduleDispatch(state.rootSessionId, errText, state.retryBackoffMs);
     return null;
   }
 
@@ -1192,7 +1193,7 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
     state.retryScheduled = false;
     state.lastHeartbeatAt = Date.now();
     const recovered = await enqueueLockContentionRun(state).catch((err) => {
-      log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${errMsg(err)}`);
       return false;
     });
     await saveState(state);

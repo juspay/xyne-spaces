@@ -15,6 +15,7 @@
  */
 
 import { Queue, Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { agentRepository } from "../repositories/index.js";
@@ -208,7 +209,7 @@ async function redispatch(job: ProviderRetryJob): Promise<boolean> {
     const body = (await res.json().catch(() => ({}))) as { success?: boolean };
     return res.ok && body.success === true;
   } catch (err) {
-    log.error(`[capacity-retry] redispatch failed token=${job.retryToken}: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[capacity-retry] redispatch failed token=${job.retryToken}: ${errMsg(err)}`);
     return false;
   }
 }
@@ -241,7 +242,7 @@ async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted"
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
-    log.warn(`[capacity-retry] card update failed token=${job.retryToken}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[capacity-retry] card update failed token=${job.retryToken}: ${errMsg(err)}`);
   }
 }
 

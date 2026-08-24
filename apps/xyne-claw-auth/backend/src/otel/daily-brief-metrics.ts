@@ -1,4 +1,5 @@
 import { metrics } from "@opentelemetry/api";
+import { errMsg } from "../lib/errors.js";
 import type { Counter, Histogram, Meter } from "@opentelemetry/api";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -340,7 +341,7 @@ export function registerDailyBriefGauges(): void {
         });
       } catch (err) {
         // OTel swallows a rejected callback silently — log so a broken read is visible.
-        log.warn(`[otel] daily-brief gauges skipped: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[otel] daily-brief gauges skipped: ${errMsg(err)}`);
       }
     },
     [

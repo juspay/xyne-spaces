@@ -1,4 +1,5 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import multer from "multer";
 import crypto from "node:crypto";
@@ -24,6 +25,7 @@ import {
   getRequesterId,
   getOrgId,
   isClawAdmin,
+  requireRequester,
 } from "../middleware/agent-acl.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
@@ -387,8 +389,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
 router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.query["userId"] as string | undefined)?.trim();
   if (!userId) throw badRequest("userId is required");
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("authenticated user required");
+  const requesterId = requireRequester(req, "authenticated user required");
   if (requesterId !== userId) throw forbidden("userId does not match authenticated session");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("Organization context is required");
@@ -977,8 +978,7 @@ async function notifyDelegationRequesterOfDecisionInSpaces(args: {
 }
 
 router.get("/delegation-requests/pending-for-me", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
   const orgId = getOrgId(req);
   const requests = await prisma.agentDelegationGrant.findMany({
     where: { status: "pending" },
@@ -1191,7 +1191,7 @@ router.post(
           requestReason: grant.requestReason,
           callee,
         }).catch((err) => {
-          log.warn("[agents/delegation] request DM failed:", err instanceof Error ? err.message : String(err));
+          log.warn("[agents/delegation] request DM failed:", errMsg(err));
         });
       }
       res.status(201).json({
@@ -1320,7 +1320,7 @@ router.post(
             deciderUserId: requesterId,
           });
         })().catch((err) => {
-          log.warn("[agents/delegation] decision DM failed:", err instanceof Error ? err.message : String(err));
+          log.warn("[agents/delegation] decision DM failed:", errMsg(err));
         });
       }
       res.json({ success: true, data: grant });
@@ -1376,7 +1376,7 @@ router.post(
             deciderUserId: requesterId,
           });
         })().catch((err) => {
-          log.warn("[agents/delegation] revoke DM failed:", err instanceof Error ? err.message : String(err));
+          log.warn("[agents/delegation] revoke DM failed:", errMsg(err));
         });
       }
       res.json({ success: true, data: grant });
@@ -1692,7 +1692,7 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
 
     log.info(`[agents/clone] sent clone-approval DM to owner ${agent.ownerUserId} for agent ${agent.slug}`);
   } catch (err) {
-    log.warn(`[agents/clone] owner DM failed for ${agent.slug}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[agents/clone] owner DM failed for ${agent.slug}:`, errMsg(err));
   }
 }
 
@@ -2524,7 +2524,7 @@ router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Re
       spacesAppId: agent.spacesAppId,
       userAuthHeaders: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
     }).catch((err) => {
-      log.warn(`[agents] signing-secret fetch swallowed for ${req.params.slug}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[agents] signing-secret fetch swallowed for ${req.params.slug}: ${errMsg(err)}`);
       return false;
     });
 
@@ -2595,7 +2595,7 @@ router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Re
         }
       }
     } catch (err) {
-      log.warn(`[agents] grant-permissions: registry fetch failed for ${req.params.slug}; using full desired set — ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[agents] grant-permissions: registry fetch failed for ${req.params.slug}; using full desired set — ${errMsg(err)}`);
     }
     if (grantScopes.length === 0) {
       res.status(400).json({ success: false, error: "No grantable permissions — the Spaces permission registry has none of the bot's scopes." });

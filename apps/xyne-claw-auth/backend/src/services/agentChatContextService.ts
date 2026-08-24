@@ -1,4 +1,5 @@
 import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { errMsg } from "../lib/errors.js";
 
 export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file";
 // 'collection' / 'file' are not user-searchable via this service (they're
@@ -231,7 +232,7 @@ export async function buildAttachedContextPayload(
     try {
       return await resolveSection(item, auth);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       return {
         header: `${labelForType(item.type)} "${item.title}" (id=${item.id})`,
         inlineText: `Unable to resolve attached context: ${message}`,
@@ -253,7 +254,7 @@ export async function buildAttachedContextPayload(
     try {
       sections.unshift(await resolveThreadSection(threadConversationId, auth));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       sections.unshift({
         header: `Spaces thread (conversationId=${threadConversationId})`,
         inlineText: `Unable to resolve thread: ${message}. Read it with \`spaces-messages\` (conversationId=${threadConversationId}).`,
@@ -269,7 +270,7 @@ export async function buildAttachedContextPayload(
     try {
       sections.unshift(await resolveCanvasByViewAccessSection(canvasViewAccessId, auth));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       sections.unshift({
         header: `Canvas (viewAccessId=${canvasViewAccessId})`,
         inlineText: `Unable to resolve canvas: ${message}. Read it with \`spaces-read-canvas\` (viewAccessId=${canvasViewAccessId}).`,

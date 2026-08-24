@@ -15,6 +15,7 @@
  */
 
 import type { Citation } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
@@ -701,7 +702,7 @@ export async function handleKbSearch(args: {
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
-    log.warn(`[kb-search] vespa call failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-search] vespa call failed: ${errMsg(err)}`);
     return { content: `KB search failed: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 
@@ -726,7 +727,7 @@ export async function handleKbSearch(args: {
       }) : "none"}`
     );
   } catch (e) {
-    log.warn(`[kb-search] DEBUG log of response shape failed: ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(`[kb-search] DEBUG log of response shape failed: ${errMsg(e)}`);
   }
 
   // Capture for attachment to the result below. Spaces returns the YQL +
@@ -1020,7 +1021,7 @@ export async function handleKbReadFile(args: {
     const body = text.length > 100_000 ? text.slice(0, 100_000) + "\n\n…(truncated to 100k characters)" : text;
     return { content: header + body, citations: [citation] };
   } catch (err) {
-    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${errMsg(err)}`);
     return { content: `Failed to read file \`${args.fileId}\`: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 }
@@ -1161,7 +1162,7 @@ export async function handleKbGetChunks(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-get-chunks failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1297,7 +1298,7 @@ export async function handleKbSearchWithinDoc(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-search-within-doc failed: ${err instanceof Error ? err.message : "unknown error"}`,

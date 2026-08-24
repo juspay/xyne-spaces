@@ -5,6 +5,7 @@
  * Handlers call the Spaces HTTP client and return MCP-formatted results.
  */
 
+import { errMsg } from "../../lib/errors.js";
 import {
   interact,
   search,
@@ -196,7 +197,7 @@ function withToolErrors(
     try {
       return await fn(params, ctx);
     } catch (e) {
-      return err(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+      return err(`${label}: ${errMsg(e)}`);
     }
   };
 }
@@ -3157,7 +3158,7 @@ async function renderUserActivityContext(
       ].join("\n"),
     );
   } catch (e) {
-    return err(`User activity context error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`User activity context error: ${errMsg(e)}`);
   }
 }
 
@@ -3758,7 +3759,7 @@ async function fetchFullTranscript(
       `/api/calls/claw/${encodeURIComponent(call.externalId)}/download-transcript`,
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errMsg(e);
     if (msg.includes("403")) return `\n\n(No transcript: you do not have access to "${label}".)`;
     if (msg.includes("404")) return `\n\n(No transcript: not available yet for "${label}".)`;
     return `\n\n(Transcript fetch failed for "${label}": ${msg})`;
@@ -4279,7 +4280,7 @@ const spacesCreateTicket: ToolDef = {
           });
         } catch (linkError) {
           return err(
-            `Ticket ${data.xyneId} was created, but its Tech Doc link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
+            `Ticket ${data.xyneId} was created, but its Tech Doc link failed: ${errMsg(linkError)}. Do not create a duplicate ticket.`,
           );
         }
       }
@@ -4306,7 +4307,7 @@ const spacesCreateTicket: ToolDef = {
               ? `  Attachments: ${count} file(s) carried over`
               : `  Attachments: 0 files found on source conversation`;
         } catch (e) {
-          attachLine = `  Attachments: transfer failed — ${e instanceof Error ? e.message : String(e)}`;
+          attachLine = `  Attachments: transfer failed — ${errMsg(e)}`;
         }
       }
 
@@ -4473,7 +4474,7 @@ const spacesCreateBulkTickets: ToolDef = {
         failures.push({
           index: i + 1,
           title: label,
-          reason: e instanceof Error ? e.message : String(e),
+          reason: errMsg(e),
         });
       }
     }
@@ -4766,7 +4767,7 @@ const spacesUpdateBulkTickets: ToolDef = {
         failures.push({
           index: i + 1,
           ticketId: label,
-          reason: e instanceof Error ? e.message : String(e),
+          reason: errMsg(e),
         });
       }
     }
@@ -5387,7 +5388,7 @@ async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerCon
       citations,
     );
   } catch (e) {
-    return err(`Update SDLC baseline error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`Update SDLC baseline error: ${errMsg(e)}`);
   }
 }
 
@@ -5417,7 +5418,7 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
       citations,
     );
   } catch (e) {
-    return err(`Create SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`Create SDLC artifact error: ${errMsg(e)}`);
   }
 }
 
@@ -5443,7 +5444,7 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
         return ok(JSON.stringify(data.artifact));
       } catch (e) {
-        return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+        return err(`Update SDLC artifact error: ${errMsg(e)}`);
       }
     }
     return err(`${artifactType} action must be create or update.`);
@@ -5486,7 +5487,7 @@ async function callSdlcWiki(path: string, args: Record<string, unknown>): Promis
     );
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC Wiki tool error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC Wiki tool error: ${errMsg(e)}`);
   }
 }
 
@@ -5509,7 +5510,7 @@ async function callSdlcArtifactHistory(
     );
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC artifact history error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC artifact history error: ${errMsg(e)}`);
   }
 }
 
@@ -6206,7 +6207,7 @@ async function renderFetchedAttachment(params: {
         } catch (ingestErr) {
           return err(
             `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
+            `${errMsg(ingestErr)}. ` +
             `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
           );
         }
@@ -6230,7 +6231,7 @@ async function renderFetchedAttachment(params: {
               .catch((downloadErr) => {
                 throw new Error(
                   `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+                  `${errMsg(downloadErr)}`,
                 );
               })
           : Buffer.from(source.data, "base64")
@@ -6359,7 +6360,7 @@ const spacesFetchAttachment: ToolDef = {
         // plainly rather than masquerading as a storage outage.
         return err(
           `Could not fetch attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(m.size)}) ` +
-          `via the app download route: ${e instanceof Error ? e.message : String(e)}. ` +
+          `via the app download route: ${errMsg(e)}. ` +
           "If this is a 403, grant the agent's app the `files:read` scope; if 404, the file was deleted.",
         );
       }
@@ -6612,7 +6613,7 @@ const spacesUploadToKb: ToolDef = {
           }
           return { ok: true };
         } catch (e) {
-          return { ok: false, error: `network error: ${e instanceof Error ? e.message : String(e)}` };
+          return { ok: false, error: `network error: ${errMsg(e)}` };
         }
       };
 
@@ -7041,7 +7042,7 @@ const userSendMessage: ToolDef = {
         .join(", ");
       return ok(`Message sent as user to channel ${channelId}${ids ? ` (${ids})` : ""}.`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errMsg(e);
       return err(
         `user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`,
       );
@@ -7355,7 +7356,7 @@ async function renderDirectResult(
 // (thrown before Vespa is hit) carry no executedYql and render as plain text.
 function directError(prefix: string, e: unknown): ToolResult {
   const executedYql = (e as { executedYql?: string })?.executedYql;
-  const base = `${prefix}: ${e instanceof Error ? e.message : String(e)}`;
+  const base = `${prefix}: ${errMsg(e)}`;
   const text = executedYql ? `${base}\n\n[Executed YQL (ACL guard injected): ${executedYql}]` : base;
   const result = err(text);
   return executedYql

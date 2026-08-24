@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -587,8 +588,7 @@ export { parseTriggers as parseWorkflowTriggers };
 /* ------------------------------------------------------------------ */
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"] : undefined;
   if (channelId) {
@@ -606,8 +606,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.post("/", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
     name?: string;
@@ -758,14 +757,13 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     res.json({ success: true, data: Array.isArray(channelIds) ? rows : rows[0] });
   } catch (err) {
     log.error("[chain-workflows] upsert binding error:", err);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     res.status(500).json({ success: false, error: msg });
   }
 });
 
 router.patch("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
   if (!binding) throw notFound("Binding not found");
@@ -781,8 +779,7 @@ router.patch("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, 
 }));
 
 router.delete("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
   if (!binding) throw notFound("Binding not found");
@@ -795,8 +792,7 @@ router.delete("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>,
 }));
 
 router.get("/bindings/resolve", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"].trim() : "";
   const entryAgentSlug = typeof req.query["entryAgentSlug"] === "string" ? req.query["entryAgentSlug"].trim() : "";
@@ -923,8 +919,7 @@ router.post("/global-requests/:id/cancel", asyncHandler(async (req: Request<{ id
 }));
 
 router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
   if (!row) throw notFound("Workflow not found");
@@ -936,8 +931,7 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
 }));
 
 router.put("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const existing = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
   if (!existing) throw notFound("Workflow not found");
@@ -1194,7 +1188,7 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
       }
     } catch (err) {
       log.warn(`[chain-workflows/trigger] could not auto-create conversation:`,
-        err instanceof Error ? err.message : String(err));
+        errMsg(err));
     }
   }
 

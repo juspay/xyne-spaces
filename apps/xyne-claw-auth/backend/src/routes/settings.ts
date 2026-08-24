@@ -7,7 +7,7 @@ import {
   sharedProviderCredentialRepository,
   agentProviderCredentialsRepository,
 } from "../repositories/index.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decrypt } from "../crypto.js";
@@ -29,8 +29,7 @@ const DEVICE_CODE_TTL = 900;
 
 // GET /settings/provider-credentials — list user's credentials (without raw keys)
 router.get("/provider-credentials", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const rows = await userProviderCredentialsRepository.listByUser(userId);
   const data = rows.map((r) => ({
     provider: r.provider,
@@ -45,8 +44,7 @@ router.get("/provider-credentials", asyncHandler(async (req: Request, res: Respo
 
 // PUT /settings/provider-credentials/:provider — upsert credentials for a provider
 router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{ provider: string }>, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const { provider } = req.params;
   if (!VALID_PROVIDERS.has(provider)) {
     throw badRequest(`provider must be one of ${[...VALID_PROVIDERS].join(", ")}`);
@@ -99,8 +97,7 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
 
 // DELETE /settings/provider-credentials/:provider
 router.delete("/provider-credentials/:provider", asyncHandler(async (req: Request<{ provider: string }>, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   await userProviderCredentialsRepository.delete(userId, req.params.provider);
   ok(res);
 }));
@@ -113,8 +110,7 @@ router.delete("/provider-credentials/:provider", asyncHandler(async (req: Reques
 // Re-calling with more agentIds reuses the existing shared credential.
 // Agents must belong to the requester (or requester is CLAW_ADMIN).
 router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Request<{ provider: string }>, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const provider = req.params.provider;
   if (!VALID_PROVIDERS.has(provider) || provider === "spaces") {
     throw badRequest("Provider cannot be shared");
@@ -210,8 +206,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
 
 // GET /settings/subagent-routing — list user's per-subagent provider preferences
 router.get("/subagent-routing", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const rows = await userSubagentConfigRepository.listByUser(userId);
   const data = rows.map((r) => ({ subagentName: r.subagentName, provider: r.provider }));
   ok(res, data);
@@ -219,8 +214,7 @@ router.get("/subagent-routing", asyncHandler(async (req: Request, res: Response)
 
 // PUT /settings/subagent-routing/:subagentName — set provider for a subagent
 router.put("/subagent-routing/:subagentName", asyncHandler(async (req: Request<{ subagentName: string }>, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const { provider } = req.body as { provider?: string };
   if (!provider || !VALID_PROVIDERS.has(provider)) {
     throw badRequest(`provider must be one of ${[...VALID_PROVIDERS].join(", ")}`);
@@ -231,8 +225,7 @@ router.put("/subagent-routing/:subagentName", asyncHandler(async (req: Request<{
 
 // DELETE /settings/subagent-routing/:subagentName — clear override (falls back to parent agent provider)
 router.delete("/subagent-routing/:subagentName", asyncHandler(async (req: Request<{ subagentName: string }>, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   await userSubagentConfigRepository.delete(userId, req.params.subagentName);
   ok(res);
 }));
@@ -240,8 +233,7 @@ router.delete("/subagent-routing/:subagentName", asyncHandler(async (req: Reques
 // ── GitHub Copilot device-code login (user-level) ──────────────────
 
 router.post("/copilot/github-login", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const ghRes = await fetch(GITHUB_DEVICE_CODE_URL, {
     method: "POST",
     headers: { Accept: "application/json" },
@@ -270,8 +262,7 @@ router.post("/copilot/github-login", asyncHandler(async (req: Request, res: Resp
 }));
 
 router.post("/copilot/github-poll", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const key = `${DEVICE_CODE_PREFIX}${userId}`;
   const redis = redisService.getConnection();
   const raw = await redis.get(key);
@@ -340,8 +331,7 @@ function generateCodexPkce(): { verifier: string; challenge: string } {
 
 
 router.post("/codex/oauth/start", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
 
   const { verifier, challenge } = generateCodexPkce();
   const state = base64UrlEncode(crypto.randomBytes(16));
@@ -365,8 +355,7 @@ router.post("/codex/oauth/start", asyncHandler(async (req: Request, res: Respons
 }));
 
 router.post("/codex/oauth/exchange", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
 
   let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
 
@@ -437,8 +426,7 @@ router.post("/codex/oauth/exchange", asyncHandler(async (req: Request, res: Resp
 interface CopilotModel { id: string; name: string }
 
 router.get("/copilot/models", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "copilot");
   if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
     throw badRequest("Copilot is not configured. Log in with GitHub first.");
@@ -473,8 +461,7 @@ router.get("/copilot/models", asyncHandler(async (req: Request, res: Response) =
 }));
 
 router.get("/claude/models", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "claude");
   if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
     throw badRequest("Claude is not configured. Save an API key first.");
@@ -508,8 +495,7 @@ interface CodexBackendModel {
 }
 
 router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "codex");
   if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
     throw badRequest("OpenAI is not configured. Save an API key first.");

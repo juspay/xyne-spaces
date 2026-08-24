@@ -1,4 +1,5 @@
 import path from "node:path";
+import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
@@ -38,7 +39,7 @@ const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
     try {
       return strictSchemaValidator.getValidator(schema);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       if (!warnedSchemaCompileFailures.has(message)) {
         warnedSchemaCompileFailures.add(message);
         log.warn(
@@ -69,7 +70,7 @@ async function resolveAppTokenForAppUser(appUserId: string): Promise<string | nu
     return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
   } catch (err) {
     log.warn(
-      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${errMsg(err)}`,
     );
     return null;
   }

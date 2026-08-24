@@ -16,6 +16,7 @@
  */
 
 import { agentIdentity, type AgentCapability, type AgentIdentity } from "xyne-claw-shared";
+import { errMsg } from "./errors.js";
 import type { AvailableToolsCatalog } from "../routes/tools.js";
 import { agentRepository, agentRequestRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
@@ -129,7 +130,7 @@ export async function resolveAgentCapabilities(
     } catch (err) {
       unconnected.clear();
       log.warn(
-        `[agent-card] connection lookup failed for ${connectedFor}: ${err instanceof Error ? err.message : String(err)}`,
+        `[agent-card] connection lookup failed for ${connectedFor}: ${errMsg(err)}`,
       );
     }
   } else {
@@ -464,7 +465,7 @@ export async function resolveAgentDraft(
     // Roll the claim back so the card stays approvable instead of dead.
     await agentRequestRepository.revertAgentCreateToPending(requestId).catch(() => {});
     log.error(
-      `[agent-card] create failed for ${spec.slug} (request=${requestId}): ${err instanceof Error ? err.message : String(err)}`,
+      `[agent-card] create failed for ${spec.slug} (request=${requestId}): ${errMsg(err)}`,
     );
     return { ok: false, code: 500, error: "Couldn't create the agent just now — please try approving again." };
   }

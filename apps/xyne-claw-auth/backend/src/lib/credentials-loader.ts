@@ -27,6 +27,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
@@ -163,7 +164,7 @@ export async function loadEffectiveCredentials(
         isUserOwned: true,
       };
     } catch (err) {
-      const detail = err instanceof TokenRefreshError ? err.message : err instanceof Error ? err.message : String(err);
+      const detail = err instanceof TokenRefreshError ? err.message : errMsg(err);
       log.error(`[creds-loader] ${serverType} userId=${userId} → token refresh failed: ${detail}`);
       return null;
     }

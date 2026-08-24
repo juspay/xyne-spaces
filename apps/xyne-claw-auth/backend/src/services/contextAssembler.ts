@@ -28,6 +28,7 @@
  */
 
 import type { UserMemoryChannelType, UserMemoryRecord, UserMemoryThreadContext } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { interact } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
@@ -1044,7 +1045,7 @@ async function persistBehaviorSignals(rows: BehaviorSignalRow[]): Promise<void> 
       logger.warn("[assembler] persist behavior signal failed", {
         userId: r.userId,
         sourceMessageId: r.sourceMessageId,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     }
   }

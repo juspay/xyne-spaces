@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { Prisma } from "@prisma/client";
 import { skillRepository, agentRequestRepository, userRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess , requireRequester} from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { decrypt } from "../crypto.js";
@@ -242,8 +243,7 @@ router.post("/:slug/demote", requireClawAdmin, asyncHandler(async (req: Request<
 
 // Request to push skill to global (owner only)
 router.post("/:slug/request", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
 
   const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
   if (!skill) {
@@ -330,8 +330,7 @@ router.get("/:slug/files/:fileId", asyncHandler(async (req: Request<{ slug: stri
 }));
 
 router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const requesterId = requireRequester(req, "x-user-id header is required");
   const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
   if (!skill) {
     log.warn(`[skills/upsert-files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
@@ -375,7 +374,7 @@ router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, r
   try {
     await skillRepository.replaceFiles(skill.id, sanitized);
   } catch (err) {
-    throw badRequest(err instanceof Error ? err.message : String(err));
+    throw badRequest(errMsg(err));
   }
 
   const files = await skillRepository.listFiles(skill.id);
@@ -457,7 +456,7 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
     }, token);
     log.info(`[skills/propose-update] sent skill-update DM to approver ${args.approverUserId} for ${args.skillSlug}`);
   } catch (err) {
-    log.warn(`[skills/propose-update] owner DM failed for ${args.skillSlug}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[skills/propose-update] owner DM failed for ${args.skillSlug}:`, errMsg(err));
   }
 }
 
@@ -465,8 +464,7 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
 // replacement. Validates requester + org, computes the diff, records a
 // skill_update AgentRequest, and DMs the approver the diff. Never applies here.
 router.post("/:slug/propose-update", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id required");
+  const requesterId = requireRequester(req, "x-user-id required");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("orgId is required");
 
@@ -712,16 +710,14 @@ export async function resolveSkillUpdateRequest(
 // REST parity endpoints (used by tests / non-card callers). The card path in
 // flow-action.ts calls resolveSkillUpdateRequest directly.
 router.post("/skill-update-requests/:requestId/approve", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
-  const callerUserId = getRequesterId(req);
-  if (!callerUserId) throw unauthorized("x-user-id required");
+  const callerUserId = requireRequester(req, "x-user-id required");
   const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "approve");
   if (!result.ok) throw new HttpError(result.code, result.error);
   ok(res, { alreadyResolved: result.alreadyResolved ?? false });
 }));
 
 router.post("/skill-update-requests/:requestId/reject", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
-  const callerUserId = getRequesterId(req);
-  if (!callerUserId) throw unauthorized("x-user-id required");
+  const callerUserId = requireRequester(req, "x-user-id required");
   const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "reject");
   if (!result.ok) throw new HttpError(result.code, result.error);
   ok(res, { alreadyResolved: result.alreadyResolved ?? false });

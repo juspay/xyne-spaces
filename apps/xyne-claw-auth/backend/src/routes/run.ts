@@ -1,4 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "crypto";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -678,7 +679,7 @@ router.get(
             headers: { Authorization: `Bearer ${appToken}` },
           });
         } catch (error) {
-          log.warn(`[recording-stream] could not decrypt app token for appid=${token.appid}: ${error instanceof Error ? error.message : String(error)}`);
+          log.warn(`[recording-stream] could not decrypt app token for appid=${token.appid}: ${errMsg(error)}`);
         }
       }
     }
@@ -702,7 +703,7 @@ router.get(
         failures.push(`${source.label}: HTTP ${candidate.status}`);
         await candidate.body?.cancel().catch(() => undefined);
       } catch (error) {
-        failures.push(`${source.label}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${source.label}: ${errMsg(error)}`);
       }
     }
     if (!upstream?.body) {
@@ -742,7 +743,7 @@ router.get(
       );
       log.info(`[recording-stream] session=${sessionId} attachment=${attachmentId} bytes=${streamedBytes}`);
     } catch (error) {
-      log.warn(`[recording-stream] session=${sessionId} attachment=${attachmentId} interrupted: ${error instanceof Error ? error.message : String(error)}`);
+      log.warn(`[recording-stream] session=${sessionId} attachment=${attachmentId} interrupted: ${errMsg(error)}`);
       if (!res.headersSent) res.status(502).json({ success: false, error: "Recording stream failed" });
       else res.destroy(error instanceof Error ? error : undefined);
     }
@@ -1010,7 +1011,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         }
         await spacesAppFetch("/channel/info", { channelId: effectiveChannelId }, appToken);
       } catch (channelErr) {
-        const msg = channelErr instanceof Error ? channelErr.message : String(channelErr);
+        const msg = errMsg(channelErr);
         if (/Spaces app API 404/i.test(msg) || /CHANNEL_NOT_FOUND/i.test(msg)) {
           res.status(400).json({ success: false, error: `channel ${effectiveChannelId} not found` });
           return;
@@ -1069,7 +1070,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         } catch (err) {
           log.warn(
             "[run] Failed to resolve attachedContext:",
-            err instanceof Error ? err.message : String(err),
+            errMsg(err),
           );
         }
       } else {
@@ -1116,7 +1117,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       } catch (err) {
         log.warn(
           "[run] failed to load user agent instructions:",
-          err instanceof Error ? err.message : String(err),
+          errMsg(err),
         );
       }
     }
@@ -1752,7 +1753,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         streamBroken = true;
         log.error(
           `[run] proxy: SSE pipe error (sessionId=${sessionId}):`,
-          pipeErr instanceof Error ? pipeErr.message : String(pipeErr),
+          errMsg(pipeErr),
         );
         if (!res.writableEnded) {
           try {
@@ -2155,7 +2156,7 @@ router.post(
       const handoff = await handleRunHandoff(id).catch((err) => {
         log.warn(
           `[sessions] ${id}: handoff re-dispatch failed:`,
-          err instanceof Error ? err.message : String(err),
+          errMsg(err),
         );
         return null;
       });
@@ -2220,7 +2221,7 @@ router.post(
             } catch (attErr) {
               log.error(
                 `[sessions] ${id}: failed to persist attachment ${att.fileName}:`,
-                attErr instanceof Error ? attErr.message : String(attErr),
+                errMsg(attErr),
               );
             }
           }
@@ -2253,7 +2254,7 @@ router.post(
       } catch (msgErr) {
         log.warn(
           `[sessions] ${id}: failed to persist assistant message:`,
-          msgErr instanceof Error ? msgErr.message : String(msgErr),
+          errMsg(msgErr),
         );
       }
 
@@ -2447,7 +2448,7 @@ async function retryBrokenBridgeOnce(opts: {
     }
   } catch (err) {
     log.warn(
-      `[run] proxy: bridge retry dispatch failed old=${opts.oldSessionId} new=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[run] proxy: bridge retry dispatch failed old=${opts.oldSessionId} new=${newSessionId}: ${errMsg(err)}`,
     );
     return false;
   }
@@ -2460,7 +2461,7 @@ async function retryBrokenBridgeOnce(opts: {
   // retry-once semantics — if IT dies too, the failure surfaces via callback.
   await handleRunCompletion(opts.oldSessionId, "completed").catch((err) =>
     log.warn(
-      `[run] proxy: failed to hand off recovery state for bridge-lost run (session=${opts.oldSessionId}): ${err instanceof Error ? err.message : String(err)}`,
+      `[run] proxy: failed to hand off recovery state for bridge-lost run (session=${opts.oldSessionId}): ${errMsg(err)}`,
     ),
   );
   await agentRunRepository
@@ -2472,7 +2473,7 @@ async function retryBrokenBridgeOnce(opts: {
     })
     .catch((err) =>
       log.warn(
-        `[run] proxy: failed to mark bridge-lost run failed (session=${opts.oldSessionId}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] proxy: failed to mark bridge-lost run failed (session=${opts.oldSessionId}): ${errMsg(err)}`,
       ),
     );
 
@@ -2490,7 +2491,7 @@ async function retryBrokenBridgeOnce(opts: {
       })
       .catch((err) =>
         log.warn(
-          `[run] proxy: failed to create scheduled retry run row job=${scheduledJobId} session=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+          `[run] proxy: failed to create scheduled retry run row job=${scheduledJobId} session=${newSessionId}: ${errMsg(err)}`,
         ),
       );
   }
@@ -2514,7 +2515,7 @@ async function retryBrokenBridgeOnce(opts: {
       })
       .catch((err) =>
         log.warn(
-          `[run] proxy: failed to start retry AgentRun old=${opts.oldSessionId} new=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+          `[run] proxy: failed to start retry AgentRun old=${opts.oldSessionId} new=${newSessionId}: ${errMsg(err)}`,
         ),
       );
   }
@@ -2568,7 +2569,7 @@ function armHeadlessFinalizeCheck(opts: {
       });
     } catch (err) {
       log.warn(
-        `[run] proxy: headless finalize check failed (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] proxy: headless finalize check failed (session=${opts.sessionId}): ${errMsg(err)}`,
       );
     }
   }, HEADLESS_FINALIZE_CHECK_MS);
@@ -2608,7 +2609,7 @@ async function postBrokenSseTerminalCallback(opts: {
       })
       .catch((err) =>
         log.warn(
-          `[run] proxy: failed to finalize broken SSE without callback (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+          `[run] proxy: failed to finalize broken SSE without callback (session=${opts.sessionId}): ${errMsg(err)}`,
         ),
       );
     return;
@@ -2632,7 +2633,7 @@ async function postBrokenSseTerminalCallback(opts: {
     log.warn(`[run] proxy: ${opts.logPrefix}; posted failed callback (session=${opts.sessionId})`);
   } catch (err) {
     log.warn(
-      `[run] proxy: ${opts.logPrefix}; failed callback POST failed (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+      `[run] proxy: ${opts.logPrefix}; failed callback POST failed (session=${opts.sessionId}): ${errMsg(err)}`,
     );
     await agentRunRepository
       .finalize(opts.sessionId, {
@@ -2643,7 +2644,7 @@ async function postBrokenSseTerminalCallback(opts: {
       })
       .catch((finalizeErr) =>
         log.warn(
-          `[run] proxy: failed direct finalize after broken SSE callback miss (session=${opts.sessionId}): ${finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr)}`,
+          `[run] proxy: failed direct finalize after broken SSE callback miss (session=${opts.sessionId}): ${errMsg(finalizeErr)}`,
         ),
       );
   }
@@ -2705,7 +2706,7 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
       });
     } catch (err) {
       log.warn(
-        `[run] proxy: progress POST failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] proxy: progress POST failed (session=${sessionId}): ${errMsg(err)}`,
       );
     }
   };
@@ -2779,7 +2780,7 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
         });
       } catch (err) {
         log.warn(
-          `[run] proxy: callback POST failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+          `[run] proxy: callback POST failed (session=${sessionId}): ${errMsg(err)}`,
         );
       }
     } else if (!result.result) {
@@ -2832,7 +2833,7 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
       return;
     }
     log.error(
-      `[run] proxy: bridge failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+      `[run] proxy: bridge failed (session=${sessionId}): ${errMsg(err)}`,
     );
     const retried = await retryBrokenBridgeOnce({
       forwardBody,

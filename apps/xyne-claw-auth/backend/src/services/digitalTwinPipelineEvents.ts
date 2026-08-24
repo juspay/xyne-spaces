@@ -9,6 +9,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type { UserMemoryCuratorTrace } from "xyne-claw-shared";
 
@@ -172,7 +173,7 @@ export async function recordPipelineEvent(input: RecordPipelineEventInput): Prom
     logger.warn("[digital-twin-pipeline-events] recordPipelineEvent failed", {
       userId: input.userId,
       source: input.source,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -207,7 +208,7 @@ export async function startSynthesisEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] startSynthesisEvent failed", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -242,7 +243,7 @@ export async function finishSynthesisEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] finishSynthesisEvent failed", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -282,7 +283,7 @@ export async function startCuratorBatchEvent(input: {
     logger.warn("[digital-twin-pipeline-events] startCuratorBatchEvent failed", {
       userId: input.userId,
       source: input.source,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -308,7 +309,7 @@ export async function updateCuratorBatchAttempt(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] updateCuratorBatchAttempt failed", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -345,7 +346,7 @@ export async function finishCuratorBatchEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] finishCuratorBatchEvent failed — creating fresh", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return recordPipelineEvent(input);
   }
@@ -448,7 +449,7 @@ export async function recordGateEvent(input: {
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] recordGateEvent failed", {
       userId: input.userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -465,7 +466,7 @@ export async function prunePipelineEvents(days = DEFAULT_PRUNE_DAYS): Promise<nu
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] prunePipelineEvents failed", {
       days,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return 0;
   }

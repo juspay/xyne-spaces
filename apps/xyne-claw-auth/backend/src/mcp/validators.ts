@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { errMsg } from "../lib/errors.js";
 import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 const log = createLogger("validators");
@@ -80,7 +81,7 @@ async function validateChannelAppAccess(
     }
     log.warn(
       `[validator] channel access check failed open channelId=${channelId} status=${status ?? "n/a"}:`,
-      err instanceof Error ? err.message : String(err),
+      errMsg(err),
     );
     return null;
   }
@@ -121,7 +122,7 @@ async function validateTargetConversationId(
       );
       return null;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMsg(err);
       if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
         return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
       }
@@ -188,7 +189,7 @@ async function validateTargetConversationId(
     // card at delivery time. Same app token, same endpoint as the card path.
     return await validateChannelAppAccess(channelId, auth);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
     return null;
   }

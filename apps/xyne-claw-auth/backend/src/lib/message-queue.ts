@@ -28,6 +28,7 @@
  */
 
 import { redisService } from "../redis.js";
+import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("message-queue");
@@ -187,7 +188,7 @@ export async function tryAcquireSlot(conversationId: string, agentSlug: string, 
     log.warn("tryAcquireSlot failed — failing open (dispatch proceeds, runtime lock guards)", {
       conversationId,
       agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     return `failopen-${Date.now()}`;
   }
@@ -213,7 +214,7 @@ export async function isSlotBusy(conversationId: string, agentSlug: string, user
     log.warn("isSlotBusy failed — assuming not busy (fail-open)", {
       conversationId,
       agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     return false;
   }
@@ -247,7 +248,7 @@ export async function refreshSlot(conversationId: string, agentSlug: string, tok
       await redis.pexpire(busyKey(conversationId, agentSlug, userScopeId), BUSY_TTL_MS);
     }
   } catch (err) {
-    log.warn("refreshSlot failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("refreshSlot failed", { conversationId, agentSlug, error: errMsg(err) });
   }
 }
 
@@ -277,7 +278,7 @@ export async function releaseSlot(conversationId: string, agentSlug: string, tok
       await redis.del(busyKey(conversationId, agentSlug, userScopeId));
     }
   } catch (err) {
-    log.warn("releaseSlot failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("releaseSlot failed", { conversationId, agentSlug, error: errMsg(err) });
   }
 }
 
@@ -331,7 +332,7 @@ export async function enqueueMessage(msg: QueuedMessage): Promise<EnqueueResult>
     log.warn("enqueueMessage failed", {
       conversationId: msg.conversationId,
       agentSlug: msg.agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     // Fail-closed on enqueue: report not-enqueued so the caller can tell the
     // user we couldn't queue it (better than a false "queued" promise).
@@ -348,7 +349,7 @@ export async function dequeueMessage(conversationId: string, agentSlug: string, 
     if (!raw) return null;
     return JSON.parse(raw) as QueuedMessage;
   } catch (err) {
-    log.warn("dequeueMessage failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("dequeueMessage failed", { conversationId, agentSlug, error: errMsg(err) });
     return null;
   }
 }
@@ -367,7 +368,7 @@ export async function clearQueue(conversationId: string, agentSlug: string, user
     await redis.del(queueKey(conversationId, agentSlug, userScopeId), seenKey(conversationId, agentSlug, userScopeId));
     return discarded;
   } catch (err) {
-    log.warn("clearQueue failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("clearQueue failed", { conversationId, agentSlug, error: errMsg(err) });
     return 0;
   }
 }
@@ -399,7 +400,7 @@ export async function peekQueue(conversationId: string, agentSlug: string, userS
       })
       .filter((m): m is QueuedMessage => m !== null);
   } catch (err) {
-    log.warn("peekQueue failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("peekQueue failed", { conversationId, agentSlug, error: errMsg(err) });
     return [];
   }
 }

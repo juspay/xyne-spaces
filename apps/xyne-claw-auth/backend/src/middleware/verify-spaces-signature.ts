@@ -23,6 +23,7 @@
  *     req.body (JSON-parsed) as before.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { errMsg } from "../lib/errors.js";
 import type { NextFunction, Request, Response } from "express";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -57,7 +58,7 @@ async function checkSignatureReplayRedis(signature: string): Promise<"fresh" | "
     const set = await redis.set(key, "1", "EX", SEEN_SIGNATURE_TTL_SEC, "NX");
     return set === "OK" ? "fresh" : "replay";
   } catch (err) {
-    log.warn(`[replay-check] redis unavailable, falling back to in-memory set: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[replay-check] redis unavailable, falling back to in-memory set: ${errMsg(err)}`);
     return null;
   }
 }
@@ -192,7 +193,7 @@ export async function verifySpacesSignature(
   try {
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
-    verificationFailure("decrypt_failed", "secret decrypt failed", `error=${err instanceof Error ? err.message : String(err)}`);
+    verificationFailure("decrypt_failed", "secret decrypt failed", `error=${errMsg(err)}`);
     return;
   }
 

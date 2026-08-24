@@ -1,4 +1,5 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
@@ -1758,7 +1759,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
     try {
       await cancelRunSession(sessionId, userId);
     } catch (err) {
-      res.status(502).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ success: false, error: errMsg(err) });
       return;
     }
 
@@ -2510,7 +2511,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
       })}\n\n`,
     );
   } catch (err) {
-    log.warn("[agent-chat] live snapshot failed:", err instanceof Error ? err.message : String(err));
+    log.warn("[agent-chat] live snapshot failed:", errMsg(err));
   }
 
   // 2) Subscribe to live deltas (cross-pod via Redis). Buffer-free: write as they arrive.
@@ -3170,7 +3171,7 @@ async function runAgentChatViaSse(
               log.warn(`[agent-chat/sse] /callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
             }
           } catch (err) {
-            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${errMsg(err)}`);
           }
         } else {
           // No done frame ever arrived — synthesise a failed callback so the
@@ -3192,7 +3193,7 @@ async function runAgentChatViaSse(
           } catch { /* nothing else we can do */ }
         }
       } catch (err) {
-        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${errMsg(err)}`);
         // If we never handed off, surface the failure synchronously so the
         // outer handler can short-circuit with the proper error message.
         if (!handed) {

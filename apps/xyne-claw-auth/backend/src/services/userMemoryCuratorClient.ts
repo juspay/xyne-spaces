@@ -12,6 +12,7 @@
  */
 
 import { Agent } from "undici";
+import { errMsg } from "../lib/errors.js";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { baseRecordId } from "./userMemoryBatcher.js";
 import { CONFIG } from "../config.js";
@@ -206,7 +207,7 @@ export async function distillUserMemoryViaClaw(
       // batches. Retry with backoff; only give up after the last attempt.
       const isLast = attempt >= DISTILL_CLIENT_ATTEMPTS;
       logger.error("[user-memory-curator-client] call failed", {
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
         name: err instanceof Error ? err.name : "unknown",
         cause:
           err instanceof Error && (err as { cause?: unknown }).cause
@@ -222,7 +223,7 @@ export async function distillUserMemoryViaClaw(
         willRetry: !isLast,
       });
       if (!isLast) {
-        prevError = err instanceof Error ? err.message : String(err);
+        prevError = errMsg(err);
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
@@ -265,7 +266,7 @@ async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMe
   } catch (err) {
     logger.warn("[user-memory-curator-client] fetchExistingUserMemories failed — curator will create-only", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -489,7 +490,7 @@ export async function curateAndPersistBatch(args: {
             source,
             subsystem: row.subsystem,
             signalScore: row.signalScore,
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           },
         );
       }
@@ -596,7 +597,7 @@ export async function learnFromTwinReply(args: {
     logger.warn("[user-memory-curator-client] learnFromTwinReply failed", {
       userId: args.userId,
       conversationId: args.conversationId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }

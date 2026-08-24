@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -1426,7 +1427,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({
           success: true,
           data: {
-            content: `KB tool failed: ${err instanceof Error ? err.message : String(err)}`,
+            content: `KB tool failed: ${errMsg(err)}`,
             isError: true,
           },
         });
@@ -1489,7 +1490,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({
           success: true,
           data: {
-            content: `${tool} failed: ${err instanceof Error ? err.message : String(err)}`,
+            content: `${tool} failed: ${errMsg(err)}`,
             isError: true,
           },
         });
@@ -1646,7 +1647,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         .markUsedUserToken(req.params.sessionId)
         .catch((e) =>
           log.warn(
-            `[mcp/call] markUsedUserToken failed for ${req.params.sessionId}: ${e instanceof Error ? e.message : String(e)}`,
+            `[mcp/call] markUsedUserToken failed for ${req.params.sessionId}: ${errMsg(e)}`,
           ),
         );
     }
@@ -1820,7 +1821,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       } catch (err) {
         res.json({
           success: true,
-          data: { content: `Error: ${err instanceof Error ? err.message : String(err)}` },
+          data: { content: `Error: ${errMsg(err)}` },
         });
       }
       return;
@@ -2002,7 +2003,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
     res.json({ success: true, data: result });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     // serverType/tool are block-scoped to the try above; re-read from the body
     // so the error is attributable to a server/tool in the structured log.
     const body = req.body as { serverType?: string; tool?: string };

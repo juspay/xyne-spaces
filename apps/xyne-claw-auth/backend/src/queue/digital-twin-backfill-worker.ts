@@ -12,6 +12,7 @@
  */
 
 import { Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -236,7 +237,7 @@ export async function recoverIncompleteBackfills(): Promise<number> {
     }
     if (requeued > 0) logger.info(`[backfill] self-heal re-enqueued ${requeued} incomplete source(s) on startup`);
   } catch (err) {
-    logger.warn("[backfill] self-heal sweep failed (non-fatal)", { err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[backfill] self-heal sweep failed (non-fatal)", { err: errMsg(err) });
   }
   return requeued;
 }
@@ -309,14 +310,14 @@ export function initDigitalTwinBackfillWorker(): Worker<BackfillJobData> {
             userId,
             source,
             windowLower: windowLower.toISOString(),
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           });
           await writeProgress(userId, source, {
             cursor: windowLower, // unchanged → re-process this window on retry
             complete: false,
             progress: {
               lastError: {
-                message: err instanceof Error ? err.message : String(err),
+                message: errMsg(err),
                 windowUpper: effectiveUpper.toISOString(),
                 at: new Date().toISOString(),
               },

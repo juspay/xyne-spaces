@@ -11,6 +11,8 @@
  * Callers can override auth per request for user-scoped routes.
  */
 
+import { errMsg } from "../../lib/errors.js";
+
 export interface SpacesAuthContext {
   token?: string;
   sessionId?: string;
@@ -141,7 +143,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       return { ok: true, json: await response.json() };
     } catch (err) {
       // Network error / timeout — the endpoint is unreachable.
-      return { ok: false, status: null, text: err instanceof Error ? err.message : String(err) };
+      return { ok: false, status: null, text: errMsg(err) };
     }
   };
 

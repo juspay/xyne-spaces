@@ -16,6 +16,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import type { Prisma } from "@prisma/client";
 import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
 import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
@@ -101,7 +102,7 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
       data: { files: files.map((f) => ({ name: f.name, content: f.content })) },
     });
   } catch (err) {
-    logger.error("[memory] agent-prompt-files failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] agent-prompt-files failed", { err: errMsg(err) });
     res.json({ success: true, data: { files: [] } });
   }
 });
@@ -140,7 +141,7 @@ memoryRouter.get("/agent-file", requireAuth, async (req, res) => {
       data: { files: files.map((f) => ({ name: f.name, chars: f.content.length, loadInPrompt: f.loadInPrompt })) },
     });
   } catch (err) {
-    logger.error("[memory] agent-file read failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] agent-file read failed", { err: errMsg(err) });
     res.json({ success: true, data: { file: null, files: [] } });
   }
 });
@@ -181,7 +182,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
       data: { file: { name: file.name, chars: file.content.length, maxChars: MAX_FILE_CHARS } },
     });
   } catch (err) {
-    logger.error("[memory] agent-file write failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] agent-file write failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -207,7 +208,7 @@ function startApprovalInBackground(batchId: string, sessionIds?: string[]): void
     } catch (err) {
       logger.error("[memory] Background approve crashed", {
         batchId,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     } finally {
       inFlightApprovals.delete(batchId);
@@ -329,7 +330,7 @@ memoryRouter.get("/reviews", requireUserAuth, requireClawAdmin, async (req, res)
 
     res.json({ success: true, data });
   } catch (err) {
-    logger.error("[memory] GET /reviews failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /reviews failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -382,7 +383,7 @@ memoryRouter.post("/reviews/approve-all", requireUserAuth, requireClawAdmin, asy
         logger.warn("[memory] approve-all: retain failed for row — left pending", {
           reviewId: review.id,
           agentSlug: review.agentSlug,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }
@@ -394,7 +395,7 @@ memoryRouter.post("/reviews/approve-all", requireUserAuth, requireClawAdmin, asy
     logger.info("[memory] approve-all complete", { agentSlug: agentSlug ?? "(all)", approved, failed, remaining, by: getRequesterId(req) });
     res.json({ success: true, data: { approved, failed, remaining } });
   } catch (err) {
-    logger.error("[memory] POST /reviews/approve-all failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST /reviews/approve-all failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -417,7 +418,7 @@ memoryRouter.post("/reviews/reject-all", requireUserAuth, requireClawAdmin, asyn
     logger.info("[memory] reject-all complete", { agentSlug: agentSlug ?? "(all)", rejected: result.count, by: getRequesterId(req) });
     res.json({ success: true, data: { rejected: result.count } });
   } catch (err) {
-    logger.error("[memory] POST /reviews/reject-all failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST /reviews/reject-all failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -514,7 +515,7 @@ async function handleReviewAction(
         });
       } catch (err) {
         logger.error("[memory] Retain failed on approve — leaving status pending", {
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
           reviewId,
         });
         res.status(502).json({ success: false, error: "Retain failed — try again." });
@@ -536,7 +537,7 @@ async function handleReviewAction(
     res.json({ success: true, action, reviewId });
   } catch (err) {
     logger.error("[memory] Failed to process review action", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
       reviewId,
     });
     res.status(500).json({ success: false, error: "Internal error" });
@@ -578,7 +579,7 @@ memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (
     });
     res.json({ success: true, data: summary });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errMsg(err);
     logger.error("[memory] POST retention-sweep failed", { err: message });
     res.status(message.startsWith("Refusing") || message.includes("disabled") || message.includes("not opted in") ? 400 : 500)
       .json({ success: false, error: message });
@@ -804,7 +805,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
       provider: memory.name,
     });
   } catch (err) {
-    logger.error("[memory] GET /banks/:agentSlug/memories failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /banks/:agentSlug/memories failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1010,7 +1011,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
       },
     });
   } catch (err) {
-    logger.error("[memory] GET /banks/:agentSlug/stats failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /banks/:agentSlug/stats failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1126,7 +1127,7 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (re
     });
   } catch (err) {
     logger.error("[memory] GET /banks/:agentSlug/subsystem-graph failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -1258,7 +1259,7 @@ memoryRouter.get("/banks/:agentSlug/graph", requireUserAuth, async (req, res) =>
     const graph = await getGraph(bankId);
     res.json({ success: true, data: graph, provider: memory.name });
   } catch (err) {
-    logger.error("[memory] GET /banks/:agentSlug/graph failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /banks/:agentSlug/graph failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1349,7 +1350,7 @@ memoryRouter.post("/banks/:agentSlug/recall", requireUserAuth, async (req, res) 
   } catch (err) {
     logger.error("[memory] recall failed", {
       agentSlug,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -1399,7 +1400,7 @@ memoryRouter.get(
       res.json({ success: true, data: history });
     } catch (err) {
       logger.error("[memory] GET /banks/:agentSlug/memories/:id/history failed", {
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
       res.status(500).json({ success: false, error: "Internal error" });
     }
@@ -1431,7 +1432,7 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUser
     });
     res.json({ success: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     if (msg.includes("HINDSIGHT_DERIVED_OBSERVATION")) {
       logger.info("[memory] Direct delete refused for derived observation", {
         agentSlug: req.params["agentSlug"],
@@ -1533,7 +1534,7 @@ memoryRouter.post("/banks/:agentSlug/consolidate", requireUserAuth, async (req, 
     res.status(202).json({ success: true, data: result });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/consolidate failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -1714,7 +1715,7 @@ memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (r
           agentSlug,
           offset: i,
           size: chunk.length,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }
@@ -1729,7 +1730,7 @@ memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (r
     });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/memories/import failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -1812,7 +1813,7 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
     res.json({ success: true, data: { filename, candidatesCreated: reviewIds.length } });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/upload-md failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -1906,7 +1907,7 @@ memoryRouter.get("/batches", requireUserAuth, async (req, res) => {
     const enriched = batches.map((b) => ({ ...b, processing: inFlightApprovals.has(b.id) }));
     res.json({ success: true, data: enriched, total });
   } catch (err) {
-    logger.error("[memory] GET /batches failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /batches failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1962,7 +1963,7 @@ memoryRouter.get("/batches/:id", requireUserAuth, async (req, res) => {
       data: { batch: { ...batch, processing: inFlightApprovals.has(batch.id) }, sessions: previews },
     });
   } catch (err) {
-    logger.error("[memory] GET /batches/:id failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET /batches/:id failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2010,7 +2011,7 @@ memoryRouter.post("/batches/:id/approve", requireUserAuth, requireClawAdmin, asy
       },
     });
   } catch (err) {
-    logger.error("[memory] POST /batches/:id/approve failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST /batches/:id/approve failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2086,7 +2087,7 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
     const result = await prisma.memoryRecallHit.createMany({ data: rows, skipDuplicates: true });
     res.json({ success: true, data: { inserted: result.count, received: hits.length } });
   } catch (err) {
-    logger.error("[memory] POST /recall-hits failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST /recall-hits failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2105,7 +2106,7 @@ memoryRouter.post("/batches/:id/reject", requireUserAuth, requireClawAdmin, asyn
     }
     res.json({ success: true });
   } catch (err) {
-    logger.error("[memory] POST /batches/:id/reject failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST /batches/:id/reject failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2154,7 +2155,7 @@ async function approveBatch(batchId: string, sessionIds?: string[]): Promise<App
       logger.error("[memory] Retain failed for approved session", {
         batchId,
         sessionId: sid,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
       failedSessions.push(sid);
     }
@@ -2300,7 +2301,7 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
     res.status(202).json({ success: true, data: { jobId, status: "queued", from, to } });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/backfill failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -2332,7 +2333,7 @@ memoryRouter.get("/banks/:agentSlug/backfill/:jobId", requireUserAuth, async (re
       },
     });
   } catch (err) {
-    logger.error("[memory] GET backfill status failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET backfill status failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2385,7 +2386,7 @@ memoryRouter.get("/banks/:agentSlug/status", requireUserAuth, async (req, res) =
     }
     res.json({ success: true, data: readMemoryStatus(agent.config as Record<string, unknown> | null) });
   } catch (err) {
-    logger.error("[memory] GET status failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] GET status failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2439,7 +2440,7 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
 
     res.json({ success: true, data: readMemoryStatus(config) });
   } catch (err) {
-    logger.error("[memory] POST enable failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST enable failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2482,7 +2483,7 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
 
     res.json({ success: true, data: readMemoryStatus(config) });
   } catch (err) {
-    logger.error("[memory] POST disable failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[memory] POST disable failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -2533,7 +2534,7 @@ memoryRouter.post("/banks/:agentSlug/clear-all", requireUserAuth, async (req, re
     res.json({ success: true, data: { deleted, reviewsRejected: reviews.count } });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/clear-all failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -2591,7 +2592,7 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
     res.json({ success: true, data: { deleted, reviewsRejected: reviews.count } });
   } catch (err) {
     logger.error("[memory] DELETE /banks/:agentSlug/subsystems/:subsystem failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });
   }
@@ -2761,13 +2762,13 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
         });
       } catch (err) {
         logger.error("[memory] /upload-session background processing failed", {
-          agentSlug, filename, err: err instanceof Error ? err.message : String(err),
+          agentSlug, filename, err: errMsg(err),
         });
       }
     });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/upload-session failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     if (!res.headersSent) res.status(500).json({ success: false, error: "Internal error" });
   }

@@ -1,4 +1,5 @@
 import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
+import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { extractCodexBearer } from "./codex-creds.js";
@@ -260,7 +261,7 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       ...(row.reasoningEffort ? { reasoningEffort: row.reasoningEffort } : {}),
     };
   } catch (err) {
-    log.error(`Failed to decrypt ${provider} key for agent`, { error: err instanceof Error ? err.message : String(err) });
+    log.error(`Failed to decrypt ${provider} key for agent`, { error: errMsg(err) });
     return null;
   }
 }
@@ -353,7 +354,7 @@ export async function resolveAgentProviderConfigs(
         claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Claude OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       }
     }
@@ -367,7 +368,7 @@ export async function resolveAgentProviderConfigs(
         codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Codex OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       }
     }

@@ -13,6 +13,7 @@
  */
 
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -119,13 +120,13 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
     .catch((e) =>
       log.warn(
         `[flow-action] markUsedUserToken failed for conv ${conversationId}:`,
-        e instanceof Error ? e.message : String(e),
+        errMsg(e),
       ),
     );
 }
 
 function sanitizeApprovalToolError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = errMsg(err);
   return raw
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/\{[^{}]{20,}\}/g, "{...}")
@@ -204,7 +205,7 @@ async function consumePlanCard(
   } catch (err) {
     log.error(
       `[flow-action] plan-approval: durable consume failed screenId=${binding.screenId}:`,
-      err instanceof Error ? err.message : String(err),
+      errMsg(err),
     );
     return false;
   }
@@ -271,7 +272,7 @@ async function replaceFlowCardWithText(
       log.warn(`[flow-action] updateMessage HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
     }
   } catch (err) {
-    log.warn(`[flow-action] Failed to replace flow card for message ${messageId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[flow-action] Failed to replace flow card for message ${messageId}:`, errMsg(err));
   }
 }
 
@@ -444,7 +445,7 @@ async function replaceFlowCardWithFlow(
     }
     return "failed";
   } catch (err) {
-    log.warn(`[flow-action] Failed to replace flow card (flowJSON) for message ${messageId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[flow-action] Failed to replace flow card (flowJSON) for message ${messageId}:`, errMsg(err));
     return "failed";
   }
 }
@@ -732,8 +733,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             const joinRes = (await spacesPost(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
             channelName = joinRes.channelName ?? targetChannelId;
           } catch (e) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            if (errMsg.includes("private")) {
+            const errText = errMsg(e);
+            if (errText.includes("private")) {
               resp = { type: "close_screen", finalMessage: `❌ Cannot post to #${targetChannelId} — private channel. Add me first.` };
               res.json(resp);
               void replaceFlowCardWithText(messageId, agentSlug, `❌ Cannot post to #${targetChannelId} — private channel.`, conversationId, undefined, spacesAppId);
@@ -782,12 +783,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         });
 
         if (!execution.success) {
-          const errMsg = sanitizeApprovalToolError(
+          const errText = sanitizeApprovalToolError(
             formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool),
           );
-          const userMessage = approvalToolFailureMessage(errMsg);
+          const userMessage = approvalToolFailureMessage(errText);
           log.error(
-            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
           );
           res.status(422).json({
             type: "error",
@@ -1017,10 +1018,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       try {
         toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
       } catch (err) {
-        const errMsg = sanitizeApprovalToolError(err);
-        const userMessage = approvalToolFailureMessage(errMsg);
+        const errText = sanitizeApprovalToolError(err);
+        const userMessage = approvalToolFailureMessage(errText);
         log.error(
-          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
         );
         res.status(422).json({
           type: "error",
@@ -1562,7 +1563,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           sessionContext,
         }).catch((err) => {
           log.warn("[flow-action] agent-call: registerRunRecovery failed", {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         });
       }
@@ -2010,7 +2011,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               runPayload: dispatchPayload as Parameters<typeof persistGoalStart>[0]["runPayload"],
             }).catch((err) => {
               log.warn("[flow-action] start-goal: persistGoalStart failed — loop will not auto-continue", {
-                error: err instanceof Error ? err.message : String(err),
+                error: errMsg(err),
               });
             });
 
@@ -2019,7 +2020,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error("[flow-action] start-goal: /run dispatch failed", { runBody });
           }
         } catch (err) {
-          log.error("[flow-action] start-goal: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] start-goal: dispatch errored:", errMsg(err));
         }
       })();
       return;
@@ -2375,7 +2376,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error("[flow-action] plan-approval: /run dispatch failed", { runBody });
           }
         } catch (err) {
-          log.error("[flow-action] plan-approval: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] plan-approval: dispatch errored:", errMsg(err));
         }
       })();
       return;
@@ -2527,7 +2528,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             });
           }
         } catch (err) {
-          log.error("[flow-action] promote-provider: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] promote-provider: dispatch errored:", errMsg(err));
         }
       })();
       return;

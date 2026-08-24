@@ -1,11 +1,10 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { createLogger } from "../logger.js";
+import { errMsg } from "./errors.js";
+
+export { errMsg };
 
 const log = createLogger("http");
-
-export function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export class HttpError extends Error {
   constructor(

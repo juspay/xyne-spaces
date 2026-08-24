@@ -11,6 +11,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
@@ -57,7 +58,7 @@ async function prepareMessageContent(rawContent: string): Promise<string> {
     } catch (err) {
       resolved = rawContent;
       console.warn(
-        `[apps-send-message] mention resolution skipped reason=error err=${err instanceof Error ? err.message : String(err)}`,
+        `[apps-send-message] mention resolution skipped reason=error err=${errMsg(err)}`,
       );
     }
   }
@@ -220,8 +221,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
         const joinRes = (await spacesAppFetch(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
         channelName = joinRes.channelName ?? targetChannelId;
       } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        if (errMsg.includes("private")) {
+        const errText = errMsg(e);
+        if (errText.includes("private")) {
           const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
           if (sourceConversationId) {
             await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }).catch(() => {});
@@ -241,7 +242,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
       return { content: [{ type: "text", text: confirmMsg }] };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errMsg(e);
       return { content: [{ type: "text", text: `apps-send-message error: ${msg}` }], isError: true };
     }
   }

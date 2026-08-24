@@ -9,6 +9,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -79,7 +80,7 @@ function validateCronExpression(
   } catch (err) {
     return {
       ok: false,
-      error: `Invalid cronExpression: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Invalid cronExpression: ${errMsg(err)}`,
     };
   }
 
@@ -644,7 +645,7 @@ router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Resp
       log.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
       // DB is already updated — surface the Redis failure so the caller
       // knows the binding may be stale and can retry.
-      throw new HttpError(500, `Saved cron in DB but failed to update Redis scheduler: ${err instanceof Error ? err.message : String(err)}`);
+      throw new HttpError(500, `Saved cron in DB but failed to update Redis scheduler: ${errMsg(err)}`);
     }
   }
 
@@ -677,7 +678,7 @@ router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Resp
       log.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
       // DB is ahead of Redis. The next fire won't happen until the user
       // retries the reschedule. Surface this so the caller knows.
-      throw new HttpError(500, `Saved nextRunAt in DB but failed to enqueue the new delayed job: ${err instanceof Error ? err.message : String(err)}`);
+      throw new HttpError(500, `Saved nextRunAt in DB but failed to enqueue the new delayed job: ${errMsg(err)}`);
     }
   }
 
@@ -987,7 +988,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     log.info(`[scheduled-jobs/result] Job ${id}: handoff callback session=${payload.sessionId ?? ""} lastTurn=${payload.lastTurn ?? "unknown"}`);
     if (payload.sessionId) {
       const handoff = await handleRunHandoff(payload.sessionId).catch((err) => {
-        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, err instanceof Error ? err.message : String(err));
+        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, errMsg(err));
         return null;
       });
       if (handoff) {

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
-import { getRequesterId, getOrgId, isClawAdmin, isOrgAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, isOrgAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden } from "../lib/http.js";
 import { createLogger } from "../logger.js";
 import { CONFIG } from "../config.js";
@@ -106,8 +106,7 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /latest — today's stored brief (falls back to the most recent one). */
 router.get("/latest", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const today = briefDateBucket();
   const todays = await generatedContentRepository.findForBucket(userId, DAILY_BRIEF_KIND, today);
   const row = todays ?? (await generatedContentRepository.findLatest(userId, DAILY_BRIEF_KIND));
@@ -127,8 +126,7 @@ router.get("/latest", asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /history — the user's recent briefs, newest first (for the history list). */
 router.get("/history", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const limitRaw = Number(req.query.limit);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 100) : 30;
   const rows = await generatedContentRepository.findHistory(userId, DAILY_BRIEF_KIND, limit);
@@ -144,8 +142,7 @@ router.get("/history", asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /dates — every day the user has a brief for, newest first (date + status, no content). */
 router.get("/dates", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const limitRaw = Number(req.query.limit);
   const limit = Number.isFinite(limitRaw)
     ? Math.min(Math.max(Math.trunc(limitRaw), 1), 1000)
@@ -156,8 +153,7 @@ router.get("/dates", asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /by-date/:date — the stored brief for one YYYY-MM-DD bucket. */
 router.get("/by-date/:date", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const date = String(req.params.date ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("date must be YYYY-MM-DD");
   const row = await generatedContentRepository.findForBucket(userId, DAILY_BRIEF_KIND, date);

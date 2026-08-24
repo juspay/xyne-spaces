@@ -1,4 +1,5 @@
 import type { ExperimentFinding, ExperimentReview, ExperimentRun } from "@prisma/client";
+import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { experimentRepository, agentRepository } from "../repositories/index.js";
 import { setSession, type SessionContext } from "./session-context.js";
@@ -525,7 +526,7 @@ export async function dispatchExperimentChecker(run: ExperimentRun, epoch: numbe
     await experimentRepository.addCheckerSession(run.id, result.sessionId).catch(() => undefined);
     log.info(`[experiment] dispatched checker epoch=${epoch} id=${run.id} findings=${findings.length} session=${result.sessionId}`);
   } catch (err) {
-    log.warn(`[experiment] checker dispatch failed id=${run.id} epoch=${epoch}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[experiment] checker dispatch failed id=${run.id} epoch=${epoch}: ${errMsg(err)}`);
   }
 }
 

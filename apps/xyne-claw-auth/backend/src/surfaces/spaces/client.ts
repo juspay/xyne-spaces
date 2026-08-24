@@ -6,6 +6,7 @@
  * Extracted from routes/webhook.ts (2026-07-22 refactor session 1.4).
  */
 import { CONFIG } from "../../config.js";
+import { errMsg } from "../../lib/errors.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
 import { SpacesApiError, isFlowSchemaRejection } from "../../mcp/servers/xyne-spaces-client.js";
@@ -20,7 +21,7 @@ export async function withSpaces5xxRetry<T>(label: string, fn: () => Promise<T>)
   try {
     return await fn();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     const status = /^Spaces app API (\d{3})/.exec(msg)?.[1];
     if (!status || Number(status) < 500) throw err;
     log.warn(`[spaces-retry] ${label} got ${status} — retrying once after 2s`);

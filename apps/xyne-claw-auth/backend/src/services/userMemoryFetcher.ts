@@ -27,6 +27,7 @@
  */
 
 import type { UserMemoryRecord } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import {
   interact,
   search,
@@ -179,12 +180,12 @@ async function vespaQuery(
     logger.error("[user-memory-fetcher] vespaSearch failed", {
       userId,
       params: fullParams,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
       name: err instanceof Error ? err.name : "unknown",
     });
     if (err instanceof SpacesFetchError) throw err;
     throw new SpacesFetchError(
-      `vespaSearch failed for type=${params["type"] ?? "?"}: ${err instanceof Error ? err.message : String(err)}`,
+      `vespaSearch failed for type=${params["type"] ?? "?"}: ${errMsg(err)}`,
       err,
     );
   }
@@ -325,7 +326,7 @@ async function queryUserCanvases(
       auth,
     )) as SpacesCanvasRow[];
   } catch (err) {
-    logger.warn("[user-memory-fetcher] canvas authored fetch failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[user-memory-fetcher] canvas authored fetch failed", { userId, err: errMsg(err) });
   }
 
   try {
@@ -343,7 +344,7 @@ async function queryUserCanvases(
       auth,
     )) as SpacesCanvasRow[];
   } catch (err) {
-    logger.warn("[user-memory-fetcher] canvas editor/owner fetch failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[user-memory-fetcher] canvas editor/owner fetch failed", { userId, err: errMsg(err) });
   }
 
   // Dedupe by id (creators are auto-OWNER so overlap is the norm).
@@ -414,7 +415,7 @@ async function fetchTranscriptText(
     );
     return text.trim();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     // 403/404 are ordinary — not shared with this user, or not transcribed yet.
     const expected = msg.includes("403") || msg.includes("404");
     logger[expected ? "info" : "warn"]("[user-memory-fetcher] transcript unavailable", {
@@ -588,7 +589,7 @@ export async function countUserRecords(
       )) as VespaSearchResponse;
       return resp.data?.totalCount ?? 0;
     } catch (err) {
-      logger.warn("[user-memory-fetcher] messages count failed", { userId, err: err instanceof Error ? err.message : String(err) });
+      logger.warn("[user-memory-fetcher] messages count failed", { userId, err: errMsg(err) });
       return 0;
     }
   }
@@ -622,7 +623,7 @@ export async function countUserRecords(
           ? withTranscript
           : Math.round(total * (withTranscript / sample.length));
   } catch (err) {
-    logger.warn("[user-memory-fetcher] call count failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[user-memory-fetcher] call count failed", { userId, err: errMsg(err) });
   }
 
   // Canvas count: two queries because /api/query AST validator rejects
@@ -662,7 +663,7 @@ export async function countUserRecords(
     // the sum (which would double-count the overlap).
     canvases = Math.max(authoredCount, editedCount);
   } catch (err) {
-    logger.warn("[user-memory-fetcher] canvas count failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[user-memory-fetcher] canvas count failed", { userId, err: errMsg(err) });
   }
 
   const [messages] = await Promise.all([safeMessagesCount()]);

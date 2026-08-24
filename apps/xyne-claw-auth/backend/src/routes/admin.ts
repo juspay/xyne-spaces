@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
-import { requireClawAdmin, getRequesterId, getOrgId, isClawAdmin, hasSearchEvalAccess } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId, isClawAdmin, hasSearchEvalAccess , requireRequester} from "../middleware/agent-acl.js";
 import { windowFromDays } from "../lib/time-window.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository, sharedProviderCredentialRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
@@ -113,8 +114,7 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
 // caller resolved by requireAuth. This prevents a non-admin from probing
 // arbitrary userIds to discover who in the org is a CLAW_ADMIN.
 router.get("/roles/check/:userId", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("Unauthenticated");
+  const requesterId = requireRequester(req, "Unauthenticated");
   const [admin, searchEvalAccess] = await Promise.all([
     isClawAdmin(requesterId),
     hasSearchEvalAccess(requesterId),
@@ -839,8 +839,7 @@ router.post("/error-pipeline/buckets/:name/flush", requireClawAdmin, asyncHandle
  * from someone else's tangent. Idempotent: repeat calls return the same id.
  */
 router.post("/error-pipeline/fork-conversation", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) throw unauthorized("x-user-id is required");
+  const requesterId = requireRequester(req, "x-user-id is required");
   const { conversationId } = (req.body ?? {}) as { conversationId?: string };
   if (!conversationId || !/^[A-Za-z0-9_-]{1,80}$/.test(conversationId)) throw badRequest("valid conversationId is required");
   const forkId = `${conversationId}__u__${requesterId}`;
@@ -874,7 +873,7 @@ router.post("/error-pipeline/fork-conversation", asyncHandler(async (req: Reques
     sourceConversationId: piSessionStoreKey(conversationId, slug),
     targetConversationId: piSessionStoreKey(forkId, slug),
     branchMode: "full",
-  }).catch((err) => ({ success: false, error: err instanceof Error ? err.message : String(err) }));
+  }).catch((err) => ({ success: false, error: errMsg(err) }));
   // A missing source session (very old run, swept from disk+GCS) is NOT fatal:
   // the fork still works, the agent just starts without the run's history.
   if (!clone.success) {

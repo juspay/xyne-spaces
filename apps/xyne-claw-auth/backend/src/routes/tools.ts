@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { asyncHandler, ok, badRequest } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -578,7 +579,7 @@ router.post("/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Re
       totalSynced += count;
       syncedServers.push(conn.mcpServer.type);
     } catch (err) {
-      const msg = `${conn.mcpServer.type}: ${err instanceof Error ? err.message : String(err)}`;
+      const msg = `${conn.mcpServer.type}: ${errMsg(err)}`;
       errors.push(msg);
       log.error(`[tools/sync] ${msg}`);
     }

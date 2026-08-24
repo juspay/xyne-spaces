@@ -24,6 +24,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "./errors.js";
 import {
   agentRepository,
   agentShareRepository,
@@ -421,7 +422,7 @@ export async function applyAgentToolAction(
         return { ok: false, error: `Unknown agent-authoring tool: ${tool}` };
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[apply] ${tool} failed for user=${userId}: ${msg}`);
     return { ok: false, error: `Couldn't apply ${tool} just now — please try approving again.` };
   }

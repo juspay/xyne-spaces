@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
@@ -32,8 +33,7 @@ function quoteMarkdown(value: string): string {
 
 // GET /runs — list runs for the requesting user
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
   const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
   const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
@@ -93,8 +93,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
 router.get("/light", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const sinceDaysRaw = typeof req.query["sinceDays"] === "string" ? parseInt(req.query["sinceDays"], 10) : NaN;
   const sinceDays = Number.isFinite(sinceDaysRaw) ? Math.min(Math.max(sinceDaysRaw, 1), 90) : 7;
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
@@ -132,8 +131,7 @@ router.get("/light", asyncHandler(async (req: Request, res: Response) => {
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
 router.get("/search", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  if (!userId) throw unauthorized();
+  const userId = requireRequester(req);
   const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
   if (q.length < 2) throw badRequest("q (min 2 chars) is required");
   const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
@@ -493,7 +491,7 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
         }
       } catch (err) {
         log.warn(
-          `[runs/share] continuity copy failed sessionId=${sessionId} agent=${run.agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+          `[runs/share] continuity copy failed sessionId=${sessionId} agent=${run.agentSlug}: ${errMsg(err)}`,
         );
       }
     }

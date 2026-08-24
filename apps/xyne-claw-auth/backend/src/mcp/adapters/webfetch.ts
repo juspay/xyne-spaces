@@ -17,6 +17,7 @@
  */
 
 import { Readability } from "@mozilla/readability";
+import { errMsg } from "../../lib/errors.js";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
@@ -259,6 +260,6 @@ export async function handleWebfetch(
     }
     return markdown;
   } catch (e) {
-    return `Error: Webfetch failed: ${e instanceof Error ? e.message : String(e)}`;
+    return `Error: Webfetch failed: ${errMsg(e)}`;
   }
 }
