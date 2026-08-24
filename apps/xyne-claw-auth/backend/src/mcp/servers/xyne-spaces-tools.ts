@@ -188,6 +188,19 @@ function err(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+function withToolErrors(
+  label: string,
+  fn: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>,
+): (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult> {
+  return async (params, ctx) => {
+    try {
+      return await fn(params, ctx);
+    } catch (e) {
+      return err(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+}
+
 function formatAttachmentBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
   const units = ["B", "KB", "MB", "GB"] as const;
@@ -897,8 +910,7 @@ const spacesSearch: ToolDef = {
     },
     // required: ["query"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Search error", async (args, ctx) => {
       const query = String(args["query"] ?? "").trim();
       const params: Record<string, string> = {};
       // Deterministic q vs filter-only — the model no longer passes a `filterOnly`
@@ -1053,10 +1065,7 @@ const spacesSearch: ToolDef = {
           citations,
         ),
       );
-    } catch (e) {
-      return err(`Search error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-search-v2 ─────────────────────────────────────────────────
@@ -1503,8 +1512,7 @@ const spacesTickets: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Tickets error", async (args) => {
       const include = {
         assignedToUser: { select: { name: true, email: true } },
         createdByUser: { select: { name: true, email: true } },
@@ -1830,10 +1838,7 @@ const spacesTickets: ToolDef = {
       }
       if (participantNote) appendText(result, participantNote);
       return result;
-    } catch (e) {
-      return err(`Tickets error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 /**
@@ -2414,8 +2419,7 @@ const spacesMessages: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Messages error", async (args) => {
       const conversationId = String(args["conversationId"]);
       const sortDir: "asc" | "desc" = args["sortOrder"] === "desc" ? "desc" : "asc";
       const msgTypes = Array.isArray(args["msgType"])
@@ -2502,10 +2506,7 @@ const spacesMessages: ToolDef = {
           )}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Messages error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface MessageRow {
@@ -2538,8 +2539,7 @@ const spacesMessageDetail: ToolDef = {
     },
     required: ["messageId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Message detail error", async (args) => {
       const messageId = String(args["messageId"]);
       const rows = (await interact({
         model: "message",
@@ -2594,10 +2594,7 @@ const spacesMessageDetail: ToolDef = {
       applyChannelInfo(citations, channelInfo);
 
       return okCited(prefixChunk(1, parts[0]!, parts.slice(1)), citations);
-    } catch (e) {
-      return err(`Message detail error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface MessageDetailRow {
@@ -2701,8 +2698,7 @@ const spacesChannels: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Channels error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["name"]) where["name"] = { contains: args["name"] as string, mode: "insensitive" };
       if (args["description"])
@@ -2808,16 +2804,12 @@ const spacesChannels: ToolDef = {
         `${rows.length} channel(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
   // APP MODE: list channels via the app-token route `/api/apps/channel/list`
   // (returns {items:[{id,name,description,scopeType,...}], hasMore, nextCursor}).
   // The app route supports scopeType + limit + cursor only, so name filtering
   // is applied client-side over the returned page.
-  async appHandler(args) {
-    try {
+  appHandler: withToolErrors("Channels error", async (args) => {
       const qs = new URLSearchParams();
       qs.set("limit", String(args["limit"] ?? 100));
       if (args["scopeType"]) qs.set("scopeType", String(args["scopeType"]));
@@ -2842,10 +2834,7 @@ const spacesChannels: ToolDef = {
           ? `\n\n[Showing ${items.length} channel(s) — more may exist. Raise limit or refine with name/scopeType filters.]`
           : "";
       return ok(`${items.length} channel(s):\n\n${lines.join("\n\n")}${moreNote}`);
-    } catch (e) {
-      return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface ChannelRow {
@@ -2925,8 +2914,7 @@ const spacesUsers: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Users error", async (args) => {
       const nameOrEmail = args["nameOrEmail"] ? String(args["nameOrEmail"]) : "";
       const groupId = args["groupId"] ? String(args["groupId"]) : "";
       if (!nameOrEmail && !groupId) {
@@ -2971,10 +2959,7 @@ const spacesUsers: ToolDef = {
       return ok(
         `${rows.length} user(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
       );
-    } catch (e) {
-      return err(`Users error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface UserRow {
@@ -3332,8 +3317,7 @@ const spacesActivity: ToolDef = {
       },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Activity error", async (args, ctx) => {
       const where: Record<string, unknown> = {
         userId: { equals: ctx.userId },
       };
@@ -3396,10 +3380,7 @@ const spacesActivity: ToolDef = {
         `${rows.length} activity entries:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Activity error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface UserActivityRow {
@@ -3440,8 +3421,7 @@ const spacesProjects: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Projects error", async (args) => {
       const search = args["search"] ? String(args["search"]) : "";
       const limit = (args["limit"] as number | undefined) ?? 100;
       const offset = (args["offset"] as number | undefined) ?? 0;
@@ -3498,10 +3478,7 @@ const spacesProjects: ToolDef = {
       return ok(
         `${rows.length} project(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
       );
-    } catch (e) {
-      return err(`Projects error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+  }),
 };
 
 interface ProjectRow {
@@ -3527,8 +3504,7 @@ const spacesProjectTeamMembers: ToolDef = {
     },
     required: ["projectId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Project team members error", async (args) => {
       const projectId = String(args["projectId"] ?? "");
       if (!projectId) return err("projectId is required");
 
@@ -3575,10 +3551,7 @@ const spacesProjectTeamMembers: ToolDef = {
       }
 
       return ok(lines.join("\n"));
-    } catch (e) {
-      return err(`Project team members error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-canvases ─────────────────────────────────────────────────
@@ -3654,8 +3627,7 @@ const spacesCanvases: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Canvases error", async (args, ctx) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
       if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
@@ -3722,10 +3694,7 @@ const spacesCanvases: ToolDef = {
         `${rows.length} canvas(es):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Canvases error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface CanvasRow {
@@ -3912,8 +3881,7 @@ const spacesCalls: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Calls error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
       if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
@@ -4084,10 +4052,7 @@ const spacesCalls: ToolDef = {
         `${rows.length} call(s):\n\n${lines.join("\n\n")}${listFooter}${transcriptBlock}`,
         citations,
       );
-    } catch (e) {
-      return err(`Calls error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface CallRow {
@@ -4155,8 +4120,7 @@ const spacesBoards: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Boards error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["name"] = { contains: args["search"] };
       if (args["projectId"]) where["projectId"] = { equals: args["projectId"] };
@@ -4188,10 +4152,7 @@ const spacesBoards: ToolDef = {
       return ok(
         `${rows.length} board(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
       );
-    } catch (e) {
-      return err(`Boards error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface BoardRow {
@@ -4252,8 +4213,7 @@ const spacesCreateTicket: ToolDef = {
     },
     required: ["title", "description", "projectId", "boardId", "channelId"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Create ticket error", async (args, ctx) => {
       if (!args["channelId"]) {
         return err("channelId is required.");
       }
@@ -4371,10 +4331,7 @@ const spacesCreateTicket: ToolDef = {
         ...(attachLine ? [attachLine.trimStart()] : []),
       ];
       return okCited(prefixChunk(1, "Ticket created:", bodyLines), citations);
-    } catch (e) {
-      return err(`Create ticket error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-create-bulk-tickets ──────────────────────────────────────
@@ -4588,8 +4545,7 @@ const spacesUpdateTicket: ToolDef = {
     },
     required: ["ticketId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Update ticket error", async (args) => {
       const ticketId = String(args["ticketId"] ?? "").trim();
       const assigneeId = (args["assigneeId"] as string | undefined)?.trim();
       const stage = (args["stage"] as string | undefined)?.trim();
@@ -4641,10 +4597,7 @@ const spacesUpdateTicket: ToolDef = {
 
       const updates = result.updated ?? [];
       return ok(`Ticket ${ticketId} updated${updates.length > 0 ? `: ${updates.join(", ")}` : ""}.`);
-    } catch (e) {
-      return err(`Update ticket error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 // ── spaces-update-bulk-tickets ──────────────────────────────────────
 
@@ -4861,8 +4814,7 @@ const spacesScheduleCall: ToolDef = {
     },
     required: ["title", "startsAt", "endsAt"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Schedule call error", async (args) => {
       if (!args["channelId"] && !(args["targetUserIds"] as string[] | undefined)?.length) {
         return err("Must provide either channelId or targetUserIds.");
       }
@@ -4889,10 +4841,7 @@ const spacesScheduleCall: ToolDef = {
           `  channelId: ${data.channelId}`,
         ].join("\n"),
       );
-    } catch (e) {
-      return err(`Schedule call error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-whoami ─────────────────────────────────────────────────────
@@ -4904,8 +4853,7 @@ const spacesWhoami: ToolDef = {
     "If the userId and name are ALREADY in your system prompt, so do not call this just to read them; " +
     "use it only when you need the workspaceId or want to confirm the profile.",
   inputSchema: { type: "object", properties: {} },
-  async handler(_args, ctx) {
-    try {
+  handler: withToolErrors("Whoami error", async (_args, ctx) => {
       if (!ctx.userId) return err("Could not determine current user.");
       const rows = (await interact({
         model: "user",
@@ -4918,10 +4866,7 @@ const spacesWhoami: ToolDef = {
       return ok(
         `Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}\n- Workspace ID: ${u.workspaceId}`,
       );
-    } catch (e) {
-      return err(`Whoami error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-read-canvas ──────────────────────────────────────────────
@@ -4942,8 +4887,7 @@ const spacesReadCanvas: ToolDef = {
     },
     required: ["viewAccessId"],
   },
-  async handler(params, ctx) {
-    try {
+  handler: withToolErrors("Read canvas error", async (params, ctx) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
@@ -4965,10 +4909,7 @@ const spacesReadCanvas: ToolDef = {
       const citations: Citation[] = [];
       pushCanvasCitation(citations, viewAccessId, 1, title);
       return okCited(prefixChunk(1, `# ${title}`, [``, `URL: ${url}`, ``, markdown]), citations);
-    } catch (e) {
-      return err(`Read canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-edit-canvas ───────────────────────────────────────────────
@@ -4994,8 +4935,7 @@ const spacesEditCanvas: ToolDef = {
     },
     required: ["viewAccessId", "content"],
   },
-  async handler(params, ctx) {
-    try {
+  handler: withToolErrors("Edit canvas error", async (params, ctx) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       const content = String(params["content"] ?? "");
       const title = params["title"] ? String(params["title"]) : undefined;
@@ -5029,10 +4969,7 @@ const spacesEditCanvas: ToolDef = {
         ]),
         citations,
       );
-    } catch (e) {
-      return err(`Edit canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -5139,8 +5076,7 @@ const spacesMeetingInsights: ToolDef = {
     },
     required: [],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Meeting insights search error", async (args) => {
       const query = String(args["query"] ?? "").trim();
       const params: Record<string, string> = {
         q: query,
@@ -5249,10 +5185,7 @@ const spacesMeetingInsights: ToolDef = {
         `Found ${data.data.totalCount ?? results.length} meeting insight(s):\n\n${formatted}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Meeting insights search error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-create-canvas ────────────────────────────────────────────
@@ -5281,8 +5214,7 @@ const spacesCreateCanvas: ToolDef = {
     },
     required: ["title", "markdown"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Create canvas error", async (args) => {
       const title = String(args["title"] ?? "").trim();
       const markdown = String(args["markdown"] ?? "");
       const visibility = String(args["visibility"] ?? "PRIVATE");
@@ -5317,10 +5249,7 @@ const spacesCreateCanvas: ToolDef = {
         ]),
         citations,
       );
-    } catch (e) {
-      return err(`Create canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── canonical SDLC artifact mutation ──────────────────────────────
@@ -5759,8 +5688,7 @@ const spacesSdlcCreatePullRequest: ToolDef = {
     },
     required: ["repoId", "title", "head", "base", "commitHash"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Create SDLC pull request error", async (args) => {
       const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
       if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
       const data = (await spacesFetch(
@@ -5782,10 +5710,7 @@ const spacesSdlcCreatePullRequest: ToolDef = {
           `Base: ${data.pullRequest.base ?? "unknown"}`,
         ].join("\n"),
       );
-    } catch (e) {
-      return err(`Create SDLC pull request error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
   async appHandler(args) {
     return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
   },
@@ -5838,8 +5763,7 @@ const spacesEmails: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Emails error", async (args) => {
       const conversationId = String(args["conversationId"]);
       const take = (args["limit"] as number | undefined) ?? 100;
       const from = (args["from"] as "first" | "last" | undefined) ?? "first";
@@ -5902,10 +5826,7 @@ const spacesEmails: ToolDef = {
         `${rows.length} email(s) in thread:\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: take, offset: skip })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Emails error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface EmailRow {
@@ -6119,8 +6040,7 @@ const spacesThreadAttachments: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Thread attachments error", async (args) => {
       const conversationId = String(args["conversationId"] ?? "");
       if (!conversationId) return err("conversationId is required");
       const entityId = String(args["entityId"] ?? "").trim();
@@ -6244,10 +6164,7 @@ const spacesThreadAttachments: ToolDef = {
         `${rows.length} attachment(s) in ${conversationId}:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit, offset, total: deduped.length })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Thread attachments error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 /**
@@ -6337,8 +6254,7 @@ const spacesFetchAttachment: ToolDef = {
     },
     required: ["attachmentId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Fetch attachment error", async (args) => {
       const attachmentId = String(args["attachmentId"] ?? "");
       if (!attachmentId) return err("attachmentId is required");
 
@@ -6408,10 +6324,7 @@ const spacesFetchAttachment: ToolDef = {
       }
 
       return renderFetchedAttachment({ source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer });
-    } catch (e) {
-      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
   /**
    * App-token download. Headless/automation runs (no user session) cannot use
    * the user-only `/api/attachments/:id/{signed-url,download}` routes — they
@@ -6420,8 +6333,7 @@ const spacesFetchAttachment: ToolDef = {
    * workspace-scoped) using the agent's app token, then funnels through the
    * SAME renderFetchedAttachment tail so output matches the user path exactly.
    */
-  async appHandler(args) {
-    try {
+  appHandler: withToolErrors("Fetch attachment error", async (args) => {
       const attachmentId = String(args["attachmentId"] ?? "");
       if (!attachmentId) return err("attachmentId is required");
 
@@ -6461,10 +6373,7 @@ const spacesFetchAttachment: ToolDef = {
         sourceLabel: "an app-token direct download",
         inlineBuffer: dl.buffer,
       });
-    } catch (e) {
-      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-upload-to-kb ──────────────────────────────────────────────
@@ -6550,8 +6459,7 @@ const spacesUploadToKb: ToolDef = {
     },
     required: [],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Upload-to-KB error", async (args) => {
       // Normalize attachment ids from BOTH attachmentId (single) and
       // attachmentIds (array). Dedupe while preserving order so a caller can
       // pass either shape (or both) and get one upload per distinct id.
@@ -6801,10 +6709,7 @@ const spacesUploadToKb: ToolDef = {
       // a successful upload when nothing actually landed.
       if (uploaded.length === 0) return err(summary);
       return ok(summary);
-    } catch (e) {
-      return err(`Upload-to-KB error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-workflow-stats ─────────────────────────────────────────────
@@ -6861,8 +6766,7 @@ const spacesWorkflowStats: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Workflow stats error", async (args) => {
       const workflowName = typeof args["workflowName"] === "string" ? args["workflowName"].trim() : "";
       const workflowType = typeof args["workflowType"] === "string" ? args["workflowType"].trim() : "";
       if (!workflowName && !workflowType) {
@@ -7014,10 +6918,7 @@ const spacesWorkflowStats: ToolDef = {
       };
 
       return ok(JSON.stringify(summary, null, 2));
-    } catch (e) {
-      return err(`Workflow stats error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── user-send-message ─────────────────────────────────────────────────
@@ -7197,8 +7098,7 @@ const spacesVespaSchema: ToolDef = {
     },
     required: ["schema"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("vespa-schema error", async (args) => {
       const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
 
       // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
@@ -7208,10 +7108,7 @@ const spacesVespaSchema: ToolDef = {
       if (!text || !text.trim())
         return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
       return ok(text);
-    } catch (e) {
-      return err(`vespa-schema error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 /**
@@ -7900,8 +7797,7 @@ const spacesMyItems: ToolDef = {
     },
     required: ["type"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("my-items error", async (args, ctx) => {
       const type = String(args["type"] ?? "");
       const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
@@ -8200,10 +8096,7 @@ const spacesMyItems: ToolDef = {
         `${rows.length} ${isEmail ? "email draft" : "draft"}(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
         citations,
       );
-    } catch (e) {
-      return err(`my-items error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-saved-views (Project / Ticket board "Views") ──────────────
@@ -8250,8 +8143,7 @@ const spacesSavedViews: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("saved-views error", async (args, ctx) => {
       const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
       const contextId = args["contextId"] ? String(args["contextId"]) : undefined;
@@ -8330,10 +8222,7 @@ const spacesSavedViews: ToolDef = {
       return ok(
         `${views.length} saved view(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: views.length, limit, offset })}`,
       );
-    } catch (e) {
-      return err(`saved-views error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-corpus-scan ───────────────────────────────────────────────────────
@@ -8948,8 +8837,7 @@ const spacesDeskMetrics: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("desk-metrics error", async (args) => {
       if (args["lastDays"] !== undefined && typeof args["timeRange"] === "string") {
         return err("Pass either lastDays or timeRange, not both.");
       }
@@ -9004,10 +8892,7 @@ const spacesDeskMetrics: ToolDef = {
       })) as Record<string, unknown>;
 
       return ok(JSON.stringify(data, null, 2));
-    } catch (e) {
-      return err(`desk-metrics error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 export const tools: ToolDef[] = [
