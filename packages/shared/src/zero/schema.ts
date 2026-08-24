@@ -1208,6 +1208,7 @@ export const entityAccessTable = table('entity_access' /* EntityAccess */)
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
