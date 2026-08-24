@@ -168,33 +168,6 @@ export const getSpeakerColor = (name: string): string => {
 };
 
 /**
- * Dot colors for recording labels
- */
-const TAG_DOT_COLORS = [
-  'bg-cyan-600',
-  'bg-yellow-600',
-  'bg-purple-600',
-  'bg-green-600',
-  'bg-pink-600',
-  'bg-blue-600',
-] as const;
-
-/**
- * Assigns the same palette color to a label on every render using a stable string hash.
- *
- * @example
- * getRecordingTagDotColor('customer-call'); // e.g. 'bg-purple-600'
- */
-export const getRecordingTagDotColor = (tag: string): (typeof TAG_DOT_COLORS)[number] => {
-  let hash = 0;
-  for (let index = 0; index < tag.length; index += 1) {
-    hash = tag.charCodeAt(index) + ((hash << 5) - hash);
-  }
-
-  return TAG_DOT_COLORS[Math.abs(hash) % TAG_DOT_COLORS.length] ?? TAG_DOT_COLORS[0];
-};
-
-/**
  * Trims labels and drops blanks and duplicates, preserving order.
  */
 export const normalizeRecordingTags = (tags: string[]): string[] => {

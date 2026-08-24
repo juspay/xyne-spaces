@@ -1558,9 +1558,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),
