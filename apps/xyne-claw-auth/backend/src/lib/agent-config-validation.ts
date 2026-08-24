@@ -156,7 +156,7 @@ const PROFILE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "
 function validateFastModeProfile(raw: unknown): ConfigValidationResult {
   if (raw === undefined || raw === null) return { ok: true };
   if (!isPlainObject(raw)) return fail("fastModeProfile must be an object");
-  const allowed = new Set(["providers", "providerOrder", "models"]);
+  const allowed = new Set(["providers", "providerOrder", "models", "modelSettings"]);
   for (const key of Object.keys(raw)) {
     if (!allowed.has(key)) return fail(`fastModeProfile.${key} is not a recognized setting`);
   }
@@ -169,6 +169,17 @@ function validateFastModeProfile(raw: unknown): ConfigValidationResult {
       return fail(`fastModeProfile.providerOrder must list providers from: ${[...PROFILE_PROVIDERS].join(", ")}`);
     }
   }
+  if (raw["modelSettings"] !== undefined) {
+    // Fast-mode run-setting overrides — same fields/clamps as the top-level
+    // modelSettings, minus `speed` (the profile IS the fast side; a nested
+    // speed would be circular). Set fields override standard field-by-field.
+    if (isPlainObject(raw["modelSettings"]) && (raw["modelSettings"] as Record<string, unknown>)["speed"] !== undefined) {
+      return fail("fastModeProfile.modelSettings.speed is not allowed (the profile only applies in fast mode)");
+    }
+    const ms = validateModelSettings(raw["modelSettings"]);
+    if (!ms.ok) return fail(`fastModeProfile.${ms.error ?? "modelSettings invalid"}`);
+  }
+
   if (raw["models"] !== undefined) {
     const models = raw["models"];
     if (!isPlainObject(models)) return fail("fastModeProfile.models must be an object of provider → model id");

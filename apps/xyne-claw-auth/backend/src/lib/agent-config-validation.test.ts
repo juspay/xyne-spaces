@@ -29,3 +29,14 @@ describe("validateAgentModelConfig — fastModeProfile", () => {
     expect(validateAgentModelConfig({ fastModeProfile: { extra: 1 } }).ok).toBe(false);
   });
 });
+
+describe("validateAgentModelConfig — fastModeProfile.modelSettings", () => {
+  it("accepts run-setting overrides", () => {
+    expect(validateAgentModelConfig({ fastModeProfile: { modelSettings: { thinkingLevel: "high", model: "glm-latest", maxTokens: 32000 } } })).toEqual({ ok: true });
+  });
+  it("rejects bad fields and a nested speed", () => {
+    expect(validateAgentModelConfig({ fastModeProfile: { modelSettings: { thinkingLevel: "ultra" } } }).ok).toBe(false);
+    expect(validateAgentModelConfig({ fastModeProfile: { modelSettings: { speed: "fast" } } }).error).toMatch(/speed is not allowed/);
+    expect(validateAgentModelConfig({ fastModeProfile: { modelSettings: { temperature: 2 } } }).ok).toBe(false);
+  });
+});
