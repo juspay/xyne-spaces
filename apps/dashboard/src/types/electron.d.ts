@@ -191,6 +191,12 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  localHarness?: {
+    getStatus: () => Promise<LocalHarnessStatus>;
+    detect: () => Promise<LocalHarnessInstallation[]>;
+    connect: () => Promise<LocalHarnessStatus>;
+    disconnect: () => Promise<LocalHarnessStatus>;
+  };
   saveErrorReportFile?(
     fileName: string,
     buffer: ArrayBuffer | null,
@@ -202,6 +208,23 @@ export interface ElectronAPI {
   readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
+}
+
+export interface LocalHarnessInstallation {
+  provider: 'claude-code' | 'codex-cli';
+  binaryPath: string;
+  version: string;
+  authenticated: boolean;
+}
+
+export interface LocalHarnessStatus {
+  supported: boolean;
+  connected: boolean;
+  deviceId: string | null;
+  deviceName: string;
+  platform: string;
+  installations: LocalHarnessInstallation[];
+  lastError: string | null;
 }
 
 declare global {

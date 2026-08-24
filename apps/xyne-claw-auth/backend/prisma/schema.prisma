@@ -59,6 +59,8 @@ model User {
   digitalTwinPipelineEvents            DigitalTwinPipelineEvent[]
   agentMemoryFiles                     AgentMemoryFile[]
   twinBehaviorSignals                  TwinBehaviorSignal[]
+  localHarnessDevices                  LocalHarnessDevice[]
+  localHarnessRuns                     LocalHarnessRun[]
 
   /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
   /// cron enqueues a brief-generation job for this user; when false the cron
@@ -803,6 +805,52 @@ model UserProviderCredentials {
   @@map("user_provider_credentials")
 }
 
+model LocalHarnessDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId      String
+  deviceName String
+  platform   String
+  tokenHash  String   @unique
+  installations Json  @default("[]")
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  runs       LocalHarnessRun[]
+
+  @@index([userId, revokedAt])
+  @@map("local_harness_devices")
+}
+
+model LocalHarnessRun {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId         String
+  agentSlug     String
+  provider      String
+  model         String?
+  deviceId      String?
+  device        LocalHarnessDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  status        String   @default("queued")
+  envelope      Json
+  progressUrl   String   @db.Text
+  callbackUrl   String   @db.Text
+  error         String?  @db.Text
+  claimedAt     DateTime?
+  finishedAt    DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([status, expiresAt])
+  @@map("local_harness_runs")
+}
+
 model UserSubagentConfig {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1459,14 +1507,12 @@ model Skill {
   @@map("skills")
 }
 
-/**
- * Sibling files that ship alongside a skill's main SKILL.md (which lives in
- * Skill.content). Materialized into the session workspace under
- * `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
- * loader sees the whole directory.
- * relativePath is always a normalized POSIX path inside the skill dir —
- * no leading slash, no "..", no absolute paths. Enforced at write time.
- */
+// Sibling files that ship alongside a skill's main SKILL.md (which lives in
+// Skill.content). Materialized into the session workspace under
+// `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
+// loader sees the whole directory.
+// relativePath is always a normalized POSIX path inside the skill dir —
+// no leading slash, no "..", no absolute paths. Enforced at write time.
 model SkillFile {
   id           String   @id @default(cuid())
   skillId      String

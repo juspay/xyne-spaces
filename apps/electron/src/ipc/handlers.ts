@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -6,7 +6,7 @@ import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } 
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -36,6 +36,7 @@ import {
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { localHarnessBridge } from '../services/local-harness';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -704,4 +705,45 @@ export function setupIpcHandlers(): void {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  const requireLocalHarness = (event: IpcMainInvokeEvent): void => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) throw new Error('Local harness is not available in this build');
+  };
+
+  ipcMain.handle('local-harness:status', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) {
+      return {
+        supported: false,
+        connected: false,
+        deviceId: null,
+        deviceName: '',
+        platform: process.platform,
+        installations: [],
+        lastError: null,
+      };
+    }
+    return localHarnessBridge.status();
+  });
+
+  ipcMain.handle('local-harness:detect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.refreshInstallations();
+  });
+
+  ipcMain.handle('local-harness:connect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+}
+
+async function xyneCookieHeader(): Promise<string> {
+  const cookies = await session.defaultSession.cookies.get({ url: config.FRONTEND_URL });
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }

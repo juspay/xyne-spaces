@@ -9,6 +9,7 @@ import { validateSubagentInput, ValidationError as SubagentValidationError } fro
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
@@ -2750,8 +2751,15 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
 router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { provider } = req.body as { provider?: string };
-    if (!provider || !["spaces", "copilot", "claude", "codex"].includes(provider)) {
-      res.status(400).json({ success: false, error: "provider must be 'spaces', 'copilot', 'claude', or 'codex'" });
+    const allowedProviders = [
+      "spaces",
+      "copilot",
+      "claude",
+      "codex",
+      ...(CONFIG.localHarnessEnabled ? LOCAL_HARNESS_PROVIDERS : []),
+    ];
+    if (!provider || !allowedProviders.includes(provider)) {
+      res.status(400).json({ success: false, error: `provider must be one of: ${allowedProviders.join(", ")}` });
       return;
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));

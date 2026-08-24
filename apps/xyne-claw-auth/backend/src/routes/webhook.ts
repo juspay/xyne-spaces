@@ -37,6 +37,7 @@ import {
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -2516,9 +2517,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
       : null;
     const rawPersonalProvider = userAgentConfig?.provider;
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider)
+      ? undefined
+      : selectedPersonalProvider;
 
     // Agent-level fallback: shared keys the agent's owner/admin configured.
     // Anurag's framing: "If someone configures codex at xyne doctor level then
@@ -3252,19 +3256,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
     // "no healthy upstream" during a claw rollout, a connection refusal against
     // a terminating pod) is retryable — the run never started, so nothing is
-    // duplicated by trying again. Without this, a routine claw deploy turns
-    // every in-flight mention into a user-visible "I couldn't start this
-    // request: no healthy upstream" (observed prod 2026-08-05) even though a
-    // retry two seconds later would have succeeded. Mirrors the retry the /run
-    // proxy already does (routes/run.ts fetchClawRunWithRetry).
-    //
-    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
-    // returning 503 for the full pod-boot window (image pull + boot +
-    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
-    // 4.5s and still posted the "briefly unavailable" notice for every mention
-    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
-    // here blocks no caller; the message is already acked and the queue slot
-    // is held for this conversation.
+    // duplicated by trying again. Mirrors routes/run.ts fetchClawRunWithRetry.
     const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
     const isTransientUpstream = (status: number, body: string): boolean =>
       status === 502 || status === 503 || status === 504 ||
@@ -3277,7 +3269,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
         const res = await fetchRun();
         if (res.ok) return res;
-        // Peek at the body WITHOUT consuming the caller's copy.
         const peek = await res.clone().text().catch(() => "");
         if (!isTransientUpstream(res.status, peek)) return res;
         lastRes = res;
@@ -3289,21 +3280,69 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return lastRes!;
     };
 
-    let runRes: Awaited<ReturnType<typeof fetchRun>>;
-    try {
-      runRes = await fetchRunWithRetry();
-    } catch (err) {
-      // Dispatch never happened — free the global twin slot, and drain/free the
-      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
-      // that never started.
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-      }
-      throw err;
-    }
+    // Local-harness routing: only mention-driven runs are eligible. If the user
+    // has an online authenticated local device for a preferred provider, the run
+    // is dispatched there; otherwise we fall through to the server run below.
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          orgId: agent.orgId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: selectedPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+    let body: { success: boolean; sessionId?: string; error?: string };
+    let runRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = { success: true, sessionId: dispatched.sessionId };
+    } else {
+      try {
+        runRes = await fetchRunWithRetry();
+      } catch (err) {
+        // Dispatch never happened — free the global twin slot, and drain/free the
+        // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
+        // that never started.
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+    }
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -3358,15 +3397,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
       // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
+      // replay, no mention-note drift. Skipped on the local-harness path: the
+      // run lives in the user's Electron app, so a server-side retry can't
+      // recover it.
+      if (!localTarget) {
+        await registerRunRecovery({
+          rootSessionId: body.sessionId,
+          maxRetries: CONFIG.runRecoveryMaxRetries,
+          timeoutMs: CONFIG.runRecoveryTimeoutMs,
+          retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+          dispatchPayload,
+          sessionContext,
+        });
+      }
 
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
@@ -3421,7 +3464,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : isTransientUpstream(runRes.status, refusal)
+        : runRes && isTransientUpstream(runRes.status, refusal)
           ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
           : `⚠️ I couldn't start this request: ${refusal}`;
       await spacesAppFetch("/chat/postMessage", {

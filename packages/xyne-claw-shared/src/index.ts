@@ -14,6 +14,33 @@ export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
 export { isTwinDelivery } from "./types/twin-delivery.js";
+export type {
+  LocalHarnessProvider,
+  LocalHarnessInstallation,
+  LocalHarnessDeviceRegistration,
+  LocalHarnessDeviceCredential,
+  LocalHarnessDeviceStatus,
+  LocalHarnessRunEnvelope,
+  LocalHarnessPollResult,
+  LocalHarnessToolSpec,
+  LocalHarnessToolList,
+  LocalHarnessToolCallRequest,
+  LocalHarnessToolCallResponse,
+  LocalHarnessProgressEvent,
+  LocalHarnessRunStatus,
+  LocalHarnessRunResult,
+} from "./types/local-harness.js";
+export {
+  LOCAL_HARNESS_PROVIDERS,
+  LOCAL_HARNESS_PROTOCOL_VERSION,
+  LOCAL_HARNESS_SAFE_NAME,
+  isLocalHarnessProvider,
+  isSafeLocalHarnessName,
+  isLocalHarnessToolCallRequest,
+  isLocalHarnessRunResult,
+  isLocalHarnessProgressEvent,
+  isLocalHarnessDeviceRegistration,
+} from "./types/local-harness.js";
 export {
   normalizeSkillContent,
   hashSkillContent,
