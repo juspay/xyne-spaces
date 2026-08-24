@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.4](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.3...v1.206.0-release-20260821.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* Fix visibility tab error for non-group admins ([#937](https://github.com/juspay/xyne-spaces/issues/937)) ([3839149](https://github.com/juspay/xyne-spaces/commit/38391499d3dae077c6c570528dbc41c2badfe602))
+
 ## [1.206.0-release-20260821.3](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.2...v1.206.0-release-20260821.3) (2026-08-24)
 
 
