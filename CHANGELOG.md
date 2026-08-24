@@ -1,3 +1,10 @@
+## [1.210.0](https://github.com/juspay/xyne-spaces/compare/v1.209.9...v1.210.0) (2026-08-24)
+
+
+### Features
+
+* UI revamp of automation home screen ([#468](https://github.com/juspay/xyne-spaces/issues/468)) ([bb0ce4c](https://github.com/juspay/xyne-spaces/commit/bb0ce4c0419ba4df9ab11b06e0b24602487a8c6b))
+
 ## [1.209.9](https://github.com/juspay/xyne-spaces/compare/v1.209.8...v1.209.9) (2026-08-24)
 
 
