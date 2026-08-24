@@ -52,7 +52,7 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
   formatChannelLabel,
-  getDMSearchableNames,
+  getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
@@ -268,23 +268,28 @@ const SearchResults = (): ReactElement => {
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
+    searchNames?: string[];
   }> => {
     const result = [];
     for (const ch of starredChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
     for (const ch of dmChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     return result;

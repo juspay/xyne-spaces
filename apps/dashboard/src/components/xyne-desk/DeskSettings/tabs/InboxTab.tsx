@@ -10,6 +10,7 @@ import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegra
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -25,12 +26,11 @@ export const SIGNATURE_AUTO_APPEND_STORAGE_KEY = 'signature-auto-append-enabled'
 const CC_USER_RESULT_LIMIT = 50;
 
 function filterUsersByQuery(
-  users: ReadonlyArray<{ id: string; name: string; email: string }>,
+  users: ReadonlyArray<{ id: string; name: string; email: string; displayName?: string | null }>,
   query: string,
 ) {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  if (!query.trim()) return [];
+  return users.filter(u => matchesUserQuery(u, query));
 }
 
 interface InboxTabProps {
@@ -59,6 +59,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setTwoStepSend,
     autoMergeEmails,
     setAutoMergeEmails,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -281,6 +283,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {isApp && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Send replies to app webhook</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Forward every reply to the app webhook, and accept the reply only once the webhook
+              responds with 200. Turn this off if the app does not consume replies.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={appWebhookDeliveryEnabled}
+            onCheckedChange={setAppWebhookDeliveryEnabled}
+            disabled={!canManage}
+            aria-label='Toggle sending replies to the app webhook'
+          />
         </div>
       )}
 
