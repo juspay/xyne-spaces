@@ -24,4 +24,10 @@ set -e
 # deploy, and drain-handoff checkpoints never got to run. setpriv exec()s the
 # command directly: node becomes PID 1, receives SIGTERM itself, and the full
 # grace period governs.
-exec setpriv --reuid=claw --regid=nodejs --init-groups env HOME=/home/claw "$@"
+#
+# Only drop privileges when the container actually STARTED as root. With the
+# image's baked-in `USER claw` (and the Pod's runAsNonRoot/runAsUser:1001),
+if [ "$(id -u)" = 0 ]; then
+  exec setpriv --reuid=claw --regid=nodejs --init-groups env HOME=/home/claw "$@"
+fi
+exec env HOME=/home/claw "$@"

@@ -12,11 +12,17 @@ RUN npm run build
 
 FROM public.ecr.aws/docker/library/nginx:stable-alpine AS runner
 
-RUN rm /etc/nginx/conf.d/default.conf
+# Run nginx non-root (same hardening as apps/dashboard + the claw/claw-auth
+# backend images): a UID/GID 1001 user that owns every path nginx writes to.
+# Without this, a pod securityContext enforcing runAsNonRoot crashes nginx at
+# startup: mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied).
+RUN rm /etc/nginx/conf.d/default.conf && \
+    addgroup --system --gid 1001 frontend && \
+    adduser --system --uid 1001 frontend
 
 # Assets are built with /claw/ base path, serve from /claw/
 RUN mkdir -p /usr/share/nginx/html/claw
-COPY --from=builder /app/dist /usr/share/nginx/html/claw
+COPY --from=builder --chown=frontend:frontend /app/dist /usr/share/nginx/html/claw
 
 RUN printf 'server {\n\
     listen 80;\n\
@@ -42,6 +48,21 @@ RUN printf 'server {\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
+# Hand nginx's runtime-write paths to the frontend user: cache/temp dirs,
+# logs, conf.d (the docker-entrypoint scripts sed default.conf in place) and
+# the pid file. Pre-created + owned in the image so no runtime chown is needed.
+RUN chown -R frontend:frontend /var/cache/nginx && \
+    chown -R frontend:frontend /var/log/nginx && \
+    chown -R frontend:frontend /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown frontend:frontend /var/run/nginx.pid
+
+USER frontend
+
+# Still listening on :80, so running non-root requires the pod to allow
+# unprivileged binds on privileged ports:
+#   securityContext.sysctls: net.ipv4.ip_unprivileged_port_start = "0"
+# (safe system-wide-safe sysctl, K8s 1.22+; dashboard opted for :8080 instead)
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
