@@ -19,6 +19,23 @@ export interface SpacesAuthContext {
   s2sKey?: string;
 }
 
+/**
+ * Thrown by every Spaces client fetch on a non-2xx response, carrying the HTTP
+ * `status` as a NUMBER so callers can branch on `err.status === 403` instead of
+ * regex-matching the message. `status` is 0 for a network-level failure (no
+ * response). The message keeps the historical `Spaces API <status>: …` /
+ * `Spaces app API <status>: …` shape so older string-matching callers still work.
+ */
+export class SpacesApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SpacesApiError";
+  }
+}
+
 function resolveBaseUrl(override?: string): string {
   const raw = override
     ?? process.env["XYNE_SPACES_URL"]
@@ -148,7 +165,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   }
 
   if (!res.ok) {
-    throw new Error(`Spaces API ${res.status ?? "network error"}: ${res.text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status ?? 0, `Spaces API ${res.status ?? "network error"}: ${res.text.slice(0, 500)}`);
   }
   return res.json;
 }
@@ -189,7 +206,7 @@ export async function spacesFetchBuffer(
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 300)}`);
+    throw new SpacesApiError(response.status, `Spaces API ${response.status}: ${text.slice(0, 300)}`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
   return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
@@ -225,7 +242,7 @@ export async function spacesFetchText(path: string, auth?: SpacesAuthContext): P
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 300)}`);
+    throw new SpacesApiError(response.status, `Spaces API ${response.status}: ${text.slice(0, 300)}`);
   }
   return response.text();
 }
@@ -258,7 +275,7 @@ export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAu
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(response.status, `Spaces app API ${response.status}: ${text.slice(0, 500)}`);
   }
   return response.json();
 }
@@ -286,7 +303,7 @@ export async function appFetchBuffer(
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 300)}`);
+    throw new SpacesApiError(response.status, `Spaces app API ${response.status}: ${text.slice(0, 300)}`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
   return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };

@@ -8,6 +8,11 @@
 import { CONFIG } from "../../config.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
+import { SpacesApiError } from "../../mcp/servers/xyne-spaces-client.js";
+
+// Re-export so callers (webhook.ts) can branch on `err.status` from the same
+// module they import the fetch helpers.
+export { SpacesApiError };
 
 const log = createLogger("spaces-client");
 
@@ -42,7 +47,7 @@ export async function spacesAppFetchMultipart(path: string, form: FormData, appT
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+      throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
     }
 
     return res.json();
@@ -59,7 +64,7 @@ export async function spacesAppFetchGet(path: string, appToken?: string): Promis
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
   }
   return res.json();
 }
@@ -82,7 +87,7 @@ export async function spacesAppFetch(path: string, body: Record<string, unknown>
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+      throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
     }
 
     return res.json();

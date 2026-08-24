@@ -551,6 +551,7 @@ import {
   spacesAppFetch,
   spacesAppFetchGet,
   spacesAppFetchMultipart,
+  SpacesApiError,
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
@@ -770,12 +771,15 @@ async function pendingActionTargetValidation(
       );
       return { error: null };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/Spaces app API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+      // Branch on the typed HTTP status, not message text. Only a definitive 404
+      // rejects a conversation target; everything else (403 included, preserving
+      // prior behavior) fails open so the Spaces API stays the final judge.
+      const status = err instanceof SpacesApiError ? err.status : undefined;
+      if (status === 404) {
         return { error: `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread` };
       }
       clog.warn(
-        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(err instanceof Error ? err.message : String(err)).slice(0, 240)}`,
       );
       return { error: null };
     }
@@ -787,19 +791,17 @@ async function pendingActionTargetValidation(
     const channel = (await spacesAppFetch("/channel/info", { channelId }, appToken)) as { name?: string } | undefined;
     return channel?.name ? { error: null, channelName: channel.name } : { error: null };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (
-      /Spaces app API 404/i.test(msg) ||
-      /CHANNEL_NOT_FOUND/i.test(msg) ||
-      (/channel not found/i.test(msg) && /\b404\b/.test(msg))
-    ) {
+    // Same typed-status branch as the queue-time validator (mcp/validators.ts):
+    // 404 → not found, 403 → not accessible, anything else fails open.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 404) {
       return { error: `channel ${channelId} not found — use a real Spaces channel id` };
     }
-    if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+    if (status === 403) {
       return { error: `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access` };
     }
     clog.warn(
-      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(err instanceof Error ? err.message : String(err)).slice(0, 240)}`,
     );
     return { error: null };
   }

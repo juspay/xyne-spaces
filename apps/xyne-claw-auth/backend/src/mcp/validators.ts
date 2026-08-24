@@ -1,5 +1,5 @@
 import { createLogger } from "../logger.js";
-import { interact, spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -43,6 +43,46 @@ function targetConversationId(params: Record<string, unknown>): string | undefin
 
 function targetChannelId(params: Record<string, unknown>): string | undefined {
   return stringField(params["channelId"]);
+}
+
+/**
+ * App-MEMBERSHIP check for a write target channel, AT QUEUE TIME. Existence
+ * (`interact` findMany) is not enough: a real channel the agent's Spaces app is
+ * not a member of passes existence but 403s at card-post time in webhook.ts
+ * (`pendingActionTargetValidation` → `/channel/info`), so the action queued,
+ * the model said "queued, approve it", and the approval card was silently
+ * dropped (prod 2026-08-24, Arya Doctor spaces-create-ticket into a HyperCredit
+ * channel). Hitting the SAME `/api/apps/channel/info` endpoint here — with the
+ * same app token that will later try to post the card — makes tool-time and
+ * card-time agree, so the model narrates the failure instead of a false queue.
+ *
+ * Fails OPEN on anything other than a definitive 403/404: the authoritative
+ * Spaces API stays the final judge, matching the delivery-boundary semantics.
+ */
+async function validateChannelAppAccess(
+  channelId: string,
+  auth: SpacesAuthContext,
+): Promise<string | null> {
+  try {
+    await appFetch("/channel/info", { method: "POST", body: JSON.stringify({ channelId }) }, auth);
+    return null;
+  } catch (err) {
+    // Branch on the typed HTTP status, not the message text. Only a definitive
+    // 403 (app not a member) or 404 (gone) rejects; anything else fails open so
+    // the authoritative Spaces API stays the final judge.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 403) {
+      return `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access`;
+    }
+    if (status === 404) {
+      return `channel ${channelId} not found — use a real Spaces channel id`;
+    }
+    log.warn(
+      `[validator] channel access check failed open channelId=${channelId} status=${status ?? "n/a"}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
 }
 
 async function validateTargetConversationId(
@@ -141,7 +181,11 @@ async function validateTargetConversationId(
       }
       return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
     }
-    return null;
+    // The channel exists — now confirm the agent's app can actually reach it, so
+    // a write into a channel the app isn't a member of fails HERE (model can
+    // retry a reachable channel) instead of queuing and then losing its approval
+    // card at delivery time. Same app token, same endpoint as the card path.
+    return await validateChannelAppAccess(channelId, auth);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
