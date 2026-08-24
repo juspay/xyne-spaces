@@ -10,6 +10,7 @@ import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegra
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -25,12 +26,11 @@ export const SIGNATURE_AUTO_APPEND_STORAGE_KEY = 'signature-auto-append-enabled'
 const CC_USER_RESULT_LIMIT = 50;
 
 function filterUsersByQuery(
-  users: ReadonlyArray<{ id: string; name: string; email: string }>,
+  users: ReadonlyArray<{ id: string; name: string; email: string; displayName?: string | null }>,
   query: string,
 ) {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  if (!query.trim()) return [];
+  return users.filter(u => matchesUserQuery(u, query));
 }
 
 interface InboxTabProps {

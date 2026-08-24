@@ -101,7 +101,7 @@ import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -1643,11 +1643,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const query = assigneeSearchValue.trim().toLowerCase();
     const matchedUsers = !query
       ? activeUsers
-      : activeUsers.filter(
-          user =>
-            getUserDisplayName(user).toLowerCase().includes(query) ||
-            (user.email ?? '').toLowerCase().includes(query),
-        );
+      : activeUsers.filter(user => matchesUserQuery(user, assigneeSearchValue));
     // You first, then channel members, then cap the rows (this list isn't
     // virtualized). Deactivated users aren't shown here — the source is active-only.
     const membersFirst = channelMembersFirst(matchedUsers, user => user.id, assigneeMemberIds);
