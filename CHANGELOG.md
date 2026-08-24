@@ -1,3 +1,10 @@
+## [1.217.0](https://github.com/juspay/xyne-spaces/compare/v1.216.0...v1.217.0) (2026-08-24)
+
+
+### Features
+
+* fixing url resolver to not attach s2s keys ([#986](https://github.com/juspay/xyne-spaces/issues/986)) ([6b756d8](https://github.com/juspay/xyne-spaces/commit/6b756d888e8c8eb7534d020e63bca7276f54ce06))
+
 ## [1.216.0](https://github.com/juspay/xyne-spaces/compare/v1.215.0...v1.216.0) (2026-08-24)
 
 
