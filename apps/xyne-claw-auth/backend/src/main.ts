@@ -7,6 +7,7 @@ process.env.SERVICE_NAME ||= "xyne-claw-auth";
 import express, { type Request, type Response } from "express";
 import { CONFIG } from "./config.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import { errorMiddleware } from "./lib/http.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
@@ -314,6 +315,7 @@ app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireC
 // routes authenticate per-route with gatewayTenantAuth + gatewayRegistrationAuth
 // (mcpgateway/middleware/gateway-auth.ts) against the registration API key.
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
+app.use(errorMiddleware);
 
 initializeOpenTelemetry();
 registerDailyBriefGauges();

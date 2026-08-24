@@ -36,7 +36,8 @@
  */
 
 import { randomBytes, createHash } from "crypto";
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction, type RequestHandler } from "express";
+import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -214,40 +215,35 @@ export const miroOAuthProvider: OAuthTokenProvider = {
  * Performs DCR, builds the PKCE consent URL, and returns it for the frontend
  * to redirect the user to.
  */
-router.post("/:userId/oauth/miro/authorize", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { redirectUri, scope } = req.body as { redirectUri?: string; scope?: string };
+router.post("/:userId/oauth/miro/authorize", asyncHandler(async (req, res) => {
+  const { userId } = req.params as { userId: string };
+  const { redirectUri, scope } = req.body as { redirectUri?: string; scope?: string };
 
-    const callbackUri =
-      redirectUri ??
-      `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/miro/callback`;
+  const callbackUri =
+    redirectUri ??
+    `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/miro/callback`;
 
-    // DCR — register a fresh confidential client for this authorization attempt.
-    const { clientId, clientSecret } = await registerMiroClient(callbackUri);
+  // DCR — register a fresh confidential client for this authorization attempt.
+  const { clientId, clientSecret } = await registerMiroClient(callbackUri);
 
-    // PKCE
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = deriveCodeChallenge(codeVerifier);
+  // PKCE
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = deriveCodeChallenge(codeVerifier);
 
-    // Encode all state needed for the callback into the state param.
-    const state = encodeState({ userId, clientId, clientSecret, codeVerifier, redirectUri: callbackUri });
+  // Encode all state needed for the callback into the state param.
+  const state = encodeState({ userId, clientId, clientSecret, codeVerifier, redirectUri: callbackUri });
 
-    const authUrl = new URL(MIRO_AUTH_URL);
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", callbackUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("code_challenge", codeChallenge);
-    authUrl.searchParams.set("code_challenge_method", "S256");
-    authUrl.searchParams.set("scope", scope ?? "boards:read boards:write");
-    authUrl.searchParams.set("state", state);
+  const authUrl = new URL(MIRO_AUTH_URL);
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", callbackUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
+  authUrl.searchParams.set("scope", scope ?? "boards:read boards:write");
+  authUrl.searchParams.set("state", state);
 
-    res.json({ success: true, data: { authUrl: authUrl.toString() } });
-  } catch (err) {
-    log.error("[miro-oauth] authorize error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  ok(res, { authUrl: authUrl.toString() });
+}));
 
 // ── Programmatic callback (POST) ───────────────────────────────────────────
 
@@ -256,66 +252,57 @@ router.post("/:userId/oauth/miro/authorize", async (req: Request<{ userId: strin
  * Programmatic token exchange — frontend passes code + state from query params.
  * Decodes state to get clientId + clientSecret + codeVerifier, then exchanges the code.
  */
-router.post("/:userId/oauth/miro/callback", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { code, state } = req.body as { code?: string; state?: string };
+router.post("/:userId/oauth/miro/callback", asyncHandler(async (req, res) => {
+  const { userId } = req.params as { userId: string };
+  const { code, state } = req.body as { code?: string; state?: string };
 
-    if (!code || !state) {
-      res.status(400).json({ success: false, error: "code and state are required" });
-      return;
-    }
-
-    let statePayload: StatePayload;
-    try {
-      statePayload = decodeState(state);
-    } catch {
-      res.status(400).json({ success: false, error: "Invalid state parameter" });
-      return;
-    }
-
-    if (statePayload.userId !== userId) {
-      res.status(403).json({ success: false, error: "State userId mismatch" });
-      return;
-    }
-
-    const { clientId, clientSecret, codeVerifier, redirectUri } = statePayload;
-
-    const tokenRes = await fetch(MIRO_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        code_verifier: codeVerifier,
-        redirect_uri: redirectUri,
-      }),
-    });
-
-    if (!tokenRes.ok) {
-      const text = await tokenRes.text();
-      log.error(`[miro-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "Miro token exchange failed" });
-      return;
-    }
-
-    const tokens = (await tokenRes.json()) as {
-      access_token: string;
-      refresh_token: string;
-      expires_in: number;
-    };
-
-    await storeMiroTokens(userId, clientId, clientSecret, tokens.access_token, tokens.refresh_token, tokens.expires_in);
-
-    log.info(`[miro-oauth] Stored Miro credentials for user ${userId}`);
-    res.json({ success: true, data: { message: "Miro account connected successfully" } });
-  } catch (err) {
-    log.error("[miro-oauth] callback error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!code || !state) {
+    throw badRequest("code and state are required");
   }
-});
+
+  let statePayload: StatePayload;
+  try {
+    statePayload = decodeState(state);
+  } catch {
+    throw badRequest("Invalid state parameter");
+  }
+
+  if (statePayload.userId !== userId) {
+    throw forbidden("State userId mismatch");
+  }
+
+  const { clientId, clientSecret, codeVerifier, redirectUri } = statePayload;
+
+  const tokenRes = await fetch(MIRO_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    const text = await tokenRes.text();
+    log.error(`[miro-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
+    throw new HttpError(502, "Miro token exchange failed");
+  }
+
+  const tokens = (await tokenRes.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+
+  await storeMiroTokens(userId, clientId, clientSecret, tokens.access_token, tokens.refresh_token, tokens.expires_in);
+
+  log.info(`[miro-oauth] Stored Miro credentials for user ${userId}`);
+  ok(res, { message: "Miro account connected successfully" });
+}));
 
 // ── Browser-redirect callback (GET) ───────────────────────────────────────
 

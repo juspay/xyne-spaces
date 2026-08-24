@@ -33,7 +33,7 @@
  */
 
 import { randomBytes, createHash } from "crypto";
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -42,6 +42,7 @@ import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState } from "../lib/oauth-state.js";
+import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("customerio-oauth");
@@ -196,37 +197,32 @@ export const customerioOAuthProvider: OAuthTokenProvider = {
  * Performs DCR, builds the PKCE consent URL, and returns it for the frontend
  * to redirect the user to.
  */
-router.post("/:userId/oauth/customerio/authorize", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { redirectUri } = req.body as { redirectUri?: string };
+router.post("/:userId/oauth/customerio/authorize", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+  const { userId } = req.params;
+  const { redirectUri } = req.body as { redirectUri?: string };
 
-    const callbackUri = redirectUri ?? defaultCallbackUri();
+  const callbackUri = redirectUri ?? defaultCallbackUri();
 
-    // DCR — register a fresh public client for this authorization attempt.
-    const clientId = await registerCustomerioClient(callbackUri);
+  // DCR — register a fresh public client for this authorization attempt.
+  const clientId = await registerCustomerioClient(callbackUri);
 
-    // PKCE
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = deriveCodeChallenge(codeVerifier);
+  // PKCE
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = deriveCodeChallenge(codeVerifier);
 
-    // Encode all state needed for the callback into the state param.
-    const state = encodeState({ userId, clientId, codeVerifier, redirectUri: callbackUri });
+  // Encode all state needed for the callback into the state param.
+  const state = encodeState({ userId, clientId, codeVerifier, redirectUri: callbackUri });
 
-    const authUrl = new URL(CUSTOMERIO_AUTH_URL);
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", callbackUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("code_challenge", codeChallenge);
-    authUrl.searchParams.set("code_challenge_method", "S256");
-    authUrl.searchParams.set("state", state);
+  const authUrl = new URL(CUSTOMERIO_AUTH_URL);
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", callbackUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
+  authUrl.searchParams.set("state", state);
 
-    res.json({ success: true, data: { authUrl: authUrl.toString() } });
-  } catch (err) {
-    log.error("[customerio-oauth] authorize error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  ok(res, { authUrl: authUrl.toString() });
+}));
 
 // ── Programmatic callback (POST) ───────────────────────────────────────────
 
@@ -234,65 +230,56 @@ router.post("/:userId/oauth/customerio/authorize", async (req: Request<{ userId:
  * POST /:userId/oauth/customerio/callback
  * Programmatic token exchange — frontend passes code + state from query params.
  */
-router.post("/:userId/oauth/customerio/callback", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { code, state } = req.body as { code?: string; state?: string };
+router.post("/:userId/oauth/customerio/callback", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+  const { userId } = req.params;
+  const { code, state } = req.body as { code?: string; state?: string };
 
-    if (!code || !state) {
-      res.status(400).json({ success: false, error: "code and state are required" });
-      return;
-    }
-
-    let statePayload: StatePayload;
-    try {
-      statePayload = decodeState(state);
-    } catch {
-      res.status(400).json({ success: false, error: "Invalid state parameter" });
-      return;
-    }
-
-    if (statePayload.userId !== userId) {
-      res.status(403).json({ success: false, error: "State userId mismatch" });
-      return;
-    }
-
-    const { clientId, codeVerifier, redirectUri } = statePayload;
-
-    const tokenRes = await fetch(CUSTOMERIO_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: clientId,
-        code,
-        code_verifier: codeVerifier,
-        redirect_uri: redirectUri,
-      }),
-    });
-
-    if (!tokenRes.ok) {
-      const text = await tokenRes.text();
-      log.error(`[customerio-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "Customer.io token exchange failed" });
-      return;
-    }
-
-    const tokens = (await tokenRes.json()) as {
-      access_token: string;
-      refresh_token: string;
-      expires_in: number;
-    };
-
-    await storeCustomerioTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
-
-    log.info(`[customerio-oauth] Stored Customer.io credentials for user ${userId}`);
-    res.json({ success: true, data: { message: "Customer.io account connected successfully" } });
-  } catch (err) {
-    log.error("[customerio-oauth] callback error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!code || !state) {
+    throw badRequest("code and state are required");
   }
-});
+
+  let statePayload: StatePayload;
+  try {
+    statePayload = decodeState(state);
+  } catch {
+    throw badRequest("Invalid state parameter");
+  }
+
+  if (statePayload.userId !== userId) {
+    throw forbidden("State userId mismatch");
+  }
+
+  const { clientId, codeVerifier, redirectUri } = statePayload;
+
+  const tokenRes = await fetch(CUSTOMERIO_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    const text = await tokenRes.text();
+    log.error(`[customerio-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
+    throw new HttpError(502, "Customer.io token exchange failed");
+  }
+
+  const tokens = (await tokenRes.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+
+  await storeCustomerioTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
+
+  log.info(`[customerio-oauth] Stored Customer.io credentials for user ${userId}`);
+  ok(res, { message: "Customer.io account connected successfully" });
+}));
 
 // ── Browser-redirect callback (GET) ───────────────────────────────────────
 

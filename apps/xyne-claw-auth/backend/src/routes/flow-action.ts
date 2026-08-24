@@ -404,7 +404,9 @@ function summarizeToolResult(
   return { heading, details };
 }
 
-/** Replace a flow card with a NEW flow (rich result card). Mirrors replaceFlowCardWithText. */
+/** Replace a flow card with a NEW flow (rich result card). Mirrors replaceFlowCardWithText.
+ *  Returns "flow-schema-400" when Spaces rejected the flow's component schema (a
+ *  400 "Invalid flowJSON") so the caller can retry with a generic-component card. */
 async function replaceFlowCardWithFlow(
   messageId: string,
   agentSlug: string | undefined,
@@ -412,12 +414,12 @@ async function replaceFlowCardWithFlow(
   conversationId?: string,
   channelId?: string,
   spacesAppId?: string,
-): Promise<void> {
-  if (!messageId) return;
+): Promise<"ok" | "flow-schema-400" | "failed"> {
+  if (!messageId) return "failed";
   const agent = await getAgentTokenAndUserId(agentSlug, spacesAppId);
   if (!agent) {
     log.warn(`[flow-action] replaceFlowCardWithFlow: no agent token/userId for slug=${agentSlug ?? "(default)"}`);
-    return;
+    return "failed";
   }
   try {
     const spacesBase = `${CONFIG.spacesInternalUrl}/api/apps`;
@@ -434,12 +436,16 @@ async function replaceFlowCardWithFlow(
       }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      log.warn(`[flow-action] updateMessage(flowJSON) HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
+    if (res.ok) return "ok";
+    const body = await res.text().catch(() => "");
+    log.warn(`[flow-action] updateMessage(flowJSON) HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
+    if (res.status === 400 && /invalid\s*flowjson|flowjson|discriminator/i.test(body)) {
+      return "flow-schema-400";
     }
+    return "failed";
   } catch (err) {
     log.warn(`[flow-action] Failed to replace flow card (flowJSON) for message ${messageId}:`, err instanceof Error ? err.message : String(err));
+    return "failed";
   }
 }
 
@@ -530,19 +536,32 @@ async function finishWriteSuccess(opts: {
   resultText: string;
 }): Promise<void> {
   let flow: FlowDefinition | null = null;
+  let usedTicketFlow = false;
   if (opts.tool === "spaces-create-ticket") {
     const xyneId = parseXyneIdFromToolResult(opts.resultText);
     const agent = xyneId ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId) : null;
     if (xyneId && agent) {
       const ticket = await fetchTicketForCard(xyneId, agent.token);
-      if (ticket) flow = buildTicketFlow(ticket);
+      if (ticket) {
+        flow = buildTicketFlow(ticket);
+        usedTicketFlow = true;
+      }
     }
   }
   if (!flow) {
     const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
     flow = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
   }
-  await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, flow, opts.conversationId, opts.channelId, opts.spacesAppId);
+  const status = await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, flow, opts.conversationId, opts.channelId, opts.spacesAppId);
+  if (status === "flow-schema-400" && usedTicketFlow) {
+    // The rich `ticket` component isn't supported by this Spaces backend, so the
+    // update was rejected and the approval card would stay stuck on Approve/
+    // Decline. Fall back to the generic result card (supported components) so the
+    // card still flips to a completed state; the write itself already succeeded.
+    const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
+    const fallback = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
+    await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, fallback, opts.conversationId, opts.channelId, opts.spacesAppId);
+  }
   if (opts.actionId === "approve-continue" || opts.actionId === "retry-continue") {
     await dispatchContinuationRun({
       writeUserId: opts.writeUserId,
