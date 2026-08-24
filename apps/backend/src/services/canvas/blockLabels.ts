@@ -112,11 +112,10 @@ export function parseLabelledMarkdown(text: string): ParsedEntry[] {
 
 export interface DerivedOp {
   op: 'insert' | 'replace' | 'delete' | 'move';
-  /** Stable key within one reply; an anchor may reference an insert op's key. */
+  /** Stable key within one reply. */
   key: string;
   blockId?: string;
-  /** insert/move placement: the element it follows in the reply; null = top of document. */
-  anchor?: { kind: 'block' | 'new'; ref: string } | null;
+  anchor?: string | null;
   beforeContent?: BlockNoteBlock;
   afterMarkdown?: string;
   orderIndex: number;
@@ -188,7 +187,7 @@ export function deriveOps({
 
   const ops: DerivedOp[] = [];
   let order = 0;
-  let prev: DerivedOp['anchor'] = null; // last element seen in the reply; null = top
+  let lastStationary: string | null = null; // last block the agent left in place; null = top
   for (const { entry, id } of resolved) {
     if (id) {
       const block = byId.get(id) as BlockNoteBlock;
@@ -198,14 +197,16 @@ export function deriveOps({
           beforeContent: block, afterMarkdown: entry.markdown, orderIndex: order++,
         });
       }
-      if (!stationary.has(id)) {
-        ops.push({ op: 'move', key: `op${order}`, blockId: id, anchor: prev, orderIndex: order++ });
+      if (stationary.has(id)) {
+        lastStationary = id;
+      } else {
+        ops.push({ op: 'move', key: `op${order}`, blockId: id, anchor: lastStationary, orderIndex: order++ });
       }
-      prev = { kind: 'block', ref: id };
     } else {
-      const key = `op${order}`;
-      ops.push({ op: 'insert', key, anchor: prev, afterMarkdown: entry.markdown, orderIndex: order++ });
-      prev = { kind: 'new', ref: key };
+      ops.push({
+        op: 'insert', key: `op${order}`, anchor: lastStationary,
+        afterMarkdown: entry.markdown, orderIndex: order++,
+      });
     }
   }
 

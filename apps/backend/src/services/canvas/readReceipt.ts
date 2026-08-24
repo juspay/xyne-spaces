@@ -16,8 +16,6 @@ import { logger } from '@/utils/logger';
 
 export interface ReadReceipt {
   blockIds: string[];
-  contentHash: string;
-  readAt: number;
 }
 
 const TTL_SECONDS = 60 * 60;
@@ -47,13 +45,5 @@ export async function getReadReceipt(
   } catch (error) {
     logger.warn('[ReadReceipt] Failed to read receipt:', error);
     return null;
-  }
-}
-
-export async function clearReadReceipt(canvasId: string, userId: string): Promise<void> {
-  try {
-    await redisService.del(key(canvasId, userId));
-  } catch {
-    /* best effort */
   }
 }

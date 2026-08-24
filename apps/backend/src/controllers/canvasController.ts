@@ -17,7 +17,6 @@ import { v4 as uuidv4 } from 'uuid';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
 import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
-import { hashBlocks } from '@/services/canvas/blockHash.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
 import { isCanvasContentEmpty } from '@xyne/shared';
 import { readFromYSweet as readFromYSweetBlocks } from '../utils/ysweetUtils.js';
@@ -455,8 +454,6 @@ export class CanvasController {
           blockIds: blocks
             .map(b => (b as { id?: string }).id)
             .filter((id): id is string => Boolean(id)),
-          contentHash: hashBlocks(blocks),
-          readAt: Date.now(),
         });
         res.status(200).json({
           id: canvas.id,
