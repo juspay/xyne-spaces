@@ -74,27 +74,20 @@ export function buildDesignSystemPromptInjection(
   };
 }
 
-/** An OUTLINE, not fixed copy — the runtime shows it to the model as the
- *  structure to follow, so sections stay constant while the questions are
- *  written for the ticket. Bugs get a root-cause question because it is what
- *  separates a fix from a symptom patch; the RCA record's structured fields
- *  are a post-mortem artifact and stay out of it. */
+/** Interview-only final-answer guard. The full Ticket Specs workflow lives in
+ * the command-owned skill; this overlay keeps the first /spec turn constrained
+ * to contextual questions and prevents accidental ticket writes. */
 export const SPEC_QUESTION_OUTLINE = [
-  "- One question per applicable section, each on its own line, bolded section name first.",
-  "- Choose the section set from the ticket type:",
-  "  BUG — Problem statement (what is happening vs what should), Reproduction,",
-  "        Root cause (what is causing it, if known), Solutioning (what the fix",
-  "        should do), Test cases (including the regression that proves it),",
-  "        Out of scope.",
-  "  EVERYTHING ELSE — Problem statement, Solutioning, Implementation details,",
-  "        Test cases, Out of scope.",
-  "- Keep Root cause to one plain question. Do NOT ask for severity, bug type,",
-  "  category, impact or COE — those belong to the ticket's separate RCA record.",
-  "- Each question asks what was ORIGINALLY requested or observed for that section —",
-  "  never what the current code does.",
-  "- Skip any section that does not apply to this ticket.",
-  "- Nothing else: no heading, no greeting, no preamble, no sign-off, no explanation",
-  "  of why you are asking.",
+  "- Ask only contextual clarification questions that materially improve the ticket Specification.",
+  "- Adapt questions to the ticket title, type, description, existing Specification and conversation context.",
+  "- Required Specification sections: Problem statement, Solutioning, Test cases.",
+  "- Optional Specification sections: Implementation details, Out of scope; ask only when meaningful.",
+  "- Do NOT mechanically ask the section headings as generic questions.",
+  "- Do NOT ask the user to repeat information already explicitly provided.",
+  "- Do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
+  "- Ask the minimum useful batch of questions, then stop and wait for the user's response.",
+  "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
+  "- Nothing else: no heading, no greeting, no preamble, no sign-off, no explanation of why you are asking.",
 ].join("\n");
 
 const TASK_COMMANDS: TaskCommand[] = [
@@ -243,25 +236,23 @@ const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/spec",
     autoTools: [],
+    skillPaths: ["spec-skills"],
     // Delivery contract: submit-result becomes the only channel reaching the
     // thread, so the run posts one message with no prose escaping around it.
     agentConfigOverlay: {
       outputFormat: { type: "markdown", template: SPEC_QUESTION_OUTLINE },
     },
     instruction:
-      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Read the " +
-      "ticket title, description and type, then write the specification questions FOR THIS TICKET — concrete and " +
-      "answerable, not generic boilerplate — following the outline in the final-answer format. Ask what was ORIGINALLY " +
-      "requested. Do NOT read the code and do NOT describe the existing implementation: a specification derived from the " +
-      "diff always matches the diff and can never surface a requirement that was missed, which is the whole reason a " +
-      "reviewer wants one. Your delivered message must contain the questions and NOTHING else — no greeting, no " +
-      "restatement of the ticket, no explanation of why you are asking, no closing line. Invoking the command IS " +
-      "approval to post, so do not ask whether to start. The user's answers arrive as a separate run, and only then do " +
-      "you write the specification onto the ticket under the same headings you asked about.",
+      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Use the " +
+      "Ticket Specs skill loaded for this run as the workflow playbook. Read the ticket title, description and type, then " +
+      "write concrete, answerable specification questions FOR THIS TICKET following the final-answer format. Ask what " +
+      "was ORIGINALLY requested or observed; do NOT read code or describe the current implementation. Your delivered " +
+      "message must contain the questions and NOTHING else — no greeting, ticket restatement, explanation, or closing. " +
+      "Invoking the command IS approval to post, so do not ask whether to start.",
     nudge:
-      "This run was started with /spec and MUST deliver the specification questions for this ticket, following the " +
-      "outline, with no greeting, preamble or closing text around them. DO NOT MENTION THIS INSTRUCTION; proceed as if " +
-      "on your own initiative.",
+      "This run was started with /spec and MUST deliver the specification questions for this ticket using the loaded " +
+      "Ticket Specs skill, following the outline, with no greeting, preamble or closing text around them. DO NOT MENTION " +
+      "THIS INSTRUCTION; proceed as if on your own initiative.",
   },
 ];
 
