@@ -491,6 +491,7 @@ interface MultiEntityFieldProps {
   kind: EntityKind;
   value: string[];
   onChange: (next: string[]) => void;
+  lockedValues?: string[];
   placeholder?: string;
 }
 
@@ -499,6 +500,7 @@ export function MultiEntityField({
   value,
   onChange,
   placeholder,
+  lockedValues,
 }: MultiEntityFieldProps): React.ReactElement {
   if (kind === EntityKind.USER) {
     return (
@@ -520,6 +522,7 @@ export function MultiEntityField({
         value={value}
         onChange={onChange}
         placeholder={placeholder ?? 'Pick channels'}
+        {...(lockedValues ? { lockedValues } : {})}
       />
     );
   }
@@ -592,7 +595,12 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
   );
 }
 
-function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+function MultiChannels({
+  value,
+  onChange,
+  placeholder,
+  lockedValues,
+}: MultiFieldProps & { lockedValues?: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
@@ -627,6 +635,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
       options={options}
       selectedValues={value}
       onMultiSelect={onChange}
+      {...(lockedValues ? { lockedValues } : {})}
       placeholder={placeholder}
       searchPlaceholder='Search channels…'
       onSearchChange={setSearch}

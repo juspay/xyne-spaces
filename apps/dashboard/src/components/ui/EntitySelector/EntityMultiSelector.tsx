@@ -7,6 +7,8 @@ import { EntitySelectorProps } from './EntitySelector.types';
 interface EntityMultiSelectorProps extends EntitySelectorProps {
   selectedValues: string[]; // Controlled selected tags
   onMultiSelect: (tags: string[]) => void;
+  /** Values that are pinned: they cannot be deselected, and render without an × . */
+  lockedValues?: string[];
   allowCreate?: boolean;
   onCreateOption?: (value: string) => void;
   showSearch?: boolean;
@@ -18,6 +20,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   options,
   selectedValues,
   onMultiSelect,
+  lockedValues,
   placeholder,
   searchPlaceholder,
   isLoading = false,
@@ -64,8 +67,15 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   /**
    * Handle selecting an option
    */
+  const isLocked = (value: string): boolean => (lockedValues ?? []).includes(value);
+  const keepLocked = (next: string[]): string[] => [
+    ...next,
+    ...(lockedValues ?? []).filter(v => selectedValues.includes(v) && !next.includes(v)),
+  ];
+
   const toggleValue = (value: string) => {
     if (selectedValues.includes(value)) {
+      if (isLocked(value)) return;
       onMultiSelect(selectedValues.filter(v => v !== value));
     } else {
       onMultiSelect([...selectedValues, value]);
@@ -73,6 +83,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   };
 
   const removeValue = (value: string) => {
+    if (isLocked(value)) return;
     onMultiSelect(selectedValues.filter(v => v !== value));
   };
 
@@ -181,16 +192,18 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             <span className='max-w-32 text-xs font-medium text-foreground truncate'>
               {opt.label}
             </span>
-            <button
-              type='button'
-              onClick={e => {
-                e.stopPropagation();
-                removeValue(opt.value);
-              }}
-              className='text-muted-foreground hover:text-muted-foreground'
-            >
-              <X className='size-2.5' strokeWidth={2.5} />
-            </button>
+            {!isLocked(opt.value) && (
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  removeValue(opt.value);
+                }}
+                className='text-muted-foreground hover:text-muted-foreground'
+              >
+                <X className='size-2.5' strokeWidth={2.5} />
+              </button>
+            )}
           </span>
         ))}
       <Popover.Root open={isOpen} onOpenChange={setIsOpen} modal={false}>
@@ -211,7 +224,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                 type='button'
                 onClick={e => {
                   e.stopPropagation();
-                  onMultiSelect([]);
+                  onMultiSelect(keepLocked([]));
                 }}
                 className='text-muted-foreground hover:text-muted-foreground'
               >

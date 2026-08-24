@@ -101,6 +101,7 @@ export function TriggerCard({
   catalog,
   schema,
   schemaLoading,
+  lockedValues,
   onChangeType,
   onConfigChange,
   issues,
@@ -162,6 +163,7 @@ export function TriggerCard({
               onChange={onConfigChange}
               issues={issues ?? null}
               pathPrefix='trigger.config.'
+              {...(lockedValues ? { lockedValues } : {})}
             />
             <TicketUpdatedFormFieldsSection
               boardIds={(trigger.config?.['boardIds'] as string[] | undefined) ?? []}
@@ -185,6 +187,7 @@ export function TriggerCard({
             onChange={onConfigChange}
             issues={issues ?? null}
             pathPrefix='trigger.config.'
+            {...(lockedValues ? { lockedValues } : {})}
           />
         )}
       </div>

@@ -9,6 +9,7 @@ export interface TriggerCardProps {
   trigger: AutomationConfig['trigger'];
   catalog: TriggerCatalogItem[];
   schema: TriggerSchema | null;
+  lockedValues?: Record<string, string[]>;
   schemaLoading?: boolean;
   onChangeType: (type: string) => void;
   onConfigChange: (config: Record<string, unknown>) => void;

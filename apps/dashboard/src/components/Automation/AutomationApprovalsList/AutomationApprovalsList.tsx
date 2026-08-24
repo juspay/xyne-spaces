@@ -22,6 +22,9 @@ import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 export interface AutomationApprovalsListProps {
   /** When provided, only proposals passing this predicate are shown. */
   filterPredicate?: (automation: Automation) => boolean;
+  /** Embedded hosts must supply both, or the defaults navigate away to /automations. */
+  onOpenProposal?: (automation: Automation) => void;
+  onBack?: () => void;
 }
 
 /**
@@ -31,6 +34,8 @@ export interface AutomationApprovalsListProps {
  */
 export function AutomationApprovalsList({
   filterPredicate,
+  onOpenProposal,
+  onBack,
 }: AutomationApprovalsListProps = {}): React.ReactElement {
   const navigate = useNavigate();
   const me = useSelf();
@@ -88,7 +93,7 @@ export function AutomationApprovalsList({
         <div className='flex items-start gap-3'>
           <button
             type='button'
-            onClick={() => void navigate('/automations')}
+            onClick={() => (onBack ? onBack() : void navigate('/automations'))}
             aria-label='Back to automations'
             data-track-category='automation-approvals'
             data-track-name='back-to-list'
@@ -138,7 +143,11 @@ export function AutomationApprovalsList({
                     setRejectingId(item.id);
                     setRejectNote('');
                   }}
-                  onOpen={() => void navigate(`/automations/${item.id}?from=approvals`)}
+                  onOpen={() =>
+                    onOpenProposal
+                      ? onOpenProposal(item)
+                      : void navigate(`/automations/${item.id}?from=approvals`)
+                  }
                 />
               ))}
             </ul>

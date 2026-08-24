@@ -36,6 +36,7 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { isFramedSdlcSurface, requestSdlcFrameReset } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
@@ -87,6 +88,11 @@ import {
   type SdlcWikiStartInput,
 } from './SdlcWikiSection';
 import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
+import {
+  SdlcAutomationsSection,
+  useSdlcChannelAutomations,
+  type SdlcAutomationsNav,
+} from './SdlcAutomationsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import {
   discussionConversationIds as discussionIdsForOwner,
@@ -121,7 +127,15 @@ import {
   type RepoKnowledgeControl,
 } from './repoKnowledgePolicy';
 
-type Section = 'overview' | 'wiki' | 'baseline' | 'prds' | 'tech-docs' | 'tracks' | 'tickets';
+type Section =
+  | 'overview'
+  | 'wiki'
+  | 'baseline'
+  | 'prds'
+  | 'tech-docs'
+  | 'tracks'
+  | 'tickets'
+  | 'automations';
 type ArtifactKind = 'PRD' | 'TECH_DOC';
 
 const StableCanvasScreen = memo(CanvasScreen);
@@ -141,6 +155,7 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof Boxes }> = [
   { id: 'prds', label: 'PRDs', icon: ScrollText },
   { id: 'tech-docs', label: 'Tech Docs', icon: Network },
   { id: 'tickets', label: 'Tickets', icon: CircleDot },
+  { id: 'automations', label: 'Automations', icon: Zap },
 ];
 
 const BASELINE_LABELS: Record<string, string> = {
@@ -489,6 +504,15 @@ export default function SdlcScreen(): ReactElement {
     [selectedCanvasRelatedConversations],
   );
   const selectedTicketId = routeSearchParams.get('ticket');
+
+  const selectedAutomationId = routeSearchParams.get('automation');
+  const automationForkFromId = routeSearchParams.get('fork');
+  const automationIsClone = routeSearchParams.get('clone') === '1';
+  const automationShowRuns = routeSearchParams.get('runs') === '1';
+  const selectedAutomationRunId = routeSearchParams.get('run');
+  const automationShowApprovals = routeSearchParams.get('approvals') === '1';
+  const repoChannelId = repo && !(repo instanceof Error) ? (repo.channelId ?? null) : null;
+  const { activeCount: activeAutomationCount } = useSdlcChannelAutomations(repoChannelId);
   const chatLayout = sdlcChatLayout({
     chatParam: routeSearchParams.get('chat'),
     discussionParam: routeSearchParams.get('discussion'),
@@ -805,6 +829,40 @@ export default function SdlcScreen(): ReactElement {
       void navigate(`${pathname}${search}`);
     },
     [location.search, navigate, ownerHasConversations],
+  );
+
+  const navigateAutomations = useCallback(
+    (next: SdlcAutomationsNav): void => {
+      if (!repoId) return;
+      const keep = <T,>(patch: T | undefined, current: T): T =>
+        patch === undefined ? current : patch;
+      const automation = keep(next.automation, selectedAutomationId);
+      const fork = keep(next.fork, automationForkFromId);
+      const clone = keep(next.clone, automationIsClone);
+      const runs = keep(next.runs, automationShowRuns);
+      const run = keep(next.run, selectedAutomationRunId);
+      const approvals = keep(next.approvals, automationShowApprovals);
+
+      const params = new URLSearchParams();
+      if (automation) params.set('automation', automation);
+      if (fork) params.set('fork', fork);
+      if (clone) params.set('clone', '1');
+      if (runs) params.set('runs', '1');
+      if (run) params.set('run', run);
+      if (approvals) params.set('approvals', '1');
+      const query = params.toString();
+      navigateWithinSdlc(`/sdlc/${repoId}/automations`, query ? `?${query}` : '');
+    },
+    [
+      automationForkFromId,
+      automationIsClone,
+      automationShowApprovals,
+      automationShowRuns,
+      navigateWithinSdlc,
+      repoId,
+      selectedAutomationId,
+      selectedAutomationRunId,
+    ],
   );
 
   const openCanvas = (canvasId: string): void => {
@@ -1697,7 +1755,9 @@ export default function SdlcScreen(): ReactElement {
                               ? tickets.length
                               : item.id === 'tracks'
                                 ? tracks.filter(track => track.status === 'ACTIVE').length
-                                : ''}
+                                : item.id === 'automations'
+                                  ? activeAutomationCount
+                                  : ''}
                   </span>
                 </button>
               </div>
@@ -2289,6 +2349,20 @@ export default function SdlcScreen(): ReactElement {
                 {section === 'tickets' && repo.channelId && (
                   <div className='h-[calc(100vh-8rem)] min-h-[36rem]'>
                     <KanbanBoardScreen channelId={repo.channelId} />
+                  </div>
+                )}
+                {section === 'automations' && (
+                  <div className='h-[calc(100vh-8rem)] min-h-[36rem]'>
+                    <SdlcAutomationsSection
+                      channelId={repo.channelId ?? null}
+                      automationId={selectedAutomationId}
+                      forkFromId={automationForkFromId}
+                      isClone={automationIsClone}
+                      showRuns={automationShowRuns}
+                      runId={selectedAutomationRunId}
+                      showApprovals={automationShowApprovals}
+                      onNavigate={navigateAutomations}
+                    />
                   </div>
                 )}
               </div>

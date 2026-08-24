@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Hourglass, Loader2, MinusCircle, XCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  Ban,
+  CheckCircle2,
+  Hourglass,
+  Loader2,
+  MinusCircle,
+  XCircle,
+} from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import {
   Select,
@@ -243,7 +251,10 @@ function RunRow({
           <Hourglass className='size-4 text-purple-600' />
         ) : run.status === 'SKIPPED' ? (
           <MinusCircle className='size-4 text-muted-foreground' />
+        ) : run.status === 'CANCELLED' ? (
+          <Ban className='size-4 text-muted-foreground' />
         ) : (
+          // PENDING / SCHEDULED / RUNNING — the only statuses still in flight.
           <Loader2 className='size-4 animate-spin text-blue-600' />
         )}
       </div>

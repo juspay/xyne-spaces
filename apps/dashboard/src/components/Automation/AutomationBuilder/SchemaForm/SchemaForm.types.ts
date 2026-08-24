@@ -8,4 +8,6 @@ export interface SchemaFormProps {
   issues?: ValidationIssue[] | null;
   pathPrefix: string;
   variableSources?: VariablePickerSource[];
+  /** Per-field values the host pins: rendered without an × and undeletable. */
+  lockedValues?: Record<string, string[]>;
 }

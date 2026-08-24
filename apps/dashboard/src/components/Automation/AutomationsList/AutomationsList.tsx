@@ -63,6 +63,8 @@ export function AutomationsList({
   onOpen,
   onShowRuns,
   filterPredicate,
+  onFork,
+  onShowApprovals,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ListCategory>('all');
@@ -157,12 +159,20 @@ export function AutomationsList({
   });
 
   const handleClone = (item: Automation): void => {
+    if (onFork) {
+      onFork(item, 'clone');
+      return;
+    }
     void navigate(`/automations/new?fork=${item.id}&clone=1`);
   };
 
   const handleEdit = (item: Automation): void => {
     if (item.status === AutomationStatusValues.DRAFT) {
       onOpen(item);
+      return;
+    }
+    if (onFork) {
+      onFork(item, 'fork');
       return;
     }
     void navigate(`/automations/new?fork=${item.id}`);
@@ -222,12 +232,19 @@ export function AutomationsList({
           </div>
           {/* Approvals inbox is readable by anyone — non-admins see the
               queue but the Approve / Reject buttons stay admin-gated. */}
-          <Link to='/automations/approvals'>
-            <Button variant='outline' className='font-semibold'>
+          {onShowApprovals ? (
+            <Button variant='outline' className='font-semibold' onClick={onShowApprovals}>
               <Check className='size-4' />
               Approvals
             </Button>
-          </Link>
+          ) : (
+            <Link to='/automations/approvals'>
+              <Button variant='outline' className='font-semibold'>
+                <Check className='size-4' />
+                Approvals
+              </Button>
+            </Link>
+          )}
           <Button onClick={onCreate} className='font-semibold'>
             <Plus className='size-4' />
             New automation

@@ -66,6 +66,7 @@ import {
   moveStep,
 } from './AutomationBuilder.utils';
 import type { AutomationBuilderProps } from './AutomationBuilder.types';
+import { resolveSchema } from './SchemaForm/SchemaForm.utils';
 import type { StepSchema } from '../Automation.types';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
@@ -158,6 +159,9 @@ export function AutomationBuilder({
   onAfterApprovalDecision,
   onBack,
   onShowRuns,
+  scopeDefaults,
+  onFork,
+  onOpenAutomation,
 }: AutomationBuilderProps): React.ReactElement {
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
   const [description, setDescription] = useState(
@@ -507,10 +511,13 @@ export function AutomationBuilder({
   });
 
   const handleProposeChangeNavigate = useCallback((): void => {
-    if (automation?.id) {
-      void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+    if (!automation?.id) return;
+    if (onFork) {
+      onFork(automation.id, 'fork');
+      return;
     }
-  }, [automation?.id, navigate]);
+    void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+  }, [automation?.id, navigate, onFork]);
 
   // Approve / Reject — only used in approval-review mode, when an admin
   // opens a PENDING_APPROVAL proposal from the inbox. The actual auth check
@@ -753,6 +760,37 @@ export function AutomationBuilder({
   const operators = operatorsQuery.data ?? [];
   const triggerSchema = triggerSchemaQuery.data ?? null;
 
+  const triggerScope = useMemo((): Record<string, string[]> => {
+    if (!scopeDefaults || !triggerSchema?.configSchema) return {};
+    // zodToJsonSchema({ name: 'config' }) puts the object behind a $ref.
+    const declared = resolveSchema(triggerSchema.configSchema).properties ?? {};
+    return Object.fromEntries(Object.entries(scopeDefaults).filter(([key]) => key in declared));
+  }, [scopeDefaults, triggerSchema]);
+
+  // Only new automations (including forks) — seeding a saved one would silently
+  // rescope it. Ref guard: react-query's refetch identity would otherwise re-seed
+  // a value the user cleared.
+  const seededForTypeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const type = triggerSchema?.type;
+    if (!type || automation || seededForTypeRef.current === type) return;
+    const seed = Object.entries(triggerScope);
+    if (seed.length === 0) return;
+    seededForTypeRef.current = type;
+    setConfig(prev => {
+      if (prev.trigger.type !== type) return prev; // stale fetch, type changed
+      const next = { ...prev.trigger.config };
+      let changed = false;
+      for (const [key, value] of seed) {
+        if (next[key] === undefined) {
+          next[key] = value;
+          changed = true;
+        }
+      }
+      return changed ? { ...prev, trigger: { ...prev.trigger, config: next } } : prev;
+    });
+  }, [triggerScope, triggerSchema?.type, automation]);
+
   const [formFieldNameMap, setFormFieldNameMap] = useState<Map<string, string>>(new Map());
 
   const handleFormFieldNamesResolved = useCallback((map: Map<string, string>) => {
@@ -815,7 +853,8 @@ export function AutomationBuilder({
                     return;
                   }
                   if (forkSourceAutomationId) {
-                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    if (onOpenAutomation) onOpenAutomation(forkSourceAutomationId);
+                    else void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
                     return;
                   }
                   onBack();
@@ -855,7 +894,11 @@ export function AutomationBuilder({
                 <Button
                   variant='outline'
                   size='sm'
-                  onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
+                  onClick={() =>
+                    onFork
+                      ? onFork(savedId, 'clone')
+                      : void navigate(`/automations/new?fork=${savedId}&clone=1`)
+                  }
                   data-track-category='automation-builder'
                   data-track-name='header-clone'
                 >
@@ -1087,6 +1130,7 @@ export function AutomationBuilder({
               view='condition'
               trigger={config.trigger}
               catalog={triggerCatalog}
+              lockedValues={triggerScope}
               schema={triggerSchema}
               schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
               onChangeType={handleTriggerTypeChange}

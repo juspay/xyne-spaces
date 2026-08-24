@@ -47,11 +47,13 @@ export function SchemaForm(props: SchemaFormProps): React.ReactElement {
       issues={props.issues ?? null}
       pathPrefix={props.pathPrefix}
       variableSources={props.variableSources ?? []}
+      lockedValues={props.lockedValues ?? {}}
     />
   );
 }
 
 interface ObjectFieldsProps {
+  lockedValues?: Record<string, string[]>;
   schema: JsonSchema;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
@@ -88,6 +90,7 @@ function ObjectFields({
   issues,
   pathPrefix,
   variableSources,
+  lockedValues,
 }: ObjectFieldsProps): React.ReactElement {
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
@@ -131,6 +134,9 @@ function ObjectFields({
             issues={issues}
             pathPrefix={pathPrefix}
             variableSources={variableSources}
+            {...(lockedValues?.[effectiveFieldKey]
+              ? { lockedValues: lockedValues[effectiveFieldKey] }
+              : {})}
           />
         );
       })}
@@ -140,6 +146,7 @@ function ObjectFields({
 
 interface FieldProps {
   fieldKey: string;
+  lockedValues?: string[];
   displayLabel?: string | undefined;
   schema: JsonSchema;
   required: boolean;
@@ -152,6 +159,7 @@ interface FieldProps {
 
 function Field({
   fieldKey,
+  lockedValues,
   displayLabel,
   schema,
   required,
@@ -400,6 +408,7 @@ function Field({
             kind={entityArrayKind}
             value={arrayValue}
             onChange={next => onChange(next)}
+            {...(lockedValues ? { lockedValues } : {})}
             placeholder={`Pick ${entityKindLabel(entityArrayKind)}s`}
           />
           {hasError && <FieldError message={errorMessage} />}
