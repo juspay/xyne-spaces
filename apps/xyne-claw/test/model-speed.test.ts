@@ -124,3 +124,24 @@ describe("modelSettings.speed", () => {
     expect(parseModelSettings({ modelSettings: { speed: true } })).toBeUndefined();
   });
 });
+
+describe("fastModeProfile.modelSettings overlay", () => {
+  const cfg = (speed?: string) => ({
+    modelSettings: { model: "kimi-latest", thinkingLevel: "minimal", maxTokens: 8192, ...(speed ? { speed } : {}) },
+    fastModeProfile: { providers: "custom", providerOrder: ["claude"], modelSettings: { thinkingLevel: "high", model: "glm-latest" } },
+  });
+
+  it("overlays set fields when the run is fast; unset fields inherit", () => {
+    expect(parseModelSettings(cfg("fast"))).toEqual({ model: "glm-latest", thinkingLevel: "high", maxTokens: 8192, speed: "fast" });
+  });
+
+  it("ignores the overlay at standard speed", () => {
+    expect(parseModelSettings(cfg())).toEqual({ model: "kimi-latest", thinkingLevel: "minimal", maxTokens: 8192 });
+    expect(parseModelSettings(cfg("standard"))).toEqual({ model: "kimi-latest", thinkingLevel: "minimal", maxTokens: 8192, speed: "standard" });
+  });
+
+  it("clamps overlay values like the base fields", () => {
+    const c = { modelSettings: { speed: "fast" }, fastModeProfile: { modelSettings: { temperature: 9, maxTokens: 1 } } };
+    expect(parseModelSettings(c)).toEqual({ speed: "fast", temperature: 1, maxTokens: 1024 });
+  });
+});

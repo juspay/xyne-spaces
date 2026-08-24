@@ -1054,12 +1054,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
               <h3 className="text-[14px] font-semibold text-xyne-fg-primary">
                 Configure Credentials
               </h3>
-              {providerView === "fast" && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-700/60">
-                  <LightningIcon size={11} weight="fill" />
-                  Shared with standard mode
-                </span>
-              )}
+
               <span
                 className="inline-flex items-center gap-1 text-[11px] font-medium text-xyne-success-fg bg-xyne-success-bg border border-xyne-success-border rounded-full px-2 py-0.5"
                 title="Credentials are encrypted at rest and never returned by the API."
@@ -1069,7 +1064,9 @@ export function ProviderTabV3({ agent, userId }: Props) {
               </span>
             </div>
             <p className="mt-1 text-[12px] text-xyne-fg-secondary">
-              API keys for the providers above. Stored encrypted; the platform never returns plaintext.
+              {providerView === "fast"
+                ? "Shared with standard mode by default — override any setting below for fast mode only."
+                : "API keys for the providers above. Stored encrypted; the platform never returns plaintext."}
             </p>
           </div>
           {!adding && (
@@ -1095,7 +1092,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
             pencil expands the full model-settings editor (model, temperature,
             thinking, max tokens, JSON output). */}
         <ul className="space-y-2.5">
-          <SpacesDefaultRowV3 agent={agent} />
+          <SpacesDefaultRowV3 key={providerView} agent={agent} view={providerView} />
         </ul>
 
         {loading ? (
