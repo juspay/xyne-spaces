@@ -79,6 +79,7 @@ export const RecordingDetailV2Header = ({
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
+  const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
   const isGeneratingTitle = titleState?.kind === 'generating';
   const displayTitle =
     titleState && titleState.kind !== 'generating'
@@ -307,7 +308,7 @@ export const RecordingDetailV2Header = ({
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
-              canEdit={isOwner}
+              canEdit={canShare}
               isUpdating={isUpdatingTicketLink}
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
@@ -317,7 +318,7 @@ export const RecordingDetailV2Header = ({
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
+          {canShare && (
             <>
               <RecordingSharedWithAvatars
                 recordingExternalId={recording.externalId}
@@ -356,7 +357,7 @@ export const RecordingDetailV2Header = ({
             </Tooltip>
           )}
 
-          {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
+          {canShare && showShareModal && (
             <Dialog
               open={showShareModal}
               onOpenChange={open => !open && setShowShareModal(false)}
