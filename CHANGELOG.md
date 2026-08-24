@@ -1,3 +1,17 @@
+## [1.213.3](https://github.com/juspay/xyne-spaces/compare/v1.213.2...v1.213.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* Add retry button for failed LLM calls ([#963](https://github.com/juspay/xyne-spaces/issues/963)) ([ba84cff](https://github.com/juspay/xyne-spaces/commit/ba84cffdd13c0442055ecdc73948b0e26443cb94))
+
+## [1.213.2](https://github.com/juspay/xyne-spaces/compare/v1.213.1...v1.213.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* prefill fields while creating subticket ([#877](https://github.com/juspay/xyne-spaces/issues/877)) ([b61ef24](https://github.com/juspay/xyne-spaces/commit/b61ef243e463f028075b50db84c09a802b2ec11f))
+
 ## [1.213.1](https://github.com/juspay/xyne-spaces/compare/v1.213.0...v1.213.1) (2026-08-24)
 
 

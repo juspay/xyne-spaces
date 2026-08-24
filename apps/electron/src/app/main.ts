@@ -103,7 +103,7 @@ function menuItemToTemplate(item: MenuItem): MenuItemConstructorOptions {
     label: item.label,
     role: item.role || undefined,
     type: item.type,
-    accelerator: item.accelerator,
+    accelerator: item.accelerator || undefined,
     checked: item.checked,
     enabled: item.enabled,
     visible: item.visible,

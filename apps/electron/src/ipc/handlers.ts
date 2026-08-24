@@ -456,7 +456,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 

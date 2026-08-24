@@ -26,7 +26,8 @@ import type {
   ClawStreamMeta,
   Todo,
 } from "xyne-claw-shared";
-import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { type ThinkingLevel } from "@earendil-works/pi-ai";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
@@ -720,7 +721,8 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 // Library-maintained model → contextWindow table (pi-ai ships real values for
-// every known model). Built once from getProviders()/getModels() so we don't
+// every known model). Built once from getBuiltinProviders()/getBuiltinModels()
+// (pi-ai's static generated catalog — no auth/network needed) so we don't
 // hand-maintain windows. Setting a window HIGHER than the model's true limit is
 // what causes empty completions — compaction fires at ~85% of the configured
 // window, so a too-high value lets the synthesis turn overflow and the provider
@@ -729,8 +731,8 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   const map = new Map<string, number>();
   try {
-    for (const provider of getProviders()) {
-      for (const model of getModels(provider)) {
+    for (const provider of getBuiltinProviders()) {
+      for (const model of getBuiltinModels(provider)) {
         const m = model as { id?: string; contextWindow?: number };
         if (m.id && typeof m.contextWindow === "number" && m.contextWindow > 0) {
           map.set(m.id.toLowerCase(), m.contextWindow);
