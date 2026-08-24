@@ -1,3 +1,11 @@
+## [1.209.8](https://github.com/juspay/xyne-spaces/compare/v1.209.7...v1.209.8) (2026-08-24)
+
+
+### Bug Fixes
+
+* canvas loader ([#781](https://github.com/juspay/xyne-spaces/issues/781)) ([c345193](https://github.com/juspay/xyne-spaces/commit/c3451933c1d09aa13d57a029678d71f839220879))
+* xyne desk metrics — filter search, AND/OR logic, scroll fix, stable tags ([#843](https://github.com/juspay/xyne-spaces/issues/843)) ([285d4bb](https://github.com/juspay/xyne-spaces/commit/285d4bb3f26117287267fc8ac9921dd3169a6e2d))
+
 ## [1.209.7](https://github.com/juspay/xyne-spaces/compare/v1.209.6...v1.209.7) (2026-08-24)
 
 
