@@ -6,5 +6,6 @@ const router = Router();
 const userController = new UserController();
 
 router.get('/info', requirePermission('users:read'), userController.getUserInfo);
+router.post('/status', requirePermission('users:write'), userController.setOwnStatus);
 
 export default router;
