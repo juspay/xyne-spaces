@@ -37,7 +37,6 @@ export interface WorkerStartStreamMessage {
       /** Single search + single answer pass instead of the full agentic tool
        *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
       instant?: boolean;
-      /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
       /** Per-run thinking level (composer dropdown). Absent = agent default. */
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
