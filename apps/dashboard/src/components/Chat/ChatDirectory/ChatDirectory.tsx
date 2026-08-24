@@ -30,6 +30,7 @@ import {
   Hashtag,
   ChatDefault,
   ThreeDotsMenuVertical,
+  BuildingApartmentBig,
   type PikaIconProps,
 } from '@xyne/icons';
 import {
@@ -45,6 +46,8 @@ import { keyBetween } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useAllMentionCount } from '../../../hooks/useMentionCount';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import UnreadMentionsPill, { useOffscreenUnreadSections } from './UnreadMentionsPill';
 import { useMutation } from '@tanstack/react-query';
 import { useSelector } from '@xstate/react';
@@ -277,6 +280,40 @@ const ChatDirectory = ({
     activeChannelId,
   });
 
+  // Slack-Connect: partition the default "Channels" group into external (connect) channels
+  // and normal ones, so connect channels render under their own "External connections"
+  // header — but ONLY once an external org has actually joined (an ACTIVE connect_channel
+  // link exists), NOT the moment isConnectEnabled is toggled on. This mirrors the disable
+  // toggle's source of truth (canDisableConnect = no ACTIVE link). The set covers both POVs:
+  // the host channel (hostChannelId) and the guest's local pointer (guestChannelId).
+  const [activeConnectLinks] = useCachedQuery(queries.activeConnectChannels());
+  const externalChannelIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const link of activeConnectLinks ?? []) {
+      if (link.guestChannelId) ids.add(link.guestChannelId);
+      ids.add(link.hostChannelId);
+    }
+    return ids;
+  }, [activeConnectLinks]);
+  const isExternalChannel = useMemo(
+    () =>
+      (channel: VisibleChannel): boolean =>
+        externalChannelIds.has(channel.id),
+    [externalChannelIds],
+  );
+  const externalDisplayChannels = useMemo(
+    () => defaultDisplayChannels.filter(isExternalChannel),
+    [defaultDisplayChannels, isExternalChannel],
+  );
+  const normalDisplayChannels = useMemo(
+    () => defaultDisplayChannels.filter(c => !isExternalChannel(c)),
+    [defaultDisplayChannels, isExternalChannel],
+  );
+  const externalUnreadCount = useMemo(
+    () => externalDisplayChannels.reduce((n, c) => n + (unreadCounts[c.id] ?? 0), 0),
+    [externalDisplayChannels, unreadCounts],
+  );
+
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
   // ChatDirectory renders (starred → custom sections → channels → DMs) so keyboard
   // navigation can never drift from the visual list. Collapse state is
@@ -284,8 +321,9 @@ const ChatDirectory = ({
   const flatSidebarChannels = useMemo(() => {
     const ordered = [
       ...starredDisplayChannels,
+      ...externalDisplayChannels,
       ...displaySectioned.flatMap(({ channels: sectionChannels }) => sectionChannels),
-      ...defaultDisplayChannels,
+      ...normalDisplayChannels,
       ...dmDisplayChannels,
     ];
     const seen = new Set<string>();
@@ -294,7 +332,13 @@ const ChatDirectory = ({
       seen.add(channel.id);
       return true;
     });
-  }, [starredDisplayChannels, displaySectioned, defaultDisplayChannels, dmDisplayChannels]);
+  }, [
+    starredDisplayChannels,
+    externalDisplayChannels,
+    displaySectioned,
+    normalDisplayChannels,
+    dmDisplayChannels,
+  ]);
 
   const navigateRelativeChannel = useCallback(
     (delta: number): void => {
@@ -317,6 +361,7 @@ const ChatDirectory = ({
   // Base groups start open; each custom section adopts its persisted isCollapsed once.
   const [openSidebarSections, setOpenSidebarSections] = useState<string[]>([
     ChannelCategory.STARRED,
+    ChannelCategory.EXTERNAL_CONNECTIONS,
     ChannelCategory.CHANNELS,
     ChannelCategory.DIRECT_MESSAGES,
   ]);
@@ -949,6 +994,50 @@ const ChatDirectory = ({
                 document.body,
               )}
 
+              {/* External connections (Slack-Connect) — connect channels grouped apart from
+                  normal channels, for both host and guest. */}
+              {externalDisplayChannels.length > 0 && (
+                <Accordion.Item
+                  value={ChannelCategory.EXTERNAL_CONNECTIONS}
+                  data-sidebar-section={ChannelCategory.EXTERNAL_CONNECTIONS}
+                >
+                  <Accordion.Header asChild>
+                    <div className='group px-3 flex items-center justify-between gap-2'>
+                      <Accordion.Trigger asChild>
+                        <button className='flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium'>
+                          <span className='size-4 flex items-center justify-center shrink-0'>
+                            <BuildingApartmentBig size={14} className='group-hover:hidden' />
+                            <ChevronRight
+                              strokeWidth={2.33}
+                              size={12}
+                              className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                            />
+                          </span>
+                          <span className='text-left truncate block'>External connections</span>
+                        </button>
+                      </Accordion.Trigger>
+                      {externalUnreadCount > 0 && (
+                        <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+                          {externalUnreadCount > 9 ? '9+' : externalUnreadCount}
+                        </Badge>
+                      )}
+                    </div>
+                  </Accordion.Header>
+                  <Accordion.Content>
+                    <div className='min-h-[4px]'>
+                      {externalDisplayChannels.map(channel => (
+                        <ChannelItemV2
+                          key={channel.id}
+                          channel={channel}
+                          unreadCount={unreadCounts[channel.id] ?? 0}
+                          isActive={activeChannelId === channel.id}
+                        />
+                      ))}
+                    </div>
+                  </Accordion.Content>
+                </Accordion.Item>
+              )}
+
               {/* Channels  */}
               <Accordion.Item
                 value={ChannelCategory.CHANNELS}
@@ -1062,7 +1151,7 @@ const ChatDirectory = ({
                     id={`section-drop-${DEFAULT_CONTAINER}`}
                     className='min-h-[4px]'
                   >
-                    {defaultDisplayChannels.map(channel => (
+                    {normalDisplayChannels.map(channel => (
                       <SortableChannelItem
                         key={channel.id}
                         channel={channel}

@@ -3,11 +3,22 @@ import { ChannelVisibility, MessageType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class MessagesACL extends BaseACL<'messages'> {
 
+  /** Resolve the (host) channel id for a conversation, or null. */
+  private async channelIdForConversation(conversationId: string, tx: Transaction<Schema>): Promise<string | null> {
+    const conv = await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one());
+    return conv?.channel?.id ?? null;
+  }
+
   private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+    // Slack-Connect: an active connect member may edit/delete their own messages cross-org.
+    const channelId = await this.channelIdForConversation(conversationId, tx);
+    if (channelId && (await isActiveConnectMember(this.ctx, tx, channelId))) {
+      return;
+    }
     const conversationWorkspaceId = workspaceId ?? await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one()).then(c => c?.channel?.workspaceId);
     if (!conversationWorkspaceId) throw new MutationACLError('Message not found: conversation does not exist', 'messages');
     if (conversationWorkspaceId !== this.ctx.workspaceId) {
@@ -23,6 +34,12 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (conversation.channel.isArchived) {
       throw new MutationACLError('Message insert failed: cannot send messages in archived channel', 'messages');
     }
+
+    // Slack-Connect: an active connect member may post to the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, conversation.channel.id)) {
+      return;
+    }
+
     await this.verifyConversationInWorkspace(args.conversationId, tx, conversation.channel.workspaceId);
 
     if (this.ctx.role === 'GUEST') {

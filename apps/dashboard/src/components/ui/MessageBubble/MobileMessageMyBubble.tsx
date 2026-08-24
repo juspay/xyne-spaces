@@ -35,6 +35,9 @@ export interface MobileMessageMyBubbleProps {
   reminderDueInLabel?: string | undefined;
   isHighlighted?: boolean | undefined;
   channelId?: string | undefined;
+  // Slack-Connect: URLs must stay on the guest's POINTER id. `channelId` is the (possibly host) content
+  // id; `navChannelId` is the pointer id used for navigation. Mirrors MessageBubble's routeChannelId.
+  navChannelId?: string | undefined;
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread' | undefined;
   contentOnly?: boolean;
@@ -68,6 +71,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   reminderDueInLabel,
   isHighlighted,
   channelId,
+  navChannelId,
   conversation,
   context,
   contentOnly,
@@ -79,6 +83,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
 }) => {
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
+  // Navigation/URLs stay on the guest's pointer id; content lookups keep using `channelId`.
+  const routeChannelId = navChannelId ?? channelId;
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
   const isBotMessage = message.msgType === MessageType.BOT;
@@ -133,7 +139,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
         <div className='flex justify-end mb-1'>
           <ThreadInfoIndicator
             threadInfo={threadInfo}
-            channelId={channelId}
+            channelId={routeChannelId ?? ''}
             messageId={message.messageId}
           />
         </div>
@@ -146,7 +152,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
         message.childConversationId && (
           <div className='flex justify-end mb-1'>
             <AlsoSentToChannelIndicator
-              channelId={channelId}
+              channelId={routeChannelId ?? ''}
               childConversationId={message.childConversationId}
               {...(channelScopeType && { channelScopeType })}
             />

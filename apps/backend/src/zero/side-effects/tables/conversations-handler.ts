@@ -3,6 +3,8 @@ import type { SideEffectJobConfig, ConversationPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { ChannelScopeType } from '@xyne/shared';
+import { connectDmService } from '@/services/connectDmService';
+import { logger } from '@/utils/logger';
 
 
 export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
@@ -18,6 +20,18 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
     if (!conversation) {
       return;
     }
+
+    // Slack-Connect: a cross-org DM's guest pointers are materialised lazily on its FIRST conversation
+    // (the composer's silent auto-creates only make the hidden host channel, so intermediate group
+    // selections don't litter guest orgs). Idempotent + no-op unless this is a connect DM/GroupDM whose
+    // foreign members aren't linked yet.
+    await connectDmService
+      .materializeForHostDmChannel(conversation.channelId)
+      .catch(err =>
+        logger.error(
+          `[ConversationsHandler] connect DM materialise failed for ${conversation.channelId}: ${err}`,
+        ),
+      );
 
     const [channel, channelParticipantsRaw] = await Promise.all([
       db.channel.findUnique({

@@ -3,13 +3,17 @@ import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
 
   private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>): Promise<void> {
     const conversation = await tx.run(zql.conversations.where('conversationId', conversationId).one());
     if (!conversation) throw new MutationACLError('Reaction count not found: conversation does not exist', 'reaction_counts');
+    // Slack-Connect: an active connect member may react in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, conversation.channelId)) {
+      return;
+    }
     const channel = await tx.run(zql.channels.where('id', conversation.channelId).one());
     if (channel?.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Reaction count not found in this workspace', 'reaction_counts');
@@ -21,6 +25,12 @@ export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
     if (!message || !message.conversation) {
       throw new MutationACLError('Reaction count insert failed: the specified message or its conversation does not exist', 'reaction_counts');
     }
+
+    // Slack-Connect: an active connect member may react in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, message.conversation.channelId)) {
+      return;
+    }
+
     await this.verifyConversationInWorkspace(message.conversation.conversationId, tx);
 
     const channel = await tx.run(zql.channels.where('id', message.conversation.channelId).one());
@@ -53,6 +63,12 @@ export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
     if (!countWithMessage || !countWithMessage.message || !countWithMessage.message.conversation) {
       throw new MutationACLError('Reaction count update failed: the reaction count or its message does not exist', 'reaction_counts');
     }
+
+    // Slack-Connect: an active connect member may react in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, countWithMessage.message.conversation.channelId)) {
+      return;
+    }
+
     await this.verifyConversationInWorkspace(countWithMessage.message.conversation.conversationId, tx);
 
     const channel = await tx.run(zql.channels.where('id', countWithMessage.message.conversation.channelId).one());

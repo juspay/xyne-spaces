@@ -225,6 +225,10 @@ export class ACLFactory {
         return new ChannelsACL(ctx);
       case 'channel_board_mappings':
         return new ChannelBoardMappingsACL(ctx);
+      case 'connect_channel':
+        return new BaseACL(ctx, table);
+      case 'connect_channel_member':
+        return new BaseACL(ctx, table);
       case 'conversation_participants':
         return new ConversationParticipantsACL(ctx);
       case 'conversations':

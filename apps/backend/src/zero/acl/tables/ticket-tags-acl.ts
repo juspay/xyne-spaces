@@ -6,16 +6,24 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketTagsACL extends BaseACL<'ticket_tags'> {
 
   private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
     const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
     if (!ticket) throw new MutationACLError('Ticket tag not found: ticket does not exist', 'ticket_tags');
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket tag not found in this workspace', 'ticket_tags');
     }
+  }
+
+  // Slack-Connect: is the caller an active connect member of the given ticket's (host) channel?
+  private async isConnectMemberOfTicket(ticketId: string, tx: Transaction<Schema>): Promise<boolean> {
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    return Boolean(ticket && (await isActiveConnectMember(this.ctx, tx, ticket.channelId)));
   }
 
   private async verifyGuestScope(ticketId: string, tx: Transaction<Schema>): Promise<void> {
@@ -41,6 +49,10 @@ export class TicketTagsACL extends BaseACL<'ticket_tags'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
+    // Slack-Connect: an active connect member may tag the (host) channel's tickets cross-org.
+    if (await this.isConnectMemberOfTicket(args.ticketId, tx)) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       await this.verifyGuestScope(args.ticketId, tx);
       return;
@@ -82,6 +94,11 @@ export class TicketTagsACL extends BaseACL<'ticket_tags'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
+    const existingTag = await tx.run(zql.ticket_tags.where('id', args.id).one());
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (existingTag && (await this.isConnectMemberOfTicket(existingTag.ticketId, tx))) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       const ticketId = await this.resolveTicketIdFromTag(args.id, tx);
       await this.verifyGuestScope(ticketId, tx);
@@ -129,6 +146,11 @@ export class TicketTagsACL extends BaseACL<'ticket_tags'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
+    const existingTag = await tx.run(zql.ticket_tags.where('id', args.id).one());
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (existingTag && (await this.isConnectMemberOfTicket(existingTag.ticketId, tx))) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       const ticketId = await this.resolveTicketIdFromTag(args.id, tx);
       await this.verifyGuestScope(ticketId, tx);

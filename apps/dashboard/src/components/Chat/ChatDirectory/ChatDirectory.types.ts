@@ -13,6 +13,7 @@ export type DraftMessage = {
 // Channel category types (using const objects due to erasableSyntaxOnly)
 export const ChannelCategory = {
   STARRED: 'starred',
+  EXTERNAL_CONNECTIONS: 'external-connections',
   CHANNELS: 'channels',
   DIRECT_MESSAGES: 'direct-messages',
   GROUP_DMS: 'group-dms',

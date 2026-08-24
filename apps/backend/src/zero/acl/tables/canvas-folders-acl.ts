@@ -2,6 +2,7 @@ import type { InsertValue, Transaction, UpdateValue, DeleteID } from '@rocicorp/
 import { ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { isActiveConnectMember } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
@@ -10,6 +11,8 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     if (!channelId) return;
+    // Slack-Connect: an active connect member of the host channel bypasses the workspace fence.
+    if (await isActiveConnectMember(this.ctx, tx, channelId)) return;
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) {
       throw new MutationACLError(
@@ -117,6 +120,10 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
     if (!folder) {
       throw new MutationACLError('Canvas folder update failed: folder not found', 'canvas_folders');
     }
+    // Slack-Connect: an active connect member of the host channel may mutate its folders cross-org.
+    if (folder.channelId && (await isActiveConnectMember(this.ctx, tx, folder.channelId))) {
+      return;
+    }
     if (folder.projectId) {
       await this.verifyProjectWorkspace(
         folder.projectId,
@@ -156,34 +163,44 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
     if (!folder) {
       throw new MutationACLError('Canvas folder delete failed: folder not found', 'canvas_folders');
     }
-    if (folder.projectId) {
-      await this.verifyProjectWorkspace(
-        folder.projectId,
-        tx,
-        'Canvas folder delete failed: folder not found in this workspace',
-      );
-    }
-    await this.verifyChannelWorkspace(folder.channelId, tx);
 
-    const isChannelAdmin = folder.channelId
-      ? Boolean(
-          await tx.run(
-            zql.channel_participants
-              .where('channelId', folder.channelId)
-              .where('userId', this.ctx.userID)
-              .where('role', ChannelRole.ADMIN)
-              .one(),
-          ),
-        )
+    // Slack-Connect: an active connect member of the host channel may delete its folders cross-org,
+    // bypassing the workspace fence and creator/admin requirement. The "folder must be empty" guard
+    // below still applies to avoid orphaning canvases.
+    const isConnect = folder.channelId
+      ? await isActiveConnectMember(this.ctx, tx, folder.channelId)
       : false;
 
-    if (folder.createdBy !== this.ctx.userID && !isChannelAdmin) {
-      throw new MutationACLError(
-        folder.channelId
-          ? 'Canvas folder delete failed: only the creator or a channel admin can delete the folder'
-          : 'Canvas folder delete failed: only the creator can delete the folder',
-        'canvas_folders',
-      );
+    if (!isConnect) {
+      if (folder.projectId) {
+        await this.verifyProjectWorkspace(
+          folder.projectId,
+          tx,
+          'Canvas folder delete failed: folder not found in this workspace',
+        );
+      }
+      await this.verifyChannelWorkspace(folder.channelId, tx);
+
+      const isChannelAdmin = folder.channelId
+        ? Boolean(
+            await tx.run(
+              zql.channel_participants
+                .where('channelId', folder.channelId)
+                .where('userId', this.ctx.userID)
+                .where('role', ChannelRole.ADMIN)
+                .one(),
+            ),
+          )
+        : false;
+
+      if (folder.createdBy !== this.ctx.userID && !isChannelAdmin) {
+        throw new MutationACLError(
+          folder.channelId
+            ? 'Canvas folder delete failed: only the creator or a channel admin can delete the folder'
+            : 'Canvas folder delete failed: only the creator can delete the folder',
+          'canvas_folders',
+        );
+      }
     }
 
     const canvases = await tx.run(zql.canvases.where('folderId', args.id).limit(1));

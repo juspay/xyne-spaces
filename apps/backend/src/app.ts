@@ -38,6 +38,7 @@ import conversationRoutes from '@/routes/conversations';
 import conversationLabelRoutes from '@/routes/conversationLabels';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
+import connectRequestRoutes from '@/routes/connectRequests';
 import communityRoutes from '@/routes/community';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
@@ -474,6 +475,7 @@ export class App {
     this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
+    this.app.use('/api/connect-requests', connectRequestRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes

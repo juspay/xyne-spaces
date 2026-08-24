@@ -6,13 +6,15 @@ import {
 import { Schema, UserStatus } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketACl extends BaseACL<'tickets'> {
 
     private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
         const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
         if (!ticket) throw new MutationACLError('Ticket not found', 'tickets');
+        // Slack-Connect: an active connect member may mutate the (host) channel's tickets cross-org.
+        if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
         if (ticket.workspaceId !== this.ctx.workspaceId) {
             throw new MutationACLError('Ticket not found in this workspace', 'tickets');
         }
@@ -30,6 +32,10 @@ export class TicketACl extends BaseACL<'tickets'> {
     }
 
     async canInsert(args: InsertValue<TableSchema<'tickets'>>, tx: Transaction<Schema>): Promise<void> {
+        // Slack-Connect: an active connect member may create tickets in the (host) channel cross-org.
+        if (args.channelId && (await isActiveConnectMember(this.ctx, tx, args.channelId as string))) {
+            return;
+        }
         if (args.workspaceId !== this.ctx.workspaceId) {
             throw new MutationACLError('Ticket not found in this workspace', 'tickets');
         }
@@ -66,6 +72,8 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (!ticket) {
             throw new MutationACLError('Ticket update failed: ticket does not exist', 'tickets');
         }
+        // Slack-Connect: an active connect member may update the (host) channel's tickets cross-org.
+        if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
         await this.verifyTicketInWorkspace(ticket.id, tx);
 
         if (ticket.isArchived && args.isArchived === false) {

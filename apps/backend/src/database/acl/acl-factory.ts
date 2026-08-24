@@ -179,6 +179,12 @@ export class ACLFactory {
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
       return new ChannelBoardMappingsACL(ctx, prisma)
+    case 'connectChannel':
+      return new UnscopedACL(ctx, prisma)
+    case 'connectChannelMember':
+      return new UnscopedACL(ctx, prisma)
+    case 'connectRequest':
+      return new UnscopedACL(ctx, prisma)
     case 'channelParticipant':
       return new ChannelParticipantsACL(ctx, prisma)
     case 'channelStats':

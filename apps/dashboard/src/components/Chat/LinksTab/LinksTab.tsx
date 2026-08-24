@@ -17,11 +17,15 @@ import { openLink, getLinkOpenExternalDefault } from '../../../utils/openLink';
 
 interface LinksTabProps {
   channelId: string;
+  // Slack-Connect: pointer id for navigation/URLs; host `channelId` is for content only.
+  navChannelId?: string | undefined;
 }
 
-const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
+const LinksTab: React.FC<LinksTabProps> = ({ channelId, navChannelId }) => {
   const zero = useZero();
   const context = useAuthContextValues();
+  // Slack-Connect: navigate/URLs on the pointer id; host `channelId` is content only.
+  const routeChannelId = navChannelId ?? channelId;
   const [links] = useCachedQuery(queries.channelLinks({ channelId }));
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -49,9 +53,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
         urls.forEach(url => window.open(url, '_blank'));
       }
 
-      void navigate(`${baseRoute}/${channelId}?tab=links`, { replace: true });
+      void navigate(`${baseRoute}/${routeChannelId}?tab=links`, { replace: true });
     }
-  }, [searchParams, links, navigate, baseRoute, channelId]);
+  }, [searchParams, links, navigate, baseRoute, routeChannelId]);
 
   const sharedLinks = links.filter(link => link.visibility === LinkVisibility.DEFAULT);
   const personalAndSharedLinks = links.filter(

@@ -87,8 +87,48 @@ const WORKSPACE_SCOPED_TABLES: ReadonlySet<string> = new Set(
     .filter(([, t]) => 'workspaceId' in (t as { columns: Record<string, unknown> }).columns)
     .map(([name]) => name),
 );
-// Tables whose own ACL owns cross-workspace/global visibility (e.g. GLOBAL apps) — skip the backstop.
-const WORKSPACE_SCOPE_OPT_OUT: ReadonlySet<string> = new Set(['apps']);
+// Tables whose own ACL owns cross-workspace/global visibility — skip the root workspace backstop.
+//  - 'apps': GLOBAL apps.
+//  - Slack-Connect content tables: their per-table ACL applies `OR(workspaceId=ctx, active connect
+//    membership)` and is fully self-scoping in EVERY branch (see channels/conversations/messages ACLs).
+//    They MUST be here, else the root `workspaceId = ctx` re-clamp would nullify the connect branch.
+//    Any table added here must be airtight on its own — the backstop no longer guards it.
+const WORKSPACE_SCOPE_OPT_OUT: ReadonlySet<string> = new Set([
+  'apps',
+  'channels',
+  'conversations',
+  'messages',
+  // Chat-read surface (§4 step 2): roster + reactions + attachments + thread participants.
+  'channel_participants',
+  'reactions',
+  'reaction_counts',
+  'message_attachments',
+  'conversation_participants',
+  // Cross-org user resolution (§5): visible = same workspace OR connect co-member.
+  'users',
+  'user_presence',
+  // Desk/link surface shared over connect (§7): each ACL is channel-gated & self-scoping.
+  'links',
+  // Canvas surface shared over connect. (canvas_comments / canvas_comment_threads have no
+  // workspaceId column, so the backstop already skips them — not listed here.)
+  'canvases',
+  'canvas_folders',
+  'canvas_participants',
+  'canvas_versions',
+  'canvas_user_status',
+  // Tickets/boards/stages surface shared over connect.
+  'tickets',
+  'sub_tickets',
+  'ticket_assignments',
+  'ticket_activities',
+  'ticket_stage_eta',
+  'ticket_tags',
+  'ticket_tag_mappings',
+  'stages',
+  'stage_transitions',
+  'channel_board_mappings',
+  'boards',
+]);
 
 function applyQueryACL<TQuery>(
   query: TQuery,

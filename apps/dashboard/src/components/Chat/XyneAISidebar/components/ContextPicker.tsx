@@ -61,6 +61,7 @@ const CHANNEL_CATEGORY_ORDER: ChannelCategory[] = [
 
 const CATEGORY_LABELS: Record<ChannelCategory, string> = {
   [ChannelCategory.STARRED]: 'Starred',
+  [ChannelCategory.EXTERNAL_CONNECTIONS]: 'External connections',
   [ChannelCategory.CHANNELS]: 'Channels',
   [ChannelCategory.DIRECT_MESSAGES]: 'Direct Messages',
   [ChannelCategory.GROUP_DMS]: 'Group DMs',

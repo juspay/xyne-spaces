@@ -38,6 +38,7 @@ export type KanbanPageGroupBy =
 
 export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
+  // In-channel board view: scope tickets to those created in this channel.
   channelId?: string;
   projectId?: string;
   boardId?: string;

@@ -3,12 +3,17 @@ import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class ConversationParticipantsACL extends BaseACL<'conversation_participants'> {
 
   private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
-    const conversationWorkspaceId = workspaceId ?? await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one()).then(c => c?.channel?.workspaceId);
+    const conv = await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one());
+    // Slack-Connect: an active connect member may join threads in the (host) channel cross-org.
+    if (conv?.channel?.id && (await isActiveConnectMember(this.ctx, tx, conv.channel.id))) {
+      return;
+    }
+    const conversationWorkspaceId = workspaceId ?? conv?.channel?.workspaceId;
     if (!conversationWorkspaceId) throw new MutationACLError('Conversation participant not found: conversation does not exist', 'conversation_participants');
     if (conversationWorkspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Conversation participant not found in this workspace', 'conversation_participants');
@@ -21,6 +26,12 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
     if (!conversation) {
       throw new MutationACLError('Conversation participant insert failed: the conversation does not exist', 'conversation_participants')
     }
+
+    // Slack-Connect: an active connect member may join threads in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, conversation.channelId)) {
+      return;
+    }
+
     await this.verifyConversationInWorkspace(args.conversationId, tx, conversation.channel?.workspaceId);
 
     if (conversation.channel?.isArchived) {

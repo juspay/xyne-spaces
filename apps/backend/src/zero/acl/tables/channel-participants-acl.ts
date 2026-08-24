@@ -6,6 +6,7 @@ import { zql } from '../../queries';
 import {
   hasGuestChannelAccess,
   hasGuestChannelAccessForUser,
+  isActiveConnectMember,
 } from '../core/guest-access';
 
 export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
@@ -32,6 +33,13 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
       if (existingParticipants.length >= 2) {
         throw new MutationACLError('Channel participant insert failed: cannot add more than 2 participants to a DM channel', 'channel_participants');
       }
+    }
+
+    // Slack-Connect: an active connect member may add participants to the host channel
+    // cross-org (the channel lives in a different workspace than the caller). This must
+    // come before verifyChannelInWorkspace, which would otherwise reject the cross-org write.
+    if (await isActiveConnectMember(this.ctx, tx, args.channelId)) {
+      return;
     }
 
     await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId);
@@ -88,6 +96,12 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
       throw new MutationACLError('Channel participant update failed: cannot update participants in archived channel', 'channel_participants');
     }
 
+    // Slack-Connect: an active connect member may update participant rows on the host
+    // channel cross-org (e.g. the lastViewedAt stamp written right after an add).
+    if (await isActiveConnectMember(this.ctx, tx, participant.channelId)) {
+      return;
+    }
+
     await this.verifyChannelInWorkspace(participant.channelId, tx);
 
     if (this.ctx.role === 'GUEST') {
@@ -123,11 +137,18 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
     if (!participant || !participant.channel) {
       throw new MutationACLError('Channel participant delete failed: participant record does not exist', 'channel_participants');
     }
-    await this.verifyChannelInWorkspace(participant.channelId, tx); 
 
     if (participant.channel.isArchived) {
       throw new MutationACLError('Channel participant delete failed: cannot delete participants in archived channel', 'channel_participants');
     }
+
+    // Slack-Connect: an active connect member may remove participants on the host channel
+    // cross-org. Comes before verifyChannelInWorkspace, which rejects the cross-org write.
+    if (await isActiveConnectMember(this.ctx, tx, participant.channelId)) {
+      return;
+    }
+
+    await this.verifyChannelInWorkspace(participant.channelId, tx);
 
     if (this.ctx.role === 'GUEST') {
       if (participant.userId !== this.ctx.userID) {

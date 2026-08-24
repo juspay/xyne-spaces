@@ -41,6 +41,11 @@ import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar'
 
 export type ChatListProps = {
   channelId: string;
+  // Slack-Connect: for a guest pointer channel, `channelId` is the HOST id (content lives
+  // there). Navigation/URLs must stay on the guest's own POINTER id, or opening a thread
+  // rewrites the URL to the host channel — which the guest doesn't own, blanking the header.
+  // Defaults to channelId for normal channels.
+  navChannelId?: string | undefined;
   projectId?: string | undefined;
   cachedConversations: Conversation[];
   linkedItemCreatedAt?: Anchor;
@@ -194,6 +199,7 @@ function computeNewConvIdx(
 }
 const ChatListV4: React.FC<ChatListProps> = ({
   channelId,
+  navChannelId,
   projectId,
   cachedConversations,
   linkedItemCreatedAt,
@@ -202,6 +208,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   channelScopeType,
   skipMarkAsReadRef,
 }) => {
+  // URL/navigation id — the pointer channel for a guest connect channel, else channelId.
+  const routeChannelId = navChannelId ?? channelId;
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
     return () => {
@@ -1076,14 +1084,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
       if (ticketId) {
         standaloneNavigate(
           navigate,
-          `${baseRoute}/${channelId}/${conversationId}/${ticketId}?selectedTab=thread`,
+          `${baseRoute}/${routeChannelId}/${conversationId}/${ticketId}?selectedTab=thread`,
           { event: e },
         );
       } else {
-        standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
+        standaloneNavigate(navigate, `${baseRoute}/${routeChannelId}/${conversationId}`, {
+          event: e,
+        });
       }
     },
-    [channelId, conversations, navigate],
+    [routeChannelId, conversations, navigate],
   );
 
   const isEventFromChannelInput = useCallback(
@@ -1428,6 +1438,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
                       index={virtualItem.index}
                       chatListItems={combinedMessages}
                       channelId={channelId}
+                      navChannelId={routeChannelId}
                       projectId={projectId}
                       channelScopeType={channelScopeType}
                       handleOpenThread={handleOpenThread}

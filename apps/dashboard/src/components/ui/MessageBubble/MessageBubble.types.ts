@@ -63,6 +63,8 @@ export interface MessageBubbleProps {
   variant?: 'default' | 'pinned';
   isHighlighted?: boolean | undefined;
   channelId?: string;
+  // Slack-Connect: pointer id for navigation/URLs; host `channelId` is for content only.
+  navChannelId?: string | undefined;
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread';
   contentOnly?: boolean;

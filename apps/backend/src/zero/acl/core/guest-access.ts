@@ -80,12 +80,38 @@ export async function hasGuestTicketAccess(
   return Boolean(channelParticipant);
 }
 
+/**
+ * Slack-Connect — is the caller an ACTIVE member of this connect channel?
+ * The write-side twin of the read predicate `connectChannelAccessWhere`. Grants cross-org
+ * write access: an active `connect_channel_member` may mutate the (host) channel's content
+ * regardless of workspace. `channelId` is always the HOST channel id.
+ */
+export async function isActiveConnectMember(
+  ctx: QueryContext,
+  tx: Transaction<Schema>,
+  channelId: string,
+): Promise<boolean> {
+  const member = await tx.run(
+    zql.connect_channel_member
+      .where('channelId', '=', channelId)
+      .where('userId', '=', ctx.userID)
+      .where('leftAt', 'IS', null)
+      .one(),
+  );
+  return Boolean(member);
+}
+
 export async function hasChannelMutationAccess(
   ctx: QueryContext,
   tx: Transaction<Schema>,
   channelId: string,
   options?: { allowPublicForNonGuests?: boolean },
 ): Promise<boolean> {
+  // Slack-Connect: an active connect member may mutate the channel's content cross-org.
+  if (await isActiveConnectMember(ctx, tx, channelId)) {
+    return true;
+  }
+
   const allowPublicForNonGuests = options?.allowPublicForNonGuests ?? true;
 
   const channel = await tx.run(zql.channels.where('id', '=', channelId).one());

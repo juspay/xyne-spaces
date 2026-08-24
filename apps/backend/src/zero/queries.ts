@@ -71,6 +71,8 @@ const kanbanTicketsPageArgsSchema = z.object({
   viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
   projectId: z.string().optional(),
   boardId: z.string().optional(),
+  // When set (the in-channel board view), scope tickets to those created in THIS channel.
+  channelId: z.string().optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
   ...flowStepVisibilitySchemaShape,
@@ -249,6 +251,11 @@ const applyKanbanTicketPageConditions = (
 
   if (boardId) {
     query = query.where('boardId', boardId);
+  }
+
+  // In-channel board view: only tickets created in this channel (a board can span channels).
+  if (args.channelId) {
+    query = query.where('channelId', args.channelId);
   }
 
   if (!boardId && viewMode !== 'my-tickets' && projectId) {
@@ -520,6 +527,11 @@ const applyCanvasVisibilityQueryFilter = (
           ),
         ),
       ),
+      // Slack-Connect: NO blanket connect-channel branch here. Connect canvases must follow the
+      // SAME visibility rules as a normal channel — private until shared/made public. A connect
+      // member is a (hidden) host channel_participant, so the channel branch above already grants
+      // them any canvas shared to the host channel; PUBLIC ones are covered below. A private,
+      // unshared connect-channel canvas stays hidden, matching normal channels.
       ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
     )
   );
@@ -710,6 +722,52 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('participants')
         .related('ticket')
         .one();
+    },
+  ),
+
+  // Slack-Connect: resolve a guest pointer channel → its established connect link (host id),
+  // so the client can flip guestChannelId → hostChannelId at content read/write core places.
+  // MUST stay in sync with the shared registry (packages/shared/src/zero/queries.ts).
+  connectChannelByGuestChannelId: defineQuery(
+    z.object({ guestChannelId: z.string() }),
+    ({ args: { guestChannelId } }) => {
+      return zql.connect_channel
+        .where('guestChannelId', '=', guestChannelId)
+        .where('status', '=', 'ACTIVE')
+        .one();
+    },
+  ),
+
+  // Slack-Connect: is the caller an active connect member of this (host) channel?
+  // MUST stay in sync with the shared registry.
+  connectMembershipForChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.connect_channel_member
+        .where('channelId', '=', channelId)
+        .where('userId', '=', ctx.userID)
+        .where('leftAt', 'IS', null)
+        .one();
+    },
+  ),
+  // Slack-Connect: all ACTIVE connect links (allow-all read, no workspaceId). Used by the
+  // sidebar to group connect channels under "External connections".
+  activeConnectChannels: defineQuery(() => {
+    return zql.connect_channel.where('status', '=', 'ACTIVE');
+  }),
+  // Slack-Connect: the full active cross-org roster of a connect (host) channel. Keyed on
+  // the HOST channel id. Gated so only an active member of the channel may list its roster.
+  connectMembersForChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.connect_channel_member
+        .where('channelId', '=', channelId)
+        .where('leftAt', 'IS', null)
+        .whereExists('channel', ch =>
+          ch.whereExists('connectMembers', m =>
+            m.where('userId', '=', ctx.userID).where('leftAt', 'IS', null),
+          ),
+        );
     },
   ),
 
@@ -942,6 +1000,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      channelId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -953,6 +1012,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         viewMode,
         projectId,
         boardId,
+        channelId,
         userId,
         groupId,
         excludeFlowSteps,
@@ -965,6 +1025,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       // boardId implicitly scopes to project, so no need for separate projectId filter
       if (boardId && viewMode !== 'my-tickets') {
         query = query.where('boardId', boardId);
+      }
+
+      // A board can be shared across channels; a channel board view must only show
+      // tickets created in THIS channel.
+      if (channelId) {
+        query = query.where('channelId', channelId);
       }
 
       // Apply projectId filter ONLY if:
@@ -3336,8 +3402,8 @@ export const queries: AnyQueryRegistry = defineQueries({
   ),
 
   // Boards mapped to a channel via ChannelBoardMapping.
-  // Preferred path for resolving channel → boards; consumer falls back to
-  // boardsListByProject if the mapping is empty.
+  // This is the preferred path for resolving channel → boards.
+  // Falls back to boardsListByProject on the consumer side if empty.
   boardsByChannel: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {

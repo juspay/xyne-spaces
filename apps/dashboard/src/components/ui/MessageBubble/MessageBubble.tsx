@@ -523,6 +523,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   context,
   isHighlighted,
   channelId,
+  navChannelId,
   conversation,
   contentOnly = false,
   onClick,
@@ -675,6 +676,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     [message.nudgeCounts],
   );
 
+  // Slack-Connect: navigation/URLs stay on the guest's pointer id (navChannelId); the host
+  // `channelId` is only for content. Using the host id here would rewrite the URL to a channel
+  // the guest doesn't own, blanking the channel header.
+  const routeChannelId = navChannelId ?? channelId;
+
   const handleUserClick = (userId: string): void => {
     if (onUserClick) {
       onUserClick(userId);
@@ -688,7 +694,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         : '';
     const focusThreadSearch = isFocusThread ? '?focusThread=1' : '';
     void navigate(
-      `${baseRoute}/${channelId}${threadSegment}/profile/${userId}${focusThreadSearch}`,
+      `${baseRoute}/${routeChannelId}${threadSegment}/profile/${userId}${focusThreadSearch}`,
     );
   };
 
@@ -702,19 +708,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (window.location.pathname.includes('/chat/dir/threads')) {
       if (isThreadReply) {
         void navigate(
-          `/chat/dir/threads/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`,
+          `/chat/dir/threads/${routeChannelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`,
         );
       } else {
-        void navigate(`/chat/dir/${channelId}#origin=${conversationId}`);
+        void navigate(`/chat/dir/${routeChannelId}#origin=${conversationId}`);
       }
       return;
     }
     if (isThreadReply) {
       void navigate(
-        `${baseRoute}/${channelId}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${message.messageId}`,
+        `${baseRoute}/${routeChannelId}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${message.messageId}`,
       );
     } else {
-      void navigate(`${baseRoute}/${channelId}#origin=${conversationId}`);
+      void navigate(`${baseRoute}/${routeChannelId}#origin=${conversationId}`);
     }
   };
 
@@ -777,6 +783,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         reminderDueInLabel={reminderDueInLabel}
         isHighlighted={isHighlighted ?? false}
         channelId={channelId}
+        {...(navChannelId && { navChannelId })}
         {...(conversation && { conversation })}
         context={context}
         contentOnly={contentOnly}
@@ -1172,7 +1179,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {threadInfo && channelId && (
             <ThreadInfoIndicator
               threadInfo={threadInfo}
-              channelId={channelId}
+              channelId={routeChannelId ?? ''}
               messageId={message.messageId}
             />
           )}
@@ -1183,7 +1190,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             channelId &&
             message.childConversationId && (
               <AlsoSentToChannelIndicator
-                channelId={channelId}
+                channelId={routeChannelId ?? ''}
                 childConversationId={message.childConversationId}
                 {...(channelScopeType && { channelScopeType })}
               />

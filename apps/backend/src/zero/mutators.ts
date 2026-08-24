@@ -1130,6 +1130,17 @@ export function createMutators(
             throw new Error('Only GROUP_DM channels can be promoted to a regular channel');
           }
 
+          const isConnectGroupDm =
+            channel.isConnectEnabled === true ||
+            Boolean(
+              await tx.run(
+                zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one(),
+              ),
+            );
+          if (isConnectGroupDm) {
+            throw new Error('Cross-org group DMs cannot be promoted to a channel');
+          }
+
           const participant = await tx.run(
             zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
           );
@@ -1227,16 +1238,30 @@ export function createMutators(
             .where('channelId', channelId)
             .where('userId', authData.sub)
             .one());
-          if (!participationOfRequestingUser) {
+
+          // Slack-Connect: an active connect member (e.g. an OWNER-role guest) may add
+          // members to the host channel even though they hold no channel_participants row
+          // on it. channelId here is the HOST id (client resolves it via useHostChannelId).
+          const isConnectMember = Boolean(
+            await tx.run(
+              zql.connect_channel_member
+                .where('channelId', channelId)
+                .where('userId', authData.sub)
+                .where('leftAt', 'IS', null)
+                .one(),
+            ),
+          );
+
+          if (!participationOfRequestingUser && !isConnectMember) {
             throw new Error('You are not allowed to add someone');
           }
 
-          if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
+          if (channel.scopeType !== ChannelScopeType.GROUP_DM && !isConnectMember) {
             const channelStatsData = await tx.run(zql.channel_stats.where('channelId', channelId).one());
             const addUserPolicy = channelStatsData?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
             if (
               addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY &&
-              participationOfRequestingUser.role === ChannelRole.MEMBER
+              participationOfRequestingUser?.role === ChannelRole.MEMBER
             ) {
               throw new Error('Only admins can add users to this channel');
             }
@@ -1246,6 +1271,29 @@ export function createMutators(
             userIds.map((id) => tx.run(zql.users.where('id', id).one()))
           );
           const validUsers = users.filter((user) => user !== undefined);
+
+          // Slack-Connect fence: EXTERNAL (cross-workspace) people may ONLY enter a channel through the
+          // connect flows — invite→materialize for a DEFAULT connect channel, or the reachability-gated
+          // group-DM add. This generic add-participants path must NEVER pull a foreign-workspace user into a
+          // plain channel (host OR guest side). If the channel isn't connect-linked, reject anyone whose
+          // home workspace differs from the channel's. (Connect channels legitimately hold cross-org members,
+          // so they're exempted here and governed by their own gates.)
+          const linkedAsHost = await tx.run(
+            zql.connect_channel.where('hostChannelId', channelId).where('status', 'ACTIVE').one(),
+          );
+          const linkedAsPointer = linkedAsHost
+            ? null
+            : await tx.run(
+                zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one(),
+              );
+          const isConnectChannel =
+            channel.isConnectEnabled === true || Boolean(linkedAsHost) || Boolean(linkedAsPointer);
+          if (!isConnectChannel) {
+            const foreign = validUsers.find((u) => u.workspaceId !== channel.workspaceId);
+            if (foreign) {
+              throw new Error('External people can only be added to connect channels');
+            }
+          }
 
           const addedUsers = [];
           for (const user of validUsers) {
@@ -2420,7 +2468,19 @@ export function createMutators(
             throw new Error("Channel doesn't exist");
           }
 
-          if (participant === undefined || channelUserStatusParticipant === undefined) {
+          // Slack-Connect: an active connect member may post cross-org even without a host
+          // channel_user_status row (their per-user state lives on their pointer channel).
+          const isConnectMember = Boolean(
+            await tx.run(
+              zql.connect_channel_member
+                .where('channelId', channelId)
+                .where('userId', authData.sub)
+                .where('leftAt', 'IS', null)
+                .one(),
+            ),
+          );
+
+          if (!isConnectMember && (participant === undefined || channelUserStatusParticipant === undefined)) {
             throw new Error('You need to be a participant for adding a conversations');
           }
 
@@ -2506,10 +2566,14 @@ export function createMutators(
             }
           }
 
+          // Slack-Connect: content belongs to the (host) channel, so stamp the CHANNEL's
+          // workspaceId — the host's for a connect channel, identical to the writer's otherwise.
+          const contentWorkspaceId = channel.workspaceId;
+
           await tx.mutate.conversations.insert({
             conversationId,
             channelId,
-            workspaceId: authData.workspaceId,
+            workspaceId: contentWorkspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: now,
@@ -2537,7 +2601,7 @@ export function createMutators(
           const message = {
             messageId,
             conversationId,
-            workspaceId: authData.workspaceId,
+            workspaceId: contentWorkspaceId,
             senderId: authData.sub,
             content: content.trim(),
             msgType: type,
@@ -2648,21 +2712,25 @@ export function createMutators(
             lastActivityAt: now,
           });
 
-          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channel.id, now);
-          await tx.mutate.channel_user_status.update({
-            id: channelUserStatusParticipant.id,
-            lastViewedAt: now,
-            conversationSeenCutoffAt,
-            lastViewedConversationId: conversationId,
-            updatedAt: now,
-          });
+          // Slack-Connect: a connect member has no host channel_user_status (their read state lives
+          // on the pointer channel), so only bump the sender's last-viewed when the row exists.
+          if (channelUserStatusParticipant) {
+            const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channel.id, now);
+            await tx.mutate.channel_user_status.update({
+              id: channelUserStatusParticipant.id,
+              lastViewedAt: now,
+              conversationSeenCutoffAt,
+              lastViewedConversationId: conversationId,
+              updatedAt: now,
+            });
+          }
 
           // Auto-reopen DMs for all participants when a new conversation is started
           await reopenClosedDmParticipants(tx, channel.id, channel.scopeType, now);
 
-          // Add conversation creator as MENTIONED participant
+          // Add conversation creator as MENTIONED participant (stamp host ws for connect channels)
           await tx.mutate.conversation_participants.insert({
-            workspaceId: authData.workspaceId,
+            workspaceId: contentWorkspaceId,
             id: uuidv4(),
             conversationId,
             userId: authData.sub,
@@ -3213,14 +3281,30 @@ export function createMutators(
             throw new Error("Channel doesn't exists");
           }
 
-          if (participant === undefined && channel.visibility == ChannelVisibility.PRIVATE) {
+          // Slack-Connect: an active connect member may reply cross-org even without a host
+          // channel_participant row (their membership lives in connect_channel_member; their
+          // per-user state lives on the pointer channel). Mirrors conversations.send's bypass.
+          const isConnectMember = Boolean(
+            await tx.run(
+              zql.connect_channel_member
+                .where('channelId', conversation.channelId)
+                .where('userId', authData.sub)
+                .where('leftAt', 'IS', null)
+                .one(),
+            ),
+          );
+
+          if (participant === undefined && channel.visibility == ChannelVisibility.PRIVATE && !isConnectMember) {
             throw new Error('You need to be a participant for adding a conversations');
           }
 
+          // Slack-Connect: content belongs to the (host) channel, so stamp the CHANNEL's
+          // workspaceId — the host's for a connect channel, identical to the writer's otherwise.
+          // (conversations.send does the same; messages.send previously stamped the writer's ws.)
           const message = {
             messageId,
             conversationId,
-            workspaceId: authData.workspaceId,
+            workspaceId: channel.workspaceId,
             senderId: authData.sub,
             content: content.trim(),
             msgType: type,
@@ -3774,7 +3858,20 @@ export function createMutators(
             .where('channelId', conversation.channelId)
             .one());
           if (!participation) {
-            throw new Error('Only member of the channel can react to a message');
+            // Slack-Connect: an active connect member may react cross-org even without a host
+            // channel_participants row.
+            const isConnectMember = Boolean(
+              await tx.run(
+                zql.connect_channel_member
+                  .where('channelId', conversation.channelId)
+                  .where('userId', authData.sub)
+                  .where('leftAt', 'IS', null)
+                  .one(),
+              ),
+            );
+            if (!isConnectMember) {
+              throw new Error('Only member of the channel can react to a message');
+            }
           }
 
           const reaction = await tx.run(zql.reaction_counts
