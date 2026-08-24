@@ -82,7 +82,9 @@ RULES:
 - Deleting a paragraph? Omit it.
 - Rewriting a whole section? That is a deletion plus additions: omit every
   labelled paragraph you are removing, and mark every new paragraph [new].
-- Never renumber, never invent labels, never reorder labels.
+- Moving a paragraph? Move its labelled line to the new position — keep the
+  label unchanged.
+- Never renumber and never invent labels.
 - Return only the document, with no commentary before or after it.`;
 
 /** Split an agent's reply back into labelled paragraphs. */
@@ -147,4 +149,113 @@ export function validateAgentResponse(
   }
 
   return { ok: true };
+}
+
+export interface DerivedOp {
+  op: 'insert' | 'replace' | 'delete' | 'move';
+  /** Stable key within one reply; an anchor may reference an insert op's key. */
+  key: string;
+  blockId?: string;
+  /** insert/move placement: the element it follows in the reply; null = top of document. */
+  anchor?: { kind: 'block' | 'new'; ref: string } | null;
+  beforeContent?: BlockNoteBlock;
+  afterMarkdown?: string;
+  orderIndex: number;
+}
+
+/** Longest common subsequence of two id sequences — the blocks that did NOT move. */
+export function lcsStationary(a: string[], b: string[]): Set<string> {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i]![j] = a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! + 1 : Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+    }
+  }
+  const keep = new Set<string>();
+  let i = a.length;
+  let j = b.length;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      keep.add(a[i - 1] as string);
+      i--;
+      j--;
+    } else if (dp[i - 1]![j]! >= dp[i]![j - 1]!) i--;
+    else j--;
+  }
+  return keep;
+}
+
+/**
+ * Turn the agent's parsed reply into operation descriptions.
+ * Known label + same text = nothing; changed text = replace (same block id);
+ * label out of order = move; [new]/unknown/duplicate label = insert;
+ * label missing from the reply = delete, only for blocks the agent saw.
+ */
+export function deriveOps({
+  current,
+  entries,
+  handleMap,
+  render,
+  seenBlockIds,
+}: {
+  current: BlockNoteBlock[];
+  entries: ParsedEntry[];
+  handleMap: HandleMap;
+  render: (block: BlockNoteBlock) => string;
+  seenBlockIds?: Set<string>;
+}): DerivedOp[] {
+  const byId = new Map<string, BlockNoteBlock>();
+  for (const b of current) {
+    const id = (b as { id?: string }).id;
+    if (id) byId.set(id, b);
+  }
+
+  // Resolve entries to block ids; first claim wins, a duplicate label becomes an insert.
+  const claimed = new Set<string>();
+  const resolved = entries.map(entry => {
+    const id = entry.handle ? handleMap.get(entry.handle) : undefined;
+    if (id && byId.has(id) && !claimed.has(id)) {
+      claimed.add(id);
+      return { entry, id };
+    }
+    return { entry, id: null as string | null };
+  });
+
+  const docKept = current
+    .map(b => (b as { id?: string }).id)
+    .filter((id): id is string => Boolean(id) && claimed.has(id as string));
+  const replyKept = resolved.filter(r => r.id).map(r => r.id as string);
+  const stationary = lcsStationary(docKept, replyKept);
+
+  const ops: DerivedOp[] = [];
+  let order = 0;
+  let prev: DerivedOp['anchor'] = null; // last element seen in the reply; null = top
+  for (const { entry, id } of resolved) {
+    if (id) {
+      const block = byId.get(id) as BlockNoteBlock;
+      if (render(block).trim() !== entry.markdown.trim()) {
+        ops.push({
+          op: 'replace', key: `op${order}`, blockId: id,
+          beforeContent: block, afterMarkdown: entry.markdown, orderIndex: order++,
+        });
+      }
+      if (!stationary.has(id)) {
+        ops.push({ op: 'move', key: `op${order}`, blockId: id, anchor: prev, orderIndex: order++ });
+      }
+      prev = { kind: 'block', ref: id };
+    } else {
+      const key = `op${order}`;
+      ops.push({ op: 'insert', key, anchor: prev, afterMarkdown: entry.markdown, orderIndex: order++ });
+      prev = { kind: 'new', ref: key };
+    }
+  }
+
+  // Deletions: blocks the agent saw but did not return.
+  for (const b of current) {
+    const id = (b as { id?: string }).id;
+    if (!id || claimed.has(id)) continue;
+    if (!seenBlockIds || !seenBlockIds.has(id)) continue;
+    ops.push({ op: 'delete', key: `op${order}`, blockId: id, beforeContent: b, orderIndex: order++ });
+  }
+  return ops;
 }
