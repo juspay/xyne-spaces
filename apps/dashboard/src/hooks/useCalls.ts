@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { QueryResultType } from '@rocicorp/zero';
 import { roomActor } from '../machines/roomMachine';
 import { queries } from '../zero/queries';
@@ -206,6 +206,34 @@ export const useChannelHasActiveCall = (channelId: string): boolean => {
     () =>
       activeCalls?.some(call => (call.callUpdatesChannel ?? call.channelId) === channelId) ?? false,
     [activeCalls, channelId],
+  );
+};
+
+/**
+ * Whether the user is already an active participant of the call `externalId`
+ * points at, answered from the call's own participant rows (the synced
+ * `activeCalls` data) rather than from what state the room machine is in.
+ *
+ * Returns a checker rather than a boolean because the caller — a link click, a
+ * deep link — only learns which call it is asking about at event time.
+ *
+ * @param userId - The current user's ID
+ * @returns (externalId) => true when that call lists the user as ACCEPTED
+ */
+export const useIsActiveCallParticipant = (
+  userId: string | undefined,
+): ((externalId: string) => boolean) => {
+  const activeCalls = useActiveCalls();
+
+  return useCallback(
+    (externalId: string): boolean => {
+      if (!userId || !externalId) return false;
+      const call = findActiveCall(activeCalls ?? [], externalId) as
+        | ActiveCallWithRelations
+        | undefined;
+      return isUserActiveInCall(call?.participants ?? [], userId);
+    },
+    [activeCalls, userId],
   );
 };
 
