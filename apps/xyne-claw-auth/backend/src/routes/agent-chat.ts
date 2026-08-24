@@ -15,7 +15,8 @@ import { KNOWN_PROVIDERS, buildProviderConfig, buildProviderConfigsTiered, agent
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
-import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
@@ -2093,7 +2094,12 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // just stops it leaking into the normal chat view.
     const isAdmin = await isClawAdmin(userId);
     const crossUser = isAdmin && req.query["allRuns"] === "1";
-    const visibleForUser = crossUser ? allMessages : allMessages.filter((m) => m.userId === userId);
+    // Rows may be keyed by either verified representation of this caller
+    // (canonical Claw id in x-user-id or the current workspace's raw Spaces
+    // id in x-spaces-user-id) — match both so older/misscoordinated turns
+    // don't vanish from the transcript.
+    const userAliases = getRequesterAliases(req);
+    const visibleForUser = crossUser ? allMessages : allMessages.filter((m) => userAliases.includes(m.userId));
     // Hide the in-progress "running" assistant placeholder from the transcript:
     // the in-flight turn is rendered by the /live stream (snapshot `partial` +
     // `delta` events), so returning it here too would double-render it (a second
@@ -2105,7 +2111,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // user-scoped via listByUser (admins use the conversation-wide view).
     const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
-      : await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
+      : await agentRunRepository.listByUser(userAliases.length ? userAliases : [userId!], { conversationId: req.params.convId });
 
     // Strip internal GCS paths from attachment metadata before sending to client
     const serialized = messages.map((m) => {
@@ -2756,12 +2762,12 @@ router.delete("/:slug/chat/:convId", async (req: Request<{ slug: string; convId:
     // For destructive operations always use the authenticated identity — never
     // accept a caller-supplied userId override (unlike read routes that follow
     // the req.query["userId"] pattern for convenience).
-    const userId = getRequesterId(req);
-    if (!userId) {
+    const userAliases = getRequesterAliases(req);
+    if (!userAliases.length) {
       res.status(400).json({ success: false, error: "userId required" });
       return;
     }
-    const count = await chatMessageRepository.deleteConversation(userId, req.params.slug, req.params.convId);
+    const count = await chatMessageRepository.deleteConversation(userAliases, req.params.slug, req.params.convId);
     res.json({ success: true, data: { deleted: count } });
   } catch (err) {
     log.error("[agent-chat] delete conversation error:", err);
@@ -2775,23 +2781,33 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Identity comes from the session, NOT the query param. A caller-supplied
     // ?userId previously overrode the authenticated user, letting anyone list
     // another user's conversations. Only an admin may target another user.
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
+    const userAliases = getRequesterAliases(req);
+    if (!userAliases.length) {
       res.status(401).json({ success: false, error: "Authentication required" });
       return;
     }
     const requestedUserId = req.query["userId"] as string | undefined;
-    let userId = requesterId;
+    // Own reads span ALL verified representations of this caller — the
+    // canonical Claw id (x-user-id) AND the current workspace's raw Spaces id
+    // (x-spaces-user-id) — because chat rows may be keyed under either. No
+    // org-wide fan-out: the alias pair is already workspace-scoped by auth.
+    let userIds = userAliases;
     if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
-      if (!(await isClawAdmin(requesterId))) {
+      if (!(await isClawAdmin(userAliases[0]!))) {
         res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
         return;
       }
-      userId = requestedUserId;
+      // Admin targeting another user: resolve the target's other
+      // representation within THIS request's workspace context only, so the
+      // admin sees exactly the chats that user would see themselves.
+      const ws = req.headers["x-spaces-workspace-id"];
+      const workspaceId = typeof ws === "string" && ws.trim() ? ws.trim() : undefined;
+      const canonical = await resolveClawUserIdForSpacesIdentity(requestedUserId, workspaceId).catch(() => undefined);
+      userIds = canonical && canonical !== requestedUserId ? [requestedUserId, canonical] : [requestedUserId];
     }
 
     // Get all messages for this user+agent, grouped by conversation
-    const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
+    const allMessages = await chatMessageRepository.findByUserAndAgent(userIds, req.params.slug);
 
     // Group by conversationId
     const convMap = new Map<string, typeof allMessages>();

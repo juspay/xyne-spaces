@@ -22,6 +22,21 @@ export function matchesAuthenticatedUserId(req: Request, userId: string): boolea
     || (typeof spacesUserId === "string" && !!spacesUserId && userId === spacesUserId);
 }
 
+/**
+ * All ids the authenticated caller may own rows under: the canonical Claw id
+ * (x-user-id) plus the current workspace's raw Spaces id (x-spaces-user-id),
+ * both stamped by requireAuth from the verified session — i.e. already scoped
+ * to the session's workspace context. User-owned tables can legitimately hold
+ * either key (rows written before canonicalization, or via its raw fallback),
+ * so reads of "my" data must accept the pair, never a single id.
+ */
+export function getRequesterAliases(req: Request): string[] {
+  const ids = [req.headers["x-user-id"], req.headers["x-spaces-user-id"]]
+    .filter((v): v is string => typeof v === "string" && !!v.trim())
+    .map((v) => v.trim());
+  return [...new Set(ids)];
+}
+
 export function pinUserIdParam(req: Request, res: Response, next: NextFunction): void {
   const sessionUserId = getCanonicalRequesterId(req);
   const urlUserId = (req.params as { userId?: string }).userId;
