@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TestClassificationForm } from './TestClassificationForm';
 import XyneAISidebar from '../../Chat/XyneAISidebar/XyneAISidebar';
 import type { ChannelClawAgent } from '../../../hooks/useChannelClawAgents';
+import { useDraftAgentOptions } from '../../../hooks/useDraftAgentOptions';
 
 export interface AutoDraftAgentChatPanelProps {
   channelId: string;
@@ -22,10 +23,7 @@ export const AutoDraftAgentChatPanel: React.FC<AutoDraftAgentChatPanelProps> = (
   const [pendingQuery, setPendingQuery] = useState('');
   const [finalResponse, setFinalResponse] = useState('');
 
-  const activeAgent = useMemo(
-    () => clawAgents.find(a => a.slug === autoDraftAgentSlug),
-    [clawAgents, autoDraftAgentSlug],
-  );
+  const { selectedAgent: activeAgent } = useDraftAgentOptions(clawAgents, autoDraftAgentSlug);
   const agentLabel = activeAgent?.name ?? 'Default (Xyne AI)';
   const agentColor = activeAgent?.color ?? 'var(--desk-accent)';
 
