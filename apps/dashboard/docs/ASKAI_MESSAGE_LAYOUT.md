@@ -248,7 +248,7 @@ Left group — each button renders **only if its callback prop is passed**:
 | Deep research   | `Microscope` | Toggles deep research                | same pattern via `deepResearchAccessible`                                    |
 | Create canvas   | `File`       | Toggles canvas creation for the turn | —                                                                            |
 | `AgentSelector` | —            | Picks the claw agent                 | `compact`                                                                    |
-| `ModelSelector` | —            | Pins a model                         | `compact`; hides itself when the agent exposes no switchable models          |
+| `ModelThinkingSelector` | —    | Pins a model + per-message thinking  | Shared with the /ai composer; Recommended row, search, Thinking flyout       |
 
 Enabled toggles go `bg-muted` + a status colour (`text-status-success` for web
 search, `text-status-pending` for deep research, `text-primary` for canvas).

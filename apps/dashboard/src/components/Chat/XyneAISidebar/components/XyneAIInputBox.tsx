@@ -40,8 +40,9 @@ import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
 import { ContextPillRow } from './ContextPillRow';
+import { RecordingTranscriptModal } from './RecordingTranscriptModal';
 import { CONTEXT_PICKER_TOGGLE_ATTR } from './ContextPicker';
-import { ModelSelector } from './ModelSelector';
+import { ModelThinkingSelector } from '../../../AIScreen/ModelThinkingSelector';
 import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
 import type { AgentOption } from './AgentSelector';
 import {
@@ -164,6 +165,9 @@ export interface XyneAIInputBoxProps {
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
   defaultModel?: string | null;
+  /** Per-message thinking level for the combined model+thinking menu. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  onSelectThinking?: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
   /** Currently pinned model, or null for the agent's default. */
   selectedModel?: string | null;
   onSelectModel?: (model: string | null) => void;
@@ -268,6 +272,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       defaultModel = null,
       selectedModel = null,
       onSelectModel,
+      thinkingLevel = null,
+      onSelectThinking,
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
@@ -616,6 +622,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Browser context state
     const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
+    // Recording pill → its transcript, read in place over the composer.
+    const [transcriptCallId, setTranscriptCallId] = useState<string | null>(null);
 
     // Update activeThreadInfo when threadInfo prop changes
     useEffect(() => {
@@ -826,12 +834,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
     };
 
-    // Recordings have a real linkable detail route; fall back to the shared
-    // conversation when the search result didn't carry the recording id.
+    // The transcript is what the pill actually attached, so show it in a modal
+    // rather than routing away from the half-written question. Falls back to the
+    // shared conversation when the search result didn't carry the recording id.
     const handleRecordingContextClick = (recording: SelectedRecording): void => {
       if (recording.externalId) {
-        void navigate(`/recordings/${recording.externalId}`);
-        if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+        setTranscriptCallId(recording.externalId);
         return;
       }
       handleTranscriptContextClick(recording);
@@ -1712,6 +1720,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           {...(onActivitiesChange && { onActivitiesChange })}
         />
 
+        <RecordingTranscriptModal
+          callId={transcriptCallId}
+          onClose={() => setTranscriptCallId(null)}
+        />
+
         {/* MentionSelector for "@" trigger in editor (user mentions) */}
         <MentionSelector
           editor={editor}
@@ -1858,16 +1871,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       />
                     </div>
                   )}
-                  {/* Model selector — hides itself when the agent exposes no
-                      switchable models. */}
+                  {/* Combined model + thinking menu — same component as the
+                      /ai composer (Recommended row, search, Thinking flyout). */}
                   {onSelectModel && (
                     <div className='flex items-center shrink-0'>
-                      <ModelSelector
-                        selectedModel={selectedModel}
+                      <ModelThinkingSelector
                         models={models}
                         defaultModel={defaultModel}
-                        onSelect={onSelectModel}
-                        compact={true}
+                        selectedModel={selectedModel}
+                        onSelectModel={onSelectModel}
+                        thinkingLevel={thinkingLevel}
+                        onSelectThinking={onSelectThinking ?? (() => {})}
+                        disabled={false}
                       />
                     </div>
                   )}

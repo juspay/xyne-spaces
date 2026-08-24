@@ -46,16 +46,7 @@ export async function prepareAppWebhookDispatch(
   headers: Record<string, string> = {},
 ): Promise<{ url: string; headers: Record<string, string>; isInternal: boolean }> {
   const { url, isInternal } = resolveAppWebhookUrl(webhookUrl);
-  if (isInternal) {
-    const s2sKey = config.internalS2sKey;
-    if (s2sKey) {
-      headers['x-s2s-key'] = s2sKey;
-    } else {
-      logger.warn(
-        '[APP-URL-RESOLVER] Internal dispatch but INTERNAL_S2S_KEY is unset; sending without S2S auth',
-      );
-    }
-  } else {
+  if (!isInternal) {
     await assertWebhookUrlSafe(url);
   }
   return { url, headers, isInternal };

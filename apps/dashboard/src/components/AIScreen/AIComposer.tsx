@@ -33,6 +33,8 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
+import { ModelThinkingSelector } from './ModelThinkingSelector';
+import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
@@ -236,6 +238,14 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  // Per-run model pin + thinking level. The model list is the account's allowed
+  // models off the selected agent's shared LiteLLM key; "Default" = the model
+  // configured in the DB. Both reset when the agent changes — a pick from one
+  // agent's list may not exist on another's.
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => seed.model);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(() => seed.thinkingLevel);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -255,6 +265,22 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   );
   const instant = selectedAgent?.instantAgent === true;
 
+  const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const { data: agentModelsData } = useQuery({
+    queryKey: ['claw-agent-models', modelAgentSlug],
+    queryFn: () => fetchClawAgentModels(modelAgentSlug),
+    staleTime: 60_000,
+  });
+  // Reset the pin/thinking picks when the AGENT changes — but not on mount,
+  // where they may be seeded from initialExtras (landing → chat handoff).
+  const prevModelAgentSlug = useRef(modelAgentSlug);
+  useEffect(() => {
+    if (prevModelAgentSlug.current === modelAgentSlug) return;
+    prevModelAgentSlug.current = modelAgentSlug;
+    setSelectedModel(null);
+    setThinkingLevel(null);
+  }, [modelAgentSlug]);
+
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
     queryFn: async (): Promise<XyneAIConfigResponse> => {
@@ -265,6 +291,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   });
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
+
+  const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
 
   const buildContext = useCallback(
     (): ComposerContext => ({
@@ -280,6 +308,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
       instant,
+      model: selectedModel,
+      modelProvider: selectedModel ? modelPinProvider : null,
+      thinkingLevel,
     }),
     [
       selections,
@@ -289,6 +320,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled,
       createCanvasEnabled,
       instant,
+      selectedModel,
+      modelPinProvider,
+      thinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -809,6 +843,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   onAgentChange={slug => onAgentChange?.(slug, buildContext())}
                 />
               )}
+              <ModelThinkingSelector
+                models={agentModelsData?.models ?? []}
+                defaultModel={agentModelsData?.defaultModel ?? null}
+                selectedModel={selectedModel}
+                onSelectModel={setSelectedModel}
+                thinkingLevel={thinkingLevel}
+                onSelectThinking={setThinkingLevel}
+                disabled={pending}
+              />
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
