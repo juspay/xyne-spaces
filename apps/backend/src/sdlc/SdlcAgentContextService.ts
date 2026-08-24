@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { allBaselinesApproved } from './sdlcProgressiveGate';
+import { allBaselinesReady } from './sdlcProgressiveGate';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
@@ -111,9 +111,9 @@ export class SdlcAgentContextService {
     if (!repo?.projectId || !repo.channelId) throw new AppError('SDLC repository not found', 404);
     const participant = repo.channel?.participants[0];
     if (!participant) throw new AppError('You are not a member of this repository', 403);
-    const baselines = await this.prisma.canvas.findMany({
-      where: { channelId: repo.channelId },
-      select: { metadata: true, lastEditedAt: true },
+    const baselines = await this.prisma.sdlcArtifact.findMany({
+      where: { canvas: { is: { channelId: repo.channelId } } },
+      select: { artifactType: true, artifactStatus: true },
     });
     const parsed = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
     return {
@@ -134,7 +134,9 @@ export class SdlcAgentContextService {
       },
       gates: {
         capabilities: Array.isArray(repo.accessCapabilities) ? repo.accessCapabilities : [],
-        allBaselinesApproved: allBaselinesApproved(baselines),
+        // Wire-compat field name: claw-auth validates gates["allBaselinesApproved"].
+        // Semantics are now "all baselines generation-READY" (approval flow removed).
+        allBaselinesApproved: allBaselinesReady(baselines),
       },
       execution: {
         workflowExecutionId: input.workflowExecutionId ?? null,
