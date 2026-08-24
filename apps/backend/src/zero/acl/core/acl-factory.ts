@@ -80,7 +80,6 @@ import { ApplicationReleaseTicketsACL } from '../tables/application-release-tick
 import { ApplicationsACL } from '../tables/applications-acl';
 import { BoardSlaPoliciesACL } from '../tables/board-sla-policies-acl';
 import { CanvasVersionsACL } from '../tables/canvas-versions-acl';
-import { CanvasSuggestionsACL } from '../tables/canvas-suggestions-acl';
 import { CanvasSuggestionChangesACL } from '../tables/canvas-suggestion-changes-acl';
 import { ChannelDailyRecapsACL } from '../tables/channel-daily-recaps-acl';
 import { ChannelRecapsACL } from '../tables/channel-recaps-acl';
@@ -349,8 +348,6 @@ export class ACLFactory {
         return new BoardSlaPoliciesACL(ctx);
       case 'canvas_versions':
         return new CanvasVersionsACL(ctx);
-      case 'canvas_suggestions':
-        return new CanvasSuggestionsACL(ctx);
       case 'canvas_suggestion_changes':
         return new CanvasSuggestionChangesACL(ctx);
       case 'channel_daily_recaps':
