@@ -78,6 +78,7 @@ export class DeskMetricsRepository {
     stageNames: string[];
     priorities: TicketPriority[];
     userGroupIds: string[];
+    tagValues: string[];
     customFieldFilter?: {
       keys: string[];
       perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
@@ -90,6 +91,7 @@ export class DeskMetricsRepository {
       stageNames,
       priorities,
       userGroupIds,
+      tagValues,
       customFieldFilter,
     } = params;
     const db = this.getDbInstance();
@@ -158,22 +160,20 @@ export class DeskMetricsRepository {
     // Cohort: active tickets created in range, optionally scoped by the selected filters.
     let customFieldExists: Prisma.Sql = Prisma.sql``;
     if (customFieldFilter && customFieldFilter.keys.length > 0) {
-      // Value conditions — OR across keys that have values/terms selected
-      const valueConditions: Prisma.Sql[] = [];
+      // One EXISTS per field, AND'd together — values within a field are OR'd, different fields are AND'd
+      const perKeyExists: Prisma.Sql[] = [];
       for (const key of customFieldFilter.keys) {
         const kf = customFieldFilter.perKeyFilters?.[key];
         const hasValues = kf?.values && kf.values.length > 0;
         const hasTerms = kf?.textTerms && kf.textTerms.length > 0;
-        if (!hasValues && !hasTerms) continue;
         const fieldNameMatch = Prisma.sql`COALESCE(gf."fieldName", ff."fieldName") = ${key}`;
         const fieldCol = Prisma.sql`COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))`;
-        let valueCondition: Prisma.Sql;
+        let valueCondition: Prisma.Sql | undefined;
         if (hasTerms) {
-          // OR across all text terms within this field
           valueCondition = kf!
             .textTerms!.map((t) => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
             .reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`));
-        } else {
+        } else if (hasValues) {
           valueCondition = Prisma.sql`(
             ${fieldCol} IN (${Prisma.join(kf!.values!)})
             OR (
@@ -185,23 +185,50 @@ export class DeskMetricsRepository {
             )
           )`;
         }
-        valueConditions.push(Prisma.sql`(${fieldNameMatch} AND (${valueCondition}))`);
-      }
-      // Single EXISTS: field-level pre-filter (fieldName IN keys) + optional value-level AND
-      const valueClause =
-        valueConditions.length > 0
-          ? Prisma.sql`AND (${valueConditions.reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`))})`
-          : Prisma.sql``;
-      customFieldExists = Prisma.sql`AND EXISTS (
+        perKeyExists.push(Prisma.sql`AND EXISTS (
           SELECT 1 FROM "public"."form_entity_values" fev
           LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
           LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
           WHERE fev."entityId" = ta."ticketId"
             AND fev."entityType" = 'TICKET'
-            AND COALESCE(gf."fieldName", ff."fieldName") IN (${Prisma.join(customFieldFilter.keys)})
-            ${valueClause}
-        )`;
+            AND ${fieldNameMatch}
+            ${valueCondition !== undefined ? Prisma.sql`AND (${valueCondition})` : Prisma.sql``}
+        )`);
+      }
+      if (perKeyExists.length > 0) {
+        customFieldExists = perKeyExists.reduce((acc, c) => Prisma.sql`${acc} ${c}`);
+      }
     }
+
+    // Tag filter: parse "category:tag" composite values (format used by GeneratedTagsSubmenu)
+    const tagPairs = tagValues
+      .map(v => { const i = v.indexOf(':'); return i === -1 ? null : { cat: v.slice(0, i), tag: v.slice(i + 1) }; })
+      .filter((p): p is { cat: string; tag: string } => p !== null);
+
+    // Shared fragment: resolves the latest email for a ticket's conversation.
+    // Uses ORDER BY createdAt DESC, id DESC (clock-independent) so it works for
+    // both inbound and outbound emails without depending on lastEmailAt equality.
+    // Tags are read from the ticket's LATEST email only (matches Vespa mapper).
+    const latestEmailId = (conversationIdCol: string) => Prisma.sql`(
+      SELECT e2.id FROM "public"."emails" e2
+      WHERE e2."conversationId" = ${Prisma.raw(conversationIdCol)}
+      ORDER BY e2."createdAt" DESC, e2.id DESC
+      LIMIT 1
+    )`;
+
+    const tagExists: Prisma.Sql =
+      tagPairs.length > 0
+        ? Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "public"."tickets" ft
+            JOIN "public"."emails" e ON e.id = ${latestEmailId('ft."conversationId"')}
+            JOIN non_zero.tags tg
+              ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+              AND (${tagPairs
+                .map(p => Prisma.sql`(tg."tagCategory" = ${p.cat} AND tg.tag = ${p.tag})`)
+                .reduce((acc, cur) => Prisma.sql`${acc} OR ${cur}`)})
+            WHERE ft.id = ta."ticketId"
+          )`
+        : Prisma.sql``;
 
     const ticketAttributeConditions: Prisma.Sql[] = [];
     if (stageNames.length > 0) {
@@ -231,7 +258,7 @@ export class DeskMetricsRepository {
         : Prisma.sql``;
     const ticketScopeExists = Prisma.sql`${activeTicketFilter(
       assigneeIds
-    )} ${ticketAttributeExists} ${customFieldExists}`;
+    )} ${ticketAttributeExists} ${customFieldExists} ${tagExists}`;
 
     const cohortCte = Prisma.sql`
       cohort AS (
@@ -244,28 +271,40 @@ export class DeskMetricsRepository {
       )`;
 
     const frtStop = frtStopSql();
-    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend, agents] =
-      await Promise.all([
-        this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
-        this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
-        this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
-        this.stageCounts(db, cohortCte),
-        this.priorityBreakdown(db, cohortCte),
-        this.csatStats(db, channelId, gte, lte, ticketScopeExists),
-        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
-        this.agentPerformance(
-          db,
-          cohortCte,
-          frtStop,
-          resolvedAtSql,
-          reopenedSql,
-          channelId,
-          gte,
-          lte,
-          assigneeIds,
-          ticketScopeExists
-        ),
-      ]);
+    const [
+      aggregates,
+      tickets,
+      emailRepliesInRange,
+      stageCounts,
+      priority,
+      csat,
+      trend,
+      agents,
+      tagCategories,
+      tagBreakdown,
+    ] = await Promise.all([
+      this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
+      this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
+      this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
+      this.stageCounts(db, cohortCte),
+      this.priorityBreakdown(db, cohortCte),
+      this.csatStats(db, channelId, gte, lte, ticketScopeExists),
+      this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
+      this.agentPerformance(
+        db,
+        cohortCte,
+        frtStop,
+        resolvedAtSql,
+        reopenedSql,
+        channelId,
+        gte,
+        lte,
+        assigneeIds,
+        ticketScopeExists
+      ),
+      this.tagCategoryBreakdown(db, cohortCte),
+      this.tagBreakdown(db, cohortCte),
+    ]);
 
     return {
       range: { from: gte.toISOString(), to: lte.toISOString() },
@@ -279,6 +318,8 @@ export class DeskMetricsRepository {
       },
       priority,
       trend,
+      tagCategories,
+      tagBreakdown,
       tickets,
       agents,
     };
@@ -379,6 +420,7 @@ export class DeskMetricsRepository {
         rt_seconds: number | null;
         csat_value: { rating?: string; score?: number | string | null } | null;
         custom_fields: Record<string, string> | null;
+        ticket_tags: Array<{ tagCategory: string; tag: string }> | null;
       }>
     >(
       Prisma.sql`
@@ -402,6 +444,24 @@ export class DeskMetricsRepository {
               FILTER (WHERE field_name IS NOT NULL AND field_value IS NOT NULL) AS custom_fields
           FROM deduped_fev
           GROUP BY ticket_id
+        ),
+        ticket_tags_agg AS (
+          SELECT deduped."ticketId" AS ticket_id,
+            jsonb_agg(jsonb_build_object('tagCategory', deduped.tag_category, 'tag', deduped.tag)) AS tags
+          FROM (
+            SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
+            FROM cohort c
+            JOIN "public"."tickets" t ON t.id = c."ticketId"
+            JOIN "public"."emails" e ON e.id = (
+              SELECT e2.id FROM "public"."emails" e2
+              WHERE e2."conversationId" = t."conversationId"
+              ORDER BY e2."createdAt" DESC, e2.id DESC
+              LIMIT 1
+            )
+            JOIN non_zero.tags tg
+              ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+          ) deduped
+          GROUP BY deduped."ticketId"
         )
         SELECT
           c."ticketId" AS ticket_id,
@@ -418,11 +478,13 @@ export class DeskMetricsRepository {
           (SELECT ta.value FROM "public"."ticket_activities" ta
             WHERE ta."ticketId" = c."ticketId" AND ta."activityType" = 'CSAT_RECEIVED'
             ORDER BY ta."timestamp" DESC LIMIT 1) AS csat_value,
-          fv.custom_fields
+          fv.custom_fields,
+          tta.tags AS ticket_tags
         FROM cohort c
         JOIN "public"."tickets" t ON t.id = c."ticketId"
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
+        LEFT JOIN ticket_tags_agg tta ON tta.ticket_id = c."ticketId"
         ORDER BY c.created_at DESC
       `
     );
@@ -444,8 +506,67 @@ export class DeskMetricsRepository {
         csatScore: typeof score === 'number' && Number.isFinite(score) ? score : null,
         csatRating: r.csat_value?.rating ?? null,
         customFields: r.custom_fields ?? null,
+        tags: r.ticket_tags ?? null,
       };
     });
+  }
+
+  private async tagCategoryBreakdown(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<Array<{ tagCategory: string; count: number }>> {
+    const rows = await db.$queryRaw<Array<{ tag_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte},
+        latest_tag_rows AS (
+          SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category
+          FROM cohort c
+          JOIN "public"."tickets" t ON t.id = c."ticketId"
+          JOIN "public"."emails" e ON e.id = (
+            SELECT e2.id FROM "public"."emails" e2
+            WHERE e2."conversationId" = t."conversationId"
+            ORDER BY e2."createdAt" DESC, e2.id DESC
+            LIMIT 1
+          )
+          JOIN non_zero.tags tg
+            ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        )
+        SELECT tag_category, COUNT(DISTINCT "ticketId")::int AS count
+        FROM latest_tag_rows
+        GROUP BY tag_category
+        ORDER BY count DESC
+      `
+    );
+    return rows.map(r => ({ tagCategory: r.tag_category, count: r.count }));
+  }
+
+  private async tagBreakdown(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<Array<{ tag: string; tagCategory: string; count: number }>> {
+    const rows = await db.$queryRaw<Array<{ tag: string; tag_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte},
+        latest_tag_rows AS (
+          SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
+          FROM cohort c
+          JOIN "public"."tickets" t ON t.id = c."ticketId"
+          JOIN "public"."emails" e ON e.id = (
+            SELECT e2.id FROM "public"."emails" e2
+            WHERE e2."conversationId" = t."conversationId"
+            ORDER BY e2."createdAt" DESC, e2.id DESC
+            LIMIT 1
+          )
+          JOIN non_zero.tags tg
+            ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        )
+        SELECT tag_category, tag, COUNT(DISTINCT "ticketId")::int AS count
+        FROM latest_tag_rows
+        GROUP BY tag_category, tag
+        ORDER BY count DESC
+      `
+    );
+    return rows.map(r => ({ tag: r.tag, tagCategory: r.tag_category, count: r.count }));
   }
 
   private async agentPerformance(

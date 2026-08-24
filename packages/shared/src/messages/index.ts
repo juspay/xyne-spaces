@@ -68,6 +68,7 @@ export {
   type PendingStatus,
   type PendingKind,
   type ZeroStateName,
+  type PendingAttachment,
 } from './pending.js';
 
 export { usePendingQueue } from './usePendingQueue.js';

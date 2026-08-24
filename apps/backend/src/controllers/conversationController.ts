@@ -129,6 +129,7 @@ export class ConversationController {
       .object({
         limit: z.coerce.number().int().min(1).max(50).default(10),
         cursor: z.string().min(1).max(2048).optional(),
+        sort: z.enum(['sections', 'recent']).default('sections'),
       })
       .safeParse(req.query);
 
@@ -150,7 +151,8 @@ export class ConversationController {
     try {
       const page = await this.conversationParticipantRepository.findUserThreadsPage(
         queryResult.data.limit,
-        cursor
+        cursor,
+        queryResult.data.sort
       );
 
       res.json({

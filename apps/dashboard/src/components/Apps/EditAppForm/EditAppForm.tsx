@@ -479,6 +479,8 @@ interface PermissionsSectionProps {
   // workspace's installed_app_permissions (admin, Installed screen).
   editMode: 'template' | 'install';
   installedAppId: string | null;
+  // true -> render the section but lock every control (app creator on the Installed screen).
+  readOnly?: boolean;
 }
 
 const PermissionsSection = ({
@@ -486,6 +488,7 @@ const PermissionsSection = ({
   isInstalled,
   editMode,
   installedAppId,
+  readOnly = false,
 }: PermissionsSectionProps): ReactElement => {
   const isInstallMode = editMode === 'install' && !!installedAppId;
   const [available, setAvailable] = useState<AppPermission[]>([]);
@@ -495,6 +498,8 @@ const PermissionsSection = ({
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Everything the `saving` flag already disables should also be disabled when read-only.
+  const locked = saving || readOnly;
 
   // Always load the full registry
   useEffect(() => {
@@ -649,7 +654,7 @@ const PermissionsSection = ({
             variant='ghost'
             className='h-7 text-xs'
             onClick={handleToggleSelectAll}
-            disabled={saving || !loaded || available.length === 0}
+            disabled={locked || !loaded || available.length === 0}
             data-track-category='Apps'
             data-track-name='ToggleSelectAllPermissions'
           >
@@ -661,7 +666,7 @@ const PermissionsSection = ({
             variant='outline'
             className='h-7 text-xs'
             onClick={() => void handleSave()}
-            disabled={saving || !loaded}
+            disabled={locked || !loaded}
           >
             {saving ? 'Saving…' : 'Save Permissions'}
           </Button>
@@ -672,7 +677,7 @@ const PermissionsSection = ({
               variant='default'
               className='h-7 text-xs'
               onClick={() => void handleActivate()}
-              disabled={activating || saving}
+              disabled={activating || locked}
               title='Re-sync this install to activate pending permission changes'
             >
               {activating ? 'Applying…' : 'Apply & activate'}
@@ -695,16 +700,16 @@ const PermissionsSection = ({
               <div
                 key={scope}
                 role='button'
-                tabIndex={saving ? -1 : 0}
+                tabIndex={locked ? -1 : 0}
                 aria-pressed={selected.has(scope)}
                 className={`flex items-start gap-2.5 group px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                  saving ? 'cursor-not-allowed' : 'cursor-pointer'
+                  locked ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
                 onClick={() => {
-                  if (!saving) handleToggle(scope, !selected.has(scope));
+                  if (!locked) handleToggle(scope, !selected.has(scope));
                 }}
                 onKeyDown={e => {
-                  if (saving) return;
+                  if (locked) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleToggle(scope, !selected.has(scope));
@@ -718,7 +723,7 @@ const PermissionsSection = ({
                 <span className='mt-0.5 pointer-events-none'>
                   <Checkbox
                     checked={selected.has(scope)}
-                    disabled={saving}
+                    disabled={locked}
                     onChange={checked => handleToggle(scope, checked)}
                     label=''
                   />
@@ -763,6 +768,9 @@ export interface EditAppFormProps {
   // (admin; edits this workspace's install — webhook + permissions, commands read-only).
   editMode?: 'template' | 'install';
   installedAppId?: string | null;
+  // false = the app's creator viewing their own install: every section still renders, but each
+  // control is locked -- Incoming Webhooks is the only editable one. Admins/template edits pass true.
+  canEditInstallSettings?: boolean;
   onSave: (data: { description: string; webhookUrl: string }) => Promise<void>;
   onUploadPicture?: ((appId: string, file: File) => Promise<void>) | undefined;
   isLoading?: boolean | undefined;
@@ -773,8 +781,14 @@ const WEBHOOK_NAME_MAX_LENGTH = 84;
 const WEBHOOK_TYPE_OPTIONS = [
   { value: 'SLACK', label: 'Slack' },
   { value: 'SENTINELONE', label: 'SentinelOne' },
+  { value: 'AMAZON_SNS', label: 'Amazon SNS' },
+  { value: 'PINGDOM', label: 'Pingdom' },
+  { value: 'GCP', label: 'GCP Monitoring' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
+const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
+  WEBHOOK_TYPE_OPTIONS.map(option => [option.value, option.label]),
+) as Record<IncomingWebhookType, string>;
 const WEBHOOK_ACTION_OPTIONS = [
   { value: AppIncomingWebhookAction.MESSAGE, label: 'Message' },
   { value: AppIncomingWebhookAction.TICKET, label: 'Ticket' },
@@ -853,6 +867,7 @@ export const EditAppForm = ({
   appInstallations,
   editMode = 'template',
   installedAppId = null,
+  canEditInstallSettings = true,
   onSave,
   onUploadPicture,
   isLoading = false,
@@ -861,7 +876,11 @@ export const EditAppForm = ({
   // Install mode = editing this workspace's install (admin). Template mode = editing the app
   // (creator). In install mode commands and name/description are read-only (template-owned).
   const isInstallMode = editMode === 'install';
-  const [activeSection, setActiveSection] = useState<EditAppSection>('basic');
+  // The app's creator on the Installed screen: everything is locked except Incoming Webhooks, so
+  // open on that section rather than dropping them onto a Basic info form they can't submit.
+  const [activeSection, setActiveSection] = useState<EditAppSection>(
+    canEditInstallSettings ? 'basic' : 'incoming',
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [botChannels, setBotChannels] = useState<BotChannel[]>([]);
   const [webhooks, setWebhooks] = useState<IncomingWebhook[]>([]);
@@ -1200,6 +1219,9 @@ export const EditAppForm = ({
   }, [appDescription, webhookUrlValue, reset]);
 
   const onSubmit = async (formData: EditAppFormData): Promise<void> => {
+    // Authoritative gate: the Save button is disabled, but a stray Enter in another section's
+    // input can still trigger implicit form submission, so re-check rather than trust the button.
+    if (!canEditInstallSettings) return;
     await onSave({
       description: formData.description.trim(),
       webhookUrl: formData.webhookUrl.trim(),
@@ -1284,6 +1306,13 @@ export const EditAppForm = ({
 
         {/* Section content */}
         <div role='tabpanel' className='flex-1 overflow-y-auto p-6 space-y-6'>
+          {!canEditInstallSettings && (
+            <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
+              You&apos;re viewing this app as its creator. Only a workspace apps admin can change
+              these settings — you can create and manage Incoming Webhooks.
+            </div>
+          )}
+
           {activeSection === 'basic' && (
             <>
               <SectionHeading
@@ -1354,7 +1383,7 @@ export const EditAppForm = ({
                       id='webhookUrl'
                       type='url'
                       placeholder='https://your-app.com/webhook'
-                      disabled={isLoading}
+                      disabled={isLoading || !canEditInstallSettings}
                       className='text-foreground'
                       {...field}
                     />
@@ -1391,7 +1420,7 @@ export const EditAppForm = ({
                       variant='outline'
                       size='sm'
                       onClick={handleUploadClick}
-                      disabled={isLoading}
+                      disabled={isLoading || !canEditInstallSettings}
                       className='gap-1'
                       title='Upload bot profile picture'
                     >
@@ -1412,7 +1441,7 @@ export const EditAppForm = ({
               <div>
                 <SectionHeading
                   title='Incoming Webhooks'
-                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack and SentinelOne webhook URL formats.'
+                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack, SentinelOne, Amazon SNS, Pingdom and GCP Monitoring webhook URL formats.'
                 />
                 {botChannels.length > 0 && !showCreateForm && (
                   <Button
@@ -1668,7 +1697,7 @@ export const EditAppForm = ({
                           {webhook.name}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
+                          {WEBHOOK_TYPE_LABELS[webhook.type] ?? webhook.type}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
                           {webhook.action === AppIncomingWebhookAction.TICKET
@@ -1899,6 +1928,7 @@ export const EditAppForm = ({
               isInstalled={isInstallMode || isAppInstalled}
               editMode={editMode}
               installedAppId={installedAppId}
+              readOnly={!canEditInstallSettings}
             />
           )}
         </div>
@@ -1913,7 +1943,7 @@ export const EditAppForm = ({
         {activeSection === 'basic' && (
           <Button
             type='submit'
-            disabled={isLoading}
+            disabled={isLoading || !canEditInstallSettings}
             data-track-category='Apps'
             data-track-name='EditApp'
           >

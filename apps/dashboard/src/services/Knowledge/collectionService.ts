@@ -14,6 +14,11 @@ export interface CollectionChild {
   type: NodeType;
   mimeType: string;
   parentId: string | null;
+  /** Per-collection ingestion rollup, only populated for collections at the KB
+   *  root (see useGlobalCollections). Undefined for files and subfolders. */
+  fileTotal?: number;
+  fileIngested?: number;
+  fileFailed?: number;
 }
 
 export interface CollectionItemVersion {
@@ -199,6 +204,77 @@ export async function uploadFilesToCollection(
     onProgress({ uploaded: files.length, total: files.length });
   }
 
+  return response.data;
+}
+
+/** Returned by addDriveLinkToCollection once the import is enqueued. */
+export interface DriveImportStarted {
+  /** null when there was nothing to import. */
+  sessionId: string | null;
+  total: number;
+  files: Array<{ name: string }>;
+}
+
+export type DriveImportFileStatus = 'pending' | 'uploaded' | 'skipped' | 'failed';
+
+/** Live progress of a background Drive import (polled from the status endpoint). */
+export interface DriveImportProgress {
+  collectionId: string;
+  total: number;
+  processed: number;
+  done: boolean;
+  /** Set when the connected token was rejected mid-import → prompt a reconnect. */
+  needsDriveAuth?: boolean;
+  files: Array<{ name: string; status: DriveImportFileStatus; error?: string }>;
+}
+
+/**
+ * Ask the backend for the Google Drive OAuth "connect" URL. Uses OAuth incremental
+ * authorization, so an already-signed-in Google user just approves the Drive scope —
+ * no re-login. `returnPath` is the same-origin SPA path (e.g. the current KB URL) the
+ * backend redirects back to after consent, with `?driveOAuth=success` appended.
+ */
+export async function initDriveOAuth(returnPath: string): Promise<{ authUrl?: string }> {
+  const { data } = await apiInstance.post<{ success: boolean; authUrl?: string }>(
+    '/drive/oauth/google/init',
+    { returnPath },
+  );
+  return data.authUrl ? { authUrl: data.authUrl } : {};
+}
+
+/**
+ * Start a Google Drive import. The server lists the file/folder (as the user, via their
+ * connected OAuth token), enqueues a background download job, and returns a `sessionId` +
+ * the file list immediately. Poll {@link getDriveImportStatus} for live progress. If the
+ * user hasn't connected Drive, the request fails with `needsDriveAuth: true` on the error.
+ */
+export async function addDriveLinkToCollection(
+  collectionId: string,
+  driveUrl: string,
+  opts?: {
+    parentId?: string | null;
+    duplicateStrategy?: 'skip' | 'rename' | 'overwrite';
+  },
+): Promise<DriveImportStarted> {
+  const response = await apiInstance.post<DriveImportStarted>(
+    `/collections/${collectionId}/upload-drive-link`,
+    {
+      driveUrl,
+      parentId: opts?.parentId ?? null,
+      duplicateStrategy: opts?.duplicateStrategy ?? 'rename',
+    },
+  );
+  return response.data;
+}
+
+/** Poll the progress of a background Drive import started above. */
+export async function getDriveImportStatus(
+  collectionId: string,
+  sessionId: string,
+): Promise<DriveImportProgress> {
+  const response = await apiInstance.get<DriveImportProgress>(
+    `/collections/${collectionId}/drive-import/${sessionId}`,
+  );
   return response.data;
 }
 

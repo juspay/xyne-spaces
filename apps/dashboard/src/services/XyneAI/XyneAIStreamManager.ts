@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Global Stream Manager for XyneAI
  * Manages streaming lifecycle outside of React components
@@ -89,6 +90,9 @@ export interface StreamRequest {
   webSearchEnabled: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
+  instant?: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -114,6 +118,15 @@ export interface StreamRequest {
 }
 
 type StreamSubscriber = (state: StreamState) => void;
+
+const deserializeWorkerError = (
+  value: Extract<WorkerOutgoingMessage, { type: 'WORKER_LOG_ERROR' }>['payload']['error'],
+): Error => {
+  const error = new Error(value.message);
+  error.name = value.name;
+  if (value.stack) error.stack = value.stack;
+  return error;
+};
 
 // Helper function to clear status message from a message object
 const clearStatusMessage = <T extends { statusMessage?: string | string[] }>(
@@ -272,10 +285,11 @@ class XyneAIStreamManager {
       const record = await xyneAIStreamStorage.getActiveStreamForThread(threadId);
       if (!record) continue;
 
-      console.info(
-        '[XyneAIStreamManager] App foregrounded — restarting interrupted stream',
-        state.streamId,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[XyneAIStreamManager] App foregrounded — restarting interrupted stream'),
+        context: [state.streamId],
+      });
 
       // Reset the streaming bot message so it shows a reconnecting indicator
       state.messages = state.messages.map(msg =>
@@ -345,7 +359,11 @@ class XyneAIStreamManager {
         // not from stream storage
       }
     } catch (error) {
-      console.error('[XyneAIStreamManager] Failed to initialize from storage:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Failed to initialize from storage:'),
+        error: error,
+      });
     }
   }
 
@@ -371,8 +389,20 @@ class XyneAIStreamManager {
         this.handleWorkerStreamError(payload.streamId, payload.error);
         break;
 
+      case 'WORKER_LOG_ERROR':
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: payload.message,
+          error: deserializeWorkerError(payload.error),
+        });
+        break;
+
       default:
-        console.error('[XyneAIStreamManager] Unknown worker message type:', type);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAIStreamManager] Unknown worker message type:'),
+          error: type,
+        });
     }
   }
 
@@ -380,7 +410,11 @@ class XyneAIStreamManager {
    * Handle worker errors
    */
   private handleWorkerError(error: ErrorEvent): void {
-    console.error('[XyneAIStreamManager] Worker error:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[XyneAIStreamManager] Worker error:'),
+      error: error,
+    });
   }
 
   /**
@@ -502,7 +536,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId || !streamState) {
-      console.error('[XyneAIStreamManager] Stream not found for chunk:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for chunk:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -521,7 +559,10 @@ class XyneAIStreamManager {
     const botMessageId = streamingBotMessage?.id;
 
     if (!botMessageId) {
-      console.error('[XyneAIStreamManager] No streaming bot message found for stream');
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] No streaming bot message found for stream'),
+      });
       return;
     }
 
@@ -585,7 +626,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId) {
-      console.error('[XyneAIStreamManager] Stream not found for completion:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for completion:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -630,7 +675,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId || !botMessageId) {
-      console.error('[XyneAIStreamManager] Stream not found for error:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for error:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -669,7 +718,11 @@ class XyneAIStreamManager {
       try {
         subscriber(state);
       } catch (error) {
-        console.error('[XyneAIStreamManager] Subscriber error:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAIStreamManager] Subscriber error:'),
+          error: error,
+        });
       }
     }
   }
@@ -998,6 +1051,7 @@ class XyneAIStreamManager {
           webSearchEnabled: request.webSearchEnabled,
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
+          instant: request.instant ?? false,
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {
@@ -1431,7 +1485,11 @@ class XyneAIStreamManager {
           parsedInput = JSON.parse(inputStr);
         }
       } catch (e) {
-        console.warn('Failed to parse tool input:', e);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Failed to parse tool input:'),
+          context: [e],
+        });
       }
 
       try {
@@ -1442,7 +1500,11 @@ class XyneAIStreamManager {
           parsedOutput = JSON.parse(outputStr);
         }
       } catch (e) {
-        console.warn('Failed to parse tool output:', e);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Failed to parse tool output:'),
+          context: [e],
+        });
       }
 
       // For create_ppt, data is in 'content' field, not 'output'
@@ -1450,7 +1512,11 @@ class XyneAIStreamManager {
         try {
           parsedOutput = JSON.parse(contentStr);
         } catch (e) {
-          console.warn('Failed to parse create_ppt content:', e);
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('Failed to parse create_ppt content:'),
+            context: [e],
+          });
         }
       }
 
@@ -1748,7 +1814,7 @@ class XyneAIStreamManager {
     initialMessages: Message[] = [],
   ): () => void {
     if (!convId.startsWith('chat-')) {
-      return () => {};
+      return () => undefined;
     }
     const existing = this.activeStreams.get(threadId);
     if (existing && existing.status === 'streaming') {
@@ -1759,7 +1825,7 @@ class XyneAIStreamManager {
       const isDeadViewer =
         existing.streamId.startsWith('live-') && !this.liveViewerStreams.has(existing.streamId);
       if (!isDeadViewer) {
-        return () => {};
+        return () => undefined;
       }
     }
 
@@ -2150,7 +2216,11 @@ class XyneAIStreamManager {
         }, delayMs);
       }
     } catch (error) {
-      console.warn('[XyneAIStreamManager] Failed to refresh messages from backend:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[XyneAIStreamManager] Failed to refresh messages from backend:'),
+        context: [error],
+      });
       // Don't throw - the stream already has the best-effort content from streaming
     }
   }

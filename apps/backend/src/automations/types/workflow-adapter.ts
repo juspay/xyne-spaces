@@ -4,6 +4,14 @@ import { AutomationStatus, AutomationRunStatus } from './status';
 import type { AutomationConfig } from './automation-config';
 
 export const AUTOMATION_WORKFLOW_TYPE = 'Automations';
+/** Personal desk auto-label rules — not listed or synced via Automations Zero queries. */
+export const DESK_AUTOMATION_WORKFLOW_TYPE = 'DeskAutomations';
+
+export function isExecutableAutomationWorkflowType(workflowType: string | null | undefined): boolean {
+  return (
+    workflowType === AUTOMATION_WORKFLOW_TYPE || workflowType === DESK_AUTOMATION_WORKFLOW_TYPE
+  );
+}
 
 export interface AutomationView {
   id: string;
@@ -16,6 +24,7 @@ export interface AutomationView {
   createdAt: Date;
   updatedAt: Date;
   automationSeriesId: string | null;
+  eventType: WorkflowEventType;
 }
 
 /** What the run-history list renders. No context blobs — see AutomationRunView. */
@@ -84,6 +93,7 @@ export function workflowToAutomation(workflow: Workflow): AutomationView {
     createdAt: workflow.createdAt,
     updatedAt: workflow.updatedAt,
     automationSeriesId: workflow.automationSeriesId ?? null,
+    eventType: triggerTypeToEventType(workflow.eventType),
   };
 }
 

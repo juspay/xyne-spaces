@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useState, useEffect } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -43,8 +44,11 @@ export function AIInviteDialog({
     if (isOpen) {
       setSelectedUserIds(new Set(users.map(u => u.id)));
       setMessage(suggestedMessage);
-      // eslint-disable-next-line no-console
-      console.log('[AIInviteDialog] Opening with suggestedMessage:', suggestedMessage);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('[AIInviteDialog] Opening with suggestedMessage:'),
+        context: [suggestedMessage],
+      });
     }
   }, [isOpen, users, suggestedMessage]);
 
@@ -90,8 +94,11 @@ export function AIInviteDialog({
         // Create HTML with proper paragraph tags
         const messageContent = `<p>${messageText}</p>${linkText ? `<p>${linkText}</p>` : ''}`;
 
-        // eslint-disable-next-line no-console
-        console.log('[AIInviteDialog] Sending DM with message:', { message, messageContent });
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[AIInviteDialog] Sending DM with message:'),
+          context: [{ message, messageContent }],
+        });
 
         // Send DM to each user using the backend API
         // The backend will create or get existing DM and send the message
@@ -107,8 +114,11 @@ export function AIInviteDialog({
         // Notify parent
         onSend(userIds, message);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to send invites:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to send invites:'),
+          error: error,
+        });
       } finally {
         // Reset and close
         setSelectedUserIds(new Set());

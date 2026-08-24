@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { SsrfBlockedError } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { decrypt } from '@/services/encryptionService';
+import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -48,6 +51,13 @@ export class FlowController {
         error: 'Invalid flowJSON in context',
         details: formatValidationErrors(flowResult),
       });
+      return;
+    }
+
+    // 2b. Amazon SNS confirmation is owned by the incoming-webhook controller,
+    // not proxied: an incoming webhook has no outbound webhookUrl to proxy to.
+    if (actionId === SNS_CONFIRM_ACTION_ID) {
+      res.status(200).json(await incomingWebhookController.confirmSnsSubscription(values));
       return;
     }
 
@@ -116,27 +126,31 @@ export class FlowController {
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 
-      // Reject webhook URLs whose host resolves to an internal/private address.
+      // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+      const dispatchHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Xyne-Event': 'flow_action',
+        'X-Xyne-Signature': signature,
+        'X-Source': 'XyneSpaces',
+      };
+      let dispatchUrl: string;
       try {
-        await assertWebhookUrlSafe(installedApp.webhookUrl);
+        const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
+        dispatchUrl = prepared.url;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
-          res.status(502).json({ error: 'App webhook URL is not allowed' });
-          return;
+        } else {
+          logger.error('[FLOW-ACTION] Could not resolve app webhook URL', { appId, error: err });
         }
-        throw err;
+        res.status(502).json({ error: 'App webhook URL is not allowed' });
+        return;
       }
 
       // 6. Call the app backend synchronously.
-      const appResponse = await fetch(installedApp.webhookUrl, {
+      const appResponse = await fetch(dispatchUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Xyne-Event': 'flow_action',
-          'X-Xyne-Signature': signature,
-          'X-Source': 'XyneSpaces',
-        },
+        headers: dispatchHeaders,
         body,
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),

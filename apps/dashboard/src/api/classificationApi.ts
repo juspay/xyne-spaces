@@ -14,6 +14,13 @@ export const classificationApi = {
     return res.data;
   },
 
+  getAiCategories: async (channelId: string): Promise<string[]> => {
+    const res = await apiInstance.get<{ categories: string[] }>(
+      `/channels/${channelId}/classification/ai-categories`,
+    );
+    return res.data.categories;
+  },
+
   patchRawField: async (
     channelId: string,
     ticketId: string,

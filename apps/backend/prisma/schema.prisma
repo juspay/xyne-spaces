@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
 }
 
 datasource db {
@@ -438,6 +438,7 @@ model Workflow {
   // Relations
   workflowExecutions WorkflowExecution[]
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   @@index([ticketId])
   @@index([ticketId, createdAt, id])
@@ -478,6 +479,7 @@ model WorkflowExecution {
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
@@ -921,12 +923,15 @@ model QuestionnaireResponse {
   workspaceId       String
   id                String   @id @default(cuid())
   userId            String
+  email             String?
   questionnaireType String
   payload           Json
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@unique([workspaceId, questionnaireType, userId])
+  @@unique([email, questionnaireType])
+  @@index([userId])
   @@map("questionnaire_responses")
   @@schema("non_zero")
 }
@@ -1627,6 +1632,7 @@ model Project {
   globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
+  repos         Repo[]
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -1663,6 +1669,7 @@ model Board {
   mainReleaseApplications Application[] @relation("MainReleaseBoardApplications")
   ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
+  channelMappings       ChannelBoardMapping[]
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -1774,6 +1781,8 @@ model Channel {
   incomingWebhooks   AppIncomingWebhook[]
   canvasFolders      CanvasFolder[]
   emails             Email[]
+  boardMappings      ChannelBoardMapping[]
+  sdlcRepos          Repo[] @relation("RepoSdlcChannel")
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -1783,6 +1792,27 @@ model Channel {
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
   @@map("channels")
+  @@schema("public")
+}
+
+// Additive channel-to-board association. Board.projectId remains the source of
+// project ownership for ticket-producing operations.
+model ChannelBoardMapping {
+  id          String   @id @default(cuid())
+  channelId   String
+  boardId     String
+  workspaceId String
+  isDefault   Boolean
+  createdBy   String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  board   Board   @relation(fields: [boardId], references: [id])
+
+  @@unique([channelId, boardId])
+  @@index([channelId])
+  @@map("channel_board_mappings")
   @@schema("public")
 }
 
@@ -2056,11 +2086,12 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
-  projectId   String   // Project (denormalized from channel)
+  projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime // Set manually in code — written only by Zero mutators, never Prisma Client
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
   // with the trailing "name" matching the catalog query's orderBy('name').
@@ -2084,6 +2115,30 @@ model ConversationLabelMapping {
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
   @@map("conversation_label_mappings")
   @@schema("public")
+}
+
+// Server-only index of personal Desk auto-label rules targeting private conversation labels.
+// The datasource uses relationMode = "prisma", so migrations do not create database FKs.
+model DeskAutoLabelRuleReference {
+  id                String   @id @default(cuid())
+  workflowId        String
+  labelId           String
+  workspaceId       String
+  ownerId           String
+  channelId         String
+  filterFingerprint String
+  createdAt         DateTime
+
+  workflow Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  label    ConversationLabel @relation(fields: [labelId], references: [id], onDelete: Restrict)
+
+  @@unique([workflowId, labelId])
+  @@unique([workspaceId, ownerId, channelId, labelId, filterFingerprint], map: "desk_auto_label_rule_refs_filter_key")
+  @@index([workspaceId, ownerId, channelId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_idx")
+  @@index([workspaceId, channelId], map: "desk_auto_label_rule_refs_channel_idx")
+  @@index([workspaceId, labelId], map: "desk_auto_label_rule_refs_label_idx")
+  @@map("desk_auto_label_rule_references")
+  @@schema("non_zero")
 }
 
 // Gmail-style mailbox overlay: a per-user, per-desk filing of a shared ticket
@@ -2146,6 +2201,7 @@ model EmailChannelPreference {
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
+  appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2235,6 +2291,32 @@ model Message {
 
   @@index([conversationId, createdAt, messageId])
   @@map("messages")
+  @@schema("public")
+}
+
+// Lifecycle row for structured message artifacts (slash commands). The banner
+// renders and authorizes from this row alone: relating it to `messages` would
+// push every message delta through the global artifact subscription, so the few
+// fields needed to route to the message are projected here instead.
+// `status`/`callExternalId` are the single source of truth for lifecycle and are
+// never mirrored back into message content.
+model MessageArtifact {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  messageId        String   @unique
+  channelId        String
+  conversationId   String
+  isInitialMessage Boolean
+  messagePreview   String
+  messageCreatedAt DateTime
+  command          String
+  status           String
+  callExternalId   String?
+  updatedAt        DateTime
+
+  @@index([workspaceId, status, messageCreatedAt])
+  @@index([channelId])
+  @@map("message_artifacts")
   @@schema("public")
 }
 
@@ -2414,7 +2496,7 @@ model ExternalSource {
   displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
   channelId       String?                   // Target workspace channel for messages
   externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
-  workspaceId     String?
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // Owner for user-scoped integrations (calendar, gmail search)
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
@@ -2493,12 +2575,11 @@ model SurfaceNudge {
   state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
-  projectId   String
+  projectId   String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
-  @@index([projectId, state])
   @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
@@ -2627,6 +2708,7 @@ model Call {
   instanceDate     DateTime?   // For recurring instances
   recordingEnabled Boolean     @default(false)
   recordingUrl     String?     // GCS path: recordings/{callId}.mp4
+  recordingParticipants String[] @default([])
   transcript       String?     // Call transcript
   aiSummary        String?     // AI-generated summary
   startedAt        DateTime    @default(now())
@@ -2641,6 +2723,7 @@ model Call {
   summaryTemplateId String?
   labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
   markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
+  xyneManaged       Boolean     @default(false) // True when Xyne owns this Call's conference link on the source Calendar event (Xyne Call Link Auto-Injection)
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -2876,6 +2959,7 @@ model Canvas {
   editAccessId String? @unique // Random ID for edit access
   visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
+  isArchived   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
   createdAt    DateTime         @default(now())
@@ -2893,6 +2977,9 @@ model Canvas {
   commentThreads CanvasCommentThread[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
+  // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
+  // Emulated (relationMode="prisma"), no DB FK.
+  sdlcArtifact SdlcArtifact?
   // Quarto Doc fields - when docType is Quarto
   userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
   repoId       String?          // Repo ID (no FK constraint) - for editing capability
@@ -3118,16 +3205,104 @@ model VespaInsertionLogs {
 // Repository Configuration for IDE Integration
 model Repo {
   workspaceId String // denormalized tenant key (stamped on insert)
-  id         String @id @default(cuid())
-  name       String         // e.g., "xyne-spaces"
-  url        String         // SSH or HTTPS URL
-  baseBranch Json           // Base branches to checkout from: ["main", "develop"]
-  prefix     String         // Branch prefix: "feature"
-  createdBy  String         // User who added the repo
+  id                   String @id @default(cuid())
+  name                 String // e.g., "xyne-spaces"
+  url                  String // SSH or HTTPS URL
+  canonicalUrl         String?
+  baseBranch           Json // Base branches to checkout from: ["main", "develop"]
+  prefix               String // Branch prefix: "feature"
+  createdBy            String // User who added the repo
+  projectId            String?
+  channelId            String?
+  sdlcSetupExecutionId String? @unique
+  accessCapabilities   Json?
+
+  project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: Cascade)
+  setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
+  sdlcEntityLinks SdlcEntityLink[]
+  sdlcArtifacts   SdlcArtifact[]
+  sdlcTracks      SdlcTrack[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
+  @@unique([workspaceId, canonicalUrl])
   @@index([name])
+  @@index([projectId])
+  @@index([workspaceId, projectId])
   @@map("repos")
+  @@schema("public")
+}
+
+// Generic, repository-scoped trace and evidence links for the SDLC hub.
+// Entity and relation kinds remain strings so v1 can grow without DB enum churn.
+model SdlcEntityLink {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  repoId       String
+  sourceType   String
+  sourceId     String
+  targetType   String
+  targetId     String
+  relationType String
+  createdBy    String
+  createdAt    DateTime @default(now())
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, sourceType, sourceId, targetType, targetId, relationType])
+  @@index([workspaceId, repoId])
+  @@index([repoId, sourceType, sourceId])
+  @@index([repoId, targetType, targetId])
+  @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// Provenance for SDLC-owned entities (one row per entity).
+// entityType is 'CANVAS' for now; 'TICKET' reserved for future flows.
+// sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]
+model SdlcArtifact {
+  workspaceId         String
+  artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
+  repoId              String
+  artifactType        String   @default("DEFAULT")
+  artifactStatus      String   @default("ACTIVE")
+  workflowExecutionId String?
+  generationCommit    String?
+  sourceReferences    String?
+  sourcePaths         String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  repo   Repo   @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  canvas Canvas @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@index([repoId])
+  @@index([workflowExecutionId])
+  @@index([workspaceId])
+  @@index([artifactType, artifactStatus])
+  @@map("sdlc_artifacts")
+  @@schema("public")
+}
+
+// SDLC track: a named workstream inside a repo. Groups PRD canvases and
+// conversations via their nullable trackId columns (one track per item).
+model SdlcTrack {
+  workspaceId String
+  id          String   @id @default(cuid())
+  repoId      String
+  name        String
+  description String?
+  status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([repoId, status])
+  @@index([workspaceId])
+  @@map("sdlc_tracks")
   @@schema("public")
 }
 
@@ -3757,6 +3932,7 @@ model Recap {
   @@index([recapDate])
   @@index([userId])
   @@index([entityType])
+  @@index([entityType, recapDate, entityId], map: "recaps_entityType_recapDate_entityId_idx")
   @@map("recaps")
   @@schema("public")
 }
@@ -3825,13 +4001,12 @@ model SurfaceLink {
 
   linkKind    String
   createdBy   String
-  projectId   String
+  projectId   String?
   createdAt   DateTime        @default(now())
 
   @@unique([sourceType, sourceId, targetType, targetId, linkKind])
   @@index([sourceType, sourceId])
   @@index([targetType, targetId])
-  @@index([projectId])
   @@map("surface_links")
   @@schema("public")
 }

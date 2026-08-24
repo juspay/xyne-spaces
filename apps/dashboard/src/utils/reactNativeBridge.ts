@@ -1,4 +1,12 @@
 import { CallType } from '@xyne/shared';
+import { Event as LogEvent, noopLogger, type Logger } from '@xyne/shared/logger';
+
+let logger: Logger = noopLogger;
+
+export const setReactNativeBridgeLogger = (nextLogger: Logger): void => {
+  logger = nextLogger;
+};
+
 const BRIDGE_VERSION = 1 as const;
 const BRIDGE_CHANNEL = 'xyne-spaces-bridge';
 const WEB_SOURCE = 'xyne-dashboard';
@@ -449,8 +457,11 @@ class ReactNativeBridge {
       return;
     }
 
-    // eslint-disable-next-line no-console
-    console.info('[RN Bridge] <=', message.type, message.payload ?? null);
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_info',
+      message: String('[RN Bridge] <='),
+      context: [message.type, message.payload ?? null],
+    });
 
     if (message.type === NativeInboundMessageType.NATIVE_READY) {
       this.nativeReady = true;
@@ -517,8 +528,11 @@ class ReactNativeBridge {
   ): boolean {
     const bridge = getNativeBridge();
     if (!bridge) {
-      // eslint-disable-next-line no-console
-      console.warn('[RN Bridge] => FAILED - bridge not available', type);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[RN Bridge] => FAILED - bridge not available'),
+        context: [type],
+      });
       return false;
     }
 
@@ -532,13 +546,19 @@ class ReactNativeBridge {
     };
 
     try {
-      // eslint-disable-next-line no-console
-      console.info('[RN Bridge] =>', type, payload ?? null);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[RN Bridge] =>'),
+        context: [type, payload ?? null],
+      });
       bridge.postMessage(JSON.stringify(envelope));
       return true;
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('[RN Bridge] Failed to post message to native layer:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[RN Bridge] Failed to post message to native layer:'),
+        error: error,
+      });
       return false;
     }
   }
@@ -600,20 +620,28 @@ class ReactNativeBridge {
   }
   // LiveKit native bridge methods
   livekitConnect(payload: LiveKitConnectPayload): boolean {
-    // eslint-disable-next-line no-console
-    console.log('[RN Bridge] Sending LIVEKIT_CONNECT', {
-      serverUrl: payload.serverUrl,
-      callType: payload.callType,
-      externalId: payload.externalId,
-      callerName: payload.callerName,
-      roomName: payload.roomName,
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[RN Bridge] Sending LIVEKIT_CONNECT'),
+      context: [
+        {
+          serverUrl: payload.serverUrl,
+          callType: payload.callType,
+          externalId: payload.externalId,
+          callerName: payload.callerName,
+          roomName: payload.roomName,
+        },
+      ],
     });
     return this.send(NativeOutboundMessageType.LIVEKIT_CONNECT, payload);
   }
 
   livekitDisconnect(): boolean {
-    // eslint-disable-next-line no-console
-    console.log('[ReactNativeBridge] livekitDisconnect called', new Error().stack);
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('[ReactNativeBridge] livekitDisconnect called'),
+      context: [new Error().stack],
+    });
     return this.send(NativeOutboundMessageType.LIVEKIT_DISCONNECT);
   }
 
@@ -675,20 +703,22 @@ class ReactNativeBridge {
     // Replay any pending messages for this type (handles cold start race condition)
     const pendingMessage = this.pendingMessages.get(type);
     if (pendingMessage) {
-      // eslint-disable-next-line no-console
-      console.log(
-        '[RN Bridge] Replaying pending message for late listener:',
-        type,
-        pendingMessage.payload,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('[RN Bridge] Replaying pending message for late listener:'),
+        context: [type, pendingMessage.payload],
+      });
       this.pendingMessages.delete(type);
       // Dispatch asynchronously to avoid issues with handler setup
       setTimeout(() => {
         try {
           scopedHandler(pendingMessage);
         } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('[RN Bridge] Failed to replay pending message:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[RN Bridge] Failed to replay pending message:'),
+            error: error,
+          });
         }
       }, 0);
     }
@@ -710,12 +740,11 @@ class ReactNativeBridge {
     if (!listeners || listeners.size === 0) {
       // Queue the message for late listeners if it's a queueable type
       if (this.queueableMessageTypes.has(message.type)) {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[RN Bridge] Queuing message for late listener:',
-          message.type,
-          message.payload,
-        );
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[RN Bridge] Queuing message for late listener:'),
+          context: [message.type, message.payload],
+        });
         this.pendingMessages.set(message.type, message);
       }
       return;
@@ -725,8 +754,11 @@ class ReactNativeBridge {
       try {
         listener(message);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[RN Bridge] Listener execution failed:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[RN Bridge] Listener execution failed:'),
+          error: error,
+        });
       }
     });
   }

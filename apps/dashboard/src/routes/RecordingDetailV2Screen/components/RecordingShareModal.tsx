@@ -48,9 +48,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     [locallyRevokedShareIds, recordingRow],
   );
 
-  const isOwner = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
-  const canManage = isOwner;
-
   const sharedUserIds = useMemo(
     () => new Set(shares.map(share => share.userId).filter((id): id is string => Boolean(id))),
     [shares],
@@ -69,7 +66,12 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   // userGroupId/channelId (dynamic membership), not expanded to individual users.
   const options = useMemo(() => {
     const userOptions = activeUsers
-      .filter(u => u.id !== recording.createdByUserId && !sharedUserIds.has(u.id))
+      .filter(
+        u =>
+          u.id !== recording.createdByUserId &&
+          u.id !== currentUser?.id &&
+          !sharedUserIds.has(u.id),
+      )
       .map(u => ({
         label: getUserDisplayName(u),
         subtitle: u.email ?? '',
@@ -104,6 +106,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     sharedUserGroupIds,
     sharedChannelIds,
     recording.createdByUserId,
+    currentUser?.id,
   ]);
 
   const handleShare = async (): Promise<void> => {
@@ -173,14 +176,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       });
     }
   };
-
-  if (!canManage) {
-    return (
-      <div className='p-5 text-sm text-muted-foreground'>
-        Only the recording creator can manage sharing.
-      </div>
-    );
-  }
 
   return (
     <div className='flex flex-col w-full p-5 gap-4'>

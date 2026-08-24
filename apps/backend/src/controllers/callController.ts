@@ -24,6 +24,7 @@ import {
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@xyne/storage';
+import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
@@ -38,7 +39,9 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType, AttachmentEntityType } from '@xyne/shared';
+  RecordingType,
+  AttachmentEntityType,
+} from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -46,6 +49,12 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
+
+const RecordingParticipantsCommandSchema = z.object({
+  action: z.enum(['add', 'remove']),
+  userId: z.string().min(1).max(64),
+});
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -382,11 +391,21 @@ export class CallController {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
     let headlessNotesCanvasId: string | undefined;
+    let headlessDetailedSummaryCanvasId: string | undefined;
     // Tracks which stage was active when an error is thrown; used in catch log.
     let stage = 'setup';
 
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
+      const {
+        callType = 'AUDIO',
+        channelId,
+        invitedUserIds,
+        isHeadless,
+        sttModel,
+        conversationId,
+        artifactMessageId,
+        sdlcLink,
+      } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -417,6 +436,57 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
+        stage = 'detailed_summary_canvas_creation';
+        const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId(
+          'xyne-automatic',
+          req.user!.workspaceId!,
+        );
+        if (!xyneAutomaticBot) {
+          throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
+        }
+        const detailedSummaryCanvasId = await callDocumentService.createDetailedSummaryCanvas(
+          callExternalId,
+          '_Detailed summary will appear here once the recording ends._',
+          xyneAutomaticBot.id,
+          null,
+          null,
+          new Date(),
+          userId,
+          undefined,
+          undefined,
+          req.user!.workspaceId,
+        );
+        if (!detailedSummaryCanvasId) {
+          throw new Error('Failed to create detailed summary canvas');
+        }
+        headlessDetailedSummaryCanvasId = detailedSummaryCanvasId;
+
+        // Thread-linked recording: validate the conversation up front (fail
+        // fast with a 404 instead of creating a LiveKit room for nothing) and
+        // stamp channelId/conversationId onto the room metadata. The actual
+        // Call DB row — and the thread's single anchor message — are created
+        // together by noteTakerWebhookController on first participant_joined,
+        // so nothing is posted into the thread unless the recording actually
+        // starts (e.g. mic permission denied / room creation failure after
+        // this point never leaves a ghost message behind).
+        if (channelId && conversationId) {
+          stage = 'thread_conversation_lookup';
+          const conversation = await repositories.conversations.findByIdAndWorkspace(
+            conversationId,
+            req.user!.workspaceId!,
+          );
+          if (!conversation || conversation.channelId !== channelId) {
+            res.status(404).json({ success: false, error: 'Conversation not found' });
+            return;
+          }
+          stage = 'thread_channel_membership_check';
+          const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+          if (!isMember) {
+            res.status(403).json({ success: false, error: 'Not a member of this channel' });
+            return;
+          }
+        }
+
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
@@ -424,6 +494,8 @@ export class CallController {
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
+          detailedSummaryCanvasId,
+          ...(channelId && conversationId ? { channelId, conversationId } : {}),
         });
 
         stage = 'livekit_room_creation';
@@ -459,6 +531,8 @@ export class CallController {
           roomLink,
           channelId: null,
           notesCanvasId,
+          detailedSummaryCanvasId,
+          ...(conversationId ? { conversationId } : {}),
         });
         return;
       }
@@ -487,6 +561,12 @@ export class CallController {
         res.status(400).json({ success: false, error: 'Invalid call type' });
         return;
       }
+
+      // No pre-flight validation of artifactMessageId: every artifact write is
+      // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
+      // an id that does not belong to this channel matches zero rows.
+      const linkedArtifactMessageId =
+        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -617,17 +697,55 @@ export class CallController {
       // Generate room link
       const roomLink = buildCallInviteUrl(callExternalId);
 
+      // SDLC linking context: validated here, applied by the LiveKit webhook when
+      // the call record (and its conversation) are created. Invalid input is
+      // dropped with a warning rather than failing the call.
+      let validatedSdlcLink: SdlcCallLink | null = null;
+      if (sdlcLink) {
+        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
+        if (parsedSdlcLink.success) {
+          const link = parsedSdlcLink.data;
+          const sdlcRepo = await db.repo.findFirst({
+            where: { id: link.repoId, channelId: channel.id },
+            select: { id: true },
+          });
+          const linkTargetValid = sdlcRepo
+            ? link.ownerType === 'CANVAS'
+              ? Boolean(
+                  await db.canvas.findFirst({
+                    where: { id: link.ownerId, channelId: channel.id },
+                    select: { id: true },
+                  }),
+                )
+              : Boolean(
+                  await db.sdlcTrack.findFirst({
+                    where: { id: link.ownerId, repoId: link.repoId },
+                    select: { id: true },
+                  }),
+                )
+            : false;
+          if (linkTargetValid) {
+            validatedSdlcLink = link;
+          } else {
+            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
+          }
+        } else {
+          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
+        }
+      }
+
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
+        ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
+        ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
       });
 
       stage = 'livekit_room_creation';
@@ -690,10 +808,26 @@ export class CallController {
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
       if (headlessNotesCanvasId) {
         try {
-          await db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } });
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessNotesCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } }),
+          ]);
         } catch (cleanupError) {
           logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
             canvasId: headlessNotesCanvasId,
+            cleanupError,
+          });
+        }
+      }
+      if (headlessDetailedSummaryCanvasId) {
+        try {
+          await db.$transaction([
+            db.canvasParticipant.deleteMany({ where: { canvasId: headlessDetailedSummaryCanvasId } }),
+            db.canvas.deleteMany({ where: { id: headlessDetailedSummaryCanvasId } }),
+          ]);
+        } catch (cleanupError) {
+          logger.error(`[${callIdForLog}] headless_detailed_summary_canvas_cleanup_failed`, {
+            canvasId: headlessDetailedSummaryCanvasId,
             cleanupError,
           });
         }
@@ -811,7 +945,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1111,7 +1244,7 @@ export class CallController {
         return {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
@@ -1273,7 +1406,7 @@ export class CallController {
         recording: {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
@@ -1300,6 +1433,16 @@ export class CallController {
             typeof callMetadata?.detailedSummaryCanvasId === 'string'
               ? callMetadata.detailedSummaryCanvasId
               : null,
+          // Tri-state, not a plain boolean: `true`/`false` are recordings
+          // created after this flag existed (still generating vs done);
+          // `null` means the key is entirely absent from metadata (a
+          // recording from before this flag existed at all) — those already
+          // finished generating long ago, so the frontend treats `null` the
+          // same as `true` and only treats an explicit `false` as "not ready".
+          detailedSummaryReady:
+            typeof callMetadata?.detailedSummaryReady === 'boolean'
+              ? callMetadata.detailedSummaryReady
+              : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
               ? callMetadata.linkedTicketId
@@ -1308,6 +1451,8 @@ export class CallController {
             typeof callMetadata?.linkedTicketMessageId === 'string'
               ? callMetadata.linkedTicketMessageId
               : null,
+          // Google Docs exported from this recording's summary, newest first.
+          googleDocs: readRecordingGoogleDocLinks(call.metadata),
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1315,6 +1460,55 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to fetch recording detail:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch recording' });
+    }
+  };
+
+  manageRecordingParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RecordingParticipantsCommandSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (input.action === 'add') {
+        const participant = await repositories.users.findById(input.userId);
+        if (
+          !participant ||
+          participant.workspaceId !== req.user!.workspaceId ||
+          participant.leftAt !== null
+        ) {
+          res.status(400).json({ success: false, error: 'User not found in this workspace' });
+          return;
+        }
+        await repositories.calls.addRecordingParticipant(callId, input.userId);
+      } else {
+        await repositories.calls.removeRecordingParticipant(callId, input.userId);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to manage recording participants', { error, callId });
+      res.status(400).json({ success: false, error: 'Failed to update participants' });
     }
   };
 
@@ -1362,9 +1556,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),

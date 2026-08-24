@@ -12,6 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
   buildSentinelRawFallbackTicketDescription,
@@ -22,6 +23,17 @@ import {
   formatSentinelOneTicketText,
   parseExactSentinelPayload,
 } from './sentinelWebhookParser';
+import {
+  buildAmazonSnsFlow,
+  buildSubscriptionConfirmationFlow,
+  buildUnsubscribeConfirmationFlow,
+  parseSnsEnvelope,
+  parseSnsMessage,
+} from './amazonSnsWebhookParser';
+import { buildPingdomFlow, normalizePingdom, parsePingdomPayload } from './pingdomWebhookParser';
+import { buildGcpFlow, normalizeGcp, parseGcpPayload } from './gcpWebhookParser';
+import { validateFlowDefinition } from '@xyne/shared';
+import type { FlowDefinition } from '@xyne/shared';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
 type IncomingWebhookType = AppIncomingWebhookType;
@@ -109,6 +121,15 @@ class IncomingWebhookController {
     if (type === AppIncomingWebhookType.SENTINELONE) {
       return `/api/apps/webhooks/sentinel/${safeWorkspaceId}/${installedAppId}/${secret}`;
     }
+    if (type === AppIncomingWebhookType.AMAZON_SNS) {
+      return `/api/apps/webhooks/sns/${safeWorkspaceId}/${installedAppId}/${secret}`;
+    }
+    if (type === AppIncomingWebhookType.PINGDOM) {
+      return `/api/apps/webhooks/pingdom/${safeWorkspaceId}/${installedAppId}/${secret}`;
+    }
+    if (type === AppIncomingWebhookType.GCP) {
+      return `/api/apps/webhooks/gcp/${safeWorkspaceId}/${installedAppId}/${secret}`;
+    }
 
     return `/api/apps/webhooks/${safeWorkspaceId}/${installedAppId}/${secret}`;
   };
@@ -123,6 +144,21 @@ class IncomingWebhookController {
         return JSON.parse(req.body.toString('utf8'));
       } catch (error) {
         logger.warn('[Incoming-Webhook] Failed to parse buffered webhook body', {
+          workspaceId,
+          appId,
+          error,
+        });
+        return null;
+      }
+    }
+
+    // Amazon SNS posts JSON under `Content-Type: text/plain`, so its route parses
+    // the body with express.text() and hands us a raw string.
+    if (typeof req.body === 'string') {
+      try {
+        return JSON.parse(req.body);
+      } catch (error) {
+        logger.warn('[Incoming-Webhook] Failed to parse text webhook body', {
           workspaceId,
           appId,
           error,
@@ -240,6 +276,9 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
+      logger.info('[INCOMING-WEBHOOK] BODY', {
+        body: context.body,
+      });
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
@@ -322,14 +361,11 @@ class IncomingWebhookController {
             }
 
             const board = await repositories.boards.findById(context.webhook.boardId);
-            const channel = await repositories.channels.findById(context.channelId);
-            if (!board || !channel || board.projectId !== channel.projectId) {
-              logger.warn('[Incoming-Webhook] Invalid board/channel configuration for ticket webhook', {
+            if (!board) {
+              logger.warn('[Incoming-Webhook] Invalid board configuration for ticket webhook', {
                 webhookId: context.webhook.id,
                 boardId: context.webhook.boardId,
                 channelId: context.channelId,
-                boardProjectId: board?.projectId,
-                channelProjectId: channel?.projectId,
               });
               res.status(400).send('invalid_payload');
               return;
@@ -377,6 +413,205 @@ class IncomingWebhookController {
       );
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
+        params: req.params,
+        error,
+      });
+      res.status(500).send('rollup_error');
+    }
+  };
+
+  /**
+   * Serialize a flow into the message-content form the dashboard renders.
+   * Mirrors the encoding used by chatController for app-authored flow messages.
+   */
+  private encodeFlowContent(flow: FlowDefinition): string | null {
+    const result = validateFlowDefinition(flow);
+    if (!result.success) {
+      logger.warn('[Incoming-Webhook] Built an invalid flow definition', {
+        issues: result.error.issues,
+      });
+      return null;
+    }
+
+    const escapedJSON = JSON.stringify(result.data).replace(/"/g, '&quot;');
+    return `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
+  }
+
+  handleAmazonSnsIncoming = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.AMAZON_SNS);
+      if (!context) {
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      const envelope = parseSnsEnvelope(context.body);
+      if (!envelope) {
+        logger.warn('[Incoming-Webhook] Body is not an Amazon SNS envelope', {
+          workspaceId: context.workspaceId,
+          appId: context.appId,
+        });
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      // No signature check: the encrypted secret in the URL is the only
+      // credential here, as it is for the Slack and SentinelOne webhook types.
+
+      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
+      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
+      await runAsServiceActor('incoming-webhook', context.workspaceId,
+        async () => {
+          let flow: FlowDefinition;
+          switch (envelope.Type) {
+            case 'SubscriptionConfirmation':
+              // SNS delivers nothing until SubscribeURL is visited. Post the link
+              // and let an admin click it rather than fetching it server-side.
+              logger.info('[Incoming-Webhook] SNS subscription confirmation received', {
+                workspaceId: context.workspaceId,
+                topicArn: envelope.TopicArn,
+              });
+              flow = buildSubscriptionConfirmationFlow(envelope);
+              break;
+            case 'UnsubscribeConfirmation':
+              logger.info('[Incoming-Webhook] SNS unsubscribe confirmation received', {
+                workspaceId: context.workspaceId,
+                topicArn: envelope.TopicArn,
+              });
+              flow = buildUnsubscribeConfirmationFlow(envelope);
+              break;
+            default:
+              flow = buildAmazonSnsFlow(parseSnsMessage(envelope));
+              break;
+          }
+
+          const content = this.encodeFlowContent(flow);
+          if (!content) {
+            res.status(400).send('invalid_payload');
+            return;
+          }
+
+          await findOrCreateConversation(
+            context.channelId,
+            context.installedApp.userId,
+            content,
+            false,
+            undefined,
+            undefined,
+            MessageType.BOT,
+            {},
+          );
+
+          res.status(200).send('ok');
+        },
+      );
+    } catch (error) {
+      logger.error('[Incoming-Webhook] Error handling Amazon SNS webhook', {
+        params: req.params,
+        error,
+      });
+      res.status(500).send('rollup_error');
+    }
+  };
+
+  handlePingdomIncoming = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.PINGDOM);
+      if (!context) {
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      const payload = parsePingdomPayload(context.body);
+      if (!payload) {
+        logger.warn('[Incoming-Webhook] Body is not a Pingdom check notification', {
+          workspaceId: context.workspaceId,
+          appId: context.appId,
+        });
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      // No signature check: the encrypted secret in the URL is the only
+      // credential here, as it is for the Slack and Amazon SNS webhook types.
+
+      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
+      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
+      await runAsServiceActor('incoming-webhook', context.workspaceId, async () => {
+        const content = this.encodeFlowContent(buildPingdomFlow(normalizePingdom(payload)));
+        if (!content) {
+          res.status(400).send('invalid_payload');
+          return;
+        }
+
+        await findOrCreateConversation(
+          context.channelId,
+          context.installedApp.userId,
+          content,
+          false,
+          undefined,
+          undefined,
+          MessageType.BOT,
+          {},
+        );
+
+        res.status(200).send('ok');
+      });
+    } catch (error) {
+      logger.error('[Incoming-Webhook] Error handling Pingdom webhook', {
+        params: req.params,
+        error,
+      });
+      res.status(500).send('rollup_error');
+    }
+  };
+
+  handleGcpIncoming = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.GCP);
+      if (!context) {
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      const payload = parseGcpPayload(context.body);
+      if (!payload) {
+        logger.warn('[Incoming-Webhook] Body is not a GCP Monitoring incident', {
+          workspaceId: context.workspaceId,
+          appId: context.appId,
+        });
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      // No signature check: the encrypted secret in the URL is the only
+      // credential here, replacing the HTTP Basic auth infra-switch uses on its
+      // shared /alertProxy/gcp endpoint.
+
+      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
+      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
+      await runAsServiceActor('incoming-webhook', context.workspaceId, async () => {
+        const content = this.encodeFlowContent(buildGcpFlow(normalizeGcp(payload)));
+        if (!content) {
+          res.status(400).send('invalid_payload');
+          return;
+        }
+
+        await findOrCreateConversation(
+          context.channelId,
+          context.installedApp.userId,
+          content,
+          false,
+          undefined,
+          undefined,
+          MessageType.BOT,
+          {},
+        );
+
+        res.status(200).send('ok');
+      });
+    } catch (error) {
+      logger.error('[Incoming-Webhook] Error handling GCP Monitoring webhook', {
         params: req.params,
         error,
       });
@@ -445,8 +680,17 @@ class IncomingWebhookController {
         return;
       }
 
-      const normalizedAction: IncomingWebhookAction =
-        type === AppIncomingWebhookType.SLACK ? AppIncomingWebhookAction.MESSAGE : action;
+      // Only SentinelOne supports ticket creation today; the other sources always
+      // post a message.
+      const messageOnlyTypes: IncomingWebhookType[] = [
+        AppIncomingWebhookType.SLACK,
+        AppIncomingWebhookType.AMAZON_SNS,
+        AppIncomingWebhookType.PINGDOM,
+        AppIncomingWebhookType.GCP,
+      ];
+      const normalizedAction: IncomingWebhookAction = messageOnlyTypes.includes(type)
+        ? AppIncomingWebhookAction.MESSAGE
+        : action;
       const effectiveBoardId =
         normalizedAction === AppIncomingWebhookAction.TICKET ? boardId : undefined;
 
@@ -460,11 +704,6 @@ class IncomingWebhookController {
         const board = await repositories.boards.findById(effectiveBoardId);
         if (!board) {
           res.status(404).json({ error: 'Board not found' });
-          return;
-        }
-
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({ error: 'Board must belong to the same project as the selected channel' });
           return;
         }
 
@@ -735,6 +974,82 @@ class IncomingWebhookController {
       });
       res.status(500).json({ error: 'Internal server error' });
     }
+  };
+
+  /**
+   * Complete the SNS handshake for the "Do Confirmation" button.
+   *
+   * The submit lands on /api/apps/flow/action, which flowController routes here
+   * rather than proxying — an incoming webhook has no outbound webhookUrl to
+   * proxy to. The card is left as-is; the renderer toasts on success.
+   *
+   * Always returns `ack`, so a failure never raises an error toast. Only a 200
+   * carries a `message`, and only a message produces a toast — the reason for a
+   * failure is logged rather than shown.
+   */
+  confirmSnsSubscription = async (
+    values: Record<string, unknown>,
+  ): Promise<{ type: 'ack'; message?: string }> => {
+    const subscribeUrl = values['subscribeUrl'];
+
+    if (typeof subscribeUrl !== 'string' || !subscribeUrl) {
+      logger.warn('[Incoming-Webhook] SNS confirm called without a SubscribeURL');
+      return { type: 'ack' };
+    }
+
+    // SSRF guard: this endpoint is authenticated but SubscribeURL is fully
+    // attacker-controlled body input. A genuine SNS confirmation URL is always
+    // https on sns.<region>.amazonaws.com, so pin the host to that AND run the
+    // shared private-range/DNS guard to defeat DNS rebinding. Failures fall
+    // through to the standard `ack` (no error toast, reason logged).
+    let parsedSubscribeUrl: URL;
+    try {
+      parsedSubscribeUrl = new URL(subscribeUrl);
+    } catch {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: invalid SubscribeURL');
+      return { type: 'ack' };
+    }
+    const isAmazonSnsHost =
+      parsedSubscribeUrl.protocol === 'https:' &&
+      /^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(parsedSubscribeUrl.hostname);
+    if (!isAmazonSnsHost) {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: SubscribeURL is not an Amazon SNS https host', {
+        host: parsedSubscribeUrl.hostname,
+      });
+      return { type: 'ack' };
+    }
+    try {
+      await assertWebhookUrlSafe(subscribeUrl);
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) {
+        logger.warn('[Incoming-Webhook] SNS confirm blocked by SSRF guard', { error: error.message });
+        return { type: 'ack' };
+      }
+      throw error;
+    }
+
+    try {
+      const response = await fetch(subscribeUrl, {
+        method: 'GET',
+        // A redirect would take this somewhere we never intended, so treat one
+        // as a failure rather than following it.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (response.status === 200) {
+        logger.info('[Incoming-Webhook] SNS subscription confirmed');
+        return { type: 'ack', message: 'Confirmation done' };
+      }
+
+      // 400 usually means the token expired (they last 3 days) or the
+      // subscription was already confirmed.
+      logger.warn('[Incoming-Webhook] SNS confirmation rejected', { status: response.status });
+    } catch (error) {
+      logger.error('[Incoming-Webhook] SNS confirmation request failed', { error });
+    }
+
+    return { type: 'ack' };
   };
 }
 

@@ -10,7 +10,7 @@ import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
 import { MessageAttachment } from '@prisma/client';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import { canvasAuthService } from '../services/canvasAuthService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
@@ -180,7 +180,84 @@ export class AttachmentController {
       }
     }
 
+    // 4) Impact / stage-form DOC attachments (conversationId is null) — resolve the
+    //    owning ticket's channel and require the same access the ticket needs: a PUBLIC
+    //    channel is readable by any workspace member, a PRIVATE channel only by its
+    //    participants. Without this, any workspace member could download a private
+    //    channel ticket's impact/form documents by guessing the attachment id.
+    if (
+      attachment.entityType === AttachmentEntityType.IMPACT ||
+      attachment.entityType === AttachmentEntityType.FORM_ENTITY_VALUE
+    ) {
+      const ticketId = await this.resolveTicketIdForAttachmentEntity(
+        attachment.entityType,
+        attachment.entityId,
+      );
+      // Not ticket-scoped (e.g. a USER-scoped form value) — no channel to gate on;
+      // keep the workspace-bounded behavior rather than over-block a legitimate read.
+      if (ticketId) {
+        const ticket = await db.ticket.findUnique({
+          where: { id: ticketId },
+          select: { channelId: true, workspaceId: true },
+        });
+        if (!ticket || ticket.workspaceId !== workspaceId) {
+          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+        }
+        const channel = await db.channel.findUnique({
+          where: { id: ticket.channelId },
+          select: { visibility: true },
+        });
+        if (!channel) {
+          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+        }
+        if (channel.visibility !== ChannelVisibility.PUBLIC) {
+          const isParticipant = await this.channelParticipantRepository.isParticipant(
+            ticket.channelId,
+            userId,
+          );
+          if (!isParticipant) {
+            logger.warn(
+              `Unauthorized ${attachment.entityType} attachment access: user ${userId} -> ${attachment.id} (private channel ${ticket.channelId})`,
+            );
+            return {
+              ok: false,
+              status: 403,
+              body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+            };
+          }
+        }
+      }
+    }
+
     return { ok: true };
+  }
+
+  /**
+   * Resolve the ticket that owns an IMPACT or FORM_ENTITY_VALUE attachment so its
+   * download can be gated by the ticket's channel access. Returns null when the
+   * entity is not ticket-scoped (e.g. a non-TICKET form entity), in which case the
+   * caller keeps the workspace-bounded default.
+   */
+  private async resolveTicketIdForAttachmentEntity(
+    entityType: AttachmentEntityType,
+    entityId: string,
+  ): Promise<string | null> {
+    if (entityType === AttachmentEntityType.IMPACT) {
+      const impact = await db.impact.findUnique({
+        where: { id: entityId },
+        select: { ticketId: true },
+      });
+      return impact?.ticketId ?? null;
+    }
+    // FORM_ENTITY_VALUE — only ticket-scoped values map to a channel.
+    const formValue = await db.formEntityValues.findUnique({
+      where: { id: entityId },
+      select: { entityId: true, entityType: true },
+    });
+    if (formValue && formValue.entityType === 'TICKET') {
+      return formValue.entityId;
+    }
+    return null;
   }
 
   /**

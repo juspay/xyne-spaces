@@ -23,7 +23,11 @@ import type {
 } from '@xyne/shared';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_CUSTOM_RANGE_MS = 31 * DAY_MS;
+// Keep in sync with MAX_CUSTOM_DAYS in the dashboard's DeskMetricsDateRangePicker.
+const MAX_CUSTOM_RANGE_DAYS = 90;
+// +1 day of slack: the UI sends whole days (00:00 → 23:59:59.999), so a
+// 90-day selection spans a hair under 90 * DAY_MS + the trailing day.
+const MAX_CUSTOM_RANGE_MS = (MAX_CUSTOM_RANGE_DAYS + 1) * DAY_MS;
 
 type CustomFieldFilterArg = {
   keys: string[];
@@ -57,6 +61,7 @@ export class DeskMetricsController {
         stageNames: string[];
         priorities: TicketPriority[];
         userGroupIds: string[];
+        tagValues: string[];
         customFieldFilter?: CustomFieldFilterArg;
       }
     | { ok: false; error: string } {
@@ -75,7 +80,10 @@ export class DeskMetricsController {
         return { ok: false, error: 'Invalid time range' };
       }
       if (toMs - fromMs > MAX_CUSTOM_RANGE_MS) {
-        return { ok: false, error: 'Custom time range cannot exceed 30 days' };
+        return {
+          ok: false,
+          error: `Custom time range cannot exceed ${MAX_CUSTOM_RANGE_DAYS} days`,
+        };
       }
       const timeRange = rawTimeRange;
 
@@ -104,6 +112,7 @@ export class DeskMetricsController {
         (priority): priority is TicketPriority => validPriorities.has(priority),
       );
       const userGroupIds = parseJsonStringArray(getStringQueryParam(req, 'userGroupIds'));
+      const tagValues = parseJsonStringArray(getStringQueryParam(req, 'tagValues'));
       const customFieldKeys = parseJsonStringArray(getStringQueryParam(req, 'customFieldKeys'));
 
       const parsePerKeyFilters = (
@@ -146,6 +155,7 @@ export class DeskMetricsController {
         stageNames,
         priorities,
         userGroupIds,
+        tagValues,
         ...(customFieldFilter ? { customFieldFilter } : {}),
       };
   }
@@ -159,6 +169,7 @@ export class DeskMetricsController {
       stageNames: string[];
       priorities: TicketPriority[];
       userGroupIds: string[];
+      tagValues: string[];
       customFieldFilter?: CustomFieldFilterArg;
     },
   ): Promise<DeskMetricsResponse> {
@@ -179,6 +190,7 @@ export class DeskMetricsController {
       stageNames: query.stageNames,
       priorities: query.priorities,
       userGroupIds: query.userGroupIds,
+      tagValues: query.tagValues,
       customFieldFilter: query.customFieldFilter,
     });
   }

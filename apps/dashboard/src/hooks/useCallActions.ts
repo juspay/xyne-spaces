@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
@@ -9,6 +10,8 @@ import { useAuthContextValues } from './useAuth';
 import { isUserActiveInCall } from './useCalls';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
+import { isSdlcSurface } from '../config';
+import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 
 type ActiveCall = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -19,6 +22,7 @@ interface PendingAction {
   targetUserIds?: string[];
   callDisplayName?: string;
   conversationId?: string;
+  sdlcLink?: SdlcCallLink;
 }
 
 interface UseCallActionsOptions {
@@ -26,6 +30,7 @@ interface UseCallActionsOptions {
   targetUserIds?: string[] | undefined;
   callDisplayName?: string | undefined; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string | undefined; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
 }
 
 interface UseCallActionsReturn {
@@ -48,6 +53,7 @@ export const useCallActions = ({
   targetUserIds,
   callDisplayName,
   conversationId,
+  sdlcLink,
 }: UseCallActionsOptions): UseCallActionsReturn => {
   const zero = useZero();
   const { isMobile } = usePlatform();
@@ -119,12 +125,32 @@ export const useCallActions = ({
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
+          ...(action.sdlcLink && { sdlcLink: action.sdlcLink }),
         });
       }
     }
   }, [machineState, zero, isMobile]);
 
   const handleCallClick = (): void => {
+    // SDLC lane: the iframe's call overlay is suppressed, so a call started here
+    // must be owned by the HOST for its mini-view to render globally. Hand the
+    // request across the frame bridge and stop — the host initiates on its own
+    // roomActor and shows the global mini-view.
+    if (isSdlcSurface) {
+      window.parent?.postMessage(
+        {
+          type: SDLC_FRAME_MESSAGE.initiateCall,
+          channelId,
+          ...(targetUserIds && { targetUserIds }),
+          ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
+        },
+        window.location.origin,
+      );
+      return;
+    }
+
     if (hasActiveCallInChannel) {
       // If there's an active call in this channel
       if (isUserInCurrentChannelCall) {
@@ -162,6 +188,7 @@ export const useCallActions = ({
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
           ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
         };
         roomActor.send({ type: 'DISCONNECT' });
       } else {
@@ -181,6 +208,7 @@ export const useCallActions = ({
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
           ...(conversationId && { conversationId }),
+          ...(sdlcLink && { sdlcLink }),
         });
       }
     }

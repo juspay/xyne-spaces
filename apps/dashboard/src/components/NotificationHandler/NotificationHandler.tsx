@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
@@ -12,6 +13,7 @@ import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNa
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
+import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
@@ -36,9 +38,13 @@ const playNotificationSound = (): void => {
       notificationAudio.volume = 0.5; // Set volume to 50%
     }
     notificationAudio.currentTime = 0;
-    notificationAudio.play().catch(() => {});
+    notificationAudio.play().catch(() => undefined);
   } catch (error) {
-    console.error('Error playing notification sound:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Error playing notification sound:'),
+      error: error,
+    });
   }
 };
 
@@ -140,14 +146,21 @@ export const NotificationHandler: React.FC = () => {
             { workspaceId: targetWorkspaceId },
             { withCredentials: true },
           );
-          console.log(
-            `[NotificationHandler] Switched workspace from=${currentWorkspaceId} to=${targetWorkspaceId}`,
-          );
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `[NotificationHandler] Switched workspace from=${currentWorkspaceId} to=${targetWorkspaceId}`,
+            ),
+          });
           queryClient.clear();
           window.location.href = resolvedUrl;
           return;
         } catch (error) {
-          console.error('[NotificationHandler] Workspace switch failed:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[NotificationHandler] Workspace switch failed:'),
+            error: error,
+          });
           toast.error('Failed to switch workspace. Please try again.');
           return; // Do not navigate — session cookie was not switched.
         }
@@ -161,9 +174,12 @@ export const NotificationHandler: React.FC = () => {
   const handleNotification = useCallback(
     (data: NotificationData): void => {
       try {
-        console.log(
-          `[NotificationHandler] Notification received id=${data.notification.id} type=${data.notification.type} workspace=${data.notification.workspaceId ?? 'current'}`,
-        );
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(
+            `[NotificationHandler] Notification received id=${data.notification.id} type=${data.notification.type} workspace=${data.notification.workspaceId ?? 'current'}`,
+          ),
+        });
         // Skip silent data-only notifications meant for mobile tray clearing
         const type = data.notification?.type?.toLowerCase();
         if (type === 'channel_read' || type === 'thread_read') {
@@ -201,9 +217,12 @@ export const NotificationHandler: React.FC = () => {
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
         const notificationWorkspaceId = data.notification.workspaceId;
         if (notificationWorkspaceId && notificationWorkspaceId !== activeWorkspaceIdRef.current) {
-          console.log(
-            `[NotificationHandler] Cross-workspace notification received id=${data.notification.id} from=${notificationWorkspaceId} current=${activeWorkspaceIdRef.current}`,
-          );
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `[NotificationHandler] Cross-workspace notification received id=${data.notification.id} from=${notificationWorkspaceId} current=${activeWorkspaceIdRef.current}`,
+            ),
+          });
         }
         const resolvedRawActionUrl =
           data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
@@ -224,9 +243,12 @@ export const NotificationHandler: React.FC = () => {
           data.notification.data?.notificationType === 'sos_alert' ||
           data.notification.metadata?.notificationType === 'sos_alert';
         if (isSosAlert) {
-          console.log(
-            `[NotificationHandler] SOS alert received id=${data.notification.id} workspace=${notificationWorkspaceId ?? 'current'}`,
-          );
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `[NotificationHandler] SOS alert received id=${data.notification.id} workspace=${notificationWorkspaceId ?? 'current'}`,
+            ),
+          });
           // Bring Electron to foreground so the agent can't miss it.
           if (isElectron && window.electronAPI?.focusApp) {
             window.electronAPI.focusApp();
@@ -312,7 +334,11 @@ export const NotificationHandler: React.FC = () => {
           });
         }
       } catch (error) {
-        console.error('Error handling notification:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error handling notification:'),
+          error: error,
+        });
       }
     },
     [navigate, isElectron, suppressNativeToasts, handleNotificationClick],
@@ -359,20 +385,28 @@ export const NotificationHandler: React.FC = () => {
               | undefined;
 
             if (!pendingState) {
-              console.log('[NotificationHandler] No pending call state from native');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('[NotificationHandler] No pending call state from native'),
+              });
               return;
             }
 
-            console.log(
-              '[NotificationHandler] Received pending call state from native:',
-              pendingState,
-            );
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('[NotificationHandler] Received pending call state from native:'),
+              context: [pendingState],
+            });
 
             const { activeCallId, endedCallId } = pendingState;
 
             // If there's an active call that was joined, ensure it's in Zero
             if (activeCallId) {
-              console.log('[NotificationHandler] Syncing pending join:', activeCallId);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('[NotificationHandler] Syncing pending join:'),
+                context: [activeCallId],
+              });
               // Set native active call ID in callActor FIRST
               // This immediately prevents IncomingCallModal from showing
               callActor.send({ type: 'SET_NATIVE_ACTIVE_CALL', callId: activeCallId });
@@ -381,16 +415,31 @@ export const NotificationHandler: React.FC = () => {
 
             // If there's a call that ended, sync the leave
             if (endedCallId) {
-              console.log('[NotificationHandler] Syncing pending leave:', endedCallId);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('[NotificationHandler] Syncing pending leave:'),
+                context: [endedCallId],
+              });
               // Clear native active call ID in callActor
               callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
               const timestamp = Date.now();
-              console.log('[NotificationHandler] Call ended:', endedCallId, timestamp);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('[NotificationHandler] Call ended:'),
+                context: [endedCallId, timestamp],
+              });
             }
 
-            console.log('[NotificationHandler] Successfully synced pending call state');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('[NotificationHandler] Successfully synced pending call state'),
+            });
           } catch (error) {
-            console.error('[NotificationHandler] Failed to sync pending call state:', error);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('[NotificationHandler] Failed to sync pending call state:'),
+              error: error,
+            });
           }
         })();
       },
@@ -409,8 +458,11 @@ export const NotificationHandler: React.FC = () => {
       NativeInboundMessageType.NATIVE_REQUEST_CALLBACK,
       message => {
         const payload = message.payload || {};
-        // eslint-disable-next-line no-console
-        console.log('[NotificationHandler] Received NATIVE_REQUEST_CALLBACK', payload);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[NotificationHandler] Received NATIVE_REQUEST_CALLBACK'),
+          context: [payload],
+        });
         const channelId = payload?.channelId || '';
 
         roomActor.send({
@@ -434,7 +486,11 @@ export const NotificationHandler: React.FC = () => {
     const unsubscribe = reactNativeBridge.on(
       NativeInboundMessageType.NATIVE_CALL_JOINED,
       message => {
-        console.log('[NotificationHandler] Received NATIVE_CALL_JOINED:', message.payload);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[NotificationHandler] Received NATIVE_CALL_JOINED:'),
+          context: [message.payload],
+        });
         const { callId } = message.payload || {};
         if (callId && zero) {
           try {
@@ -443,9 +499,17 @@ export const NotificationHandler: React.FC = () => {
             // Set native active call ID in callActor FIRST
             // This immediately prevents IncomingCallModal from showing
             callActor.send({ type: 'SET_NATIVE_ACTIVE_CALL', callId });
-            console.log('[NotificationHandler] Call started:', callId);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('[NotificationHandler] Call started:'),
+              context: [callId],
+            });
           } catch (error) {
-            console.error('[NotificationHandler] Failed to handle call start:', error);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('[NotificationHandler] Failed to handle call start:'),
+              error: error,
+            });
           }
         }
       },
@@ -463,7 +527,11 @@ export const NotificationHandler: React.FC = () => {
     const unsubscribe = reactNativeBridge.on(
       NativeInboundMessageType.LIVEKIT_CALL_ENDED,
       message => {
-        console.log('[NotificationHandler] Received LIVEKIT_CALL_ENDED:', message.payload);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[NotificationHandler] Received LIVEKIT_CALL_ENDED:'),
+          context: [message.payload],
+        });
         const { callId } = message.payload || {};
 
         // Always write leave for native calls - handles cold start race condition
@@ -474,17 +542,29 @@ export const NotificationHandler: React.FC = () => {
             // First ensure join was recorded (may have been missed during cold start)
             // This ensures participant has ACCEPTED response before we leave
             if (!nativeJoinedCallsRef.current.has(callId)) {
-              console.log('[NotificationHandler] Call not tracked:', callId);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('[NotificationHandler] Call not tracked:'),
+                context: [callId],
+              });
             }
 
             // Clear native active call ID in callActor
             callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
 
-            console.log('[NotificationHandler] Call ended:', callId);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('[NotificationHandler] Call ended:'),
+              context: [callId],
+            });
             // Remove from tracked calls if present
             nativeJoinedCallsRef.current.delete(callId);
           } catch (error) {
-            console.error('[NotificationHandler] Failed to handle call end:', error);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('[NotificationHandler] Failed to handle call end:'),
+              error: error,
+            });
           }
         }
       },
@@ -531,6 +611,21 @@ export const NotificationHandler: React.FC = () => {
     return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
 
+  // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands
+  // before the mic is enabled, so main knows the upcoming activation is ours.
+  const isInXyneCall = useSelector(
+    roomActor,
+    s =>
+      s.matches('initiating') ||
+      s.matches('joining') ||
+      s.matches('connecting') ||
+      s.matches('connected'),
+  );
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI?.ipcSend?.('call:state-changed', isInXyneCall);
+  }, [isElectron, isInXyneCall]);
+
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
   const recordingPauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
@@ -541,6 +636,9 @@ export const NotificationHandler: React.FC = () => {
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
     const state = {
       active: isActive,
+      // Sent before the mic is enabled, so the meeting detector can tell our own
+      // recording from a meeting worth offering to record.
+      starting: recordingStatus === 'starting',
       startTime: recordingStartTime ?? undefined,
       paused: recordingStatus === 'paused',
       pauseStartedAt: recordingPauseStartedAt,

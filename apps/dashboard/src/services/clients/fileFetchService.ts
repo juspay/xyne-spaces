@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Simple File Fetch Service with React Query Caching
  * Uses apiClient.ts for authenticated file operations
@@ -81,8 +82,11 @@ export const downloadFile = async (
         return;
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn('[FileDownload] Failed to hand off file to native layer, falling back.', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[FileDownload] Failed to hand off file to native layer, falling back.'),
+        context: [error],
+      });
     }
   }
 

@@ -1,57 +1,65 @@
-import React, { useCallback, useState } from 'react';
+import React, { useState } from 'react';
 import { AutomationsList } from '../../../Automation/AutomationsList/AutomationsList';
 import { AutomationBuilder } from '../../../Automation/AutomationBuilder/AutomationBuilder';
 import { RunHistory } from '../../../Automation/AutomationRuns/RunHistory/RunHistory';
 import { RunDetail } from '../../../Automation/AutomationRuns/RunDetail/RunDetail';
 import { AutomationApprovalsList } from '../../../Automation/AutomationApprovalsList/AutomationApprovalsList';
+import { VersionHistory } from '../../../Automation/AutomationVersions/VersionHistory/VersionHistory';
+import { VersionDiffView } from '../../../Automation/AutomationVersions/VersionDiffView/VersionDiffView';
 import type { Automation, AutomationRunSummary } from '../../../Automation/Automation.types';
-import type { useDeskSettingsForm } from '../useDeskSettingsForm';
-
-type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
 
 interface AutomationTabProps {
   channelId: string;
-  form: DeskSettingsForm;
 }
 
 type AutomationView =
   | { screen: 'list' }
   | { screen: 'approvals' }
-  | { screen: 'builder'; automation: Automation | null; approvalReviewMode?: boolean }
+  | {
+      screen: 'builder';
+      automation: Automation | null;
+      approvalReviewMode?: boolean;
+      /** Set when this builder is a new draft proposing a change to (or a clone of) `forkFrom`. */
+      forkFrom?: Automation;
+      /** Clones start an independent lineage — forks (propose-change) stay pinned to the source. */
+      isClone?: boolean;
+    }
   | { screen: 'runs'; automation: Automation }
-  | { screen: 'run-detail'; automation: Automation; run: AutomationRunSummary };
+  | { screen: 'run-detail'; automation: Automation; run: AutomationRunSummary }
+  | { screen: 'history'; automationId: string; returnTo: Automation }
+  | { screen: 'compare'; automationId: string; fromId: string; toId: string; returnTo: Automation };
 
-function automationScopesToChannel(
-  automation: Automation,
-  channelId: string,
-  boardId: string | null,
-): boolean {
-  const cfg = automation.config?.trigger?.config;
-  const channelIds = Array.isArray(cfg?.['channelIds']) ? (cfg['channelIds'] as string[]) : [];
-  const boardIds = Array.isArray(cfg?.['boardIds']) ? (cfg['boardIds'] as string[]) : [];
-  const channelMatch = channelIds.length === 0 || channelIds.includes(channelId);
-  const boardMatch = boardIds.length === 0 || (boardId !== null && boardIds.includes(boardId));
-  return channelMatch && boardMatch;
-}
-
-export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId, form }) => {
-  const { boardId } = form;
+export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId }) => {
   const [view, setView] = useState<AutomationView>({ screen: 'list' });
-
-  const filterPredicate = useCallback(
-    (automation: Automation) => automationScopesToChannel(automation, channelId, boardId),
-    [channelId, boardId],
-  );
 
   if (view.screen === 'builder') {
     const backTarget: AutomationView = view.approvalReviewMode
       ? { screen: 'approvals' }
-      : { screen: 'list' };
+      : view.forkFrom
+        ? { screen: 'builder', automation: view.forkFrom }
+        : { screen: 'list' };
     return (
       <AutomationBuilder
-        key={view.automation?.id ?? 'new'}
+        key={view.automation?.id ?? `new-${view.forkFrom?.id ?? 'fresh'}`}
         automation={view.automation}
         approvalReviewMode={view.approvalReviewMode ?? false}
+        {...(view.forkFrom
+          ? {
+              initialConfig: view.forkFrom.config,
+              initialName: view.isClone
+                ? `${view.forkFrom.name.slice(0, 72)} - Clone`
+                : view.forkFrom.name,
+              ...(view.forkFrom.description
+                ? { initialDescription: view.forkFrom.description }
+                : {}),
+              ...(view.isClone
+                ? {}
+                : {
+                    forkFromSeriesId: view.forkFrom.automationSeriesId ?? view.forkFrom.id,
+                    forkSourceAutomationId: view.forkFrom.id,
+                  }),
+            }
+          : {})}
         onBack={() => setView(backTarget)}
         onAfterApprovalDecision={() => setView({ screen: 'approvals' })}
         onSaved={result => {
@@ -64,12 +72,27 @@ export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId, form })
         onShowRuns={() => {
           if (view.automation) setView({ screen: 'runs', automation: view.automation });
         }}
+        onShowVersionHistory={() => {
+          if (view.automation) {
+            setView({
+              screen: 'history',
+              automationId: view.automation.id,
+              returnTo: view.automation,
+            });
+          }
+        }}
+        onProposeChange={source =>
+          setView({ screen: 'builder', automation: null, forkFrom: source })
+        }
+        onCancelFork={() => {
+          if (view.forkFrom) setView({ screen: 'builder', automation: view.forkFrom });
+        }}
       />
     );
   }
 
   if (view.screen === 'approvals') {
-    return <AutomationApprovalsList filterPredicate={filterPredicate} />;
+    return <AutomationApprovalsList />;
   }
 
   if (view.screen === 'runs') {
@@ -91,12 +114,52 @@ export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId, form })
     );
   }
 
+  if (view.screen === 'history') {
+    return (
+      <VersionHistory
+        automationId={view.automationId}
+        onBack={() => setView({ screen: 'builder', automation: view.returnTo })}
+        onOpenVersion={version => setView({ screen: 'builder', automation: version })}
+        onCompare={(fromId, toId) =>
+          setView({
+            screen: 'compare',
+            automationId: view.automationId,
+            fromId,
+            toId,
+            returnTo: view.returnTo,
+          })
+        }
+      />
+    );
+  }
+
+  if (view.screen === 'compare') {
+    return (
+      <VersionDiffView
+        automationId={view.automationId}
+        fromId={view.fromId}
+        toId={view.toId}
+        onFromChange={fromId => setView({ ...view, fromId })}
+        onToChange={toId => setView({ ...view, toId })}
+        onClose={() =>
+          setView({ screen: 'history', automationId: view.automationId, returnTo: view.returnTo })
+        }
+      />
+    );
+  }
+
   return (
     <AutomationsList
-      filterPredicate={filterPredicate}
+      initialChannelIds={[channelId]}
       onCreate={() => setView({ screen: 'builder', automation: null })}
       onOpen={automation => setView({ screen: 'builder', automation })}
       onShowRuns={automation => setView({ screen: 'runs', automation })}
+      onEditFork={automation =>
+        setView({ screen: 'builder', automation: null, forkFrom: automation })
+      }
+      onClone={automation =>
+        setView({ screen: 'builder', automation: null, forkFrom: automation, isClone: true })
+      }
     />
   );
 };

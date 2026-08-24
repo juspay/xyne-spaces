@@ -1,4 +1,5 @@
 export { searchUsers, searchChannels } from './search.js';
+export { matchesAllTokens } from './tokenMatch.js';
 export {
   canonicalArgsJson,
   shadowKeyFor,

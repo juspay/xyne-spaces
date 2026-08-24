@@ -150,6 +150,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
 
+  onLinkOpenedExternal: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
+    ipcRenderer.on('link-opened-external', listener);
+    return () => ipcRenderer.removeListener('link-opened-external', listener);
+  },
+
   onReloadActiveBrowserTab: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('reload-active-browser-tab', listener);
@@ -231,12 +237,6 @@ const electronAPI = {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
-  // Log listener
-  onLog: (callback: (message: any) => void) => {
-    const listener = (_event: unknown, message: any) => callback(message);
-    ipcRenderer.on('electron-log', listener);
-    return () => ipcRenderer.removeListener('electron-log', listener);
-  },
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
   saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>
@@ -276,6 +276,7 @@ const electronAPI = {
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
       'app:theme-changed',
+      'call:state-changed',
       'meeting-popup:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',
@@ -376,6 +377,28 @@ const electronAPI = {
     dragEnd: () => ipcRenderer.send('recording-pill:drag-end'),
   },
 
+  platform: process.platform,
+
+  tray: {
+    getVisible: () => ipcRenderer.invoke('tray:get-visible'),
+    setVisible: (visible: boolean) => ipcRenderer.send('tray:set-visible', visible),
+    onVisibleChanged: (callback: (visible: boolean) => void) => {
+      const listener = (_event: unknown, visible: boolean) => callback(visible);
+      ipcRenderer.on('tray:visible-changed', listener);
+      return () => ipcRenderer.removeListener('tray:visible-changed', listener);
+    },
+  },
+
+  recordingPillSettings: {
+    getEnabled: () => ipcRenderer.invoke('recording-pill:get-enabled'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('recording-pill:set-enabled', enabled),
+    onEnabledChanged: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+      ipcRenderer.on('recording-pill:enabled-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:enabled-changed', listener);
+    },
+  },
+
   clawOverlay: {
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
     setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),
@@ -413,9 +436,5 @@ const electronAPI = {
 if (isTrustedOrigin()) {
   contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 } else {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[preload] Untrusted origin — electronAPI bridge withheld:',
-    window.location.origin,
-  );
+  // The privileged bridge is intentionally withheld for untrusted origins.
 }

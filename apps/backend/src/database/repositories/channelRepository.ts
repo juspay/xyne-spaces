@@ -3,6 +3,7 @@ import { Channel } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
@@ -26,7 +27,6 @@ export interface UpdateChannelInput {
 
 export interface ChannelFilters {
   scopeType?: ChannelScopeType;
-  projectId?: string;
   visibility?: ChannelVisibility;
 }
 
@@ -72,6 +72,28 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       }
     });
 
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+    // so downstream consumers never need to read channel.projectId.
+    const boards = await this.db.board.findMany({
+      where: { projectId: data.projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (boards.length > 0) {
+      const now = new Date();
+      await this.db.channelBoardMapping.createMany({
+        data: boards.map((board, index) => ({
+          channelId: result.id,
+          boardId: board.id,
+          workspaceId: data.workspaceId,
+          isDefault: index === 0,
+          createdBy: data.createdBy,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     return result;
   }
@@ -108,10 +130,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     if (filters?.scopeType) {
       where.scopeType = filters.scopeType;
-    }
-
-    if (filters?.projectId) {
-      where.projectId = filters.projectId;
     }
 
 
@@ -172,6 +190,13 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async delete(id: string): Promise<Channel> {
+    const attachedSdlcRepository = await this.db.repo.findFirst({
+      where: { channelId: id, projectId: { not: null } },
+      select: { id: true },
+    });
+    if (attachedSdlcRepository) {
+      throw new Error('Detach SDLC repositories before deleting their hidden channel');
+    }
     const result = await this.db.channel.delete({
       where: { id }
     });
@@ -221,21 +246,25 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return await this.findMany({ scopeType });
   }
 
-  async getChannelsByProject(projectId: string): Promise<Channel[]> {
-    return await this.findMany({ projectId });
-  }
-
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
-    // Self-DM: channel name is stored as single userId, scopeType DM
-    if (userId1 === userId2) {
+    // Run the existence probe under withWorkspaceScope (service actor) so the per-user
+    // channel ACL is dropped and only workspace scope applies — otherwise a non-participant
+    // caller (e.g. an automation submitter probing an admin's bot DM) never sees the existing
+    // PRIVATE DM and mints a duplicate. orderBy asc pins the oldest as the canonical match.
+    return withWorkspaceScope(async () => {
+      // Self-DM: channel name is stored as single userId, scopeType DM
+      if (userId1 === userId2) {
+        return await this.db.channel.findFirst({
+          where: { name: userId1, scopeType: ChannelScopeType.DM },
+          orderBy: { createdAt: 'asc' },
+        });
+      }
+      // For 1:1 DM channels, name is sorted user IDs joined by comma
+      const name = [userId1, userId2].sort().join(",");
       return await this.db.channel.findFirst({
-        where: { name: userId1, scopeType: ChannelScopeType.DM },
+        where: { name },
+        orderBy: { createdAt: 'asc' },
       });
-    }
-    // For 1:1 DM channels, name is sorted user IDs joined by comma
-    const name = [userId1, userId2].sort().join(",");
-    return await this.db.channel.findFirst({
-      where: { name },
     });
   }
 
@@ -255,10 +284,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       where.scopeType = filters.scopeType;
     }
 
-    if (filters?.projectId) {
-      where.projectId = filters.projectId;
-    }
-
     if (filters?.visibility) {
       where.visibility = filters.visibility;
     }
@@ -274,14 +299,18 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getGroupChannelByMembers(memberIds: string[]): Promise<Channel | null> {
-    // Get all GROUP_DM scope channels
+    // Same rationale as getDMChannel: the existence probe must not be filtered by the
+    // caller's participation, and must resolve to a single canonical (oldest) row.
     const name = memberIds.sort().join(",");
-    return await this.db.channel.findFirst({
-      where: {
-        scopeType: ChannelScopeType.GROUP_DM,
-        name: name
-      }
-    });
+    return withWorkspaceScope(async () =>
+      this.db.channel.findFirst({
+        where: {
+          scopeType: ChannelScopeType.GROUP_DM,
+          name: name,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
   }
 
   async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {

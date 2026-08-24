@@ -9,14 +9,13 @@ import {
   calculateRecordingElapsedMs,
   formatElapsedTime,
   formatRecordingDuration,
-  getRecordingTagDotColor,
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
+import { LabelChip } from '../../RecordingDetailV2Screen/components/RecordingLabelPicker';
 
 export interface RecordingsV2PillProps {
   recording: Pick<
@@ -24,6 +23,7 @@ export interface RecordingsV2PillProps {
     'id' | 'externalId' | 'title' | 'startedAt' | 'endedAt' | 'status' | 'aiSummary' | 'transcript'
   >;
   creator: User | null;
+  participantsLabel: string;
   tags?: string[];
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
@@ -74,19 +74,19 @@ export const RecordingsV2LivePill = ({
   return (
     <section
       className={cn(
-        'flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background px-4 py-3 shadow-sm',
-        'transition-[border-color,box-shadow] duration-200 hover:border-foreground/15 hover:shadow-[0_5px_20px_rgb(0,0,0,0.08)]',
+        'flex w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-sm',
+        'transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-[0_5px_20px_rgb(0,0,0,0.08)]',
       )}
       aria-label={`${displayTitle}, recording in progress`}
     >
-      <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-status-success'>
+      <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary'>
         <MicOn size={16} strokeWidth={2} variant='Contrast' />
       </span>
 
       <span className='min-w-0 flex-1'>
         <span className='block truncate text-sm font-semibold text-foreground'>{displayTitle}</span>
-        <span className='mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-          <span className='size-2 shrink-0 rounded-full bg-status-success' aria-hidden='true' />
+        <span className='mt-0.5 flex min-w-0 items-center gap-2 text-xs text-primary'>
+          <span className='size-2 shrink-0 rounded-full bg-primary' aria-hidden='true' />
           <span>{isPaused ? 'Recording paused' : 'Recording in progress'}</span>
           <span aria-hidden='true'>·</span>
           <span className='font-mono tabular-nums'>{formatElapsedTime(elapsedMs)}</span>
@@ -95,12 +95,9 @@ export const RecordingsV2LivePill = ({
 
       <Button
         type='button'
-        variant='outline'
+        variant='ghost'
         onClick={onOpenWindow}
-        className={cn(
-          'h-9 shrink-0 rounded-xl border-border px-3 text-sm text-foreground shadow-none',
-          'hover:bg-muted/60 hover:border-foreground/30 hover:text-foreground',
-        )}
+        className='h-9 shrink-0 rounded-xl bg-foreground px-3 text-sm text-background hover:bg-foreground/90 hover:text-background'
         data-track-category='RecordingsV2'
         data-track-name='open_live_recording_window'
       >
@@ -114,6 +111,7 @@ export const RecordingsV2LivePill = ({
 const RecordingsV2Pill = ({
   recording,
   creator,
+  participantsLabel,
   tags = [],
   resolveLabel = (label: string) => label,
   onOpen,
@@ -175,9 +173,7 @@ const RecordingsV2Pill = ({
               </span>
             )}
             <span className='mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
-              <span className='truncate'>
-                {creator ? getUserDisplayName(creator) : 'Unknown creator'}
-              </span>
+              <span className='truncate'>{participantsLabel}</span>
               <span aria-hidden='true'>·</span>
               <span className='shrink-0'>{formatRecordingTimestamp(recording.startedAt)}</span>
             </span>
@@ -197,19 +193,7 @@ const RecordingsV2Pill = ({
         {visibleTags.length > 0 && (
           <span className='flex flex-wrap items-center gap-1.5'>
             {visibleTags.map(tag => (
-              <span
-                key={tag}
-                className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors'
-              >
-                <span
-                  className={cn(
-                    'size-1.5 rounded-full',
-                    getRecordingTagDotColor(resolveLabel(tag)),
-                  )}
-                  aria-hidden='true'
-                />
-                <span className='max-w-32 truncate'>{resolveLabel(tag)}</span>
-              </span>
+              <LabelChip key={tag} label={resolveLabel(tag)} />
             ))}
           </span>
         )}

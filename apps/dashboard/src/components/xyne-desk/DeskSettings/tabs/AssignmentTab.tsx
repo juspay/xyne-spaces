@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/Select/Select';
+import { UserGroupSelector } from '../../../Tickets/CreateTicketModal/UserGroupSelector';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 
@@ -27,29 +21,15 @@ export const AssignmentTab: React.FC<AssignmentTabProps> = ({ form }) => {
           Tickets created from emails in this channel will be assigned to this user group
         </div>
       </div>
-      <Select
-        value={defaultAssigneeGroupId || 'none'}
-        onValueChange={setAssigneeGroup}
+      <fieldset
         disabled={!canManage}
+        className={`w-full max-w-[300px] border-0 p-0 m-0 min-w-0 ${!canManage ? 'opacity-50' : ''}`}
       >
-        <SelectTrigger className='w-full max-w-[300px] h-[38px] px-[14px] py-[10px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
-          <SelectValue
-            placeholder={
-              (allUserGroups ?? []).length > 0 ? 'Select user group' : 'No user groups available'
-            }
-          />
-        </SelectTrigger>
-        <SelectContent className='rounded-[10px]'>
-          <SelectItem value='none' className='rounded-[8px]'>
-            No default group
-          </SelectItem>
-          {(allUserGroups ?? []).map(group => (
-            <SelectItem key={group.id} value={group.id} className='rounded-[8px]'>
-              {group.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <UserGroupSelector
+          selectedGroupId={defaultAssigneeGroupId || null}
+          onGroupSelect={groupId => setAssigneeGroup(groupId ?? 'none')}
+        />
+      </fieldset>
       {(allUserGroups ?? []).length === 0 && (
         <p className='text-desk-helper'>No user groups found. Create one in team settings first.</p>
       )}

@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -11,8 +11,26 @@ import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
+import {
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 
 export type { Call, CallParticipant };
+
+/**
+ * Shape of `calls.metadata` as written by this repository.
+ * `artifactMessageId` is set only for calls started from a slash-command
+ * artifact card, and links the call back to the message that owns it.
+ */
+export interface CallMetadata {
+  systemMessageId?: string;
+  conversationId?: string;
+  artifactMessageId?: string;
+}
+
+const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
+  (metadata as CallMetadata | null)?.artifactMessageId;
 
 export interface CreateCallParticipantInput {
   id: string;
@@ -206,12 +224,64 @@ export class CallRepository {
   }
 
   async update(id: string, data: UpdateCallInput): Promise<Call> {
-    const result = await DatabaseClient.getInstance().call.update({
+    const client = DatabaseClient.getInstance();
+    const result = await client.call.update({
       where: { id },
       data
     });
+    if (data.status === CallStatus.ENDED) {
+      await this.syncArtifactLifecycle(
+        client,
+        result,
+        MessageArtifactStatus.COMPLETED,
+        data.endedAt ?? new Date(),
+      );
+    }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
+  }
+
+  /**
+   * Mirror a call transition onto the slash-command artifact that started it.
+   * A no-op for every other call, which is why it can sit directly on the
+   * shared end-of-call paths without altering their behavior.
+   */
+  private async syncArtifactLifecycle(
+    tx: Prisma.TransactionClient,
+    call: {
+      id: string;
+      externalId: string;
+      channelId: string | null;
+      startedAt: Date | null;
+      metadata: Prisma.JsonValue | null;
+    },
+    status: MessageArtifactLifecycleStatus,
+    endedAt?: Date
+  ): Promise<void> {
+    const artifactMessageId = getArtifactMessageId(call.metadata);
+    if (!artifactMessageId || !call.channelId) return;
+
+    // On completion, summarise the call for the card. An ended call has left
+    // the client's active-call subscription, so these two numbers are baked
+    // into the message once here — the same thing updateCallSystemMessageIfNeeded
+    // does for the ordinary "started a call" system message.
+    const endedCall =
+      status === MessageArtifactStatus.COMPLETED && endedAt && call.startedAt
+        ? {
+            durationMs: Math.max(0, endedAt.getTime() - call.startedAt.getTime()),
+            joinedCount: await tx.callParticipant.count({
+              where: { callId: call.id, joinedAt: { not: null } },
+            }),
+          }
+        : undefined;
+
+    await setSlashCommandArtifactLifecycle(tx, {
+      messageId: artifactMessageId,
+      channelId: call.channelId,
+      status,
+      callExternalId: call.externalId,
+      ...(endedCall && { endedCall }),
+    });
   }
 
   async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
@@ -221,6 +291,70 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  async addRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_append(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
+      WHERE "externalId" = ${externalId}
+        AND NOT (${userId} = ANY(COALESCE("recordingParticipants", ARRAY[]::TEXT[])))
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async removeRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_remove(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async appendLabels(callId: string, labelIds: string[]): Promise<void> {
+    if (labelIds.length === 0) return;
+    const lockKey = `call-labels:${callId}`;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({ where: { id: callId }, select: { labels: true } });
+      if (!call) return;
+
+      const relevantIds = [...new Set([...call.labels, ...labelIds])];
+      const tags = await tx.tag.findMany({
+        where: { id: { in: relevantIds }, sourceId: callId, isDeleted: false },
+        select: { id: true, tag: true, method: true },
+      });
+      const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+      
+      const resolve = (id: string): { slug: string; method: TagMethod } => {
+        const tag = tagById.get(id);
+        return tag ? { slug: tag.tag, method: tag.method as TagMethod } : { slug: id, method: TagMethod.MANUAL };
+      };
+
+      const bySlug = new Map<string, string>();
+
+      for (const id of call.labels) {
+        const { slug, method } = resolve(id);
+        if (method === TagMethod.LLM) continue;
+        bySlug.set(slug, id);
+      }
+
+      for (const id of labelIds) {
+        const { slug } = resolve(id);
+        if (bySlug.has(slug)) continue;
+        bySlug.set(slug, id);
+      }
+
+      const labels = [...bySlug.values()];
+      await tx.call.update({ where: { id: callId }, data: { labels } });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
   }
 
   async findById(id: string): Promise<Call | null> {
@@ -750,7 +884,7 @@ export class CallRepository {
     endedAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<void> {
-    await tx.call.update({
+    const call = await tx.call.update({
       where: { id: callId },
       data: {
         status: CallStatus.ENDED,
@@ -758,6 +892,7 @@ export class CallRepository {
       }
     });
     await refreshCallParticipantPreview(tx, callId);
+    await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -828,6 +963,7 @@ export class CallRepository {
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
+          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, leftAt);
         }
 
         // Update system message whether the call is fully ended or just rescheduled
@@ -904,8 +1040,12 @@ export class CallRepository {
         });
       }
 
+      if (call.status === CallStatus.ENDED || shouldEndCall) {
+        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
+      }
+
       // Clear conversation.callId when call ends (for conversation calls)
-      const callMetadata = call.metadata as { conversationId?: string } | null;
+      const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
           await tx.conversation.update({
@@ -1053,7 +1193,10 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            // Merge (not replace) so calendar-derived fields already on the call
+            // (organizer, attendees, provider, etc. — set by the calendar sync
+            // upsert) survive activation instead of being wiped out.
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else if (!callMetadata?.systemMessageId) {
@@ -1095,7 +1238,7 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else {
@@ -1171,6 +1314,7 @@ export class CallRepository {
       messageId: string;
       now: Date;
       callOrigin?: CallOrigin;
+      artifactMessageId?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1186,7 +1330,8 @@ export class CallRepository {
       conversationId,
       messageId,
       now,
-      callOrigin
+      callOrigin,
+      artifactMessageId,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1216,9 +1361,12 @@ export class CallRepository {
           metadata: {
             systemMessageId: messageId,
             conversationId,
+            ...(artifactMessageId && { artifactMessageId }),
           },
         },
       });
+
+      await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.ACTIVE);
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
       const invitedParticipantIds: string[] = [];
@@ -1935,7 +2083,9 @@ export class CallRepository {
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
-    channelId: null;
+    xyneManaged?: boolean;
+    /** Self-DM channel backing a Xyne-managed calendar call; null for a plain mirrored (unmanaged) event. */
+    channelId: string | null;
     isRecurring: boolean;
     recordingEnabled: boolean;
     startedAt: Date;
@@ -1953,12 +2103,15 @@ export class CallRepository {
       startsAt: true,
       endsAt: true,
       timezone: true,
+      xyneManaged: true,
+      channelId: true,
       metadata: true,
     });
 
     if (!existing) {
-      // No channel to denormalize from (external calendar calls have channelId=null),
-      // so inherit the workspace of the organizer who owns the calendar sync.
+      // Xyne-managed calendar calls carry a resolved self-DM channelId; plain
+      // mirrored (unmanaged) events have none, so inherit the workspace of the
+      // organizer who owns the calendar sync instead of denormalizing from a channel.
       const workspaceId = await resolveWorkspaceIdFromModel(DatabaseClient.getInstance(), 'user', { id: data.createdByUserId });
       await DatabaseClient.getInstance().call.create({ data: { ...data, workspaceId } });
       queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
@@ -1966,6 +2119,16 @@ export class CallRepository {
     }
 
     if (!hasExternalCallChanged(existing as unknown as ExistingCallRow, data)) return;
+
+    // Merge (not replace): once a call is activated, its metadata also carries
+    // `conversationId`/`systemMessageId` (see activateScheduledCall). A plain
+    // overwrite here would wipe those out on the next calendar resync, causing
+    // the following join to think it's a fresh call and create a duplicate
+    // conversation + "started a call" system message instead of reusing them.
+    const mergedMetadata = {
+      ...(existing.metadata as Prisma.InputJsonObject ?? {}),
+      ...data.metadata,
+    };
 
     const updated = await DatabaseClient.getInstance().call.update({
       where: { externalId: data.externalId },
@@ -1977,7 +2140,9 @@ export class CallRepository {
         startsAt: data.startsAt,
         endsAt: data.endsAt,
         timezone: data.timezone,
-        metadata: data.metadata,
+        xyneManaged: data.xyneManaged ?? false,
+        channelId: data.channelId,
+        metadata: mergedMetadata,
         updatedAt: data.updatedAt,
         lastActivityAt: data.lastActivityAt,
       },
@@ -2011,6 +2176,8 @@ interface ExistingCallRow {
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
+  xyneManaged: boolean;
+  channelId: string | null;
   metadata: Prisma.JsonValue;
 }
 
@@ -2025,6 +2192,15 @@ function stableStringify(val: unknown): string {
   return `{${sorted.join(',')}}`;
 }
 
+/** Strips the activation-only keys (`conversationId`, `systemMessageId`) that
+ * activateScheduledCall stamps onto call.metadata, so calendar-resync change
+ * detection only looks at calendar-derived fields. */
+function omitActivationKeys(metadata: Prisma.JsonValue): unknown {
+  if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
+  const { conversationId, systemMessageId, ...rest } = metadata as Record<string, unknown>;
+  return rest;
+}
+
 function hasExternalCallChanged(
   existing: ExistingCallRow,
   data: {
@@ -2035,6 +2211,8 @@ function hasExternalCallChanged(
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
+    xyneManaged?: boolean;
+    channelId: string | null;
     metadata: Prisma.InputJsonObject;
   },
 ): boolean {
@@ -2046,6 +2224,12 @@ function hasExternalCallChanged(
     existing.startsAt?.getTime() !== data.startsAt?.getTime() ||
     existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
     existing.timezone !== data.timezone ||
-    stableStringify(existing.metadata) !== stableStringify(data.metadata)
+    existing.xyneManaged !== (data.xyneManaged ?? false) ||
+    existing.channelId !== data.channelId ||
+    // Compare only the calendar-derived subset of existing.metadata: once activated,
+    // existing.metadata also carries conversationId/systemMessageId (see
+    // activateScheduledCall), which never appear in the freshly computed data.metadata
+    // and would otherwise make this always report "changed".
+    stableStringify(omitActivationKeys(existing.metadata)) !== stableStringify(data.metadata)
   );
 }

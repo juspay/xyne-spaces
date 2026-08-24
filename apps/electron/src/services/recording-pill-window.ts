@@ -5,6 +5,7 @@ import log from 'electron-log/main';
 
 const pillStore = new Store({ name: 'recording-pill' });
 const POSITION_KEY = 'pillPosition';
+const ENABLED_KEY = 'pillEnabled';
 
 let pillWindow: BrowserWindow | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -49,6 +50,14 @@ export function isPillSender(event: Electron.IpcMainEvent): boolean {
     event.sender === pillWindow.webContents &&
     event.senderFrame === pillWindow.webContents.mainFrame
   );
+}
+
+export function isRecordingPillEnabled(): boolean {
+  return pillStore.get(ENABLED_KEY, true) as boolean;
+}
+
+export function persistRecordingPillEnabled(enabled: boolean): void {
+  pillStore.set(ENABLED_KEY, enabled);
 }
 
 export function setRecordingPillTheme(theme: RecordingPillTheme): void {
@@ -208,6 +217,7 @@ export function showRecordingPill(state: RecordingPillState): void {
     skipTaskbar: true,
     hasShadow: false,
     focusable: true,
+    fullscreenable: false,
     show: false,
     type: 'panel',
     webPreferences: {

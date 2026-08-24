@@ -12,6 +12,7 @@ import {
   Link,
   Copy,
   Headphones,
+  Mic,
   Pin,
   CornerUpLeft,
   SquareAsterisk,
@@ -86,6 +87,9 @@ export interface HoverActionsToolbarProps {
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
+  /** Starts a headless ("take notes") recording anchored to this thread. */
+  onStartRecording?: () => void;
+  isRecordingDisabled?: boolean;
   isChannelArchived?: boolean;
   /** MESSAGE shortcuts for this channel — shown in the More Actions dropdown */
   messageShortcuts?: AppShortcutWithApp[];
@@ -140,6 +144,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onMarkAsUnread,
   onInitiateCall,
   isCallDisabled = false,
+  onStartRecording,
+  isRecordingDisabled = false,
   isChannelArchived = false,
   messageShortcuts,
   onRunShortcut,
@@ -238,7 +244,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               handleEmojiOpenChange(false);
             }}
             customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: false }}
+            previewConfig={{ showPreview: true }}
           />
         </Popover>
       )}
@@ -312,6 +318,25 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <Headphones className='w-4 h-4' />
+          </Button>
+        </Tooltip>
+      )}
+
+      {/* Start Recording (Take Notes) */}
+      {onStartRecording && messageId === initialMessageId && !isChannelArchived && (
+        <Tooltip content={isRecordingDisabled ? 'Recording in progress' : 'Take notes'} side='top'>
+          <Button
+            variant='ghost'
+            className='size-7 text-muted-foreground'
+            onClick={onStartRecording}
+            disabled={isRecordingDisabled}
+            title={isRecordingDisabled ? 'Recording in progress' : 'Take notes'}
+            data-testid='hover-action-start-recording'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='START_RECORDING_FROM_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
+          >
+            <Mic className='w-4 h-4' />
           </Button>
         </Tooltip>
       )}
