@@ -14,7 +14,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { apiKeyExpiryFrom, mintApiKey } from '@/api/sdk/auth';
+import { API_KEY_TTL_CHOICES, apiKeyExpiryFrom, mintApiKey } from '@/api/sdk/auth';
 
 const router = Router();
 
@@ -23,6 +23,11 @@ const MAX_LIVE_KEYS = 2;
 
 const createBody = z.object({
   name: z.string().trim().min(1).max(80),
+  ttlDays: z
+    .number()
+    .refine((d): d is (typeof API_KEY_TTL_CHOICES)[number] => (API_KEY_TTL_CHOICES as readonly number[]).includes(d), {
+      message: `ttlDays must be one of: ${API_KEY_TTL_CHOICES.join(', ')}`,
+    }),
 });
 
 interface KeySummary {
@@ -33,12 +38,16 @@ interface KeySummary {
   /** Last four characters, enough to tell two keys apart in a list. */
   hint: string;
   expired: boolean;
+  revoked: boolean;
+  revokedAt: Date | null;
 }
 
 function summarize(row: {
   id: string;
   name: string;
   token: string;
+  status: string;
+  revokedAt: Date | null;
   createdAt: Date;
   expiresAt: Date;
 }): KeySummary {
@@ -49,14 +58,16 @@ function summarize(row: {
     expiresAt: row.expiresAt,
     hint: row.token.slice(-4),
     expired: row.expiresAt.getTime() <= Date.now(),
+    revoked: row.status === 'REVOKED',
+    revokedAt: row.revokedAt,
   };
 }
 
 /**
  * List the caller's keys.
  *
- * Expired keys are returned rather than hidden, so the list explains why a key
- * stopped working instead of appearing to have lost it.
+ * Expired and revoked keys are returned rather than hidden, so the list
+ * explains why a key stopped working instead of appearing to have lost it.
  */
 router.get('/', async (req: Request, res: Response) => {
   const user = req.user;
@@ -69,7 +80,15 @@ router.get('/', async (req: Request, res: Response) => {
     const rows = await db.sdkApiKey.findMany({
       where: { userId: user.id, workspaceId: user.workspaceId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, token: true, createdAt: true, expiresAt: true },
+      select: {
+        id: true,
+        name: true,
+        token: true,
+        status: true,
+        revokedAt: true,
+        createdAt: true,
+        expiresAt: true,
+      },
     });
 
     res.json({
@@ -99,17 +118,20 @@ router.post('/', async (req: Request, res: Response) => {
 
   const parsed = createBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'A name is required (1-80 characters).' });
+    res.status(400).json({
+      error: `A name (1-80 characters) and a ttlDays of ${API_KEY_TTL_CHOICES.join(', ')} are required.`,
+    });
     return;
   }
 
   try {
-    // Only live keys count against the limit: an expired one must never block
-    // minting its replacement.
+    // Only live keys count against the limit: an expired or revoked one must
+    // never block minting its replacement.
     const liveKeys = await db.sdkApiKey.count({
       where: {
         userId: user.id,
         workspaceId: user.workspaceId,
+        status: 'ACTIVE',
         expiresAt: { gt: new Date() },
       },
     });
@@ -150,9 +172,17 @@ router.post('/', async (req: Request, res: Response) => {
         userId: user.id,
         workspaceId: user.workspaceId,
         token,
-        expiresAt: apiKeyExpiryFrom(),
+        expiresAt: apiKeyExpiryFrom(parsed.data.ttlDays),
       },
-      select: { id: true, name: true, token: true, createdAt: true, expiresAt: true },
+      select: {
+        id: true,
+        name: true,
+        token: true,
+        status: true,
+        revokedAt: true,
+        createdAt: true,
+        expiresAt: true,
+      },
     });
 
     logger.info('[sdk-keys] key created', { userId: user.id, keyId: row.id });
@@ -163,7 +193,13 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/** Delete one of the caller's keys. Takes effect on the next request. */
+/**
+ * Revoke one of the caller's keys. Takes effect on the next request.
+ *
+ * Soft: the row stays, `status` flips to `REVOKED`, `revokedAt` records when.
+ * A hard delete would lose that — `GET /` couldn't tell "you deleted this" from
+ * "this never existed," and there would be nothing left to audit.
+ */
 router.delete('/:id', async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
@@ -172,10 +208,16 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    // Scoped by userId as well as id, so an id belonging to someone else is a
-    // no-op rather than a deletion.
-    const { count } = await db.sdkApiKey.deleteMany({
-      where: { id: req.params['id'], userId: user.id, workspaceId: user.workspaceId },
+    // Scoped by userId, workspaceId, and current status: an id belonging to
+    // someone else, or already revoked, is a no-op rather than a change.
+    const { count } = await db.sdkApiKey.updateMany({
+      where: {
+        id: req.params['id'],
+        userId: user.id,
+        workspaceId: user.workspaceId,
+        status: 'ACTIVE',
+      },
+      data: { status: 'REVOKED', revokedAt: new Date() },
     });
 
     if (count === 0) {
@@ -183,10 +225,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    logger.info('[sdk-keys] key deleted', { userId: user.id, keyId: req.params['id'] });
+    logger.info('[sdk-keys] key revoked', { userId: user.id, keyId: req.params['id'] });
     res.status(204).end();
   } catch (error) {
-    logger.error('[sdk-keys] delete failed', { userId: user.id, error });
+    logger.error('[sdk-keys] revoke failed', { userId: user.id, error });
     res.status(500).json({ error: 'Failed to delete API key' });
   }
 });

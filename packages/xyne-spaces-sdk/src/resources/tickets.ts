@@ -18,6 +18,7 @@ import {
   type TicketViewMode,
 } from '../registry/tickets.js';
 import { newId } from '../core/ids.js';
+import { paginate, type Page, type PageOptions } from '../core/paginate.js';
 import type {
   CreateTicketInput,
   CreateTicketResponse,
@@ -139,19 +140,36 @@ export class TicketsResource extends Resource {
     return this.call(ticketsOperations.search, options ?? {});
   }
 
-  /** List tickets in a project. */
-  listByProject(projectId: string): Promise<Ticket[]> {
-    return this.call(ticketsOperations.listByProject, { projectId });
+  /**
+   * List tickets in a project, one page at a time.
+   *
+   * `ticketsByProjectV2` has no server-side cursor — a project with hundreds
+   * of tickets returns all of them in one response — so this fetches that and
+   * windows it. Defaults to the first 50. For filtered, view-scoped listing
+   * (by board, by assignee, by status) use {@link list} instead, which takes
+   * those filters server-side.
+   */
+  async listByProject(projectId: string, options?: PageOptions): Promise<Page<Ticket>> {
+    const all = await this.call(ticketsOperations.listByProject, { projectId });
+    return paginate(all, options);
   }
 
-  /** List a ticket's activity timeline. */
   /** List the current user's ticket exports, newest first (server caps at 100). */
   listExports(): Promise<unknown[]> {
     return this.call(ticketsOperations.listExports, undefined);
   }
 
-  listActivities(ticketId: string): Promise<unknown[]> {
-    return this.call(ticketsOperations.listActivities, { ticketId });
+  /**
+   * List one ticket's activity timeline, one page at a time.
+   *
+   * `ticketActivities` has no server-side cursor — a ticket's whole history
+   * comes back in one response — so this fetches that and windows it.
+   * Defaults to the first 50, newest first. For several tickets at once, with
+   * a real server-side cursor, use {@link listActivitiesForTickets}.
+   */
+  async listActivities(ticketId: string, options?: PageOptions): Promise<Page<unknown>> {
+    const all = await this.call(ticketsOperations.listActivities, { ticketId });
+    return paginate(all, options);
   }
 
   /**

@@ -200,8 +200,10 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
-import { createSdkRouter } from '@/api/sdk';
+import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
+import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { sdkConfig } from '@/api/sdk/config';
+import { apiKeyAuth } from '@/middleware/sdkApiKeyAuth';
 import sdkKeyRoutes from '@/routes/sdk-keys';
 
 
@@ -356,21 +358,25 @@ export class App {
     this.app.use(encryptResponseBodyMiddleware);
 
     // Public SDK API. It authenticates its own API keys, so it must be mounted
-    // before the legacy catch-all `/api` session middleware.
+    // before the legacy catch-all `/api` session middleware. When disabled,
+    // nothing is mounted here and a request falls through to the app's own
+    // `notFoundHandler` further down.
+    //
+    // Two routers at the same prefix: the public one (version/health) is
+    // tried first and falls through on no match, then `apiKeyAuth` runs for
+    // everything else — mirroring how `/api/sdk-keys` below passes its own
+    // auth explicitly, rather than hiding it inside the router. The trailing
+    // `sdkErrorHandler` is what still gives an `apiKeyAuth` failure the SDK's
+    // own error envelope: that failure happens before the protected router is
+    // ever entered, so an error handler defined inside it would never see it.
     if (sdkConfig.enabled) {
-      this.app.use('/api/sdk', createSdkRouter());
+      this.app.use('/api/sdk', createSdkPublicRouter());
+      this.app.use('/api/sdk', apiKeyAuth, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
 
       // Where those keys are minted. Session-authenticated, not key-authenticated:
       // you cannot use an API key to mint another one.
       this.app.use('/api/sdk-keys', authMiddleware.authenticate, sdkKeyRoutes);
-    } else {
-      this.app.use('/api/sdk', (_req, res) => {
-        res.status(404).json({
-          success: false,
-          error: 'The public SDK API is not enabled on this deployment.',
-        });
-      });
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);

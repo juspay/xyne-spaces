@@ -13,7 +13,7 @@
 
 import type { AuthData } from '@/zero/mutators';
 import { runCatalogMutation } from '@/zero/server';
-import { toApiError } from './errors';
+import { toSdkApiError } from './errors';
 
 /** Run one catalog mutator as the authenticated caller. */
 export async function callMutator(
@@ -26,6 +26,6 @@ export async function callMutator(
   } catch (err) {
     // Domain failures from the mutator catalog are plain `Error`s (~485 throw
     // sites), so this is where they acquire a code and a status.
-    throw toApiError(err);
+    throw toSdkApiError(err);
   }
 }

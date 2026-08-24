@@ -966,13 +966,15 @@ model ScheduledMessage {
 // API keys for the public Spaces SDK (/api/sdk).
 model SdkApiKey {
   workspaceId String // denormalized tenant key (stamped on insert)
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   userId      String
-  token       String   @unique
-  expiresAt   DateTime @map("expires_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  token       String    @unique
+  status      String    @default("ACTIVE")
+  revokedAt   DateTime? @map("revoked_at")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@index([workspaceId])
   @@index([userId])

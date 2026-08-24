@@ -6,6 +6,10 @@ import { apiInstance } from '../clients/apiClient';
  * A key is workspace-scoped, because the user row that mints it is: someone
  * with access to two workspaces mints separately from each.
  */
+/** Lifetimes a key can be minted with, in days. Mirrors `API_KEY_TTL_CHOICES` on the backend. */
+export const API_KEY_TTL_CHOICES = [30, 60, 90] as const;
+export type ApiKeyTtlDays = (typeof API_KEY_TTL_CHOICES)[number];
+
 export interface SdkApiKey {
   id: string;
   name: string;
@@ -14,6 +18,8 @@ export interface SdkApiKey {
   /** Last four characters — enough to tell two keys apart in a list. */
   hint: string;
   expired: boolean;
+  revoked: boolean;
+  revokedAt: string | null;
 }
 
 export interface SdkApiKeyList {
@@ -32,8 +38,8 @@ export const sdkKeysService = {
     return response.data;
   },
 
-  async create(name: string): Promise<CreatedSdkApiKey> {
-    const response = await apiInstance.post<CreatedSdkApiKey>('/sdk-keys', { name });
+  async create(name: string, ttlDays: ApiKeyTtlDays): Promise<CreatedSdkApiKey> {
+    const response = await apiInstance.post<CreatedSdkApiKey>('/sdk-keys', { name, ttlDays });
     return response.data;
   },
 

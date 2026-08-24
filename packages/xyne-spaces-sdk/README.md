@@ -100,12 +100,12 @@ Three properties worth knowing before you deploy:
 
 | | |
 |---|---|
-| **Short-lived** | 30 days by default. There is no refresh step, so lifetime is the bound on a leaked key |
+| **Short-lived** | 30, 60, or 90 days, chosen at creation. There is no refresh step, so lifetime is the bound on a leaked key |
 | **Live permissions** | Role changes take effect on the next request, not on rotation. Deactivate a user and their keys stop working |
 | **Single workspace** | Access to a second workspace requires a second key, minted there |
 
 A user may hold **2 live keys** at a time — enough to rotate without downtime.
-Expired keys don't occupy a slot.
+Neither an expired nor a revoked key occupies a slot.
 
 ### Identity
 

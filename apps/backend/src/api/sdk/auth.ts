@@ -1,11 +1,16 @@
 /**
- * API-key authentication for /api/sdk.
+ * API-key format for /api/sdk.
  *
  * The key *is* the credential and carries the caller's identity: it is minted
  * from the dashboard, presented as a bearer token, and accepted until it expires
- * or is deleted. Keys are short-lived by design — a key grants everything its
+ * or is revoked. Keys are short-lived by design — a key grants everything its
  * user can do and there is no refresh step, so its lifetime is the only bound on
- * one that leaks. `sdkConfig.apiKey.ttlDays` sets the default.
+ * one that leaks. The dashboard offers `API_KEY_TTL_CHOICES` (30/60/90 days), and
+ * a caller must name one — there is no configured default to fall back to.
+ *
+ * The Express middleware that verifies a presented key is
+ * `middleware/sdkApiKeyAuth.ts`, not this file — this owns the format and how
+ * one gets minted; that owns authenticating a request against it.
  *
  * ## What a key contains
  *
@@ -37,16 +42,22 @@
  * The result is an `AuthData` identical in shape to the one the app builds from a
  * session JWT, which is why the query, mutation, and direct-API paths can hand it
  * straight to `createMutators` / `wrapTransactionWithACL` with no adaptation.
+ *
+ * ## Why not a JWT
+ *
+ * A JWT's usual advantage — verify the signature, skip the database — does not
+ * apply here: `role` and `orgRole` are re-read from the database on every
+ * request regardless (see above), so the row lookup already happens on every
+ * call. What a JWT would cost, and this avoids, is revocability: a signed token
+ * is valid until it expires, full stop, so revoking one early needs a
+ * denylist — itself a database check on every request, the exact cost a JWT is
+ * chosen to avoid. Looking a key up directly gets revocation for free from the
+ * same lookup that already has to happen.
  */
 
-import type { NextFunction, Request, Response } from 'express';
 import type { Context } from '@xyne/shared';
 import type { AuthData } from '@/zero/mutators';
-import { db } from '@/database/client';
-import { decrypt, encrypt } from '@/services/encryptionService';
-import { logger } from '@/utils/logger';
-import { sdkConfig } from './config';
-import { ApiError } from './errors';
+import { encrypt } from '@/services/encryptionService';
 
 /** Prefix that makes a leaked key greppable in logs and repositories. */
 export const API_KEY_PREFIX = 'xyne_sk_';
@@ -69,14 +80,24 @@ export interface SdkAuth {
   readonly keyExpiresAt: Date;
 }
 
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      sdkAuth?: SdkAuth;
-    }
-  }
-}
+// `Request.sdkAuth` is declared once, alongside `Request.user`, in
+// `types/express.ts` — see that file for the augmentation.
+
+/**
+ * `sdk_api_keys.status`. A plain `String` column, not a DB enum — Postgres
+ * enums are frozen in this repo (see `scripts/validate-no-new-enums.sh`), so
+ * a fixed set of values is enforced here, app-side, instead.
+ *
+ * `REVOKED` is explicit user action (`DELETE /api/sdk-keys/:id`), distinct
+ * from a key that has simply run past its `expiresAt` — that needs no status
+ * change, since the expiry check already rejects it.
+ */
+export const SDK_API_KEY_STATUSES = ['ACTIVE', 'REVOKED'] as const;
+export type SdkApiKeyStatus = (typeof SDK_API_KEY_STATUSES)[number];
+
+/** The lifetimes a key can be minted with. There is no default — see `apiKeyExpiryFrom`. */
+export const API_KEY_TTL_CHOICES = [30, 60, 90] as const;
+export type ApiKeyTtlDays = (typeof API_KEY_TTL_CHOICES)[number];
 
 /**
  * Mint a key string for an identity.
@@ -91,140 +112,14 @@ export function mintApiKey(identity: KeyIdentity): string {
   return `${API_KEY_PREFIX}${Buffer.from(sealed, 'utf8').toString('base64url')}`;
 }
 
-/** When a key minted now should stop working. */
-export function apiKeyExpiryFrom(now: Date = new Date()): Date {
-  return new Date(now.getTime() + sdkConfig.apiKey.ttlDays * 24 * 60 * 60 * 1000);
-}
-
-/** Recover the identity from a key string, or undefined if it is not readable. */
-function openApiKey(key: string): KeyIdentity | undefined {
-  try {
-    const sealed = Buffer.from(key.slice(API_KEY_PREFIX.length), 'base64url').toString('utf8');
-    const parsed = JSON.parse(decrypt(sealed)) as Partial<KeyIdentity>;
-    if (
-      !parsed.sub ||
-      !parsed.workspaceId ||
-      !parsed.memberId ||
-      typeof parsed.email !== 'string' ||
-      typeof parsed.name !== 'string'
-    ) {
-      return undefined;
-    }
-    return parsed as KeyIdentity;
-  } catch {
-    // Malformed base64, wrong ENCRYPTION_KEY, or not JSON. All mean "not a key
-    // we issued"; the caller reports one indistinguishable failure either way.
-    return undefined;
-  }
-}
-
 /**
- * Authenticate an API key and attach the acting principal.
+ * When a key minted now, with the given lifetime, should stop working.
  *
- * An expired key is reported as such, since the caller can act on that. Every
- * other failure returns the same `unauthenticated` error: distinguishing "no such
- * key" from "key for a deleted user" would let a caller probe which keys exist.
+ * `ttlDays` is required and typed to `ApiKeyTtlDays` — one of
+ * `API_KEY_TTL_CHOICES` — rather than defaulting to a config value: the one
+ * caller (`routes/sdk-keys.ts`) always has a chosen lifetime by the time it
+ * gets here, so a silent fallback would exist to serve nobody.
  */
-export async function apiKeyAuth(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): Promise<void> {
-  try {
-    const header = req.header('Authorization');
-    if (!header?.toLowerCase().startsWith('bearer ')) {
-      throw new ApiError(
-        'unauthenticated',
-        'Provide an Authorization: Bearer <api key> header.',
-      );
-    }
-
-    const presented = header.slice(7).trim();
-    if (!presented.startsWith(API_KEY_PREFIX)) {
-      throw new ApiError('unauthenticated', 'Malformed API key.');
-    }
-
-    // Authenticate on the stored row, not on the decrypt. See the header note.
-    const row = await db.sdkApiKey.findUnique({
-      where: { token: presented },
-      select: { id: true, userId: true, workspaceId: true, expiresAt: true },
-    });
-    if (!row) {
-      throw new ApiError('unauthenticated', 'Unknown or revoked API key.');
-    }
-
-    // Distinct from `unauthenticated`: the key was genuinely issued and simply
-    // ran out, which the caller fixes by minting a new one rather than by
-    // hunting for a mistake in how they sent it.
-    if (row.expiresAt.getTime() <= Date.now()) {
-      throw new ApiError(
-        'token_expired',
-        'This API key has expired. Create a new one from the Apps page.',
-      );
-    }
-
-    const identity = openApiKey(presented);
-    if (
-      !identity ||
-      identity.sub !== row.userId ||
-      identity.workspaceId !== row.workspaceId
-    ) {
-      // A stored key that will not open, or that disagrees with its own row,
-      // means the encryption key was rotated or the row was tampered with.
-      logger.error('[sdk] stored api key failed to open', { keyId: row.id });
-      throw new ApiError('unauthenticated', 'API key could not be read.');
-    }
-
-    const [user, orgMember] = await Promise.all([
-      db.user.findUnique({
-        where: { id: identity.sub },
-        select: { role: true, displayName: true },
-      }),
-      db.orgMember.findUnique({
-        where: { memberId: identity.memberId },
-        select: { role: true },
-      }),
-    ]);
-
-    // The key is valid but the principal is gone (deactivated user, removed org
-    // membership). Fail closed rather than proceeding without a role.
-    if (!user || !orgMember) {
-      logger.warn('[sdk] api key valid but principal missing', {
-        keyId: row.id,
-        sub: identity.sub,
-        userExists: !!user,
-        orgMemberExists: !!orgMember,
-      });
-      throw new ApiError('unauthenticated', 'The account for this key is no longer active.');
-    }
-
-    const authData: AuthData = {
-      sub: identity.sub,
-      email: identity.email,
-      name: identity.name,
-      displayName: user.displayName,
-      workspaceId: identity.workspaceId,
-      orgId: identity.orgId,
-      memberId: identity.memberId,
-      role: user.role,
-      orgRole: orgMember.role,
-    };
-
-    req.sdkAuth = {
-      authData,
-      ctx: {
-        userID: authData.sub,
-        workspaceId: authData.workspaceId,
-        role: authData.role,
-        orgRole: authData.orgRole,
-        memberId: authData.memberId,
-      } as Context,
-      keyId: row.id,
-      keyExpiresAt: row.expiresAt,
-    };
-
-    next();
-  } catch (err) {
-    next(err);
-  }
+export function apiKeyExpiryFrom(ttlDays: ApiKeyTtlDays, now: Date = new Date()): Date {
+  return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
 }

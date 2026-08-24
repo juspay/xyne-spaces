@@ -117,7 +117,7 @@ export function describeError(err: unknown): string {
 		return err instanceof Error ? err.message : String(err);
 	}
 	if (err.code === "token_expired") {
-		return `Your Xyne Spaces API key has expired — keys last 30 days. Mint a new one in ${KEY_SOURCE} and set XYNE_SPACES_API_KEY.`;
+		return `Your Xyne Spaces API key has expired — keys last at most 90 days, chosen at creation. Mint a new one in ${KEY_SOURCE} and set XYNE_SPACES_API_KEY.`;
 	}
 	if (err.status === 401 || err.code === "unauthenticated") {
 		return `Not authorized to Xyne Spaces. Set XYNE_SPACES_API_KEY to a key minted in ${KEY_SOURCE}.`;

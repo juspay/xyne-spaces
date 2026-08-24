@@ -137,7 +137,11 @@ export type {
   PaginationOptions,
 } from './types/index.js';
 
-// ----- Pagination Cursors -----
+// ----- Pagination -----
+// `Page`/`PageOptions` are the client-side pagination used by methods whose
+// underlying Zero query has no server-side cursor (see core/paginate.ts). The
+// cursor types below are the real thing, native to the operations that have one.
+export type { Page, PageOptions } from './core/paginate.js';
 export type { ConversationCursor } from './registry/conversations.js';
 export type { MessageCursor } from './registry/messages.js';
 export type { ActivityCursor } from './registry/activities.js';

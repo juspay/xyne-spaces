@@ -14,22 +14,12 @@ export const sdkConfig = {
 
   /**
    * Development escape hatch: run reads against the primary pool when no read
-   * replica is configured. Never enable in production — the replica exists to
-   * keep SDK read traffic off the write path.
+   * replica is configured. Tied to `NODE_ENV` rather than its own flag — the
+   * replica exists to keep SDK read traffic off the write path, and that
+   * matters precisely in production, so there is nothing a separate switch
+   * would let a deployment opt out of that `NODE_ENV` does not already decide.
    */
   get allowPrimaryForReads(): boolean {
-    return process.env['SDK_QUERIES_ALLOW_PRIMARY'] === 'true';
-  },
-
-  apiKey: {
-    /**
-     * How long a newly minted key stays valid. Keys are deliberately short-lived:
-     * they carry a user's full identity and there is no refresh step, so the
-     * lifetime is the only bound on a leaked one.
-     */
-    get ttlDays(): number {
-      const raw = Number(process.env['SDK_API_KEY_TTL_DAYS'] ?? 30);
-      return Number.isFinite(raw) && raw > 0 ? raw : 30;
-    },
+    return process.env['NODE_ENV'] !== 'production';
   },
 } as const;

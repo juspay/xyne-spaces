@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { SdkAuth } from '@/api/sdk/auth';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -61,6 +62,8 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       authenticatedSessionId?: string;
+      /** Set by `apiKeyAuth` in `api/sdk/auth.ts` for a request bearing a valid `xyne_sk_` key. */
+      sdkAuth?: SdkAuth;
     }
   }
 }

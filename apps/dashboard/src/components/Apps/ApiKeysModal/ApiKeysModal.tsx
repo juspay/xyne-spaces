@@ -4,12 +4,20 @@ import { Check, Copy, KeyRound, Trash2, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
+import { SegmentedToggle } from '../../ui/SegmentedToggle/SegmentedToggle';
 import {
+  API_KEY_TTL_CHOICES,
   sdkKeysService,
+  type ApiKeyTtlDays,
   type CreatedSdkApiKey,
   type SdkApiKey,
 } from '../../../services/Apps/sdkKeysService';
 import { daysLeft, formatDate } from './ApiKeysModal.utils';
+
+const TTL_OPTIONS = API_KEY_TTL_CHOICES.map(days => ({
+  value: String(days),
+  label: `${days}d`,
+}));
 
 const QUERY_KEY = ['sdk-keys'] as const;
 
@@ -26,6 +34,7 @@ const QUERY_KEY = ['sdk-keys'] as const;
 export const ApiKeysModal = (): ReactElement => {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
+  const [ttlDays, setTtlDays] = useState<ApiKeyTtlDays>(30);
   const [revealed, setRevealed] = useState<CreatedSdkApiKey | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -36,7 +45,8 @@ export const ApiKeysModal = (): ReactElement => {
   });
 
   const createKey = useMutation({
-    mutationFn: (keyName: string) => sdkKeysService.create(keyName),
+    mutationFn: (input: { name: string; ttlDays: ApiKeyTtlDays }) =>
+      sdkKeysService.create(input.name, input.ttlDays),
     onSuccess: created => {
       setRevealed(created);
       setName('');
@@ -62,7 +72,7 @@ export const ApiKeysModal = (): ReactElement => {
 
   const rows: SdkApiKey[] = keys.data?.keys ?? [];
   const maxLiveKeys = keys.data?.maxLiveKeys ?? 2;
-  const liveCount = rows.filter(key => !key.expired).length;
+  const liveCount = rows.filter(key => !key.expired && !key.revoked).length;
   const atLimit = liveCount >= maxLiveKeys;
 
   const copy = async (): Promise<void> => {
@@ -112,36 +122,46 @@ export const ApiKeysModal = (): ReactElement => {
           </div>
         ) : (
           <form
-            className='flex items-end gap-2'
+            className='space-y-3'
             onSubmit={event => {
               event.preventDefault();
-              if (name.trim() && !atLimit) createKey.mutate(name.trim());
+              if (name.trim() && !atLimit) createKey.mutate({ name: name.trim(), ttlDays });
             }}
           >
-            <div className='flex-1'>
-              <label htmlFor='sdk-key-name' className='block text-sm text-muted-foreground'>
-                Name
-              </label>
-              <Input
-                id='sdk-key-name'
-                value={name}
-                onChange={event => setName(event.target.value)}
-                placeholder='e.g. CI pipeline'
-                maxLength={80}
-                disabled={atLimit}
-                className='mt-1'
+            <div className='flex items-end gap-2'>
+              <div className='flex-1'>
+                <label htmlFor='sdk-key-name' className='block text-sm text-muted-foreground'>
+                  Name
+                </label>
+                <Input
+                  id='sdk-key-name'
+                  value={name}
+                  onChange={event => setName(event.target.value)}
+                  placeholder='e.g. CI pipeline'
+                  maxLength={80}
+                  disabled={atLimit}
+                  className='mt-1'
+                />
+              </div>
+              <Button type='submit' disabled={!name.trim() || atLimit || createKey.isPending}>
+                {createKey.isPending ? 'Creating…' : 'Create key'}
+              </Button>
+            </div>
+            <div className='flex items-center gap-2'>
+              <span className='text-sm text-muted-foreground'>Expires in</span>
+              <SegmentedToggle
+                options={TTL_OPTIONS}
+                value={String(ttlDays)}
+                onChange={value => setTtlDays(Number(value) as ApiKeyTtlDays)}
               />
             </div>
-            <Button type='submit' disabled={!name.trim() || atLimit || createKey.isPending}>
-              {createKey.isPending ? 'Creating…' : 'Create key'}
-            </Button>
           </form>
         )}
 
         <p className='text-xs text-muted-foreground'>
           {atLimit
             ? `You have ${liveCount} of ${maxLiveKeys} active keys. Delete one to create another.`
-            : `Keys are valid for 30 days. You can hold ${maxLiveKeys} at a time.`}
+            : `You can hold ${maxLiveKeys} active keys at a time.`}
         </p>
 
         <div className='rounded-lg border border-border'>
@@ -171,7 +191,13 @@ export const ApiKeysModal = (): ReactElement => {
                   </p>
                 </div>
 
-                {confirmingDelete === key.id ? (
+                {key.revoked ? (
+                  // Nothing left to do to an already-revoked key — no delete
+                  // affordance, since revoking it again is a 404, not a no-op.
+                  <span className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
+                    Revoked {formatDate(key.revokedAt ?? key.expiresAt)}
+                  </span>
+                ) : confirmingDelete === key.id ? (
                   // Revoking is immediate and cannot be undone — anything using
                   // this key stops working on its next request.
                   <div className='flex shrink-0 items-center gap-1'>

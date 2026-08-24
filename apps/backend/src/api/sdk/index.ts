@@ -4,11 +4,15 @@
  * A thin authenticated surface over machinery that already exists. It owns
  * exactly five concerns:
  *
- *   auth.ts      authenticate an API key into an `AuthData`
+ *   auth.ts      the API-key format and how one is minted
  *   query.ts     run one catalog query
  *   mutation.ts  run one catalog mutator
  *   direct.ts    call the product controllers behind the catalog gaps
  *   handler.ts   request id and one error envelope
+ *
+ * Authenticating a *request* against a key is `middleware/sdkApiKeyAuth.ts`,
+ * passed in explicitly where this router is mounted — see `app.ts` — rather
+ * than applied invisibly inside it.
  *
  * Everything else — ACL, Vespa indexing, side effects, sequence allocation — is
  * reached through code the app itself uses, never reimplemented here.
@@ -18,11 +22,10 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { API_VERSION } from '@xyne/spaces-contract';
 import { errorHandler, handle, notFound, requestId } from './handler';
-import { apiKeyAuth } from './auth';
 import { callQuery, readsAvailable } from './query';
 import { callMutator } from './mutation';
 import { createDirectRouter } from './direct';
-import { ApiError } from './errors';
+import { SdkApiError } from './errors';
 
 /**
  * Body of a catalog call. What a caller may actually reach is decided by Zero's
@@ -37,7 +40,7 @@ const catalogRequest = z.object({
 function catalogHandler(kind: 'query' | 'mutator') {
   return handle(async (req: Request, res: Response) => {
     const auth = req.sdkAuth;
-    if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+    if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
 
     const { name, args } = catalogRequest.parse(req.body);
 
@@ -51,13 +54,20 @@ function catalogHandler(kind: 'query' | 'mutator') {
   });
 }
 
-export function createSdkRouter(): Router {
+/**
+ * Unauthenticated service endpoints, mounted before the authenticated router
+ * so a probe can tell "the API is misconfigured" from "your key is bad".
+ *
+ * `requestId` lives here rather than in both routers: it is `router.use()`
+ * with no path, so it runs for every request to `/api/sdk/*` regardless of
+ * which of the two routers ultimately serves it — mounting order in `app.ts`
+ * guarantees this one sees the request first.
+ */
+export function createSdkPublicRouter(): Router {
   const router = Router();
 
   router.use(requestId);
 
-  // Unauthenticated service endpoints. Deliberately before `apiKeyAuth` so a
-  // probe can tell "the API is misconfigured" from "your key is bad".
   router.get('/version', (_req: Request, res: Response) => {
     res.json({ version: API_VERSION, service: 'xyne-spaces-api' });
   });
@@ -71,12 +81,21 @@ export function createSdkRouter(): Router {
         : {
             available: false,
             reason:
-              'No read replica configured (DATABASE_READ_REPLICA_POOL_URL) and SDK_QUERIES_ALLOW_PRIMARY is off.',
+              'No read replica configured (DATABASE_READ_REPLICA_POOL_URL) and this is a production deployment, ' +
+              'which does not fall back to the primary pool.',
           },
     });
   });
 
-  router.use(apiKeyAuth);
+  return router;
+}
+
+/**
+ * The authenticated part of the API. `app.ts` mounts this behind
+ * `apiKeyAuth`, passed explicitly rather than applied inside — see that file.
+ */
+export function createSdkRouter(): Router {
+  const router = Router();
 
   router.post('/catalog/query', catalogHandler('query'));
   router.post('/catalog/mutate', catalogHandler('mutator'));

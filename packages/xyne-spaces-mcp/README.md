@@ -12,8 +12,9 @@ exact schema.
 
 ## Quick start
 
-**1. Mint a key.** Spaces dashboard → **Apps** → **API keys** → *Create key*. The key is
-shown once. It lasts 30 days, and you may hold two live keys at a time.
+**1. Mint a key.** Spaces dashboard → **Apps** → **API keys** → *Create key*, choosing a
+lifetime of 30, 60, or 90 days. The key is shown once, and you may hold two live keys at
+a time.
 
 **2. Tell the server about it.** Either an environment variable:
 
@@ -299,14 +300,14 @@ Failures come back as text with the API's stable error code, and the auth cases 
 to do:
 
 ```
-Your Xyne Spaces API key has expired — keys last 30 days. Mint a new one in the Spaces
-dashboard, under Apps → API keys and set XYNE_SPACES_API_KEY.
+Your Xyne Spaces API key has expired — keys last at most 90 days, chosen at creation.
+Mint a new one in the Spaces dashboard, under Apps → API keys and set XYNE_SPACES_API_KEY.
 ```
 
 | Code | Means |
 |---|---|
 | `unauthenticated` | No key configured, or the key was revoked |
-| `token_expired` | Past its 30 days — mint another |
+| `token_expired` | Past its chosen lifetime — mint another |
 | `forbidden` | Your user is not allowed this. Not a bug in the tool |
 | `not_found` | Absent, or invisible to you — deliberately indistinguishable |
 | `validation_failed` | An argument the server rejects. The message names the field |

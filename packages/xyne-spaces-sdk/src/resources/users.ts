@@ -6,6 +6,7 @@
 
 import { Resource } from './base.js';
 import { usersOperations } from '../registry/users.js';
+import { paginate, type Page, type PageOptions } from '../core/paginate.js';
 import type { CurrentUser, User, UserProfile } from '../types/index.js';
 
 export class UsersResource extends Resource {
@@ -30,30 +31,38 @@ export class UsersResource extends Resource {
   }
 
   /**
-   * List all users in the workspace.
+   * List users in the workspace, one page at a time.
+   *
+   * `getUsers` has no server-side cursor — it returns the whole workspace
+   * directory in one response — so this fetches that and windows it. Defaults
+   * to the first 50. `updatedAt` still narrows the fetched set server-side
+   * before paging happens.
    *
    * @param options.updatedAt - Only return users updated after this timestamp (epoch ms)
-   * @returns Array of users
    *
    * @example
-   * const users = await sdk.users.list();
-   * for (const user of users) {
+   * const page = await sdk.users.list();
+   * for (const user of page.items) {
    *   console.log(user.email);
    * }
    */
-  list(options?: { updatedAt?: number }): Promise<User[]> {
-    return this.call(usersOperations.list, options);
+  async list(options?: { updatedAt?: number } & PageOptions): Promise<Page<User>> {
+    const all = await this.call(usersOperations.list, { updatedAt: options?.updatedAt });
+    return paginate(all, options);
   }
 
   /**
-   * List users with basic fields only (no presence data).
+   * List users with basic fields only (no presence data), one page at a time.
    * More efficient when presence status is not needed.
    *
+   * Same shape as {@link list} and for the same reason: `getUsersV2` has no
+   * server-side cursor.
+   *
    * @param options.updatedAt - Only return users updated after this timestamp
-   * @returns Array of users
    */
-  listBasic(options?: { updatedAt?: number }): Promise<User[]> {
-    return this.call(usersOperations.listBasic, options);
+  async listBasic(options?: { updatedAt?: number } & PageOptions): Promise<Page<User>> {
+    const all = await this.call(usersOperations.listBasic, { updatedAt: options?.updatedAt });
+    return paginate(all, options);
   }
 
   /**

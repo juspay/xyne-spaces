@@ -7,6 +7,7 @@
 import { Resource } from './base.js';
 import { channelsOperations } from '../registry/channels.js';
 import { newId } from '../core/ids.js';
+import { paginate, type Page, type PageOptions } from '../core/paginate.js';
 import type {
   Channel,
   ChannelParticipant,
@@ -46,9 +47,15 @@ export class ChannelsResource extends Resource {
     return this.call(channelsOperations.listEmail, undefined);
   }
 
-  /** List public channels the user can join but has not joined. */
-  listBrowsable(): Promise<Channel[]> {
-    return this.call(channelsOperations.listBrowsable, undefined);
+  /**
+   * List public channels the user can join but has not joined, one page at a
+   * time. `browsableChannels` has no server-side cursor — it returns every
+   * matching channel in the workspace in one response — so this fetches that
+   * and windows it. Defaults to the first 50.
+   */
+  async listBrowsable(options?: PageOptions): Promise<Page<Channel>> {
+    const all = await this.call(channelsOperations.listBrowsable, undefined);
+    return paginate(all, options);
   }
 
   /** Get message and participant counts for a channel. */
@@ -61,7 +68,13 @@ export class ChannelsResource extends Resource {
     return this.call(channelsOperations.getUserStatus, { channelId });
   }
 
-  /** List a channel's participants. */
+  /**
+   * List a channel's participants, unpaginated.
+   *
+   * Fine for a small channel; for one that may have many members prefer
+   * {@link listParticipantsPaginated}, which has a real server-side cursor
+   * rather than fetching everyone and slicing.
+   */
   listParticipants(channelId: string): Promise<ChannelParticipant[]> {
     return this.call(channelsOperations.listParticipants, { channelId });
   }

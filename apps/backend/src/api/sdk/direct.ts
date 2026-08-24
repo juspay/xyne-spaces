@@ -33,7 +33,7 @@ import {
 import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
 import type { SdkAuth } from './auth';
-import { ApiError } from './errors';
+import { SdkApiError } from './errors';
 import { handle } from './handler';
 import type { ErrorCode } from '@xyne/spaces-contract';
 
@@ -232,9 +232,9 @@ const ROUTES: readonly DirectRoute[] = [
     serverErrorCode: 'upstream_unavailable',
     service: async (req, auth) => {
       const sessionId = req.params['sessionId'];
-      if (!sessionId) throw new ApiError('invalid_request', 'sessionId is required.');
+      if (!sessionId) throw new SdkApiError('invalid_request', 'sessionId is required.');
       const status = await getS2SClawRunStatus(sessionId, auth.authData.sub);
-      if (!status) throw ApiError.notFound('Claw run');
+      if (!status) throw SdkApiError.notFound('Claw run');
       return status;
     },
   },
@@ -251,15 +251,15 @@ export function createDirectRouter(): Router {
       handle(async (req: Request, res: Response) => {
         if (route.service) {
           const auth = req.sdkAuth;
-          if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+          if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
           if (route.query) route.query.parse(req.query);
           if (route.body) route.body.parse(req.body);
           try {
             res.status(200).json(await route.service(req, auth));
           } catch (err) {
-            throw err instanceof ApiError
+            throw err instanceof SdkApiError
               ? err
-              : new ApiError(route.serverErrorCode ?? 'internal', serviceMessage(err), {
+              : new SdkApiError(route.serverErrorCode ?? 'internal', serviceMessage(err), {
                   cause: err,
                 });
           }
@@ -303,7 +303,7 @@ export async function callController(
   req: Request,
 ): Promise<ControllerResult> {
   const auth = req.sdkAuth;
-  if (!auth) throw new ApiError('unauthenticated', 'Missing authenticated principal.');
+  if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
 
   const principal = principalOf(auth.authData);
   req.user = principal;
@@ -364,7 +364,7 @@ export async function callController(
   await route.controller(proxyReq, stub as unknown as Response);
 
   if (!settled) {
-    throw new ApiError('internal', 'The handler produced no response.');
+    throw new SdkApiError('internal', 'The handler produced no response.');
   }
   if (status >= 400) throw controllerError(status, body, route.serverErrorCode);
 
@@ -384,7 +384,7 @@ export async function callController(
 function unwrapEnvelope(raw: unknown): unknown {
   const body = raw as { success?: boolean; data?: unknown; error?: string } | undefined;
   if (body?.success === false) {
-    throw new ApiError('upstream_unavailable', body.error ?? 'The request failed.');
+    throw new SdkApiError('upstream_unavailable', body.error ?? 'The request failed.');
   }
   if (body && typeof body === 'object' && 'data' in body) return body.data;
   if (body && typeof body === 'object') {
@@ -425,7 +425,7 @@ function principalOf(authData: {
   };
 }
 
-function controllerError(status: number, body: unknown, serverErrorCode?: ErrorCode): ApiError {
+function controllerError(status: number, body: unknown, serverErrorCode?: ErrorCode): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;
   const message =
     (typeof payload?.message === 'string' && payload.message) ||
@@ -434,23 +434,23 @@ function controllerError(status: number, body: unknown, serverErrorCode?: ErrorC
 
   switch (status) {
     case 400:
-      return new ApiError('invalid_request', message);
+      return new SdkApiError('invalid_request', message);
     case 401:
-      return new ApiError('unauthenticated', message);
+      return new SdkApiError('unauthenticated', message);
     case 403:
-      return new ApiError('forbidden', message);
+      return new SdkApiError('forbidden', message);
     case 404:
-      return new ApiError('not_found', message);
+      return new SdkApiError('not_found', message);
     case 409:
-      return new ApiError('conflict', message);
+      return new SdkApiError('conflict', message);
     case 422:
-      return new ApiError('domain_rule', message);
+      return new SdkApiError('domain_rule', message);
     case 429:
-      return new ApiError('rate_limited', message);
+      return new SdkApiError('rate_limited', message);
     default:
       return serverErrorCode
-        ? new ApiError(serverErrorCode, message)
-        : new ApiError('internal', 'The handler failed.', { cause: body });
+        ? new SdkApiError(serverErrorCode, message)
+        : new SdkApiError('internal', 'The handler failed.', { cause: body });
   }
 }
 

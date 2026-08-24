@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { REQUEST_ID_HEADER, type ApiErrorBody } from '@xyne/spaces-contract';
 import { logger } from '@/utils/logger';
-import { ApiError, toApiError } from './errors';
+import { SdkApiError, toSdkApiError } from './errors';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -44,14 +44,14 @@ export function handle(
 ): RequestHandler {
   return (req, res, next) => {
     fn(req, res).catch((err: unknown) => {
-      next(err instanceof ZodError ? ApiError.validation(err) : err);
+      next(err instanceof ZodError ? SdkApiError.validation(err) : err);
     });
   };
 }
 
 /** 404 for unmatched paths, in the SDK envelope rather than the app's. */
 export function notFound(req: Request, _res: Response, next: NextFunction): void {
-  next(new ApiError('not_found', `No such endpoint: ${req.method} ${req.path}`));
+  next(new SdkApiError('not_found', `No such endpoint: ${req.method} ${req.path}`));
 }
 
 /**
@@ -72,7 +72,7 @@ export function errorHandler(
     return;
   }
 
-  const apiError = err instanceof ApiError ? err : toApiError(err);
+  const apiError = err instanceof SdkApiError ? err : toSdkApiError(err);
   const id = req.apiRequestId ?? 'unknown';
   const isServerError = apiError.status >= 500;
 

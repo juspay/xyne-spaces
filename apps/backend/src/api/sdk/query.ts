@@ -14,7 +14,7 @@ import {
   replicaDbProvider,
   runCatalogQuery,
 } from '@/zero/server';
-import { ApiError } from './errors';
+import { SdkApiError } from './errors';
 import { sdkConfig } from './config';
 
 /**
@@ -30,10 +30,9 @@ export function readsAvailable(): boolean {
 /**
  * Run one catalog query as the authenticated caller.
  *
- * Reads go to the replica. Falling back to the primary is a development escape
- * hatch behind `SDK_QUERIES_ALLOW_PRIMARY`: the replica exists to keep this
- * traffic off the write path, so a deployment missing one is misconfigured
- * rather than merely slower.
+ * Reads go to the replica. In production, a deployment missing one is
+ * misconfigured rather than merely slower; outside production, reads fall
+ * back to the primary pool automatically (see `sdkConfig.allowPrimaryForReads`).
  */
 export async function callQuery<T = unknown>(
   name: string,
@@ -42,7 +41,7 @@ export async function callQuery<T = unknown>(
 ): Promise<T> {
   const provider = replicaDbProvider ?? (sdkConfig.allowPrimaryForReads ? dbProvider : null);
   if (!provider) {
-    throw new ApiError(
+    throw new SdkApiError(
       'service_misconfigured',
       'Read replica is not configured for this deployment (DATABASE_READ_REPLICA_POOL_URL).',
     );
@@ -54,12 +53,12 @@ export async function callQuery<T = unknown>(
     if (!(err instanceof CatalogQueryError)) throw err;
     switch (err.phase) {
       case 'unknown':
-        throw new ApiError('invalid_request', err.message, { cause: err.cause });
+        throw new SdkApiError('invalid_request', err.message, { cause: err.cause });
       case 'build':
-        throw new ApiError('validation_failed', err.message, { cause: err.cause });
+        throw new SdkApiError('validation_failed', err.message, { cause: err.cause });
       default:
         // The cause is logged, not returned: it carries SQL and connection detail.
-        throw new ApiError('upstream_unavailable', 'The database is temporarily unavailable.', {
+        throw new SdkApiError('upstream_unavailable', 'The database is temporarily unavailable.', {
           cause: err.cause,
         });
     }

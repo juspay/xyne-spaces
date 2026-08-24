@@ -23,7 +23,7 @@ Eight files, five of which are the whole design:
 | `mutation.ts` | Run one catalog mutator |
 | `direct.ts` | Call the product controllers behind the catalog gaps |
 | `handler.ts` | Request id, and the one error envelope |
-| `errors.ts` | `ApiError`, bound to the contract's error catalog |
+| `errors.ts` | `SdkApiError`, bound to the contract's error catalog |
 | `config.ts` | Three environment switches |
 | `index.ts` | Router assembly |
 
@@ -77,8 +77,16 @@ own key, minted from that workspace.
 
 Keys are minted at `POST /api/sdk-keys` (`routes/sdk-keys.ts`), which is
 **session**-authenticated: you cannot use an API key to mint another one. A user
-may hold **2 live keys**, and they expire after **30 days** by default. Expired
-keys do not occupy a slot.
+may hold **2 live keys**, choosing a lifetime of **30, 60, or 90 days** at
+creation. Neither an expired nor a revoked key occupies a slot.
+
+Deleting a key (`DELETE /api/sdk-keys/:id`) is a soft revoke: the row stays,
+`status` moves from `ACTIVE` to `REVOKED`, `revokedAt` records when. `apiKeyAuth`
+rejects a revoked key with the same message as a row that never existed —
+"Unknown or revoked API key" — so revocation carries no information a caller
+could use to distinguish the two. `status` is a plain `String` column rather
+than a Postgres enum: this repo's enums are frozen (`scripts/validate-no-new-enums.sh`),
+so a fixed value set is enforced app-side via `SDK_API_KEY_STATUSES` in `auth.ts`.
 
 ### Authorization
 
@@ -212,9 +220,10 @@ Because `queryDef.fn` is the real `defineQuery` wrapper, the per-table read ACL 
 folded into the AST **before any SQL is generated**. There is no second
 authorization path to keep in sync.
 
-Reads go to the replica (`DATABASE_READ_REPLICA_POOL_URL`). Without one the API
-reports `degraded` at `/health` and returns `service_misconfigured`;
-`SDK_QUERIES_ALLOW_PRIMARY` is a development escape hatch only.
+Reads go to the replica (`DATABASE_READ_REPLICA_POOL_URL`). In production, a
+missing replica makes the API report `degraded` at `/health` and return
+`service_misconfigured`; outside production it falls back to the primary pool,
+so a local setup with no replica configured still works.
 
 ### Writes
 
@@ -242,9 +251,7 @@ the controllers and `tenantScopeMiddleware` read identity from.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SDK_API_ENABLED` | `false` | Master switch. The router is not mounted when false |
-| `DATABASE_READ_REPLICA_POOL_URL` | — | Where reads go. Required in production |
-| `SDK_QUERIES_ALLOW_PRIMARY` | `false` | Development only: read from the primary |
-| `SDK_API_KEY_TTL_DAYS` | `30` | Lifetime of a newly minted key |
+| `DATABASE_READ_REPLICA_POOL_URL` | — | Where reads go. Required in production; outside it, falls back to the primary pool |
 | `ENCRYPTION_KEY` | — | 32 bytes, hex. Already required by the app |
 
 No signing keys, no client registry, no callback URLs.
