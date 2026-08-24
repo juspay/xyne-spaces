@@ -4763,6 +4763,15 @@ async function processTask(
       const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
       if (gracefulInterrupt) {
         log(`Session interrupted with reply: ${sessionId}`);
+        const interruptSummary = partialResult
+          ? `✅ Picked up your new message and I’m switching to it now.
+
+**Summary of the work so far:**
+
+${partialResult}`
+          : `✅ Picked up your new message and I’m switching to it now.
+
+**Summary of the work so far:** I had not produced a stable partial result yet.`;
         await sendCallback(callbackUrl, sessionToken, {
           sessionId,
           userId,
@@ -4770,7 +4779,7 @@ async function processTask(
           agentSlug: agentSlug ?? null,
           fastMode: fastModeForCallback,
           status: "completed",
-          result: partialResult || "I’m pausing this run here so I can continue with your new message.",
+          result: interruptSummary,
           ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
             ? { toolsUsed: err.toolsUsed }
             : {}),
