@@ -1,3 +1,10 @@
+## [1.209.4](https://github.com/juspay/xyne-spaces/compare/v1.209.3...v1.209.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* ask ai calls with transcript ([#838](https://github.com/juspay/xyne-spaces/issues/838)) ([5f46a00](https://github.com/juspay/xyne-spaces/commit/5f46a00f47d12aa8365c617bbac9f50126490a67))
+
 ## [1.209.3](https://github.com/juspay/xyne-spaces/compare/v1.209.2...v1.209.3) (2026-08-23)
 
 
