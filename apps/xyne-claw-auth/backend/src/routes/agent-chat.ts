@@ -873,7 +873,11 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
     const rawOrder = agentCfg["providerOrder"];
     const order = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
     const relevant = order.filter((e) => e === "spaces" || (e === "litellm" && hasCred));
-    const primary = relevant[0] ?? (hasCred ? "litellm" : "spaces");
+    // No order → the platform default serves (strict ranking: a credential
+    // that was saved but never selected as a provider never routes a run).
+    // Legacy config.provider = "litellm" still counts as an explicit selection.
+    const legacyProvider = typeof agentCfg["provider"] === "string" ? agentCfg["provider"] : undefined;
+    const primary = relevant[0] ?? (order.length === 0 && legacyProvider === "litellm" && hasCred ? "litellm" : "spaces");
 
     if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
       const platform = await listPlatformModels();
@@ -1445,9 +1449,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Resolution: personal user provider always wins. Otherwise providerOrder
     // (canonical) takes over, with legacy config.provider as fallback for
     // agents that haven't migrated yet.
+    // STRICT RANKING — top first. "spaces" is keyless and can always serve,
+    // so an explicit spaces entry wins over lower-ranked saved credentials
+    // (mirrors resolveAgentProviderConfigs).
     let resolvedParentProvider = personalProvider;
     if (!resolvedParentProvider && agentProviderOrder.length > 0) {
-      resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+      resolvedParentProvider = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
