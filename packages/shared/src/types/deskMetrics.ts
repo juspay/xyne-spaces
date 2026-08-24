@@ -113,6 +113,7 @@ export const DESK_METRIC_KEYS = [
   'trend',
   'agents',
   'tags',
+  'aiCategories',
   'customFields',
   'tickets',
 ] as const;
@@ -132,10 +133,25 @@ export interface DeskMetricsPartial {
   tagBreakdown?: DeskMetricsResponse['tagBreakdown'];
   customFields?: DeskMetricsCustomFieldSummary[];
   customFieldBreakdown?: DeskMetricsCustomFieldBreakdown[];
+  aiCategoryCounts?: DeskMetricsAiCategoryCount[];
+  aiSubCategoryCounts?: DeskMetricsAiSubCategoryCount[];
   tickets?: DeskMetricsTicketRow[];
   ticketsTruncated?: boolean;
 }
 
+
+export interface DeskMetricsAiCategoryCount {
+  aiCategory: string;
+  count: number;
+}
+
+export interface DeskMetricsAiSubCategoryCount {
+  aiCategory: string;
+  aiSubCategory: string;
+  count: number;
+}
+
+export const UNCLASSIFIED_AI_CATEGORY = 'Unclassified';
 
 export interface DeskMetricsCustomFieldSummary {
   field: string;
