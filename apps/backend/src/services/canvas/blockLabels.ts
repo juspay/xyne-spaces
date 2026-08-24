@@ -110,47 +110,6 @@ export function parseLabelledMarkdown(text: string): ParsedEntry[] {
     });
 }
 
-export interface ValidationResult {
-  ok: boolean;
-  reason?: string;
-}
-
-export function validateAgentResponse(
-  entries: ParsedEntry[],
-  handleMap: HandleMap,
-  originalBlockCount: number
-): ValidationResult {
-  if (entries.length === 0) {
-    return { ok: false, reason: 'Agent returned an empty document' };
-  }
-
-  const recognised = entries.filter(e => e.handle && handleMap.has(e.handle));
-  if (originalBlockCount > 0 && recognised.length === 0) {
-    return {
-      ok: false,
-      reason: 'Agent returned no recognisable block labels — refusing to treat this as a full rewrite',
-    };
-  }
-
-  if (originalBlockCount >= 4 && entries.length < originalBlockCount / 2) {
-    return {
-      ok: false,
-      reason: `Agent returned ${entries.length} of ${originalBlockCount} paragraphs — response looks truncated`,
-    };
-  }
-
-  if (originalBlockCount >= 4 && recognised.length < originalBlockCount * 0.3) {
-    return {
-      ok: false,
-      reason:
-        `Only ${recognised.length} of ${originalBlockCount} existing paragraphs came back with their labels — ` +
-        'refusing a wholesale replacement',
-    };
-  }
-
-  return { ok: true };
-}
-
 export interface DerivedOp {
   op: 'insert' | 'replace' | 'delete' | 'move';
   /** Stable key within one reply; an anchor may reference an insert op's key. */
