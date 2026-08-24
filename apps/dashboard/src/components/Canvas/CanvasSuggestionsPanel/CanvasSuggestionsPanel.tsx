@@ -1,3 +1,7 @@
+// Review UI for pending agent suggestions: collapsed bar over the canvas,
+// batch-grouped cards (green insert / red delete / red-green replace / neutral
+// move), accept/reject wired to Zero mutators. A batch is visible while it has
+// at least one PENDING row; count and cards derive from that same predicate.
 import { useCallback, useMemo, useState, type ReactElement, type RefObject } from 'react';
 import { toast } from 'sonner';
 
@@ -6,28 +10,26 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { cn } from '../../../utils/classNames';
-import {
-  createCanvasContentTextDiff,
-  isVisibleCanvasContentDiffPart,
-} from '../../../utils/canvasVersioning';
 import { useCanvasSuggestionAnchors } from '../useCanvasSuggestionAnchors';
 
-interface SuggestionChange {
+interface SuggestionRow {
   id: string;
-  op: string;
+  batchId: string;
+  op: string; // insert | replace | delete | move
   blockId: string | null;
-  basePos: number | null;
+  proposedAnchorId: string | null;
+  currentAnchorId: string | null;
   beforeContent: unknown;
   afterContent: unknown;
   status: string;
   orderIndex: number;
+  createdAt: number;
 }
 
-interface Suggestion {
-  id: string;
-  baseBlockIds: unknown;
+interface Batch {
+  batchId: string;
+  rows: SuggestionRow[];
   createdAt: number;
-  changes?: readonly SuggestionChange[];
 }
 
 interface Props {
@@ -37,19 +39,7 @@ interface Props {
   className?: string;
 }
 
-/** Above this change ratio a word diff is unreadable — show old and new blocks whole. */
-const WORD_DIFF_MAX_CHANGE_RATIO = 0.4;
-
-const changeRatio = (parts: { type: string; value: string }[]): number => {
-  let changed = 0;
-  let total = 0;
-  for (const part of parts) {
-    total += part.value.length;
-    if (part.type !== 'same') changed += part.value.length;
-  }
-  return total === 0 ? 0 : changed / total;
-};
-
+/** Extract readable text from stored content: {markdown} for proposals, a block for snapshots. */
 const asText = (value: unknown): string => {
   if (!value) return '';
   if (typeof value === 'string') return value;
@@ -58,32 +48,23 @@ const asText = (value: unknown): string => {
   return '';
 };
 
-/** Extract readable text from a block; content may be a run array, a table object, or absent. */
-const runsToText = (runs: unknown): string =>
-  Array.isArray(runs)
-    ? runs
-        .map(run => {
-          const r = run as { text?: string; content?: unknown };
-          if (typeof r?.text === 'string') return r.text;
-          return r?.content ? runsToText(r.content) : '';
-        })
-        .join('')
-    : '';
+const runsToText = (runs: unknown): string => {
+  if (!Array.isArray(runs)) return '';
+  return runs.map(r => (r as { text?: string }).text ?? '').join('');
+};
 
+/** Text of a stored block; content may be a run array, a table object, or absent. */
 const blockText = (value: unknown): string => {
-  if (!value || typeof value !== 'object') return '';
-  const content = (value as { content?: unknown }).content;
-  if (!content) return '';
+  const block = value as { content?: unknown } | null;
+  if (!block) return '';
+  const content = block.content;
   if (Array.isArray(content)) return runsToText(content);
-  const table = content as { rows?: { cells?: unknown[] }[] };
-  if (Array.isArray(table.rows)) {
+  const table = content as { rows?: { cells?: unknown[] }[] } | undefined;
+  if (table?.rows) {
     return table.rows
       .map(row =>
-        (row?.cells ?? [])
-          .map(cell => {
-            const c = cell as { content?: unknown };
-            return runsToText(Array.isArray(cell) ? cell : c?.content);
-          })
+        (row.cells ?? [])
+          .map(cell => runsToText((cell as { content?: unknown }).content ?? cell))
           .join(' | '),
       )
       .join('\n');
@@ -91,53 +72,20 @@ const blockText = (value: unknown): string => {
   return '';
 };
 
-const blockType = (value: unknown): string | null =>
-  value && typeof value === 'object' ? ((value as { type?: string }).type ?? null) : null;
-
-/**
- * A reviewable item. Usually one change — but a delete+insert produced by the
- * relabel guard (same score stamped on both, insert anchored to the deleted
- * block, adjacent orderIndex) is really ONE decision: "replace this paragraph".
- * Pairing is display-only; the rows stay independent in the database.
- */
-interface ReviewItem {
-  key: string;
-  suggestion: Suggestion;
-  primary: SuggestionChange;
-  paired?: SuggestionChange; // the insert half of a replace-pair
-}
-
-const buildItems = (suggestions: Suggestion[]): ReviewItem[] => {
-  const items: ReviewItem[] = [];
-  for (const s of suggestions) {
-    const visible = (s.changes ?? []).filter(
-      c => c.status === 'PENDING' || c.status === 'CONFLICT' || c.status === 'STALE',
-    );
-    let i = 0;
-    while (i < visible.length) {
-      const c = visible[i] as SuggestionChange;
-      const next = visible[i + 1];
-      // Delete + insert anchored to the same block = one "replace" decision (derived from op + position).
-      const baseIds = (s.baseBlockIds as string[] | null) ?? [];
-      const insertTarget =
-        next?.op === 'insert_after' && next.basePos !== null && next.basePos >= 0
-          ? baseIds[next.basePos]
-          : null;
-      const isRelabelPair =
-        c.op === 'delete' &&
-        next?.op === 'insert_after' &&
-        insertTarget === c.blockId &&
-        next.orderIndex === c.orderIndex + 1;
-      if (isRelabelPair) {
-        items.push({ key: c.id, suggestion: s, primary: c, paired: next });
-        i += 2;
-      } else {
-        items.push({ key: c.id, suggestion: s, primary: c });
-        i += 1;
-      }
-    }
+/** A batch is visible while it still has a PENDING row. */
+const buildBatches = (rows: SuggestionRow[]): Batch[] => {
+  const byBatch = new Map<string, SuggestionRow[]>();
+  for (const row of rows) {
+    const list = byBatch.get(row.batchId) ?? [];
+    list.push(row);
+    byBatch.set(row.batchId, list);
   }
-  return items;
+  const batches: Batch[] = [];
+  for (const [batchId, batchRows] of byBatch) {
+    if (!batchRows.some(r => r.status === 'PENDING')) continue;
+    batches.push({ batchId, rows: batchRows, createdAt: batchRows[0]?.createdAt ?? 0 });
+  }
+  return batches.sort((a, b) => a.createdAt - b.createdAt);
 };
 
 export const CanvasSuggestionsPanel = ({
@@ -149,30 +97,27 @@ export const CanvasSuggestionsPanel = ({
   const z = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
-  // Stage 1: the panel starts as a one-line bar; the card list is opt-in so
-  // the document keeps its full height until the reviewer chooses to review.
+  // Panel starts as a one-line bar; the card list is opt-in.
   const [expanded, setExpanded] = useState(false);
-  const [suggestions = []] = useCachedQuery(queries.canvasSuggestions({ canvasId }), {
+  const [rows = []] = useCachedQuery(queries.canvasSuggestionChanges({ canvasId }), {
     enabled: Boolean(canvasId),
   });
 
-  const items = useMemo(() => buildItems(suggestions as unknown as Suggestion[]), [suggestions]);
+  const batches = useMemo(() => buildBatches(rows as unknown as SuggestionRow[]), [rows]);
+  const visibleRows = useMemo(() => batches.flatMap(b => b.rows), [batches]);
+  const pending = visibleRows.filter(r => r.status === 'PENDING');
+  const attention = visibleRows.filter(r => r.status !== 'PENDING');
 
+  // Rail anchor: the row's own block, or the paragraph an insert lands after.
   const anchors = useMemo(
     () =>
-      items.map(it => {
-        const baseIds = (it.suggestion.baseBlockIds as string[] | null) ?? [];
-        const insertNeighbour =
-          it.primary.basePos !== null && it.primary.basePos >= 0
-            ? (baseIds[it.primary.basePos] ?? null)
-            : null;
-        return {
-          blockId: it.primary.blockId ?? insertNeighbour,
-          status: it.primary.status,
-        };
-      }),
-    [items],
+      visibleRows.map(row => ({
+        blockId: row.blockId ?? row.currentAnchorId,
+        status: row.status === 'PENDING' ? 'PENDING' : 'CONFLICT',
+      })),
+    [visibleRows],
   );
+
   // Clicking a railed block in the document expands, selects and scrolls to its card.
   const handleBlockClick = useCallback((blockId: string) => {
     setExpanded(true);
@@ -199,6 +144,20 @@ export const CanvasSuggestionsPanel = ({
     [scrollToBlock],
   );
 
+  /** Snippet of a live block, read from the rendered document (moves carry no content). */
+  const domSnippet = useCallback(
+    (blockId: string | null): string => {
+      if (!blockId) return '';
+      const el = editorContainerRef?.current?.querySelector<HTMLElement>(
+        `[data-id="${CSS.escape(blockId)}"]`,
+      );
+      const text = el?.textContent?.trim() ?? '';
+      return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+    },
+    [editorContainerRef],
+  );
+
+  // Fires one mutator with busy-state + error toast handling.
   const run = useCallback(
     async (key: string, mutation: unknown, failure: string) => {
       setBusy(key);
@@ -219,41 +178,26 @@ export const CanvasSuggestionsPanel = ({
     [z],
   );
 
-  const resolveItem = useCallback(
-    (item: ReviewItem, accept: boolean) => {
-      const timestamp = Date.now();
-      if (item.paired && accept) {
-        // Both halves as ONE batched apply — one document read, one write.
-        return run(
-          item.key,
-          mutators.canvasSuggestion.acceptChanges({
-            changeIds: [item.primary.id, item.paired.id],
-            timestamp,
-          }),
-          'Failed to accept change',
-        );
-      }
-      const ids = item.paired ? [item.primary.id, item.paired.id] : [item.primary.id];
-      return (async () => {
-        for (const changeId of ids) {
-          await run(
-            item.key,
-            mutators.canvasSuggestion.resolveChange({ changeId, accept, timestamp }),
-            accept ? 'Failed to accept change' : 'Failed to reject change',
-          );
-        }
-      })();
-    },
+  const resolveRow = useCallback(
+    (row: SuggestionRow, accept: boolean) =>
+      run(
+        row.id,
+        mutators.canvasSuggestion.resolveChange({
+          changeId: row.id,
+          accept,
+          timestamp: Date.now(),
+        }),
+        accept ? 'Failed to accept change' : 'Failed to reject change',
+      ),
     [run],
   );
 
-  if (!items.length) return null;
+  if (!batches.length) return null;
 
-  const first = items[0]?.suggestion;
-  const actionable = items.filter(it => it.primary.status === 'PENDING');
-  const conflicts = items.filter(it => it.primary.status !== 'PENDING');
+  const opLabel = (op: string): string =>
+    op === 'insert' ? 'add' : op === 'delete' ? 'remove' : op === 'move' ? 'move' : 'edit';
 
-  // ── Stage 1: the collapsed bar ──────────────────────────────────────────
+  // ── the collapsed bar ─────────────────────────────────────────────────
   const bar = (
     <div className='flex flex-wrap items-center justify-between gap-2'>
       <button
@@ -264,16 +208,19 @@ export const CanvasSuggestionsPanel = ({
         className='flex items-center gap-2 text-sm font-medium text-foreground hover:underline'
       >
         <span aria-hidden>✦</span>
-        Agent proposed {actionable.length} change
-        {actionable.length === 1 ? '' : 's'}
-        {conflicts.length ? (
+        Agent proposed {pending.length} change
+        {pending.length === 1 ? '' : 's'}
+        {batches.length > 1 ? (
+          <span className='text-xs text-muted-foreground'>({batches.length} proposals)</span>
+        ) : null}
+        {attention.length ? (
           <span className='rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-900'>
-            {conflicts.length} need attention
+            {attention.length} need attention
           </span>
         ) : null}
         <span className='text-xs text-muted-foreground'>{expanded ? 'hide' : 'review'} ▾</span>
       </button>
-      {canEdit && first && actionable.length > 0 ? (
+      {canEdit && pending.length > 0 ? (
         <div className='flex items-center gap-2'>
           <button
             type='button'
@@ -281,10 +228,7 @@ export const CanvasSuggestionsPanel = ({
             onClick={() => {
               void run(
                 'accept-all',
-                mutators.canvasSuggestion.acceptAll({
-                  suggestionId: first.id,
-                  timestamp: Date.now(),
-                }),
+                mutators.canvasSuggestion.acceptAll({ canvasId, timestamp: Date.now() }),
                 'Failed to accept changes',
               );
             }}
@@ -300,10 +244,7 @@ export const CanvasSuggestionsPanel = ({
             onClick={() => {
               void run(
                 'reject-all',
-                mutators.canvasSuggestion.rejectAll({
-                  suggestionId: first.id,
-                  timestamp: Date.now(),
-                }),
+                mutators.canvasSuggestion.rejectAll({ canvasId, timestamp: Date.now() }),
                 'Failed to reject changes',
               );
             }}
@@ -321,173 +262,121 @@ export const CanvasSuggestionsPanel = ({
   return (
     <div
       className={cn(
-        'shrink-0 border-b border-border bg-background px-3 py-2 text-sm md:px-4',
+        'border-b border-border bg-amber-50/50 px-4 py-2 dark:bg-amber-950/20',
         className,
       )}
     >
       {bar}
       {expanded ? (
-        <div className='mt-3 max-h-80 space-y-2 overflow-auto'>
-          {items.map((item, index) => {
-            const { primary, paired } = item;
-            const isPair = Boolean(paired);
-            const before = blockText(primary.beforeContent);
-            const after = asText(paired ? paired.afterContent : primary.afterContent);
-            const isTable =
-              blockType(primary.beforeContent) === 'table' ||
-              (primary.op === 'insert_after' && after.trimStart().startsWith('|'));
-            const blocked = primary.status !== 'PENDING';
-
-            // Word diff only for readable same-paragraph edits; tables and replace-pairs show whole blocks.
-            const wordParts =
-              !isPair && !isTable && primary.op === 'replace'
-                ? createCanvasContentTextDiff(
-                    [{ type: 'paragraph', content: [{ type: 'text', text: before, styles: {} }] }],
-                    [{ type: 'paragraph', content: [{ type: 'text', text: after, styles: {} }] }],
-                  )
-                : null;
-            const parts =
-              wordParts && changeRatio(wordParts) <= WORD_DIFF_MAX_CHANGE_RATIO ? wordParts : null;
-
-            const label = isPair
-              ? 'replace this paragraph'
-              : primary.op === 'delete'
-                ? 'remove'
-                : primary.op === 'insert_after'
-                  ? 'add'
-                  : isTable
-                    ? 'table changed'
-                    : 'edit';
-
-            return (
-              <div
-                key={item.key}
-                data-suggestion-card-block={anchors[index]?.blockId ?? undefined}
-                data-track-category='CANVAS'
-                data-track-name='suggestion_card_focus'
-                role={anchors[index]?.blockId ? 'button' : undefined}
-                tabIndex={anchors[index]?.blockId ? 0 : undefined}
-                onClick={() => focusChange(anchors[index]?.blockId ?? null)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    focusChange(anchors[index]?.blockId ?? null);
-                  }
-                }}
-                className={cn(
-                  'rounded-md border bg-muted/20 px-3 py-2 transition-colors',
-                  anchors[index]?.blockId &&
-                    'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500',
-                  activeBlockId && anchors[index]?.blockId === activeBlockId
-                    ? 'border-amber-500 bg-amber-50/60'
-                    : 'border-border',
-                )}
-              >
-                <div className='mb-1 flex items-center justify-between gap-2'>
-                  <span className='text-[11px] font-medium uppercase text-muted-foreground'>
-                    Change {index + 1} · {label}
-                  </span>
-                  {blocked ? (
-                    <span
-                      className={cn(
-                        'rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase',
-                        primary.status === 'CONFLICT'
-                          ? 'bg-amber-100 text-amber-900'
-                          : 'bg-red-100 text-red-900',
-                      )}
-                    >
-                      {primary.status === 'CONFLICT'
-                        ? 'edited since proposed'
-                        : 'no longer applies'}
-                    </span>
-                  ) : null}
+        <div className='mt-2 flex max-h-72 flex-col gap-2 overflow-y-auto pb-1'>
+          {batches.map((batch, batchIndex) => (
+            <div key={batch.batchId} className='flex flex-col gap-2'>
+              {batches.length > 1 ? (
+                <div className='mt-1 text-[11px] font-medium uppercase text-muted-foreground'>
+                  Proposal {batchIndex + 1} · {new Date(batch.createdAt).toLocaleTimeString()}
                 </div>
-
-                {primary.op === 'insert_after' && !isPair && anchors[index]?.blockId ? (
-                  <div className='mb-1 text-[11px] italic text-muted-foreground'>
-                    will be added after the highlighted paragraph
-                  </div>
-                ) : null}
-                <div className='whitespace-pre-wrap break-words text-sm leading-6'>
-                  {parts ? (
-                    parts.filter(isVisibleCanvasContentDiffPart).length ? (
-                      parts.map((part, i) => (
-                        <span
-                          key={`${item.key}-${i}`}
-                          className={cn(
-                            part.type === 'added' &&
-                              'rounded-sm bg-emerald-100 px-0.5 text-emerald-950',
-                            part.type === 'removed' &&
-                              'rounded-sm bg-red-100 px-0.5 text-red-950 line-through decoration-red-700',
-                          )}
-                        >
-                          {part.value}
-                        </span>
-                      ))
-                    ) : (
-                      <span className='text-muted-foreground'>
-                        Changes affect formatting or non-text content only
-                      </span>
-                    )
-                  ) : (
-                    <>
-                      {before ? (
-                        <div
-                          className={cn(
-                            'mb-1 rounded-sm bg-red-50 px-1.5 py-1 text-red-900',
-                            isTable ? 'font-mono text-xs' : 'line-through decoration-red-700/70',
-                          )}
-                        >
-                          {before}
-                        </div>
-                      ) : null}
-                      {after ? (
-                        <div
-                          className={cn(
-                            'rounded-sm bg-emerald-50 px-1.5 py-1 text-emerald-950',
-                            isTable && 'font-mono text-xs',
-                          )}
-                        >
-                          {after}
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-
-                {canEdit && !blocked ? (
+              ) : null}
+              {batch.rows.map(row => {
+                const blocked = row.status !== 'PENDING';
+                const railBlockId = row.blockId ?? row.currentAnchorId;
+                const before = blockText(row.beforeContent);
+                const after = asText(row.afterContent);
+                return (
                   <div
-                    className='mt-2 flex items-center gap-2'
-                    role='presentation'
+                    key={row.id}
+                    data-suggestion-card-block={railBlockId ?? undefined}
                     data-track-category='CANVAS'
-                    data-track-name='suggestion_card_actions_boundary'
-                    onClick={e => e.stopPropagation()}
+                    data-track-name='suggestion_card_focus'
+                    role={railBlockId ? 'button' : undefined}
+                    tabIndex={railBlockId ? 0 : undefined}
+                    onClick={() => focusChange(railBlockId)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        focusChange(railBlockId);
+                      }
+                    }}
+                    className={cn(
+                      'rounded-md border bg-muted/20 px-3 py-2 transition-colors',
+                      railBlockId &&
+                        'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500',
+                      activeBlockId && railBlockId === activeBlockId
+                        ? 'border-amber-500 bg-amber-50/60'
+                        : 'border-border',
+                    )}
                   >
-                    <button
-                      type='button'
-                      disabled={busy !== null}
-                      onClick={() => void resolveItem(item, true)}
-                      data-track-category='CANVAS'
-                      data-track-name='suggestion_accept'
-                      className='rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50'
-                    >
-                      Accept{isPair ? ' both' : ''}
-                    </button>
-                    <button
-                      type='button'
-                      disabled={busy !== null}
-                      onClick={() => void resolveItem(item, false)}
-                      data-track-category='CANVAS'
-                      data-track-name='suggestion_reject'
-                      className='rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted'
-                    >
-                      Reject{isPair ? ' both' : ''}
-                    </button>
+                    <div className='mb-1 flex items-center justify-between gap-2'>
+                      <span className='text-[11px] font-medium uppercase text-muted-foreground'>
+                        {opLabel(row.op)}
+                      </span>
+                      {blocked ? (
+                        <span className='rounded-sm bg-red-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-red-900'>
+                          no longer applies
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className='whitespace-pre-wrap break-words text-sm leading-6'>
+                      {row.op === 'move' ? (
+                        <span className='text-muted-foreground'>
+                          Move “{domSnippet(row.blockId) || 'this paragraph'}” →{' '}
+                          {row.currentAnchorId
+                            ? `after “${domSnippet(row.currentAnchorId) || 'the highlighted paragraph'}”`
+                            : 'to the top of the document'}
+                        </span>
+                      ) : (
+                        <>
+                          {row.op !== 'insert' && before ? (
+                            <div className='rounded-sm bg-red-50 px-1 text-red-950 line-through decoration-red-400 dark:bg-red-950/40 dark:text-red-200'>
+                              {before}
+                            </div>
+                          ) : null}
+                          {row.op !== 'delete' && after ? (
+                            <div className='mt-0.5 rounded-sm bg-emerald-50 px-1 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-200'>
+                              {after}
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+
+                    {canEdit ? (
+                      <div
+                        className='mt-2 flex items-center gap-2'
+                        role='presentation'
+                        data-track-category='CANVAS'
+                        data-track-name='suggestion_card_actions_boundary'
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {!blocked ? (
+                          <button
+                            type='button'
+                            disabled={busy !== null}
+                            onClick={() => void resolveRow(row, true)}
+                            data-track-category='CANVAS'
+                            data-track-name='suggestion_accept'
+                            className='rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50'
+                          >
+                            Accept
+                          </button>
+                        ) : null}
+                        <button
+                          type='button'
+                          disabled={busy !== null}
+                          onClick={() => void resolveRow(row, false)}
+                          data-track-category='CANVAS'
+                          data-track-name='suggestion_reject'
+                          className='rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted'
+                        >
+                          {blocked ? 'Dismiss' : 'Reject'}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
