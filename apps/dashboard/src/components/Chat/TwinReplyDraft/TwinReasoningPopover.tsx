@@ -89,7 +89,7 @@ export function TwinReasoningPopover({
       // not a floor — `available-height` keeps it inside the viewport when the
       // tray sits low, and the body scrolls internally.
       className={cn(
-        'flex h-[440px] w-[680px] max-w-[calc(100vw-24px)] flex-col overflow-hidden p-0',
+        'flex w-[512px] max-w-[calc(100vw-24px)] flex-col overflow-hidden p-0',
         'max-h-[var(--radix-popover-content-available-height)] border-border shadow-lg',
       )}
     >
