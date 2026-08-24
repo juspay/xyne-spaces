@@ -241,7 +241,7 @@ describe("/spec task command", () => {
     expect(outputFormat?.template).toBe(SPEC_QUESTION_OUTLINE);
   });
 
-  it("keeps the first turn as a contextual interview", () => {
+  it("keeps the first turn as a context-first interview", () => {
     for (const heading of [
       "Problem statement",
       "Solutioning",
@@ -251,12 +251,14 @@ describe("/spec task command", () => {
     ]) {
       expect(SPEC_QUESTION_OUTLINE).toContain(heading);
     }
+    expect(SPEC_QUESTION_OUTLINE).toContain("summarize the ticket/context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("existing description/Specification state");
     expect(SPEC_QUESTION_OUTLINE).toContain("contextual clarification questions");
     expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT mechanically ask");
-    expect(SPEC_QUESTION_OUTLINE).toContain("no greeting");
   });
 
-  it("prevents implementation-derived specs and same-turn ticket writes", () => {
+  it("allows technical context but prevents implementation-derived specs and same-turn writes", () => {
+    expect(SPEC_QUESTION_OUTLINE).toContain("technical context or code/PR context");
     expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT derive requirement intent solely from implementation");
     expect(SPEC_QUESTION_OUTLINE).toContain("Ask the minimum useful batch of questions");
     expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT create, draft, or update the Specification");
