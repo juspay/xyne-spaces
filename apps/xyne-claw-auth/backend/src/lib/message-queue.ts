@@ -144,6 +144,14 @@ export interface QueuedMessage {
   sessionContext?: Record<string, unknown>;
   /** Defaults to "conversation" on drain when absent (legacy-safe). */
   responseMode?: "conversation" | "approval";
+  /** Why this message is waiting. Used to distinguish explicit `/queue <msg>`
+   *  from a normal busy-thread enqueue and from a same-user interrupt follow-up. */
+  queueReason?: "busy" | "explicit_queue" | "interrupt_followup";
+  /** Requested handling mode for the active run when this message was queued. */
+  interruptMode?: "queue_only" | "interrupt_with_reply";
+  /** Suppress the normal "queued" notice when another control path already
+   *  posts a better acknowledgement. */
+  suppressQueuedNotice?: boolean;
   /** epoch ms when enqueued */
   ts: number;
 }

@@ -2002,46 +2002,63 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
   }
 });
 
+async function forwardRunControl(
+  action: "cancel" | "interrupt-with-reply",
+  req: Request<{ sessionId: string }>,
+  res: Response,
+): Promise<void> {
+  const { sessionId } = req.params;
+  if (!sessionId || typeof sessionId !== "string") {
+    res.status(400).json({ success: false, error: "sessionId is required" });
+    return;
+  }
+
+  const callerUserId = req.headers["x-user-id"];
+  if (typeof callerUserId !== "string" || !callerUserId.trim()) {
+    res.status(400).json({ success: false, error: "x-user-id is required" });
+    return;
+  }
+
+  try {
+    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/run/${encodeURIComponent(sessionId)}/${action}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        "x-user-id": callerUserId,
+      },
+    });
+
+    const body = (await clawRes.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!clawRes.ok) {
+      res
+        .status(clawRes.status)
+        .json(body ?? { success: false, error: `${action} failed: HTTP ${clawRes.status}` });
+      return;
+    }
+
+    res.json(body ?? { success: true, sessionId });
+  } catch (err) {
+    log.error(`[run] Error forwarding ${action} to xyne-claw:`, err);
+    res.status(502).json({ success: false, error: "Failed to reach agent service" });
+  }
+}
+
+// ── POST /run/:sessionId/interrupt-with-reply — ask active run to post a partial reply, then drain queued follow-up ──
+router.post(
+  "/run/:sessionId/interrupt-with-reply",
+  requireRunCaller,
+  async (req: Request<{ sessionId: string }>, res: Response) => {
+    await forwardRunControl("interrupt-with-reply", req, res);
+  },
+);
+
 // ── POST /run/:sessionId/cancel — proxy cancel to xyne-claw ──
 router.post(
   "/run/:sessionId/cancel",
   requireRunCaller,
   async (req: Request<{ sessionId: string }>, res: Response) => {
-    const { sessionId } = req.params;
-    if (!sessionId || typeof sessionId !== "string") {
-      res.status(400).json({ success: false, error: "sessionId is required" });
-      return;
-    }
-
-    const callerUserId = req.headers["x-user-id"];
-    if (typeof callerUserId !== "string" || !callerUserId.trim()) {
-      res.status(400).json({ success: false, error: "x-user-id is required" });
-      return;
-    }
-
-    try {
-      const clawRes = await fetch(`${CONFIG.xyneClawUrl}/run/${encodeURIComponent(sessionId)}/cancel`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-          "x-user-id": callerUserId,
-        },
-      });
-
-      const body = (await clawRes.json().catch(() => null)) as Record<string, unknown> | null;
-      if (!clawRes.ok) {
-        res
-          .status(clawRes.status)
-          .json(body ?? { success: false, error: `Cancel failed: HTTP ${clawRes.status}` });
-        return;
-      }
-
-      res.json(body ?? { success: true, sessionId });
-    } catch (err) {
-      log.error("[run] Error forwarding cancel to xyne-claw:", err);
-      res.status(502).json({ success: false, error: "Failed to reach agent service" });
-    }
+    await forwardRunControl("cancel", req, res);
   },
 );
 

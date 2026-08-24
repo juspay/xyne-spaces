@@ -168,6 +168,10 @@ interface ActiveRunControl {
    *  respond-to-user termination (which also aborts the controller). Lets the
    *  catch block honor a user stop instead of posting a just-generated answer. */
   userCancelled?: boolean;
+  /** Same-user follow-up requested an early, user-visible reply for the current
+   *  run before the queued follow-up is dispatched. Unlike /cancel, this must
+   *  complete with a posted result so the transcript remains linear. */
+  gracefulInterruptRequested?: boolean;
   hasCallbackUrl?: boolean;
   sseClientAttached?: boolean;
   sseReconnectGraceTimer?: ReturnType<typeof setTimeout>;
@@ -1287,6 +1291,39 @@ router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
     return;
   }
   res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
+});
+
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
+  const { sessionId } = req.params as { sessionId?: string };
+  if (!sessionId) {
+    res.status(400).json({ success: false, error: "sessionId is required" });
+    return;
+  }
+
+  const active = activeRuns.get(sessionId);
+  if (!active) {
+    res.json({ success: true, sessionId, status: "not_running" });
+    return;
+  }
+
+  const callerUserId = req.headers["x-user-id"];
+  if (
+    typeof callerUserId !== "string" ||
+    !callerUserId ||
+    callerUserId !== active.userId
+  ) {
+    res
+      .status(403)
+      .json({ success: false, error: "Not authorized to interrupt this run" });
+    return;
+  }
+
+  // This is intentionally NOT userCancelled. /cancel suppresses output; a
+  // same-user follow-up wants the active turn to produce/post what it has, then
+  // let claw-auth drain the queued follow-up as the next user turn.
+  active.gracefulInterruptRequested = true;
+  active.abortController.abort();
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
 });
 
 router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
@@ -4695,6 +4732,32 @@ async function processTask(
         model: callbackModel,
       });
     } else if (err instanceof RunCancelledError || abortSignal?.aborted) {
+      const gracefulInterrupt = activeRuns.get(sessionId)?.gracefulInterruptRequested === true;
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      if (gracefulInterrupt) {
+        log(`Session interrupted with reply: ${sessionId}`);
+        await sendCallback(callbackUrl, sessionToken, {
+          sessionId,
+          userId,
+          conversationId: conversationId ?? null,
+          agentSlug: agentSlug ?? null,
+          fastMode: fastModeForCallback,
+          status: "completed",
+          result: partialResult || "I’m pausing this run here so I can continue with your new message.",
+          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
+            ? { toolsUsed: err.toolsUsed }
+            : {}),
+          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
+            ? { toolInvocations: err.toolInvocations }
+            : {}),
+          ...(err instanceof RunCancelledError
+            ? { tokenUsage: err.tokenUsage }
+            : {}),
+          provider: callbackProvider,
+          model: callbackModel,
+        });
+        return;
+      }
       log(`Session cancelled: ${sessionId}`);
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
