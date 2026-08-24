@@ -15,7 +15,7 @@ import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeYSweetDoc, readFromYSweetStrict, syncToYSweet } from '../utils/ysweetUtils.js';
-import { labelBlocks, buildHandleMap, parseLabelledMarkdown, validateAgentResponse, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
 import { hashBlocks } from '@/services/canvas/blockHash.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
@@ -544,13 +544,6 @@ export class CanvasController {
         const renderer = await createBlockRenderer(existingBlocks);
         const entries = parseLabelledMarkdown(markdown);
         const handleMap = buildHandleMap(existingBlocks);
-
-        const validation = validateAgentResponse(entries, handleMap, existingBlocks.length);
-        if (!validation.ok) {
-          logger.warn(`[CANVAS-UPDATE] Rejected agent proposal for ${canvas.id}: ${validation.reason}`);
-          res.status(422).json({ error: 'Proposal rejected', message: validation.reason });
-          return;
-        }
 
         const receipt = await getReadReceipt(canvas.id, userId);
         const ops = deriveOps({
