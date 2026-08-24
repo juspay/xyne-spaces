@@ -17,13 +17,12 @@ import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeYSweetDoc, readFromYSweetStrict, syncToYSweet } from '../utils/ysweetUtils.js';
-import { labelBlocks, buildHandleMap, parseLabelledMarkdown, validateAgentResponse, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
-import { matchBlocks } from '@/services/canvas/blockMatch.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, validateAgentResponse, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
 import { hashBlocks } from '@/services/canvas/blockHash.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
 import { isCanvasContentEmpty } from '@xyne/shared';
-import { createSuggestion } from '@/services/canvas/suggestionStore.js';
+import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import {
   convertMarkdownToBlockNote,
   convertBlockNoteToMarkdown,
@@ -1043,7 +1042,7 @@ export class CanvasController {
       const blocks = await readFromYSweet(canvas.id, userId);
 
       // Suggestion mode: return a labelled document and record which blocks the agent saw.
-      if (config.canvasSuggestions.enabled && blocks.length > 0) {
+      if (blocks.length > 0) {
         const renderer = await createBlockRenderer(blocks);
         const { markdown: labelled } = labelBlocks(blocks, renderer.render);
         await saveReadReceipt(canvas.id, userId, {
@@ -1131,7 +1130,7 @@ export class CanvasController {
 
       // Suggestion mode: this route only receives agent writes (S2S, spaces-edit-canvas);
       // park block-level changes for review unless the canvas is empty. Nothing reaches Y-Sweet here.
-      if (config.canvasSuggestions.enabled && !isCanvasContentEmpty(existingBlocks)) {
+      if (!isCanvasContentEmpty(existingBlocks)) {
         const renderer = await createBlockRenderer(existingBlocks);
         const entries = parseLabelledMarkdown(markdown);
         const handleMap = buildHandleMap(existingBlocks);
@@ -1144,7 +1143,7 @@ export class CanvasController {
         }
 
         const receipt = await getReadReceipt(canvas.id, userId);
-        const { changes, relabelled, labelMatched } = matchBlocks({
+        const ops = deriveOps({
           current: existingBlocks,
           entries,
           handleMap,
@@ -1152,23 +1151,7 @@ export class CanvasController {
           ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
         });
 
-        // Batch guardrail: mostly-implausible label matches mean the agent renumbered the document — refuse.
-        const labelClaims = relabelled + labelMatched;
-        if (labelClaims >= 4 && relabelled > labelClaims / 2) {
-          logger.warn(
-            `[CANVAS-UPDATE] Rejected proposal for ${canvas.id}: ${relabelled}/${labelClaims} labels attached to unrelated content`
-          );
-          res.status(422).json({
-            error: 'Proposal rejected',
-            message:
-              `${relabelled} of ${labelClaims} paragraph labels were attached to unrelated content. ` +
-              'A label identifies one specific paragraph — to replace a section, omit the labelled ' +
-              'paragraphs and add the new ones with [new] instead of reusing their labels.',
-          });
-          return;
-        }
-
-        if (changes.length === 0) {
+        if (ops.length === 0) {
           res.status(200).json({
             id: canvas.id,
             title: canvas.title,
@@ -1179,21 +1162,19 @@ export class CanvasController {
           return;
         }
 
-        const suggestion = await createSuggestion({
+        const batch = await createSuggestionBatch({
           workspaceId: canvas.workspaceId,
           canvasId: canvas.id,
-          createdBy: userId,
-          currentBlocks: existingBlocks,
-          changes,
+          ops,
         });
 
         res.status(202).json({
           id: canvas.id,
           title: canvas.title,
           status: 'pending-review',
-          suggestionId: suggestion.id,
-          changeCount: suggestion.changeCount,
-          message: `${suggestion.changeCount} change(s) proposed and awaiting approval.`,
+          batchId: batch.batchId,
+          changeCount: batch.created,
+          message: `${batch.created} change(s) proposed and awaiting approval.`,
           url: getCanvasUrl(canvas.id, req.user?.workspaceId),
         });
         return;
