@@ -278,7 +278,7 @@ export class SearchService {
     }
     try {
       const {
-        rankProfile = RankProfile.personalizedRank,
+        rankProfile = RankProfile.nativeRank,
         offset = 0,
         limit = 20,
         chunkLimit = 6,
