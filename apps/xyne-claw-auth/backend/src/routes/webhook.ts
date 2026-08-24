@@ -4783,36 +4783,61 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
   }
 
-  // Pending write-action footer: a DETERMINISTIC correction, not an LLM claim.
+  // Pending write-action footer: a DETERMINISTIC, per-action-honest correction.
   // Write tools now live in child subagent palettes too, so a parent (or child)
-  // can queue a signed write and then narrate as if it already ran — the write
-  // itself is gated (nothing executes until the approval card at ~6689 is
-  // approved), but the TEXT can still mislead. This footer is minted from the
-  // same `payload.pendingActions` that drives those approval cards, so it states
-  // exactly what is queued and can never drift from what actually got queued.
-  // Gated on a non-empty result (like the memory footer) so it corrects a
-  // narration rather than resurrecting an empty turn; an empty turn's approval
-  // card stands on its own.
+  // can queue a signed write and then narrate as if it already ran. The write is
+  // execution-gated (nothing runs until the approval card is approved), but two
+  // things could still mislead the user: (1) the narration claims success, and
+  // (2) the approval card is SKIPPED when the target channel isn't app-accessible
+  // (see the loop below, which validates and `continue`s). Before that skip was
+  // silent — the user saw "queued, approve it" and no card ever came.
+  //
+  // Fix: validate every queued write HERE, against the same target-validation the
+  // card loop uses, and (a) stash the result so the loop reuses it — the footer
+  // can never claim a card the loop then drops — and (b) split the footer into
+  // "actually queued" vs "could NOT be queued (with reason)". A rejected action
+  // is stated as a failure, so there is no silent "queued" exit. The warning
+  // fires even on an empty result (seeding the message) because a dropped card
+  // must always be surfaced.
   const pendingActionList = Array.isArray(
     (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions,
   )
     ? (payload as { pendingActions: Array<Record<string, unknown>> }).pendingActions
     : [];
-  if (payload.status === "completed" && resultWithCitations.trim() && pendingActionList.length > 0) {
-    const toolNames = [
-      ...new Set(
-        pendingActionList
-          .map((a) => (typeof a["tool"] === "string" ? a["tool"].trim() : ""))
-          .filter((t) => t.length > 0),
-      ),
-    ];
-    const shown = toolNames.slice(0, 6).map((t) => `\`${t}\``);
-    const extra = toolNames.length - shown.length;
-    const toolList = extra > 0 ? `${shown.join(", ")} +${extra} more` : shown.join(", ");
-    const n = pendingActionList.length;
-    const noun = n === 1 ? "action is" : "actions are";
-    const tail = toolList ? `: ${toolList}` : "";
-    resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_⏳ ${n} write ${noun} queued and awaiting your approval — nothing has run yet${tail}. Approve the card${n === 1 ? "" : "s"} to execute._`;
+  const pendingActionValidation = new Map<
+    Record<string, unknown>,
+    { error: string | null; channelName?: string }
+  >();
+  if (ctx && payload.status === "completed" && pendingActionList.length > 0) {
+    for (const action of pendingActionList) {
+      const v = await pendingActionTargetValidation(action, ctx, ctx.appToken).catch(
+        () => ({ error: null as string | null }),
+      );
+      pendingActionValidation.set(action, v);
+    }
+    const toolOf = (a: Record<string, unknown>): string =>
+      typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
+    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
+
+    const lines: string[] = [];
+    if (queued.length > 0) {
+      const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
+      const noun = queued.length === 1 ? "action is" : "actions are";
+      lines.push(
+        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+      );
+    }
+    for (const action of rejected) {
+      const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
+      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+    }
+    if (lines.length > 0) {
+      const body = lines.map((l) => `_${l}_`).join("\n\n");
+      resultWithCitations = resultWithCitations.trim()
+        ? `${resultWithCitations.trimEnd()}\n\n${body}`
+        : body;
+    }
   }
 
   // When an active /goal loop is running, prefix every turn's user-facing reply
@@ -6722,7 +6747,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (pendingActionsPayload?.length) {
       let approvalCardsSent = 0;
       for (const action of pendingActionsPayload) {
-        const targetValidation = await pendingActionTargetValidation(action, ctx, token);
+        // Reuse the validation computed for the footer above so the message and
+        // the card can never disagree; fall back only if it wasn't classified
+        // (e.g. a non-completed status path that skipped the footer).
+        const targetValidation =
+          pendingActionValidation.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
         if (targetValidation.error) {
           log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
           continue;
