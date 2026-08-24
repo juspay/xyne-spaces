@@ -896,9 +896,6 @@ export const config = {
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },
-  canvasSuggestions: {
-    enabled: envVars.ENABLE_CANVAS_SUGGESTIONS as boolean,
-  },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
