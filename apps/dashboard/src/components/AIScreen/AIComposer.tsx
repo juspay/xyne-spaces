@@ -30,12 +30,17 @@ import {
   Zap,
   Brain,
   ChevronDown,
+  ChevronRight,
+  Check,
+  Search,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
-import { ModelSelector } from '../Chat/XyneAISidebar/components/ModelSelector';
+import { formatModelLabel } from '../Chat/XyneAISidebar/components/ModelSelector';
+import type { ClawAgentModel } from '../../services/clawAgentModelsService';
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { Popover } from '../ui/Popover';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
@@ -217,54 +222,190 @@ const THINKING_LEVEL_OPTIONS: Array<{ value: 'off' | 'minimal' | 'low' | 'medium
   { value: 'high', label: 'High' },
 ];
 
-function ThinkingSelector({
-  value,
-  onSelect,
+/**
+ * Combined model + thinking picker, styled after the Claude app's model menu:
+ * the trigger leads with the MODEL name ("Recommended" when no pin, with the
+ * thinking level beside it when set), and the menu holds the Recommended row,
+ * a search bar over the account's allowed models, and an expandable Thinking
+ * section (Default / Off / Minimal / Low / Medium / High).
+ */
+function ModelThinkingSelector({
+  models,
+  defaultModel,
+  selectedModel,
+  onSelectModel,
+  thinkingLevel,
+  onSelectThinking,
   disabled,
 }: {
-  value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
-  onSelect: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
+  models: ClawAgentModel[];
+  defaultModel: string | null;
+  selectedModel: string | null;
+  onSelectModel: (m: string | null) => void;
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  onSelectThinking: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const current = THINKING_LEVEL_OPTIONS.find(o => o.value === value) ?? { value: null, label: 'Default' };
+  const [query, setQuery] = useState('');
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+
+  const selected = useMemo(
+    () => models.find(m => m.id === selectedModel) ?? null,
+    [models, selectedModel],
+  );
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+  }, [models, query]);
+  const thinkingLabel = THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
+
+  const rowClass = (active: boolean) =>
+    cn(
+      'flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 mx-0 text-left text-sm transition-colors',
+      active ? 'bg-primary/10 text-primary' : 'hover:bg-accent text-foreground',
+    );
+
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={o => {
+        setOpen(o);
+        if (!o) {
+          setQuery('');
+          setThinkingOpen(false);
+        }
+      }}
+      align='end'
+      sideOffset={4}
       trigger={
         <button
           type='button'
           disabled={disabled}
-          title={value ? `Thinking: ${current.label} (this chat)` : 'Thinking level — agent default'}
-          aria-label='Thinking level'
-          data-track-name='OPEN_THINKING_SELECTOR'
+          title={selected ? selected.id : defaultModel ? `Recommended (${defaultModel})` : 'Recommended model'}
+          aria-label='Model and thinking'
+          data-track-category='XyneAI'
+          data-track-name='OPEN_MODEL_SELECTOR'
           className={cn(
-            'flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-sm transition-colors',
+            'flex h-7 items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
             disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
-            value ? 'text-status-pending' : 'text-muted-foreground',
           )}
         >
-          <Brain className='h-3.5 w-3.5 shrink-0' aria-hidden strokeWidth={1.75} />
-          <span className='font-medium'>{value ? current.label : 'Thinking'}</span>
-          <ChevronDown className='h-3 w-3 shrink-0' aria-hidden />
+          <Sparkles className='h-3.5 w-3.5 shrink-0 text-primary' aria-hidden strokeWidth={1.75} />
+          <span className='font-medium text-foreground truncate max-w-[160px]'>
+            {selected ? formatModelLabel(selected.name) : 'Recommended'}
+          </span>
+          {thinkingLevel && <span className='text-muted-foreground'>{thinkingLabel}</span>}
+          <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground' aria-hidden />
         </button>
       }
-      className='w-40 p-1'
+      className='w-72 p-0 bg-popover border border-border rounded-lg shadow-lg overflow-hidden'
     >
-      {THINKING_LEVEL_OPTIONS.map(o => (
+      <div className='flex flex-col py-1 px-1'>
+        {/* Recommended — clears the pin; the run uses the model configured in the DB. */}
         <button
-          key={o.label}
           type='button'
-          onClick={() => { onSelect(o.value); setOpen(false); }}
-          className={cn(
-            'flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent',
-            o.value === value && 'bg-accent font-medium',
-          )}
+          onClick={() => {
+            onSelectModel(null);
+            setOpen(false);
+          }}
+          data-track-category='XyneAI'
+          data-track-name='SELECT_MODEL'
+          data-track-metadata='{"model":"recommended"}'
+          className={rowClass(selectedModel === null)}
         >
-          {o.label}
+          <span className='flex flex-col items-start gap-0.5'>
+            <span className='font-medium'>Recommended</span>
+            {defaultModel && (
+              <span className='text-[11px] text-muted-foreground truncate max-w-full'>
+                {formatModelLabel(defaultModel)}
+              </span>
+            )}
+          </span>
+          {selectedModel === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
         </button>
-      ))}
+
+        {models.length > 0 && (
+          <>
+            <div className='my-1 h-px bg-border mx-1' />
+            {/* Search over the account's allowed model list. */}
+            <div className='flex items-center gap-1.5 rounded-md border border-border mx-1 my-0.5 px-2 py-1'>
+              <Search className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder='Search models…'
+                data-id='model-search'
+                className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+              />
+            </div>
+            <div className='flex max-h-56 flex-col overflow-auto'>
+              {filtered.length === 0 ? (
+                <div className='px-2.5 py-2 text-sm text-muted-foreground'>No models match</div>
+              ) : (
+                filtered.map(m => (
+                  <button
+                    key={m.id}
+                    type='button'
+                    title={m.id}
+                    onClick={() => {
+                      onSelectModel(m.id);
+                      setOpen(false);
+                    }}
+                    data-track-category='XyneAI'
+                    data-track-name='SELECT_MODEL'
+                    data-track-metadata={JSON.stringify({ model: m.id })}
+                    className={rowClass(selectedModel === m.id)}
+                  >
+                    <span className='font-medium truncate'>{formatModelLabel(m.name)}</span>
+                    {selectedModel === m.id && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )}
+
+        <div className='my-1 h-px bg-border mx-1' />
+        {/* Thinking — expands inline to the level options. */}
+        <button
+          type='button'
+          onClick={() => setThinkingOpen(v => !v)}
+          data-id='thinking-expand'
+          aria-expanded={thinkingOpen}
+          className='flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
+        >
+          <span className='flex items-center gap-1.5 font-medium'>
+            <Brain className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden strokeWidth={1.75} />
+            Thinking
+          </span>
+          <span className='flex items-center gap-1 text-muted-foreground'>
+            {thinkingLabel}
+            {thinkingOpen ? (
+              <ChevronDown className='h-3 w-3 shrink-0' aria-hidden />
+            ) : (
+              <ChevronRight className='h-3 w-3 shrink-0' aria-hidden />
+            )}
+          </span>
+        </button>
+        {thinkingOpen &&
+          THINKING_LEVEL_OPTIONS.map(o => (
+            <button
+              key={o.label}
+              type='button'
+              onClick={() => {
+                onSelectThinking(o.value);
+                setOpen(false);
+              }}
+              data-id={`thinking-option-${o.label.toLowerCase()}`}
+              className={cn('pl-8', rowClass(o.value === thinkingLevel))}
+            >
+              <span>{o.label}</span>
+              {o.value === thinkingLevel && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+            </button>
+          ))}
+      </div>
     </Popover>
   );
 }
@@ -915,15 +1056,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
-              <ModelSelector
-                selectedModel={selectedModel}
+              <ModelThinkingSelector
                 models={agentModelsData?.models ?? []}
                 defaultModel={agentModelsData?.defaultModel ?? null}
-                onSelect={setSelectedModel}
+                selectedModel={selectedModel}
+                onSelectModel={setSelectedModel}
+                thinkingLevel={thinkingLevel}
+                onSelectThinking={setThinkingLevel}
                 disabled={pending}
-                compact
               />
-              <ThinkingSelector value={thinkingLevel} onSelect={setThinkingLevel} disabled={pending} />
               {showAgentSelector && (
                 <AIAgentSelector
                   disabled={pending}
