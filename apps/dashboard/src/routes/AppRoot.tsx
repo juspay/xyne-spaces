@@ -800,6 +800,8 @@ const AppRoot = (): ReactElement => {
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
                                       kbDocName={xyneAIKbDocName ?? ''}
+                                      kbFolderId={xyneAIKbFolderId ?? ''}
+                                      kbFolderName={xyneAIKbFolderName ?? ''}
                                       kbOpenNonce={xyneAIKbOpenNonce}
                                       researchContext={xyneAIResearchContext}
                                       initialQuery={xyneAIInitialQuery ?? undefined}
