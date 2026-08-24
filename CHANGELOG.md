@@ -1,3 +1,10 @@
+## [1.209.5](https://github.com/juspay/xyne-spaces/compare/v1.209.4...v1.209.5) (2026-08-24)
+
+
+### Bug Fixes
+
+* keep the recordings list on the tab you left it on ([#906](https://github.com/juspay/xyne-spaces/issues/906)) ([9a5db76](https://github.com/juspay/xyne-spaces/commit/9a5db76b8cdb3da2e843aef930c37bc58c77a1c6))
+
 ## [1.209.4](https://github.com/juspay/xyne-spaces/compare/v1.209.3...v1.209.4) (2026-08-24)
 
 
