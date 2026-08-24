@@ -73,7 +73,7 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole } from '@xyne/shared';
+import { MessageType, CanvasVisibility, CanvasRole, isBaselineCanvasType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -118,6 +118,10 @@ interface CanvasScreenProps {
   onToggleFullscreen?: () => void;
   showAskAiAction?: boolean;
 }
+
+// Latency thresholds (ms) above which a canvas load/save is flagged slow.
+const CANVAS_LOAD_SLOW_MS = 3000;
+const CANVAS_SAVE_SLOW_MS = 4000;
 
 const getCanvasRolePriority = (role: CanvasRole): number => {
   switch (role) {
@@ -246,6 +250,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const initializedCanvasIdRef = useRef<string | null>(null); // Track which canvas has been initialized to avoid overwriting local edits
   const previousAccessLevelRef = useRef<CanvasRole | undefined>(undefined);
   const isFirstAccessLevelComputeRef = useRef(true);
+  // Canvas load timing: track start per canvasId and whether completion was reported.
+  const loadStartRef = useRef<{ id: string; startedAt: number } | null>(null);
+  const loadReportedIdRef = useRef<string | null>(null);
+  const navStateLoggedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     titleRef.current = currentTitle;
@@ -264,14 +272,63 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     setShowVersionHistory(false);
   }, [selectedCanvas?.id]);
 
+  // Canvas load timing — start the clock whenever a real canvasId becomes active.
+  useEffect(() => {
+    if (!canvasId || canvasId === 'new') return;
+    if (loadStartRef.current?.id === canvasId) return;
+
+    loadStartRef.current = { id: canvasId, startedAt: performance.now() };
+    loadReportedIdRef.current = null;
+    logger.info(Event.CANVAS_LOAD_STARTED, {
+      canvasId,
+      hadNavState: (state as LocationState)?.canvas?.id === canvasId,
+    });
+  }, [canvasId, state]);
+
+  // Canvas load timing — report completion once the backing query resolves.
+  useEffect(() => {
+    if (!canvasId || canvasId === 'new') return;
+    if (singleCanvasDetails.type !== 'complete') return;
+    if (loadReportedIdRef.current === canvasId) return;
+    if (loadStartRef.current?.id !== canvasId) return;
+
+    loadReportedIdRef.current = canvasId;
+    const durationMs = Math.round(performance.now() - loadStartRef.current.startedAt);
+    const found = !!singleCanvas;
+
+    logger.info(Event.CANVAS_LOAD_COMPLETE, { canvasId, durationMs, found });
+    if (durationMs > CANVAS_LOAD_SLOW_MS) {
+      logger.warn(Event.CANVAS_LOAD_SLOW, {
+        canvasId,
+        durationMs,
+        thresholdMs: CANVAS_LOAD_SLOW_MS,
+        found,
+      });
+    }
+    if (!found) {
+      logger.warn(Event.CANVAS_LOAD_EMPTY, { canvasId, durationMs });
+    }
+  }, [canvasId, singleCanvas, singleCanvasDetails.type]);
+
   // Handle single canvas data sync
   useEffect(() => {
     // Use canvas from navigation state if available (for newly created canvases)
     const canvasFromState = (state as LocationState)?.canvas;
-    const shouldUseState = canvasFromState && canvasFromState.id === canvasId && !singleCanvas;
+    const shouldUseState =
+      canvasFromState &&
+      canvasFromState.id === canvasId &&
+      (!singleCanvas || singleCanvasDetails.type !== 'complete');
 
     if (shouldUseState) {
       const isNewCanvas = initializedCanvasIdRef.current !== canvasFromState.id;
+      if (navStateLoggedIdRef.current !== canvasFromState.id) {
+        navStateLoggedIdRef.current = canvasFromState.id;
+        logger.info(Event.CANVAS_LOAD_FROM_STATE, {
+          canvasId: canvasFromState.id,
+          isNewCanvas,
+          queryReady: singleCanvasDetails.type === 'complete',
+        });
+      }
       setSelectedCanvas(canvasFromState);
       if (isNewCanvas) {
         setCurrentTitle(canvasFromState.title);
@@ -303,10 +360,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
-      const sdlcMetadata = canvasData.metadata as Record<string, unknown> | null | undefined;
       const isAdminEditableSdlcBaseline =
-        sdlcMetadata?.['surface'] === 'SDLC' &&
-        sdlcMetadata['artifactKind'] === 'BASELINE' &&
+        isBaselineCanvasType(canvasData.sdlcArtifact?.artifactType) &&
         Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
 
       if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
@@ -658,11 +713,24 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       // Prevent concurrent saves, but queue the latest state
       if (isSavingRef.current) {
         hasPendingSaveRef.current = true;
+        logger.info(Event.CANVAS_SAVE_BLOCKED, {
+          canvasId: canvas?.id ?? null,
+          reason: 'in_progress',
+        });
         return;
       }
 
+      // Set ref synchronously so re-entrant calls within the same tick are blocked
+      isSavingRef.current = true;
+
       // Always read the latest title from ref to prevent stale state
       const titleToSave = titleRef.current;
+      const saveStartedAt = performance.now();
+
+      logger.info(Event.CANVAS_SAVE_STARTED, {
+        canvasId: canvas?.id ?? null,
+        blockCount: blocks.length,
+      });
 
       try {
         setIsSaving(true);
@@ -680,18 +748,42 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           // Update saved state tracker
           lastSavedContentRef.current = JSON.stringify(blocks);
 
+          const durationMs = Math.round(performance.now() - saveStartedAt);
+          logger.info(Event.CANVAS_SAVE_COMPLETE, {
+            canvasId: canvas.id,
+            blockCount: blocks.length,
+            durationMs,
+          });
+          if (durationMs > CANVAS_SAVE_SLOW_MS) {
+            logger.warn(Event.CANVAS_SAVE_SLOW, {
+              canvasId: canvas.id,
+              durationMs,
+              thresholdMs: CANVAS_SAVE_SLOW_MS,
+            });
+          }
+
           // Mention notifications are now event-based (on @ selection), not on save
+        } else {
+          logger.warn(Event.CANVAS_SAVE_SKIPPED_NO_CANVAS, { canvasId: null });
         }
-      } catch {
+      } catch (error) {
+        logger.error(Event.CANVAS_SAVE_FAILED, {
+          canvasId: canvas?.id ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
         toast.error('Error', {
           description: 'Failed to save canvas. Please check your connection and try again.',
         });
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
 
         // If changes occurred while saving, save again immediately
         if (hasPendingSaveRef.current && latestContentRef.current) {
           hasPendingSaveRef.current = false;
+          logger.info(Event.CANVAS_SAVE_RERUN_QUEUED, {
+            canvasId: selectedCanvasRef.current?.id ?? null,
+          });
           void performSave(latestContentRef.current, selectedCanvasRef.current);
         }
       }
@@ -707,6 +799,17 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const handleSave = useCallback(
     (blocks: PartialBlock[], html?: string): void => {
+      logger.info(Event.CANVAS_SAVE_REQUESTED, {
+        canvasId: selectedCanvas?.id ?? null,
+        blockCount: blocks.length,
+      });
+      // Skip save if content hasn't changed since last save
+      if (JSON.stringify(blocks) === lastSavedContentRef.current) {
+        logger.info(Event.CANVAS_SAVE_SKIPPED_UNCHANGED, {
+          canvasId: selectedCanvas?.id ?? null,
+        });
+        return;
+      }
       void performSave(blocks, selectedCanvas, html);
     },
     [performSave, selectedCanvas],
@@ -715,6 +818,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const handleTitleSave = useCallback((): void => {
     if (!selectedCanvas?.id || !canEdit || currentTitle === selectedCanvas.title) return;
 
+    logger.info(Event.CANVAS_TITLE_SAVED, { canvasId: selectedCanvas.id });
     z.mutate(
       mutators.canvas.update({
         id: selectedCanvas.id,
@@ -758,8 +862,21 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     const canvasToUpdate = selectedCanvasRef.current;
     hasPendingCollaborativeTimestampRef.current = false;
-    if (!canvasToUpdate?.id || !canEditRef.current) return;
+    if (!canvasToUpdate?.id || !canEditRef.current) {
+      logger.info(Event.CANVAS_AUTOSAVE_TRIGGERED, {
+        canvasId: canvasToUpdate?.id ?? null,
+        mode: 'collaborative',
+        flushed: false,
+        reason: !canvasToUpdate?.id ? 'no_canvas' : 'no_edit_access',
+      });
+      return;
+    }
 
+    logger.info(Event.CANVAS_AUTOSAVE_TRIGGERED, {
+      canvasId: canvasToUpdate.id,
+      mode: 'collaborative',
+      flushed: true,
+    });
     z.mutate(
       mutators.canvas.update({
         id: canvasToUpdate.id,
@@ -1620,6 +1737,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               onFilterChange={setActiveFilter}
               paginated={true}
             />
+          </div>
+        ) : singleCanvasDetails.type !== 'complete' ? (
+          <div className='h-full w-full flex items-center justify-center bg-muted'>
+            <div className='flex flex-col items-center gap-3'>
+              <Loader2 className='w-8 h-8 animate-spin text-muted-foreground' />
+              <span className='text-sm text-muted-foreground'>Loading canvas...</span>
+            </div>
           </div>
         ) : (
           <div

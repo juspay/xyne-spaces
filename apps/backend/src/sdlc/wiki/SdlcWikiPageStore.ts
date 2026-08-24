@@ -14,6 +14,12 @@ import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/servic
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import {
+  parseSdlcSourcePaths,
+  parseSdlcSourceReferences,
+  stringifySdlcSourcePaths,
+  stringifySdlcSourceReferences,
+} from '@xyne/shared';
 import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
 import {
   assertWikiCommitAssignment,
@@ -26,7 +32,13 @@ import {
   type WikiExecutionContext,
   type WikiRevisionEvidence,
 } from './wikiRunState';
-import { normalizeWikiRelativePath, WIKI_FOLDER_PREFIX, wikiFolderName } from './wikiPaths';
+import {
+  isWikiArchiveFolder,
+  normalizeWikiRelativePath,
+  WIKI_FOLDER_PREFIX,
+  wikiArchiveFolderName,
+  wikiFolderName,
+} from './wikiPaths';
 import { resolveWikiRevisionSources, wikiVersionIdentityHash } from './wikiRevisionPolicy';
 import { shortestUniqueWikiCommitRef, wikiCommitRefUniverse } from './wikiCommitRefs';
 import { mutateWikiMarkdownSection } from './wikiSectionMutation';
@@ -56,7 +68,15 @@ interface WikiPageRecord {
   title: string;
   content: Prisma.JsonValue;
   folderId: string | null;
+  folder: { name: string } | null;
   metadata: Prisma.JsonValue;
+}
+
+interface WikiEntityRecord {
+  workflowExecutionId: string | null;
+  generationCommit: string | null;
+  sourceReferences: string | null;
+  sourcePaths: string | null;
 }
 
 type WholeWikiPageAction = Extract<
@@ -72,22 +92,6 @@ function metadataRecord(value: Prisma.JsonValue | null): Record<string, unknown>
 
 function markdownHash(markdown: string): string {
   return createHash('sha256').update(markdown).digest('hex');
-}
-
-function metadataSourceReferences(value: unknown): WikiSourceReference[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap(reference => {
-    if (!reference || typeof reference !== 'object' || Array.isArray(reference)) return [];
-    const candidate = reference as Record<string, unknown>;
-    if (typeof candidate.path !== 'string' || typeof candidate.commitSha !== 'string') return [];
-    return [{
-      path: candidate.path,
-      commitSha: candidate.commitSha,
-      ...(typeof candidate.symbol === 'string' ? { symbol: candidate.symbol } : {}),
-      ...(typeof candidate.startLine === 'number' ? { startLine: candidate.startLine } : {}),
-      ...(typeof candidate.endLine === 'number' ? { endLine: candidate.endLine } : {}),
-    }];
-  });
 }
 
 function sourceReferenceKey(reference: WikiSourceReference): string {
@@ -158,26 +162,31 @@ export class SdlcWikiPageStore {
   > {
     const repo = await this.requireReadableRepository(input);
     const pages = await this.prisma.canvas.findMany({
-      where: { channelId: repo.channelId },
-      select: { id: true, title: true, content: true, folderId: true, metadata: true },
+      where: {
+        channelId: repo.channelId,
+        sdlcArtifact: { is: { artifactType: 'WIKI' } },
+      },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        folderId: true,
+        folder: { select: { name: true } },
+        metadata: true,
+      },
     });
+    const entities = await this.entityRows(pages.map((page) => page.id));
     const sourceFilter = new Set(input.sourcePaths ?? []);
     const summaries = await Promise.all(
       pages.flatMap((page) => {
         const metadata = metadataRecord(page.metadata);
-        if (
-          metadata.surface !== 'SDLC' ||
-          metadata.documentKind !== 'WIKI' ||
-          metadata.repoId !== input.repoId ||
-          typeof metadata.wikiRelativePath !== 'string'
-        ) {
+        if (typeof metadata.wikiRelativePath !== 'string') {
           return [];
         }
-        const archived = typeof metadata.wikiArchivedAt === 'string';
+        const archived = isWikiArchiveFolder(page.folder?.name);
         if (archived && !input.includeArchived) return [];
-        const sourcePaths = Array.isArray(metadata.wikiSourcePaths)
-          ? metadata.wikiSourcePaths.filter((value): value is string => typeof value === 'string')
-          : [];
+        const entity = entities.get(page.id);
+        const sourcePaths = parseSdlcSourcePaths(entity?.sourcePaths);
         if (
           sourceFilter.size > 0 &&
           !sourcePaths.some((sourcePath) => sourceFilter.has(sourcePath))
@@ -193,8 +202,7 @@ export class SdlcWikiPageStore {
               canvasId: page.id,
               contentHash: markdownHash(markdown),
               sourcePaths,
-              lastCommitSha:
-                typeof metadata.wikiLastCommitSha === 'string' ? metadata.wikiLastCommitSha : null,
+              lastCommitSha: entity?.generationCommit ?? null,
               archived,
             };
           })(),
@@ -248,12 +256,6 @@ export class SdlcWikiPageStore {
       map: fullPages.map(deriveWikiMapEntry),
       markdownByPath: new Map(fullPages.map(page => [page.path, page.markdown])),
       staleSourcesByPath,
-      previousContentLengthByPath: new Map(
-        fullPages.flatMap(page => page.previousContentLength === null ? [] : [[page.path, page.previousContentLength]])
-      ),
-      mutationModeByPath: new Map(
-        fullPages.flatMap(page => page.mutationMode === null ? [] : [[page.path, page.mutationMode]])
-      ),
       changedSourcePaths: input.changedSourcePaths,
       runTargetSha: input.targetHeadSha,
     });
@@ -275,16 +277,14 @@ export class SdlcWikiPageStore {
     sourceReferences: WikiSourceReference[];
     lastCommitSha: string | null;
     archived: boolean;
-    previousContentLength: number | null;
-    mutationMode: string | null;
   }> {
     const repo = await this.requireReadableRepository(input);
     const path = normalizeWikiRelativePath(input.path);
     const page = await this.findPage(repo.channelId, repo.id, path);
     if (!page) throw new AppError('Wiki page not found', 404);
-    const metadata = metadataRecord(page.metadata);
-    const archived = typeof metadata.wikiArchivedAt === 'string';
+    const archived = isWikiArchiveFolder(page.folder?.name);
     if (archived && !input.includeArchived) throw new AppError('Wiki page not found', 404);
+    const entity = await this.entityRow(page.id);
     const markdown = await this.readLiveMarkdown(page);
     return {
       path,
@@ -292,21 +292,10 @@ export class SdlcWikiPageStore {
       canvasId: page.id,
       markdown,
       contentHash: markdownHash(markdown),
-      sourcePaths: Array.isArray(metadata.wikiSourcePaths)
-        ? metadata.wikiSourcePaths.filter((value): value is string => typeof value === 'string')
-        : [],
-      sourceReferences: metadataSourceReferences(
-        archived ? metadata.wikiArchivedSourceReferences : metadata.wikiSourceReferences
-      ),
-      lastCommitSha:
-        typeof metadata.wikiLastCommitSha === 'string' ? metadata.wikiLastCommitSha : null,
+      sourcePaths: parseSdlcSourcePaths(entity?.sourcePaths),
+      sourceReferences: parseSdlcSourceReferences(entity?.sourceReferences),
+      lastCommitSha: entity?.generationCommit ?? null,
       archived,
-      previousContentLength:
-        typeof metadata.wikiPreviousContentLength === 'number'
-          ? metadata.wikiPreviousContentLength
-          : null,
-      mutationMode:
-        typeof metadata.wikiMutationMode === 'string' ? metadata.wikiMutationMode : null,
     };
   }
 
@@ -444,6 +433,7 @@ export class SdlcWikiPageStore {
         url: string;
       },
       actorId: execution.createdBy,
+      executionId: execution.id,
       sessionId: input.sessionId,
       commitSha: input.request.commitSha,
       displayCommitRef: shortestUniqueWikiCommitRef(
@@ -452,7 +442,6 @@ export class SdlcWikiPageStore {
       ),
       action,
       sourceReferences: canonicalReferences,
-      mutationMode: input.request.page.action,
       refinement: context.assignedChunk?.kind === 'CORRECTION',
     });
     const pages = [
@@ -564,50 +553,56 @@ export class SdlcWikiPageStore {
     };
     const source = await this.findPage(wikiRepo.channelId, wikiRepo.id, sourcePath);
     const destination = await this.findPage(wikiRepo.channelId, wikiRepo.id, destinationPath);
-    const recoveredMoveMetadata = metadataRecord(destination?.metadata ?? null);
-    const recoveringDurableMove =
-      !source &&
-      destination &&
-      recoveredMoveMetadata.wikiLastCommitSha === input.request.commitSha &&
-      recoveredMoveMetadata.wikiRevisionKind === 'moved' &&
-      recoveredMoveMetadata.wikiMovedFromPath === sourcePath &&
-      typeof recoveredMoveMetadata.wikiCanvasVersionId === 'string';
-    if (!source && !recoveringDurableMove) throw new AppError(`Wiki page does not exist: ${sourcePath}`, 409);
     if (source && destination) throw new AppError(`Wiki page already exists: ${destinationPath}`, 409);
+    if (!source && !destination) throw new AppError(`Wiki page does not exist: ${sourcePath}`, 409);
     const page = source ?? destination!;
     const markdown = await this.readLiveMarkdown(page);
     const contentHash = markdownHash(markdown);
     if (contentHash !== input.request.expectedContentHash) {
       throw new AppError(`[CONTENT_CONFLICT] Wiki page changed concurrently: ${sourcePath}`, 409);
     }
-    const metadata = metadataRecord(page.metadata);
-    const sourcePaths = Array.isArray(metadata.wikiSourcePaths)
-      ? metadata.wikiSourcePaths.filter((value): value is string => typeof value === 'string')
-      : [];
-    let moved = recoveredMoveMetadata.wikiCanvasVersionId as string | undefined;
-    if (!recoveringDurableMove) {
-      const folderId = await this.ensureFolder(wikiRepo, destinationPath, execution.createdBy);
+    const moveIdentityHash = wikiVersionIdentityHash({
+      markdown: `${sourcePath}\0${destinationPath}\0${markdown}`,
+      revisionKind: 'moved',
+      commitSha: input.request.commitSha,
+    });
+    const entity = await this.entityRow(page.id);
+    const sourcePaths = parseSdlcSourcePaths(entity?.sourcePaths);
+    let moved: string | undefined;
+    if (!source) {
+      // The source page is gone: this is valid only as a retry of a move that
+      // already durably completed. The version row's identity hash proves it.
+      const durableMove = await this.prisma.canvasVersion.findUnique({
+        where: {
+          canvasId_contentHash: { canvasId: page.id, contentHash: moveIdentityHash },
+        },
+        select: { id: true },
+      });
+      if (!durableMove) throw new AppError(`Wiki page does not exist: ${sourcePath}`, 409);
+      moved = durableMove.id;
+    }
+    if (!moved) {
+      const folderId = await this.ensureFolder(
+        wikiRepo,
+        execution.createdBy,
+        isWikiArchiveFolder(page.folder?.name)
+      );
       const canvasVersionId = randomUUID();
       const now = new Date();
       const displayCommitRef = shortestUniqueWikiCommitRef(
         input.request.commitSha,
         wikiCommitRefUniverse(context)
       );
-      const versionIdentityHash = wikiVersionIdentityHash({
-        markdown: `${sourcePath}\0${destinationPath}\0${markdown}`,
-        revisionKind: 'moved',
-        commitSha: input.request.commitSha,
-      });
       moved = await this.prisma.$transaction(async (tx) => {
         const version = await tx.canvasVersion.upsert({
-          where: { canvasId_contentHash: { canvasId: page.id, contentHash: versionIdentityHash } },
+          where: { canvasId_contentHash: { canvasId: page.id, contentHash: moveIdentityHash } },
           create: {
             id: canvasVersionId,
             workspaceId: wikiRepo.workspaceId,
             canvasId: page.id,
             name: `Wiki ${displayCommitRef}: moved`,
             content: page.content as Prisma.InputJsonValue,
-            contentHash: versionIdentityHash,
+            contentHash: moveIdentityHash,
             createdBy: execution.createdBy!,
           },
           update: { updatedAt: now },
@@ -618,19 +613,27 @@ export class SdlcWikiPageStore {
           data: {
             folderId,
             ...(input.request.title ? { title: input.request.title } : {}),
-            metadata: {
-              ...metadata,
-              wikiRelativePath: destinationPath,
-              wikiLastCommitSha: input.request.commitSha,
-              wikiRevisionSessionId: input.sessionId,
-              wikiRevisionKind: 'moved',
-              wikiCanvasVersionId: version.id,
-              wikiMovedFromPath: sourcePath,
-              wikiMovedToPath: destinationPath,
-              wikiSyncedAt: now.toISOString(),
-            },
+            metadata: { wikiRelativePath: destinationPath },
             lastEditedBy: execution.createdBy!,
             lastEditedAt: now,
+          },
+        });
+        await tx.sdlcArtifact.upsert({
+          where: { artifactId: page.id },
+          create: {
+            workspaceId: wikiRepo.workspaceId,
+            repoId: wikiRepo.id,
+            artifactId: page.id,
+            artifactType: 'WIKI',
+            workflowExecutionId: execution.id,
+            generationCommit: input.request.commitSha,
+            sourcePaths: entity?.sourcePaths ?? null,
+            sourceReferences: entity?.sourceReferences ?? null,
+            createdBy: execution.createdBy!,
+          },
+          update: {
+            workflowExecutionId: execution.id,
+            generationCommit: input.request.commitSha,
           },
         });
         return version.id;
@@ -649,17 +652,13 @@ export class SdlcWikiPageStore {
       action: 'moved',
       commitSha: input.request.commitSha,
       canvasId: page.id,
-      canvasVersionId: moved!,
+      canvasVersionId: moved,
       contentHash,
       sourcePaths,
       path: destinationPath,
       title: input.request.title ?? page.title,
-      archived: typeof metadata.wikiArchivedAt === 'string',
-      sourceReferences: metadataSourceReferences(
-        typeof metadata.wikiArchivedAt === 'string'
-          ? metadata.wikiArchivedSourceReferences
-          : metadata.wikiSourceReferences
-      ),
+      archived: isWikiArchiveFolder(page.folder?.name),
+      sourceReferences: parseSdlcSourceReferences(entity?.sourceReferences),
     };
     const pages = [...(pending?.pages ?? []), { path: destinationPath, requestHash, revision }];
     const nextContext = parseWikiExecutionContext(
@@ -810,65 +809,71 @@ export class SdlcWikiPageStore {
       url: string;
     };
     actorId: string;
+    executionId: string;
     sessionId: string;
     commitSha: string;
     displayCommitRef: string;
     action: WholeWikiPageAction;
     sourceReferences: WikiSourceReference[];
-    mutationMode: SdlcWikiPageAction['action'];
     refinement: boolean;
   }): Promise<WikiRevisionEvidence> {
     const path = normalizeWikiRelativePath(input.action.path);
     const existing = await this.findPage(input.repo.channelId, input.repo.id, path);
-    const existingMetadata = metadataRecord(existing?.metadata ?? null);
-    const priorSourceReferences = metadataSourceReferences(
-      input.action.action === 'restore'
-        ? existingMetadata.wikiArchivedSourceReferences
-        : existingMetadata.wikiSourceReferences
-    );
+    const existingEntity = existing ? await this.entityRow(existing.id) : null;
+    const priorSourceReferences = parseSdlcSourceReferences(existingEntity?.sourceReferences);
     const evidenceAction = this.evidenceAction(input.action.action, input.refinement);
     const revisionSources = resolveWikiRevisionSources({
       action: input.action.action,
       requestedSourcePaths: input.action.sourcePaths,
-      currentSourcePaths: existingMetadata.wikiSourcePaths,
-      archivedSourcePaths: existingMetadata.wikiArchivedSourcePaths,
+      currentSourcePaths: parseSdlcSourcePaths(existingEntity?.sourcePaths),
     });
-    const requestedContentHash =
-      input.action.action === 'archive'
-        ? existingMetadata.wikiContentHash
-        : markdownHash(input.action.markdown);
-    if (
-      existing &&
-      existingMetadata.wikiLastCommitSha === input.commitSha &&
-      existingMetadata.wikiRevisionKind === evidenceAction &&
-      typeof existingMetadata.wikiCanvasVersionId === 'string' &&
-      typeof existingMetadata.wikiContentHash === 'string' &&
-      existingMetadata.wikiContentHash === requestedContentHash
-    ) {
-      if (input.action.action !== 'archive') {
-        const repaired = await this.dependencies.syncCanvas(
-          existing.id,
-          existing.content as unknown as BlockNoteBlock[]
-        );
-        if (!repaired) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
-      }
-      await this.dependencies.indexCanvas({
-        canvasId: existing.id,
-        userId: input.actorId,
-        workspaceId: input.repo.workspaceId,
+
+    const currentContent = existing ? await this.readLiveContent(existing) : [];
+    const currentMarkdown = await convertBlockNoteToMarkdown(currentContent);
+    const currentHash = markdownHash(currentMarkdown);
+    const markdown = input.action.action === 'archive' ? currentMarkdown : input.action.markdown;
+    const versionIdentityHash = wikiVersionIdentityHash({
+      markdown,
+      revisionKind: evidenceAction,
+      commitSha: input.commitSha,
+    });
+
+    if (existing) {
+      // Durable-revision recovery: the version row's identity hash proves this
+      // exact revision (content + kind + commit) already committed. Repair the
+      // side effects and return the recorded evidence instead of re-applying.
+      const durable = await this.prisma.canvasVersion.findUnique({
+        where: {
+          canvasId_contentHash: { canvasId: existing.id, contentHash: versionIdentityHash },
+        },
+        select: { id: true },
       });
-      return {
-        action: evidenceAction,
-        commitSha: input.commitSha,
-        canvasId: existing.id,
-        canvasVersionId: existingMetadata.wikiCanvasVersionId,
-        contentHash: existingMetadata.wikiContentHash,
-        sourcePaths: revisionSources.evidenceSourcePaths,
-        path,
-        title: existing.title,
-        archived: typeof existingMetadata.wikiArchivedAt === 'string',
-        sourceReferences: priorSourceReferences,
-      };
+      if (durable && currentHash === markdownHash(markdown)) {
+        if (input.action.action !== 'archive') {
+          const repaired = await this.dependencies.syncCanvas(
+            existing.id,
+            existing.content as unknown as BlockNoteBlock[]
+          );
+          if (!repaired) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
+        }
+        await this.dependencies.indexCanvas({
+          canvasId: existing.id,
+          userId: input.actorId,
+          workspaceId: input.repo.workspaceId,
+        });
+        return {
+          action: evidenceAction,
+          commitSha: input.commitSha,
+          canvasId: existing.id,
+          canvasVersionId: durable.id,
+          contentHash: markdownHash(markdown),
+          sourcePaths: revisionSources.evidenceSourcePaths,
+          path,
+          title: existing.title,
+          archived: isWikiArchiveFolder(existing.folder?.name),
+          sourceReferences: priorSourceReferences,
+        };
+      }
     }
     if (input.action.action === 'create' && existing) {
       throw new AppError(`Wiki page already exists: ${path}`, 409);
@@ -876,15 +881,10 @@ export class SdlcWikiPageStore {
     if (input.action.action !== 'create' && !existing) {
       throw new AppError(`Wiki page does not exist: ${path}`, 409);
     }
-
-    const currentContent = existing ? await this.readLiveContent(existing) : [];
-    const currentMarkdown = await convertBlockNoteToMarkdown(currentContent);
-    const currentHash = markdownHash(currentMarkdown);
     if (input.action.action !== 'create' && input.action.expectedContentHash !== currentHash) {
       throw new AppError(`[CONTENT_CONFLICT] Wiki page changed concurrently: ${path}`, 409);
     }
 
-    const markdown = input.action.action === 'archive' ? currentMarkdown : input.action.markdown;
     const sourceReferences = input.action.action === 'archive'
       ? priorSourceReferences
       : [...new Map(
@@ -912,40 +912,37 @@ export class SdlcWikiPageStore {
     const canvasVersionId = randomUUID();
     const now = new Date();
     const archived = input.action.action === 'archive';
-    const metadata: Prisma.InputJsonObject = {
-      ...existingMetadata,
-      source: 'sdlc-wiki-pipeline',
-      surface: 'SDLC',
-      documentKind: 'WIKI',
-      repoId: input.repo.id,
-      projectId: input.repo.projectId,
-      repositoryUrl: input.repo.url,
-      wikiRelativePath: path,
-      wikiSourcePaths: revisionSources.activeSourcePaths,
-      wikiSourceReferences: (archived ? [] : sourceReferences) as unknown as Prisma.InputJsonArray,
-      wikiArchivedSourceReferences: archived
-        ? sourceReferences as unknown as Prisma.InputJsonArray
-        : null,
-      wikiArchivedSourcePaths:
-        input.action.action === 'archive' ? revisionSources.evidenceSourcePaths : null,
-      wikiLastCommitSha: input.commitSha,
-      wikiRevisionSessionId: input.sessionId,
-      wikiRevisionKind: evidenceAction,
-      wikiContentHash: contentHash,
-      wikiPreviousContentLength: existing ? currentMarkdown.length : 0,
-      wikiMutationMode: input.mutationMode,
-      wikiCanvasVersionId: canvasVersionId,
-      wikiSyncedAt: now.toISOString(),
-      ...(archived
-        ? { wikiArchivedAt: now.toISOString(), wikiArchivedByCommit: input.commitSha }
-        : { wikiArchivedAt: null, wikiArchivedByCommit: null }),
+    // Identity only: archive state = folder placement; provenance = sdlc_artifacts.
+    const metadata: Prisma.InputJsonObject = { wikiRelativePath: path };
+    const folderId = await this.ensureFolder(input.repo, input.actorId, archived);
+
+    const upsertEntity = async (tx: Prisma.TransactionClient, canvasId: string) => {
+      const sourcePaths = archived
+        ? existingEntity?.sourcePaths ?? null
+        : stringifySdlcSourcePaths(revisionSources.activeSourcePaths);
+      const references = archived
+        ? existingEntity?.sourceReferences ?? null
+        : stringifySdlcSourceReferences(sourceReferences);
+      await tx.sdlcArtifact.upsert({
+        where: { artifactId: canvasId },
+        create: {
+          workspaceId: input.repo.workspaceId,
+          repoId: input.repo.id,
+          artifactId: canvasId,
+          artifactType: 'WIKI',
+          workflowExecutionId: input.executionId,
+          generationCommit: input.commitSha,
+          sourcePaths,
+          sourceReferences: references,
+          createdBy: input.actorId,
+        },
+        update: {
+          workflowExecutionId: input.executionId,
+          generationCommit: input.commitSha,
+          ...(archived ? {} : { sourcePaths, sourceReferences: references }),
+        },
+      });
     };
-    const folderId = await this.ensureFolder(input.repo, path, input.actorId);
-    const versionIdentityHash = wikiVersionIdentityHash({
-      markdown,
-      revisionKind: evidenceAction,
-      commitSha: input.commitSha,
-    });
 
     const canvas = existing
       ? await this.prisma.$transaction(async (tx) => {
@@ -977,11 +974,12 @@ export class SdlcWikiPageStore {
                     content: content as unknown as Prisma.InputJsonValue,
                   }),
               folderId,
-              metadata: { ...metadata, wikiCanvasVersionId: version.id },
+              metadata,
               lastEditedBy: input.actorId,
               lastEditedAt: now,
             },
           });
+          await upsertEntity(tx, existing.id);
           return { id: existing.id, versionId: version.id };
         })
       : await this.prisma.$transaction(async (tx) => {
@@ -1019,8 +1017,21 @@ export class SdlcWikiPageStore {
               createdBy: input.actorId,
             },
           });
+          await upsertEntity(tx, created.id);
           return { id: created.id, versionId: canvasVersionId };
         });
+
+    if (existing?.folderId && existing.folderId !== folderId) {
+      // Archive/restore (and directory renames) relocate the canvas; prune the
+      // old folder when it is left empty.
+      await this.prisma.canvasFolder.deleteMany({
+        where: {
+          id: existing.folderId,
+          name: { startsWith: WIKI_FOLDER_PREFIX },
+          canvases: { none: {} },
+        },
+      });
+    }
 
     if (input.action.action !== 'archive') {
       const synced = await this.dependencies.syncCanvas(canvas.id, content);
@@ -1074,24 +1085,53 @@ export class SdlcWikiPageStore {
 
   private async findPage(
     channelId: string,
-    repoId: string,
+    _repoId: string,
     path: string
   ): Promise<WikiPageRecord | null> {
     const pages = await this.prisma.canvas.findMany({
-      where: { channelId },
-      select: { id: true, title: true, content: true, folderId: true, metadata: true },
+      where: { channelId, sdlcArtifact: { is: { artifactType: 'WIKI' } } },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        folderId: true,
+        folder: { select: { name: true } },
+        metadata: true,
+      },
     });
     return (
       pages.find((page) => {
         const metadata = metadataRecord(page.metadata);
-        return (
-          metadata.surface === 'SDLC' &&
-          metadata.documentKind === 'WIKI' &&
-          metadata.repoId === repoId &&
-          metadata.wikiRelativePath === path
-        );
+        return metadata.wikiRelativePath === path;
       }) ?? null
     );
+  }
+
+  private async entityRow(canvasId: string): Promise<WikiEntityRecord | null> {
+    return this.prisma.sdlcArtifact.findUnique({
+      where: { artifactId: canvasId },
+      select: {
+        workflowExecutionId: true,
+        generationCommit: true,
+        sourceReferences: true,
+        sourcePaths: true,
+      },
+    });
+  }
+
+  private async entityRows(canvasIds: string[]): Promise<Map<string, WikiEntityRecord>> {
+    if (canvasIds.length === 0) return new Map();
+    const rows = await this.prisma.sdlcArtifact.findMany({
+      where: { artifactId: { in: canvasIds } },
+      select: {
+        artifactId: true,
+        workflowExecutionId: true,
+        generationCommit: true,
+        sourceReferences: true,
+        sourcePaths: true,
+      },
+    });
+    return new Map(rows.map(({ artifactId, ...row }) => [artifactId, row]));
   }
 
   private async requireReadableRepository(input: {
@@ -1117,10 +1157,10 @@ export class SdlcWikiPageStore {
       projectId: string;
       channelId: string;
     },
-    path: string,
-    actorId: string
+    actorId: string,
+    archived = false
   ): Promise<string> {
-    const name = wikiFolderName(path);
+    const name = archived ? wikiArchiveFolderName() : wikiFolderName();
     const folder = await this.prisma.canvasFolder.upsert({
       where: {
         projectId_channelId_name: {

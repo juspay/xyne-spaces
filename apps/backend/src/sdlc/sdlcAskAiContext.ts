@@ -1,3 +1,4 @@
+import { isBaselineCanvasType } from '@xyne/shared';
 import type { WikiFreshnessContext } from './wiki/wikiFreshness';
 import { wikiAskAiFreshnessInstruction } from './wiki/wikiFreshness';
 import {
@@ -12,26 +13,19 @@ export interface SdlcAskAiSelectedArtifact {
 }
 
 export function resolveSdlcAskAiArtifactKind(
-  metadata: Record<string, unknown> | null | undefined
+  artifactType: string | null | undefined
 ): SdlcAskAiSelectedArtifact['artifactKind'] | undefined {
-  const kind = metadata?.artifactKind ?? metadata?.documentKind;
-  return kind === 'PRD' || kind === 'TECH_DOC' || kind === 'WIKI' || kind === 'BASELINE'
-    ? kind
-    : undefined;
+  if (artifactType === 'PRD' || artifactType === 'TECH_DOC' || artifactType === 'WIKI') {
+    return artifactType;
+  }
+  return isBaselineCanvasType(artifactType) ? 'BASELINE' : undefined;
 }
 
 export function resolveSdlcAskAiSelectedArtifact(
-  canvas:
-    | { id: string; title: string; metadata: Record<string, unknown> | null }
-    | null
-    | undefined,
-  repoId: string
+  canvas: { id: string; title: string; artifactType: string | null | undefined } | null | undefined
 ): SdlcAskAiSelectedArtifact | undefined {
-  const artifactKind = resolveSdlcAskAiArtifactKind(canvas?.metadata);
-  return canvas &&
-    canvas.metadata?.surface === 'SDLC' &&
-    canvas.metadata.repoId === repoId &&
-    artifactKind
+  const artifactKind = resolveSdlcAskAiArtifactKind(canvas?.artifactType);
+  return canvas && artifactKind
     ? { canvasId: canvas.id, title: canvas.title, artifactKind }
     : undefined;
 }
@@ -92,7 +86,7 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     repositoryAccessInstruction,
     implementationInstruction,
     selectedArtifactInstruction,
-    'When the user explicitly asks to create a PRD or Tech Doc, use spaces-sdlc-mutate-artifact with action create. Pass this SDLC repository ID. A Tech Doc must be linked to an existing parent PRD canvas; ask which PRD when it is ambiguous. Creating these Spaces artifacts does not require writable repository access. Never use a generic canvas tool as fallback. If any tool says an action was queued for approval, the action is still pending: never mark the artifact as created or complete. Claim success only when spaces-sdlc-mutate-artifact returns the created SDLC artifact identity and URL. If the user says only "PR", ask whether they mean PRD or pull request before taking action. V1 creates the editable canvas immediately without a separate approval card.',
+    'When the user explicitly asks to create a PRD or Tech Doc, use spaces-sdlc-mutate-artifact with action create. Pass this SDLC repository ID. A Tech Doc may be linked to an existing parent PRD canvas; link it when the user names one, and create it unlinked when they do not. Creating these Spaces artifacts does not require writable repository access. Never use a generic canvas tool as fallback. If any tool says an action was queued for approval, the action is still pending: never mark the artifact as created or complete. Claim success only when spaces-sdlc-mutate-artifact returns the created SDLC artifact identity and URL. If the user says only "PR", ask whether they mean PRD or pull request before taking action. V1 creates the editable canvas immediately without a separate approval card.',
     'When creating an implementation ticket for a Tech Doc, call spaces-create-ticket with both sdlcRepoId set to this SDLC repository ID and sourceCanvasId set to the Tech Doc canvas ID. The ticket is not complete until the tool confirms the SDLC link; never create an unlinked fallback or a duplicate ticket.',
     canvasPreflight,
     'Use relevant repository Tickets, conversations, explicitly linked context, and repository-channel history as supporting evidence. Inspect the live pinned codebase only when the preflight rules require it. Keep every lookup subject to its existing authorization.',
