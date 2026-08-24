@@ -78,6 +78,8 @@ interface UseXyneAIStreamParams {
   model?: string | null;
   /** pinProvider for the hook-level `model` (see StreamOverrides.modelProvider). */
   modelProvider?: 'litellm' | 'spaces' | null;
+  /** Hook-level thinking pick (the sidebar's menu). Null = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
   suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
@@ -143,6 +145,7 @@ export const useXyneAIStream = ({
   agentSlug,
   model,
   modelProvider,
+  thinkingLevel,
   suppressCompletionToast,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
@@ -308,7 +311,7 @@ export const useXyneAIStream = ({
       const eSpeed = ov?.speed;
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
       const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
-      const eThinkingLevel = ov?.thinkingLevel;
+      const eThinkingLevel = ov?.thinkingLevel ?? thinkingLevel ?? undefined;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;

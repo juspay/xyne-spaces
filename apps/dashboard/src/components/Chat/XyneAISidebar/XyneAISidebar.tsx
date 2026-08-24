@@ -676,6 +676,9 @@ const XyneAISidebar = ({
   // the previous agent's key may not exist on the new one.
   const modelAgentSlug = effectiveAgentSlug ?? 'ask-ai';
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(null);
   const { data: agentModelsData } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
@@ -684,6 +687,7 @@ const XyneAISidebar = ({
   });
   useEffect(() => {
     setSelectedModel(null);
+    setThinkingLevel(null);
   }, [modelAgentSlug]);
 
   useEffect(() => {
@@ -765,6 +769,7 @@ const XyneAISidebar = ({
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
     modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
+    thinkingLevel,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -1841,6 +1846,8 @@ const XyneAISidebar = ({
     defaultModel: agentModelsData?.defaultModel ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
+    thinkingLevel,
+    onSelectThinking: setThinkingLevel,
     showContextModal,
     onCloseContextModal: handleCloseContextModal,
     onConfirmContext: handleConfirmContext,
