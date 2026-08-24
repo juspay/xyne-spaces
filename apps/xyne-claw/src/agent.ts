@@ -7,6 +7,7 @@ import {
   type CreateAgentSessionOptions,
   type ToolDefinition,
   type SessionEntry,
+  type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
@@ -1772,6 +1773,13 @@ export interface RunTaskOptions {
     isUserCancelled: () => boolean;
     onTurnBoundary: (lastTurn: number) => void;
   } | undefined;
+  /** Same-user mid-run follow-up: routes/run.ts installs a callback so the
+   *  interrupt endpoint can steer the live session to summarize and finish
+   *  before falling back to a hard abort. */
+  gracefulInterrupt?: {
+    isRequested: () => boolean;
+    registerSummaryRequest: (requestSummary: () => Promise<boolean>) => void;
+  } | undefined;
 }
 
 const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
@@ -1838,6 +1846,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     fastMaxActiveTools,
     resumedFromHandoff,
     handoff,
+    gracefulInterrupt,
   } = opts;
   let lastHandoffTurn = 0;
   const recordHandoffBoundary = (turn: number): void => {
@@ -2292,6 +2301,31 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       : { requested: "standard", applied: false, reason: "standard speed requested" }
     : undefined;
   installLlmCallMetrics(session.agent, sessionId ?? conversationId ?? "unknown", { fastMode: fastMode === true });
+
+  if (gracefulInterrupt) {
+    gracefulInterrupt.registerSummaryRequest(async () => {
+      const summaryInstruction = [
+        "[System Interrupt]",
+        "The user has sent a newer prompt while this run is still active.",
+        "Stop starting new work and do not call more tools unless one is already in flight and unavoidable.",
+        "Reply now with a concise summary of the work completed so far, including useful state, tools used, and any important caveats.",
+        "This run will end after that summary, and the newer user prompt will be handled next.",
+      ].join("\n");
+      try {
+        const liveSession = session as AgentSession & { sendUserMessage?: AgentSession["sendUserMessage"] };
+        if (typeof liveSession.sendUserMessage === "function") {
+          await liveSession.sendUserMessage(summaryInstruction, { deliverAs: "steer" });
+        } else {
+          await session.prompt(summaryInstruction, { streamingBehavior: "steer", expandPromptTemplates: false });
+        }
+        log.info(`[agent] Graceful interrupt summary steer queued (session=${sessionId ?? conversationId ?? "unknown"})`);
+        return true;
+      } catch (err) {
+        log.warn(`[agent] Graceful interrupt summary steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
+      }
+    });
+  }
 
   // Mid-turn compaction: pi compacts AFTER an assistant message but doesn't
   // check the tool_result that just landed and goes into the NEXT prompt. The
