@@ -93,12 +93,8 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import {
-  useSearchMetrics,
-  filterChannelsBySearchableNames,
-  rankUsersWithMfu,
-  CMDK_USER_LIMIT,
-} from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
+import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';

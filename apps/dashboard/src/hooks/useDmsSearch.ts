@@ -3,7 +3,7 @@ import { useAllChannels } from './useChannels';
 import { useUsers, searchUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
 import { useAffinityCallback } from './useAffinityCallback';
-import { rankChannelsByAffinity, filterChannelsBySearchableNames } from './useSearchMetrics';
+import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -46,7 +46,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const allUsers = useUsers();
   const { userID: currentUserId } = useAuthContextValues();
   // Re-render once affinity weights finish loading so the DM ranking memo re-runs (weights are read
-  // imperatively inside rankChannelsByAffinity, so a post-mount fetch is otherwise invisible).
+  // imperatively inside filterChannelsBySearchableNames, so a post-mount fetch is otherwise invisible).
   const affinityVersion = useAffinityCallback();
 
   // Build a Map for O(1) user lookup (same as cmd+k approach in ChannelCommandMenu)
@@ -90,44 +90,42 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
             return u ? [u.displayName, u.name].filter((n): n is string => !!n) : [];
           }),
       }));
-    const nameMatchedIds = new Set(
-      filterChannelsBySearchableNames(dmItems, dmSearchQuery).map(item => item.channel.id),
-    );
+    // Keep filterChannelsBySearchableNames' own ordering (fuseScore − affinity), the SAME blended
+    // relevance cmd+k uses, so a strong prefix match ("Rajesh") outranks a weak fuzzy match to a
+    // higher-affinity contact. Re-ranking the matched set by pure affinity buried clean matches.
+    const nameMatched = filterChannelsBySearchableNames(dmItems, dmSearchQuery);
+    const nameMatchedIds = new Set(nameMatched.map(item => item.channel.id));
 
-    const matchedDms = allChannels.filter(channel => {
-      if (!isDMChannel(channel.scopeType)) return false;
-      if (shouldMatchSelfDm && isSelfDm(channel)) return true;
-      if (nameMatchedIds.has(channel.id)) return true;
-
-      // Email isn't part of cmd+k's DM matcher (cmd+k finds emails via People, which the DM screen
-      // can't fall back to for existing contacts). Keep an exact-substring email match so an email
-      // query still surfaces an existing DM here.
-      const emailHaystack = parseDMParticipantIds(channel)
-        .filter(id => id !== currentUserId)
-        .map(id => usersById.get(id)?.email ?? '')
-        .join(' ')
-        .toLowerCase();
-      return emailHaystack.includes(query);
-    });
-
-    // Flat recency (most recent first). rankChannelsByAffinity floats higher-weight DMs up while
-    // its stable sort preserves this order within each weight tier.
+    // Email-only matches (participant email substring, no name match): cmd+k finds emails via People,
+    // which the DM screen can't fall back to for existing contacts, so keep them here — appended
+    // after the relevance-ranked name matches, ordered by recency.
     const byRecency = (a: Channel, b: Channel): number => b.lastActivityAt - a.lastActivityAt;
-
-    const oneToOneMatches = matchedDms
-      .filter(dm => isOneToOneDMChannel(dm.scopeType))
+    const emailMatched = allChannels
+      .filter(channel => {
+        if (!isDMChannel(channel.scopeType) || nameMatchedIds.has(channel.id)) return false;
+        const emailHaystack = parseDMParticipantIds(channel)
+          .filter(id => id !== currentUserId)
+          .map(id => usersById.get(id)?.email ?? '')
+          .join(' ')
+          .toLowerCase();
+        return emailHaystack.includes(query);
+      })
       .sort(byRecency);
-    const groupMatches = matchedDms.filter(dm => isGroupDMChannel(dm.scopeType)).sort(byRecency);
 
-    const rankedOneToOne = rankChannelsByAffinity(oneToOneMatches);
-    // Pin the self-DM to the top of the Direct Messages section when searching "self"/own name.
-    const oneToOne = shouldMatchSelfDm
-      ? [...rankedOneToOne.filter(isSelfDm), ...rankedOneToOne.filter(dm => !isSelfDm(dm))]
-      : rankedOneToOne;
+    const orderedMatches: Channel[] = [...nameMatched.map(item => item.channel), ...emailMatched];
+
+    // The self-DM is name-excluded (its only participant is you), so it never appears in the matched
+    // set above; surface it explicitly when the query looks like "self"/your own name, pinned to the
+    // top of the Direct Messages section.
+    const selfDms = shouldMatchSelfDm
+      ? allChannels.filter(ch => isOneToOneDMChannel(ch.scopeType) && isSelfDm(ch))
+      : [];
+
+    const oneToOneMatches = orderedMatches.filter(dm => isOneToOneDMChannel(dm.scopeType));
 
     return {
-      oneToOneDmResults: oneToOne,
-      groupDmResults: rankChannelsByAffinity(groupMatches),
+      oneToOneDmResults: shouldMatchSelfDm ? [...selfDms, ...oneToOneMatches] : oneToOneMatches,
+      groupDmResults: orderedMatches.filter(dm => isGroupDMChannel(dm.scopeType)),
     };
   }, [allChannels, dmSearchQuery, usersById, currentUserId, affinityVersion]);
 

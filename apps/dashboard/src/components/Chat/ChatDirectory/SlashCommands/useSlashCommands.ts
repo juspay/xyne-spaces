@@ -13,15 +13,15 @@ import { ChannelScopeType } from '@xyne/shared';
 import type { User, Channel } from '@xyne/shared';
 import { parseSearchCommand, COMMAND_KINDS, getCommand, type SearchCommandKind } from './commands';
 import { useQuickCall } from '../../../../hooks/useQuickCall';
-import { useActiveUserSearch, useUsers } from '../../../../hooks/useUsers';
+import { useUsers } from '../../../../hooks/useUsers';
 import { useChannelSearch, useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { useLastVisitedChannel } from '../../../../hooks/useLastVisitedChannel';
+import { CMDK_USER_LIMIT } from '../../../../hooks/useSearchMetrics';
 import {
-  CMDK_USER_LIMIT,
-  rankUsersWithMfu,
   rankChannelsByAffinity,
   filterChannelsBySearchableNames,
-} from '../../../../hooks/useSearchMetrics';
+} from '../../../../utils/rankingUtils';
+import { useRankedActivePeople } from '../../../../hooks/useRankedPeopleSearch';
 import { useAffinityCallback } from '../../../../hooks/useAffinityCallback';
 import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
 import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
@@ -237,41 +237,34 @@ export function useSlashCommands({
 
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
-  const commandUsers = useActiveUserSearch(commandQuery, CMDK_USER_LIMIT);
-  const commandUserResults = useMemo(() => {
-    if (!showUserResults) return [];
-    // Rank exactly like the main Cmd+K people list: relevance tier → affinity weight → DM recency
-    // (rankUsersWithMfu also recovers weighted matches sliced past the CMDK_USER_LIMIT cap).
-    // `void affinityVersion` re-ranks the at-rest picker once weights finish loading.
-    void affinityVersion;
-    // `/call` can't call yourself — exclude self from BOTH the candidates and the recovery pool,
-    // else rankUsersWithMfu could pull a weighted self back in from `allUsers`.
-    if (!isComposePicker) {
-      const base = commandUsers.filter(u => u.id !== currentUserID);
-      const pool = allUsers.filter(u => u.id !== currentUserID);
-      return rankUsersWithMfu(base, pool, commandQuery, dmContactRecency);
-    }
-    // `/chat` can message your self-DM. Self is ranked like any other candidate (by its own weight
-    // + DM recency), NOT pinned — pinning "You" would push it above more-weighted contacts. At rest
-    // inject self when the cap sliced it out so the self-DM stays reachable; with a query, let
-    // matching decide (self surfaces only when its name matches).
-    const self = usersById.get(currentUserID);
-    const candidates =
-      !commandQuery.trim() && self && !commandUsers.some(u => u.id === self.id)
-        ? [...commandUsers, self]
-        : commandUsers;
-    return rankUsersWithMfu(candidates, allUsers, commandQuery, dmContactRecency);
-  }, [
-    showUserResults,
-    isComposePicker,
+  // Same recipe as the main Cmd+K people list, via the shared hook: active-user candidates →
+  // relevance tier → MFU affinity → DM recency. Opts reproduce the picker's legacy behavior exactly
+  // (seeding + substring-fallback OFF), so this is a no-op swap of the previous inline logic:
+  //   /call — self can't be a target: exclude it from candidates AND the recovery pool.
+  //   /chat — self-DM is valid: inject self at rest so it stays reachable, ranked (not pinned).
+  const rankedCommandUsers = useRankedActivePeople(
     commandQuery,
-    commandUsers,
-    allUsers,
-    usersById,
-    currentUserID,
-    dmContactRecency,
-    affinityVersion,
-  ]);
+    CMDK_USER_LIMIT,
+    isComposePicker
+      ? {
+          ensureUserIdAtRest: currentUserID,
+          recoveryPool: allUsers,
+          dmContactRecency,
+          seedDmContactsAtRest: false,
+          substringFallback: false,
+        }
+      : {
+          excludeUserId: currentUserID,
+          recoveryPool: allUsers,
+          dmContactRecency,
+          seedDmContactsAtRest: false,
+          substringFallback: false,
+        },
+  );
+  const commandUserResults = useMemo(
+    () => (showUserResults ? rankedCommandUsers : []),
+    [showUserResults, rankedCommandUsers],
+  );
   // Channel picker candidates: real group channels (DEFAULT scope) the user can access.
   const commandChannels = useChannelSearch(commandQuery, CMDK_USER_LIMIT);
   const visibleChannels = useAllVisibleChannels();
