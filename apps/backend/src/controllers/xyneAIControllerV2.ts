@@ -108,6 +108,9 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Per-message provider fast mode (the composer's ⚡ toggle). Single word →
+  // no snake_case alias needed. Absent = the agent's configured default.
+  speed: z.enum(['standard', 'fast']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -245,6 +248,7 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      speed,
       researchContext,
       research_context,
       attachments,
@@ -538,6 +542,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(speed ? { speed } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,

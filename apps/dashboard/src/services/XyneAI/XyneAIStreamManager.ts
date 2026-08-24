@@ -93,6 +93,8 @@ export interface StreamRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
+  speed?: 'standard' | 'fast';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -1052,6 +1054,7 @@ class XyneAIStreamManager {
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
           instant: request.instant ?? false,
+          ...(request.speed ? { speed: request.speed } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {
