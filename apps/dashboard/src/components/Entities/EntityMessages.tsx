@@ -8,7 +8,8 @@ import { SearchResultMessageCard } from '../Chat/SearchResults/SearchResultMessa
 import { SearchResultsContext } from '../Chat/SearchResults/SearchResultsContext';
 import EntityRemarksDialog from './EntityRemarksDialog';
 import { cn } from '../../utils/classNames';
-import type { VespaSearchGroup, VespaSearchResponse } from '../../types/search';
+import type { VespaSearchResponse } from '../../types/search';
+import { MAX_BACKEND_OFFSET } from '../../hooks/useSearchMetrics';
 import {
   entitiesApi,
   type EntityFeedback,
@@ -39,39 +40,26 @@ interface EntityMessagesProps {
   onSelectPanel: (panel: SelectedPanel) => void;
 }
 
-/** Threads per page. Grouped responses are paged by slicing the group prefix. */
-const PAGE_SIZE = 20;
-
-/**
- * Does this message literally name the entity?
- *
- * Matched against the entity's ALIAS list from the registry, not its canonical
- * name: aliases are exactly the spellings that resolve to this entity, including
- * the fuzzy ones a substring test would miss ("zakpay" resolves to "Zaakpay" but
- * shares no prefix).
- */
-const namesEntity = (text: string, entity: EntityListItem): boolean => {
-  const needles = [...new Set([entity.canonicalName, ...entity.aliases])].filter(n => n.length > 1);
-  const lower = text.toLowerCase();
-  return needles.some(n => lower.includes(n.toLowerCase()));
-};
+/** Threads per page. One hit per thread, so this is a plain Vespa hit offset/limit. */
+const PAGE_SIZE = 25;
 
 /**
  * The threads an entity was extracted from.
  *
+ * One row per THREAD, and the query does that collapsing rather than the client:
+ * filtering by `entityId` makes the backend keep only thread roots, because extraction
+ * stamps a thread's entities on every message in it and the root therefore matches
+ * whatever its replies match. That gives plain Vespa hit paging — no grouping, no
+ * group-prefix re-fetch — and the row's message is always the actual root rather than
+ * whichever hit a grouping clause happened to return.
+ *
  * Calls `/api/vespaSearch` directly rather than through `searchService.vespaSearch`
- * for one reason: that helper flattens grouped responses and drops rows with
- * `relevanceScore > 0`. A filter-only query is unranked and every hit scores 0, so
- * it would discard the entire result set. Going direct also keeps the request
- * visible as-is in the network tab.
+ * because that helper's filter set carries no `entityId`. (Its `relevanceScore > 0`
+ * filter is NOT a reason — that applies only to the grouped branch, and this is flat.)
  *
  * Rows are `SearchResultMessageCard`, the same card the full search screen uses.
  * It reads its click handlers off `SearchResultsContext`, so providing
  * `onSelectThread` here is all the wiring the side panel needs.
- *
- * Paged by `offset`: Vespa's top-level offset paginates hits rather than grouping
- * buckets, so the backend fetches the group prefix and slices the requested page —
- * the same mechanism Desk mail uses (vespaSearch/index.ts:921).
  */
 export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): JSX.Element => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -88,7 +76,6 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
             apps: 'chat',
             type: 'messages',
             entityId: entity.id,
-            groupBy: 'threadId',
             offset: pageParam,
             limit: PAGE_SIZE,
           },
@@ -97,43 +84,35 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
         return res.data.data;
       },
       initialPageParam: 0,
-      // totalCount on a grouped response counts MESSAGES, not groups, so it cannot
-      // say when threads run out. A short page is the end-of-results signal.
+      // One hit per thread now, so totalCount IS the thread count and gives an exact
+      // end-of-results signal rather than the "short page means done" guess a grouped
+      // response forced.
       getNextPageParam: (lastPage, allPages) => {
-        const groups = lastPage.groups?.length ?? 0;
-        if (groups < PAGE_SIZE) return undefined;
-        return allPages.reduce((n, p) => n + (p.groups?.length ?? 0), 0);
+        const loaded = allPages.reduce((n, p) => n + (p.results?.length ?? 0), 0);
+        if (loaded >= (lastPage.totalCount ?? 0)) return undefined;
+        if (loaded + PAGE_SIZE > MAX_BACKEND_OFFSET) return undefined;
+        return loaded;
       },
     });
 
-  const totalMessages = data?.pages?.[0]?.totalCount ?? 0;
+  const totalThreads = data?.pages?.[0]?.totalCount ?? 0;
 
-  // One card per thread, showing its ROOT message. Rendering every message would
-  // mount a ChatBubble per row, and ChatBubble fetches channel shortcuts per
-  // instance (ChatBubble.tsx:198) — one HTTP request each.
+  // One card per thread. Each hit IS that thread's root, so there is nothing to pick
+  // between — which is what makes the reviewed message deterministic.
   const rows = useMemo(
     () =>
-      (data?.pages.flatMap(p => p.groups ?? []) ?? [])
-        .map((group: VespaSearchGroup) => {
-          const root = group.results.find(r => r.searchContext?.isRootMessage) ?? group.results[0];
-          if (!root?.searchContext?.channelId) return null;
-          // Anchor on a message that actually names the entity, so the panel opens
-          // scrolled to the mention rather than the top of the thread.
-          const naming = group.results.find(r => namesEntity(r.context ?? '', entity));
+      (data?.pages.flatMap(p => p.results ?? []) ?? [])
+        .map(root => {
+          const ctx = root.searchContext;
+          if (!ctx?.channelId || !ctx.conversationId) return null;
           return {
-            conversationId: group.groupValue,
+            conversationId: ctx.conversationId,
             root,
-            // The card renders `displayMessageId ?? matchedMessageId`, so these must
-            // be passed separately: the ROOT is what the card should show, while the
-            // matched message is only where the side panel scrolls to. Passing the
-            // matched id alone makes the card render a mid-thread reply.
-            displayMessageId: root.searchContext.messageId ?? null,
-            matchedMessageId:
-              naming?.searchContext?.messageId ?? root.searchContext.messageId ?? null,
+            messageId: ctx.messageId ?? null,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null),
-    [data, entity],
+    [data],
   );
 
   // Latest paging state, read inside the observer callback. Kept in a ref so the
@@ -180,18 +159,11 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
   const currentUserId = feedbackData?.currentUserId ?? '';
 
   /**
-   * messageId → every reviewer's verdict on it, with the viewer's own separated out.
-   * Reviewers each get their own row, so a message can carry disagreement; the card
-   * shows your verdict and counts the rest.
    */
   const feedbackByMessage = useMemo(() => {
-    const map = new Map<string, { mine?: EntityFeedback; approved: number; rejected: number }>();
+    const map = new Map<string, EntityFeedback>();
     for (const row of feedback) {
-      const bucket = map.get(row.messageId) ?? { approved: 0, rejected: 0 };
-      if (row.verdict === 'APPROVED') bucket.approved++;
-      else bucket.rejected++;
-      if (row.createdBy === currentUserId) bucket.mine = row;
-      map.set(row.messageId, bucket);
+      if (row.createdBy === currentUserId) map.set(row.messageId, row);
     }
     return map;
   }, [feedback, currentUserId]);
@@ -224,6 +196,10 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
       toast.error(message);
     },
   });
+
+  const savingMessageId = feedbackMutation.isPending
+    ? (feedbackMutation.variables?.messageId ?? null)
+    : null;
 
   const contextValue = useMemo(
     () => ({
@@ -263,19 +239,13 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
       <div className='px-5 pt-4 pb-3.5 border-b border-border shrink-0'>
         <h2 className='text-[17px] font-semibold tracking-[-0.01em]'>{entity.canonicalName}</h2>
         {/*
-          Threads and messages are different units — `rows.length` counts groups,
-          while a grouped response's totalCount counts the messages inside them. The
-          earlier "N of M messages" implied N was a subset of M and looked stuck at
-          the end of the list, so label each count for what it is.
-        */}
+         */}
         <p className='text-xs text-muted-foreground mt-0.5'>
           {entity.type}
-          {rows.length > 0 &&
-            ` · ${rows.length}${hasNextPage ? '+' : ''} thread${rows.length === 1 ? '' : 's'}`}
-          {totalMessages > 0 && ` · ${totalMessages} message${totalMessages === 1 ? '' : 's'}`}
-          {/* Distinct messages, not feedback rows: reviewers each get their own row,
-              so counting rows overstates as soon as two people review one message. */}
-          {feedbackByMessage.size > 0 && ` · ${feedbackByMessage.size} reviewed`}
+          {totalThreads > 0 &&
+            ` · ${rows.length} of ${totalThreads} thread${totalThreads === 1 ? '' : 's'}`}
+          {/* Your reviews only — the map holds just your own rows. */}
+          {feedbackByMessage.size > 0 && ` · ${feedbackByMessage.size} reviewed by you`}
         </p>
       </div>
 
@@ -335,35 +305,16 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
 
         <SearchResultsContext.Provider value={contextValue}>
           {rows.map(row => {
-            // Feedback is keyed on the message the card renders — its thread root.
-            const reviewedId = row.displayMessageId ?? row.matchedMessageId;
-            const bucket = reviewedId ? feedbackByMessage.get(reviewedId) : undefined;
-            const existing = bucket?.mine;
-            // Verdicts from other reviewers on this same message.
-            const othersApproved =
-              (bucket?.approved ?? 0) - (existing?.verdict === 'APPROVED' ? 1 : 0);
-            const othersRejected =
-              (bucket?.rejected ?? 0) - (existing?.verdict === 'REJECTED' ? 1 : 0);
-            const others = othersApproved + othersRejected;
+            const reviewedId = row.messageId;
+            const existing = reviewedId ? feedbackByMessage.get(reviewedId) : undefined;
             const messageText = row.root.context ?? '';
 
             return (
-              // `relative group/verdict` wraps the shared card so the approve/reject
-              // controls can be overlaid on hover without the card needing new props.
-              // `data-prevent-thread` stops a click on them bubbling into the card's
-              // own handler and opening the side panel.
-              // Fixed height so the list scans as a uniform grid rather than a ragged
-              // stack — message length varies from one line to a paragraph. The card
-              // itself is untouched; the wrapper clips it.
-              // Wrapper hugs the card exactly — no height of its own. Give it one and
-              // a short card leaves dead space beneath, dropping the absolutely
-              // positioned buttons below outside the card's border.
-              <div key={row.conversationId} className='relative'>
+              <div key={row.messageId ?? row.conversationId} className='relative'>
                 <SearchResultMessageCard
                   channelId={row.root.searchContext!.channelId!}
                   conversationId={row.conversationId}
-                  matchedMessageId={row.matchedMessageId}
-                  {...(row.displayMessageId ? { displayMessageId: row.displayMessageId } : {})}
+                  matchedMessageId={row.messageId}
                   searchSnippet={row.root.context ?? ''}
                   searchThread={{
                     isRootMessage: row.root.searchContext?.isRootMessage ?? true,
@@ -389,13 +340,9 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
               */}
                 <div
                   data-prevent-thread
-                  title={
-                    existing?.verdict === 'REJECTED' && existing.remarks
-                      ? existing.remarks
-                      : others > 0
-                        ? `${othersApproved} approved, ${othersRejected} rejected by others`
-                        : undefined
-                  }
+                  {...(existing?.verdict === 'REJECTED' && existing.remarks
+                    ? { title: existing.remarks }
+                    : {})}
                   className='absolute bottom-3 right-4 z-20 flex items-center gap-[5px]'
                 >
                   <button
@@ -403,7 +350,7 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
                     title='Correct on this message'
                     aria-label='Approve this entity on this message'
                     aria-pressed={existing?.verdict === 'APPROVED'}
-                    disabled={feedbackMutation.isPending || !reviewedId}
+                    disabled={savingMessageId === reviewedId || !reviewedId}
                     onClick={event => {
                       event.stopPropagation();
                       if (reviewedId) {
@@ -428,7 +375,7 @@ export const EntityMessages = ({ entity, onSelectPanel }: EntityMessagesProps): 
                     title='Wrong on this message'
                     aria-label='Reject this entity on this message'
                     aria-pressed={existing?.verdict === 'REJECTED'}
-                    disabled={feedbackMutation.isPending || !reviewedId}
+                    disabled={savingMessageId === reviewedId || !reviewedId}
                     onClick={event => {
                       event.stopPropagation();
                       if (reviewedId) setRejecting({ messageId: reviewedId, text: messageText });

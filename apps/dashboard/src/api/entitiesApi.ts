@@ -65,7 +65,7 @@ export const entitiesApi = {
     entityId: string,
   ): Promise<{ feedback: EntityFeedback[]; currentUserId: string }> => {
     const res = await apiInstance.get<{ feedback: EntityFeedback[]; currentUserId: string }>(
-      `/entities/${entityId}/feedback`,
+      `/entities/${encodeURIComponent(entityId)}/feedback`,
     );
     return res.data;
   },
@@ -81,7 +81,7 @@ export const entitiesApi = {
     remarks?: string,
   ): Promise<EntityFeedback> => {
     const res = await apiInstance.put<EntityFeedback>(
-      `/entities/${entityId}/feedback/${messageId}`,
+      `/entities/${encodeURIComponent(entityId)}/feedback/${encodeURIComponent(messageId)}`,
       { verdict, ...(remarks ? { remarks } : {}) },
     );
     return res.data;

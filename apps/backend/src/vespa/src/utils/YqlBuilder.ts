@@ -422,11 +422,7 @@ export class YqlBuilder {
       // keeping the highest-relevance hit within each thread.
       yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
     } else if (groupBy && this.shouldGroup(groupBy, schemas, apps)) {
-      // threadId grouping is paged by slicing the group prefix (same approach as the
-      // mail branch above), so the caller raises `limit` to offset+pageSize to reach
-      // deeper pages. Capping it at 50 here would silently stop paging at group 50.
-      const maxGroups = groupBy === 'threadId' ? safeLimit : Math.min(safeLimit, 50);
-      const groupClause = this.buildGroupingClause(groupBy, maxGroups);
+      const groupClause = this.buildGroupingClause(groupBy, Math.min(safeLimit, 50));
       if (groupClause) {
         yql += `| ${groupClause}`;
       }
@@ -831,6 +827,7 @@ export class YqlBuilder {
         .map((id) => `entityIds contains ${params.bind('entityId', id.trim())}`)
         .join(' or ');
       conditions.push(`(${entities})`);
+      conditions.push('isRootMessage = true');
     }
 
     if (filters.createdBefore) {
@@ -1395,10 +1392,6 @@ export class YqlBuilder {
   private static readonly GROUP_FIELD_SCHEMAS: Record<string, VespaSchema[] | 'all'> = {
     senderId: [messageSchema, attachmentSchema],
     userId: [messageSchema, attachmentSchema],
-    // threadId -> chat_message only. Entity extraction resolves per THREAD and
-    // stamps the result on every message in it, so grouping by thread collapses
-    // that fan-out back to one row per conversation.
-    threadId: [messageSchema],
     channelId: [messageSchema, attachmentSchema, ticketSchema, fileSchema, mailSchema],
     docType: 'all',
     threadType: [messageSchema],
@@ -1448,12 +1441,6 @@ export class YqlBuilder {
       case 'docType':
         // Group by document type (messages, channels, attachments, etc.)
         return `all(group(docType) max(10) each(max(10) each(output(summary()))))`;
-
-      case 'threadId':
-        // Group by conversation. A deeper per-group cap than the others: the point
-        // of this grouping is to see a thread's matching messages together, and a
-        // cap of 5 would silently hide most of a long thread.
-        return `all(group(threadId) max(${maxGroups}) each(max(20) each(output(summary()))))`;
 
       case 'senderId':
       case 'userId':

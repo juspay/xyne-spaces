@@ -95,7 +95,7 @@ router.get('/types', authMiddleware.authenticate, async (req: Request, res: Resp
 });
 
 /**
- * GET /api/entities/:entityId/feedback — every review recorded for this entity.
+ * GET /api/entities/:entityId/feedback — YOUR reviews of this entity.
  *
  * Scoped to one entity rather than paged: the client renders at most a few dozen
  * threads at a time and needs to look feedback up by messageId, so one fetch keyed
@@ -111,7 +111,7 @@ router.get('/:entityId/feedback', authMiddleware.authenticate, async (req: Reque
 
   try {
     const rows = await prisma.entityFeedback.findMany({
-      where: { workspaceId, entityId },
+      where: { workspaceId, entityId, createdBy: userId },
       select: {
         messageId: true,
         conversationId: true,
@@ -122,8 +122,8 @@ router.get('/:entityId/feedback', authMiddleware.authenticate, async (req: Reque
         updatedAt: true,
       },
     });
-    // Every reviewer's rows come back, so the client can show a tally — it needs
-    // the caller's id to pick out which one is the viewer's own verdict.
+    // currentUserId still travels: the client keys its map on it, and returning it
+    // keeps that lookup honest rather than having the client assume every row is its own.
     return res.json({ feedback: rows, currentUserId: userId });
   } catch (error) {
     logger.error('[ENTITIES] list feedback failed:', error);

@@ -4643,7 +4643,8 @@ model Entity {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  aliases EntityAlias[]
+  aliases  EntityAlias[]
+  feedback EntityFeedback[]
 
   @@unique([workspaceId, type, normalizedName])
   @@index([workspaceId, type])
@@ -4816,6 +4817,12 @@ model EntityFeedback {
   /// Denormalized so a thread's feedback can be read without joining messages.
   conversationId String
   entityId       String
+  /// Cascade, matching EntityAlias above: a verdict is about an entity, so it is
+  /// meaningless once that entity is gone. Without it, deleting an entity leaves rows
+  /// pointing at an id that no longer exists — unreachable and only removable by hand.
+  /// relationMode is "prisma", so this is emulated in the client: no database FK and
+  /// no migration.
+  entity         Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   /// APPROVED | REJECTED
   verdict String
@@ -4827,10 +4834,11 @@ model EntityFeedback {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
+  // Reads are `where: { workspaceId, entityId }`; writes go through the unique key.
+  // No index on (messageId, entityId) — it is a leading prefix of the unique index
+  // below, which serves the same lookups. Nor on conversationId, which has no reader.
   @@unique([messageId, entityId, createdBy])
   @@index([entityId])
-  @@index([conversationId])
-  @@index([messageId, entityId])
   @@map("entity_feedback")
   @@schema("non_zero")
 }

@@ -102,8 +102,8 @@ interface UseSearchMetricsOptions {
 
 const BACKEND_RESULTS_LIMIT = 25;
 // Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
-// query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
-const MAX_BACKEND_OFFSET = 1000;
+// query offset at maxOffset (1000)
+export const MAX_BACKEND_OFFSET = 1000;
 
 /**
  * Cap on user rows fetched for any Cmd+K user surface (plain-search USERS

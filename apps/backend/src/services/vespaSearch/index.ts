@@ -791,6 +791,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     // Extracted-entity filter — the entity review screen sends this with
     // filterOnly=true and an empty q to list every message carrying an entity.
+    // The builder narrows this to thread roots — one hit per thread. See YqlBuilder.
     if (entityId) {
       options.slack.entityIds = toFilterValues(entityId, 'entityId');
     }
@@ -926,24 +927,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const isMailOnlySearch =
       searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
-    // Explicit groupBy=threadId (entity review) pages the same way mail does.
-    //
-    // `&& !isMailOnlySearch` is redundant given the OR below, but it is written out
-    // so the invariant is enforced by the code rather than inferred: a mail-only
-    // search can never enter the new branch. Desk mail therefore behaves exactly as
-    // before — whenever isMailOnlySearch is true, isGroupPaged is true and
-    // groupPageOffset equals the old mailGroupOffset, so all three uses below reduce
-    // to their original expressions.
-    const isThreadGroupedSearch = options.groupBy === 'threadId' && !isMailOnlySearch;
-    const isGroupPaged = isMailOnlySearch || isThreadGroupedSearch;
-    const groupPageOffset = isGroupPaged ? Math.max(Number(offset) || 0, 0) : 0;
+    const mailGroupOffset = isMailOnlySearch
+      ? Math.max(Number(offset) || 0, 0)
+      : 0;
 
     // Vespa's top-level offset paginates hits, not grouping buckets. Desk mail
     // results are grouped by threadId, so fetch the ranked group prefix and
     // slice the requested page after parsing the grouping response.
-    if (isGroupPaged && groupPageOffset > 0) {
+    if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
-      options.limit = Math.min(MAX_VESPA_HITS, groupPageOffset + effectiveLimit);
+      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
     }
 
     // Call vespa search
@@ -970,8 +963,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Grouped result don't have matchFeatures
       // Need to be added explicitly
       // Return grouped results
-      const pageGroups = isGroupPaged
-        ? parsedResults.groups.slice(groupPageOffset, groupPageOffset + effectiveLimit)
+      const pageGroups = isMailOnlySearch
+        ? parsedResults.groups.slice(mailGroupOffset, mailGroupOffset + effectiveLimit)
         : parsedResults.groups;
 
       const groupedResults = await Promise.all(
