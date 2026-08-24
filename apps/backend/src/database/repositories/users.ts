@@ -254,6 +254,23 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
   }
 
   /**
+   * Resolve ids to ACTIVE users, reporting the first id that does not resolve.
+   */
+  async findActiveByIds(userIds: string[]): Promise<{ users: User[]; missingUserId: string | null }> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) {
+      return { users: [], missingUserId: null };
+    }
+
+    const users = await this.db.user.findMany({
+      where: { id: { in: ids }, status: UserStatus.ACTIVE },
+    });
+
+    const found = new Set(users.map(user => user.id));
+    return { users, missingUserId: ids.find(id => !found.has(id)) ?? null };
+  }
+
+  /**
    * Private helper method to enrich users with their group mappings
    * Efficiently fetches mappings and groups in batched queries, then combines them
    */
