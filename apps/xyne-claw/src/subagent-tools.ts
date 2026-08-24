@@ -33,6 +33,7 @@ import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { type LlmCallStat } from "./llm-turn-stats.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
 import crypto from "node:crypto";
@@ -350,6 +351,13 @@ export interface SubagentProgressCtx {
   /** Persistent parent agent session key used for filesystem debug artifacts. */
   parentDebugSessionId?: string;
   parentToolsUsed?: string[];
+  /** Mutable parent-side sink for nested child invocations. The live
+   *  `pushInvocation` stream can drop, and finalize only re-supplies the
+   *  parent's own rows, so this is the durable path for subagent tool calls. */
+  parentToolInvocations?: ToolInvocation[];
+  /** Mutable parent-side sink for the child's own LLM calls, tagged with the
+   *  subagent name so parent-only analysis stays a filter. */
+  parentLlmCalls?: LlmCallStat[];
   /** Parent agent's conversationId/agentSlug — used by the sandbox subagent to
    *  look up an existing kata session for this conversation and surface it to
    *  the cold-started child LLM via a system reminder. */
@@ -643,6 +651,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // [clf-…#n] tokens to cite, independent of how the inner LLM summarized.
       const citedToolOutputs: string[] = [];
       let turnStartedAt: number | null = null;
+      let childCallSeq = 0;
+      let childTtftMs: number | null = null;
       let firstDeltaAt: number | null = null;
       let turnStreamChars = 0;
       let turnStreamThinkingChars = 0;
@@ -996,42 +1006,45 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               }
             } catch { /* ignore non-serializable results */ }
 
-            // Tier 2: stream nested child invocation up to the parent's progressUrl
-            // so the frontend can render it under the subagent row.
-            if (progressCtx) {
-              const started = childInflight.get(event.toolCallId);
-              if (started) {
-                // Persist exactly what the child model saw. Subagent inner
-                // tools already go through capCustomToolOutput/promoteIfOversized
-                // (see the customTools wiring above), so the result is bounded
-                // in-execute. No second persist-only slice here — that re-cut the
-                // already-capped result, shrinking the DB/UI copy below what the
-                // model reasoned over and corrupting the MCP JSON envelope.
-                const resultStr = (() => {
-                  try {
-                    if (typeof event.result === "string") return event.result;
-                    return JSON.stringify(event.result);
-                  } catch {
-                    return String(event.result);
-                  }
-                })();
-                const childInv: ToolInvocation = {
-                  toolName: event.toolName,
-                  args: started.args,
-                  result: resultStr,
-                  isError: event.isError,
-                  startedAt: new Date(started.startedAt).toISOString(),
-                  durationMs: Date.now() - started.startedAt,
-                  status: "completed",
-                  toolCallId: event.toolCallId,
-                  parentToolCallId: _toolCallId,
-                  subagentName: def.name,
-                  ...(childCitations ? { citations: childCitations } : {}),
-                };
+            const started = childInflight.get(event.toolCallId);
+            if (started) {
+              // Persist exactly what the child model saw. Subagent inner
+              // tools already go through capCustomToolOutput/promoteIfOversized
+              // (see the customTools wiring above), so the result is bounded
+              // in-execute. No second persist-only slice here — that re-cut the
+              // already-capped result, shrinking the DB/UI copy below what the
+              // model reasoned over and corrupting the MCP JSON envelope.
+              const resultStr = (() => {
+                try {
+                  if (typeof event.result === "string") return event.result;
+                  return JSON.stringify(event.result);
+                } catch {
+                  return String(event.result);
+                }
+              })();
+              const childInv: ToolInvocation = {
+                toolName: event.toolName,
+                args: started.args,
+                result: resultStr,
+                isError: event.isError,
+                startedAt: new Date(started.startedAt).toISOString(),
+                durationMs: Date.now() - started.startedAt,
+                status: "completed",
+                toolCallId: event.toolCallId,
+                parentToolCallId: _toolCallId,
+                subagentName: def.name,
+                ...(childCitations ? { citations: childCitations } : {}),
+              };
+              // Stream it up so the frontend can render it under the subagent
+              // row, AND record it on the parent's own array. The stream is a
+              // fire-and-forget HTTP push and finalize only re-supplies the
+              // PARENT's invocations, so without the second sink a dropped push
+              // loses a child row permanently.
+              if (progressCtx) {
                 pushInvocation(progressCtx.progressUrl, progressCtx.parentSessionId, childInv);
               }
+              progressCtx?.parentToolInvocations?.push(childInv);
             }
-            const started = childInflight.get(event.toolCallId);
             turnStartedAt = Date.now();
             firstDeltaAt = null;
             pushDebugEvent("tool_execution_end", {
@@ -1057,6 +1070,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
               if (firstDeltaAt == null && turnStartedAt != null) {
                 firstDeltaAt = Date.now();
+                childTtftMs = firstDeltaAt - turnStartedAt;
               }
               if (ame.type === "thinking_delta") {
                 turnStreamCount += 1;
@@ -1080,6 +1094,26 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               if (firstDeltaAt != null && turnStreamChars > 0) {
                 const elapsed = Math.max(0.001, (Date.now() - firstDeltaAt) / 1000);
                 lastStreamCharsPerSec = Math.round(turnStreamChars / elapsed);
+              }
+              if (progressCtx?.parentLlmCalls) {
+                childCallSeq += 1;
+                const u = msg.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined;
+                const called = msg as unknown as { model?: string; responseModel?: string; provider?: string };
+                progressCtx.parentLlmCalls.push({
+                  i: childCallSeq,
+                  ttft: childTtftMs,
+                  dec: firstDeltaAt != null ? Math.max(0, Date.now() - firstDeltaAt) : 0,
+                  in: u?.input ?? 0,
+                  out: u?.output ?? 0,
+                  cr: u?.cacheRead ?? 0,
+                  cw: u?.cacheWrite ?? 0,
+                  ...(turnStreamChars ? { ch: turnStreamChars } : {}),
+                  ...(msg.stopReason ? { sr: msg.stopReason } : {}),
+                  ...(called.responseModel ?? called.model ? { m: called.responseModel ?? called.model } : {}),
+                  ...(called.provider ? { p: called.provider } : {}),
+                  sa: def.name,
+                });
+                childTtftMs = null;
               }
               pushDebugEvent("assistant_turn_end", {
                 message: (() => {

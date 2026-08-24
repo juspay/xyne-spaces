@@ -46,6 +46,7 @@ import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
+import { LlmTurnRecorder, type LlmCallStat } from "./llm-turn-stats.js";
 import { installToolBudget } from "./tool-budget.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
@@ -207,6 +208,21 @@ export interface LatencyMetrics {
   toolMs: number;
 }
 
+/**
+ * Outcome of the citation-reflection pass, when the agent has it enabled.
+ *
+ * Answers "did retrieved sources actually get used" at run level. Computed
+ * during the run and previously only logged; carried on the result so it can be
+ * persisted and correlated with per-tool citation rates.
+ */
+export interface CitationReflectionOutcome {
+  outcome: "already_cited" | "no_citeable_sources" | "fixed_after_nudge" | "still_uncited" | "aborted";
+  initialCited: boolean;
+  sourcesWereCiteable: boolean;
+  finalCited: boolean;
+  rounds: number;
+}
+
 export interface RunResult {
   readonly text: string;
   readonly toolsUsed: string[];
@@ -225,6 +241,12 @@ export interface RunResult {
    *  the model never called the tool — claw-auth then stays silent (fail-closed),
    *  never posting the raw assistant text. */
   readonly twinDelivery?: import("xyne-claw-shared").TwinDelivery;
+  /** Absent when the agent has citationReflection disabled or the run produced
+   *  structured output (not citable prose). */
+  readonly citationReflection?: CitationReflectionOutcome;
+  /** Per-LLM-call latency and token series, parent calls plus any subagent
+   *  calls tagged with their origin. See llm-turn-stats.ts. */
+  readonly llmCalls?: LlmCallStat[];
 }
 
 export class RunHandoffError extends Error {
@@ -2368,6 +2390,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // is our TTFT signal. message_end closes the turn.
   let turnStartedAt: number | null = runStartedAt;
   let firstDeltaAt: number | null = null;
+  // TTFT of the CURRENT turn. The run-level accumulator only keeps the first
+  // turn's value, so without this the per-call series has no wait component.
+  let turnTtftMs: number | null = null;
+  const llmTurnRecorder = new LlmTurnRecorder();
   // LLM stall watchdog: fall back instead of hanging forever when a provider
   // call makes no progress (the silent-drop failure mode). `modelActive` is true
   // only while we're awaiting/receiving model output (NOT during tool execution,
@@ -2795,6 +2821,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         if (firstDeltaAt == null && turnStartedAt != null) {
           firstDeltaAt = Date.now();
           const wait = firstDeltaAt - turnStartedAt;
+          turnTtftMs = wait;
           latency.llmWaitMs += wait;
           if (latency.firstTurnTtftMs == null) latency.firstTurnTtftMs = wait;
         }
@@ -2847,9 +2874,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           latency.streamTextChars += turnStreamTextChars;
           latency.streamCharsPerSec = Math.round(turnStreamChars / decodeSeconds);
         }
+        const called = msg as unknown as { model?: string; responseModel?: string; provider?: string; stopReason?: string };
+        llmTurnRecorder.record({
+          index: llmCallSeq,
+          ttftMs: turnTtftMs,
+          decodeMs: firstDeltaAt != null ? now - firstDeltaAt : 0,
+          usage: msg.usage,
+          streamChars: turnStreamChars,
+          ...(called.stopReason ? { stopReason: called.stopReason } : {}),
+          // responseModel is what the gateway actually served, which is the one
+          // that explains a latency step change when routing differs.
+          ...(called.responseModel ?? called.model ? { model: called.responseModel ?? called.model } : {}),
+          ...(called.provider ? { provider: called.provider } : {}),
+        });
         latency.llmTurns += 1;
         turnStartedAt = null;
         firstDeltaAt = null;
+        turnTtftMs = null;
         // HA: checkpoint the session to GCS after each assistant turn (debounced
         // + single-flight) and keep the conversation lock alive, so a pod death
         // mid-run loses ≈one turn, not the whole conversation.
@@ -2931,6 +2972,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       }, { turn: latency.llmTurns + 1 });
     }
     if (event.type === "compaction_end") {
+      llmTurnRecorder.markCompaction();
       const e = event as {
         aborted?: boolean;
         willRetry?: boolean;
@@ -2955,6 +2997,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "auto_retry_start") {
       const e = event as { attempt?: number; maxAttempts?: number; errorMessage?: string };
+      llmTurnRecorder.markRetry();
       latency.llmRetries += 1;
       if (e.errorMessage) latency.lastRetryReason = e.errorMessage.slice(0, 200);
       // A retry restarts the current turn — re-arm the wait window so the
@@ -3368,6 +3411,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // invocations carry the tokens in their returned text, not in metadata.
   // Deliberately skipped for: structured-output runs (JSON, not citable prose),
   // and honest "nothing found" answers (no tool returned a token → no nag).
+  let citationReflectionOutcome: CitationReflectionOutcome | undefined;
   if (citationReflection && !structuredOutputRef) {
     // A well-formed citation token is `[clf-<toolCallId>#<chunk>]`. The id is a
     // FULL tool-call id whose charset varies by provider (`functions.x:2`,
@@ -3424,6 +3468,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
 
     const finalCited = CITE_RE.test(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "");
+    citationReflectionOutcome = {
+      outcome: outcome as CitationReflectionOutcome["outcome"],
+      initialCited,
+      sourcesWereCiteable,
+      finalCited,
+      rounds,
+    };
     pushDebugEvent("citation_reflection", {
       phase: "result",
       outcome,
@@ -3645,6 +3696,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const sessionClfTokens = extractSessionClfTokens(
     (session as unknown as { messages?: unknown }).messages,
   );
+  const llmCallSeries = llmTurnRecorder.snapshot();
   // A run that produced NOTHING usable and ended on a terminal provider error
   // (SDK auto-retries exhausted) must fall back to the next provider, exactly
   // like a stall — throw a fallback-eligible ProviderTerminalError instead of
@@ -3663,7 +3715,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     });
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
-  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
+  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}), ...(citationReflectionOutcome ? { citationReflection: citationReflectionOutcome } : {}), ...(llmCallSeries ? { llmCalls: llmCallSeries } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
     // pinging after the agent finishes — including on thrown errors.

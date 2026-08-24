@@ -1638,3 +1638,62 @@ export function parseToolsConfig(agentConfig: Record<string, unknown> | null | u
   if (!tools || typeof tools !== "object") return undefined;
   return tools as AgentToolsConfig;
 }
+
+/**
+ * Whether a config grant entry corresponds to a tool observed at runtime, by
+ * NAME alone.
+ *
+ * Mirrors the name conventions of `matchesDirectPick` in xyne-claw's
+ * tool-resolution.ts (bare, suffix, prefixed-config, normalized). It
+ * deliberately omits that function's fifth convention — matching against a
+ * ToolDefinition's `selectionKey` — because the only input available after the
+ * fact is the recorded tool name. For custom tools the runtime name IS the
+ * catalog slug, which is what `custom` grants hold, so the gap is narrow.
+ *
+ * Read-only analysis helper: it answers "was this grant ever exercised", and is
+ * NOT an authorization check. Grant decisions remain solely with
+ * tool-resolution.ts `authorize()`.
+ */
+export function grantMatchesToolName(grant: string, toolName: string): boolean {
+  if (!grant || !toolName) return false;
+  const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
+  return (
+    toolName === grant ||
+    toolName.endsWith(grant) ||
+    grant.endsWith(`__${toolName}`) ||
+    norm(toolName) === norm(grant)
+  );
+}
+
+/**
+ * Grant entries in `config.tools` that no run in the observed set ever
+ * exercised — palette bloat that degrades tool selection without ever being
+ * used.
+ *
+ * `subagents` grants name a wrapper or server type rather than a tool, so a
+ * subagent grant counts as exercised when ANY observed tool name carries its
+ * prefix, matching how the runtime treats it as a coarse grant unit.
+ */
+export function findUnusedGrants(
+  cfg: AgentToolsConfig | undefined,
+  observedToolNames: Iterable<string>,
+): Array<{ kind: keyof AgentToolsConfig; grant: string }> {
+  if (!cfg) return [];
+  const observed = [...new Set(observedToolNames)];
+  const unused: Array<{ kind: keyof AgentToolsConfig; grant: string }> = [];
+
+  const scan = (kind: keyof AgentToolsConfig, matcher: (grant: string, tool: string) => boolean): void => {
+    for (const grant of cfg[kind] ?? []) {
+      if (!observed.some((tool) => matcher(grant, tool))) unused.push({ kind, grant });
+    }
+  };
+
+  const prefixMatch = (grant: string, tool: string): boolean =>
+    grantMatchesToolName(grant, tool) || tool.toLowerCase().startsWith(`${grant.toLowerCase()}__`);
+
+  scan("subagents", prefixMatch);
+  scan("gateway", prefixMatch);
+  scan("direct", grantMatchesToolName);
+  scan("custom", grantMatchesToolName);
+  return unused;
+}

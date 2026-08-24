@@ -39,6 +39,8 @@ import { designSharesRouter, publicDesignSharesRouter } from "./routes/design-sh
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { experimentsInternalRouter } from "./routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
+// TEMP-BACKFILL: delete this import and the mount below once the prod toolStats backfill is done.
+import { backfillTempRouter } from "./routes/backfill-temp.js";
 import { ERROR_PIPELINE } from "./config.js";
 import { runner as errorPipelineRunner } from "./error-pipeline/runner/runner.js";
 import { googleOAuthRouter, googleCallbackRouter } from "./routes/google-oauth.js";
@@ -218,6 +220,8 @@ app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);  
 app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
+// TEMP-BACKFILL: operator-driven toolStats backfill. Remove with routes/backfill-temp.ts.
+app.use(`${BASE}/internal/backfill`, requireStrictS2S, backfillTempRouter);
 app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
 // Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
 // Mounted before the per-provider routers (which now only serve authorize/callback)

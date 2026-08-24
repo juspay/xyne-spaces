@@ -1,0 +1,11 @@
+-- Per-tool summary of a run's toolInvocations, written at finalize.
+--
+-- Purely additive and nullable: existing rows read as NULL ("not yet
+-- summarised") until the backfill runs, and every read path treats NULL as
+-- "fall back to the live query" rather than as zero.
+--
+-- No index is added. The column is only ever aggregated behind an existing
+-- window predicate on "completedAt" / ("agentSlug","startedAt"), both already
+-- indexed; a GIN index on the value would cost write throughput on the run path
+-- and buy nothing for that access pattern.
+ALTER TABLE "agent_runs" ADD COLUMN IF NOT EXISTS "toolStats" JSONB;

@@ -10,6 +10,7 @@ import {
   buildCallableAgentTools,
   clampMaxDelegationsPerRun,
   MAX_DELEGATIONS_PER_RUN_BOUNDS,
+  buildOrchestratorCallableAgentTool,
   type CallableAgentSpec,
   type NestedAgentRunner,
 } from "../src/agent-delegation.js";
@@ -112,5 +113,42 @@ describe("clampMaxDelegationsPerRun (config → budget)", () => {
     const refused = await tool.execute("c6", { task: "t6" });
     expect(refused.isError).toBeTruthy();
     expect(refused.content[0].text).toMatch(/budget exhausted/);
+  });
+});
+
+/**
+ * A2A telemetry: a delegated run's own tool calls are only attributable if the
+ * delegating call's id reaches the runner. Without it the callee's invocations
+ * carry no parent link and are indistinguishable from top-level calls once
+ * merged into the parent run.
+ */
+describe("A2A delegation telemetry", () => {
+  it("hands the delegating toolCallId to the runner", async () => {
+    let seen: string | undefined = "unset";
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne-doctor" });
+    const [tool] = buildCallableAgentTools([infra], g, async ({ spec, parentToolCallId }) => {
+      seen = parentToolCallId;
+      return { text: spec.name };
+    });
+
+    await tool.execute("call_a2a_42", { task: "check" });
+    expect(seen).toBe("call_a2a_42");
+  });
+
+  it("hands it through the orchestrator call-agent tool too", async () => {
+    let seen: string | undefined = "unset";
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne-doctor" });
+    const [tool] = buildOrchestratorCallableAgentTool(
+      [{ slug: infra.slug, name: infra.name, description: infra.description }],
+      g,
+      async () => infra,
+      async ({ spec, parentToolCallId }) => {
+        seen = parentToolCallId;
+        return { text: spec.name };
+      },
+    );
+
+    await tool.execute("call_orch_7", { agentSlug: "infra-doctor", task: "check" });
+    expect(seen).toBe("call_orch_7");
   });
 });

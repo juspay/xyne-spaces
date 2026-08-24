@@ -23,6 +23,7 @@ import {
   experimentRepository,
   agentRequestRepository,
 } from "../repositories/index.js";
+import { clawMetricsFields } from "../lib/run-metrics-payload.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import {
   identityFromAgentRow,
@@ -4481,6 +4482,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       toolMs?: number;
       lastRetryReason?: string;
     };
+    /** Run-level outcome of the citation-reflection pass, when the agent has it
+     *  enabled. Persisted onto agent_runs.metadata for "did retrieved sources
+     *  actually get used" reporting. */
+    citationReflection?: {
+      outcome?: string;
+      initialCited?: boolean;
+      sourcesWereCiteable?: boolean;
+      finalCited?: boolean;
+      rounds?: number;
+    };
+    /** Per-LLM-call latency/token series for the run. Stored verbatim; the
+     *  shape is owned by xyne-claw's llm-turn-stats.ts. */
+    llmCalls?: unknown;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
@@ -4689,9 +4703,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         ...(payload.model !== undefined ? { model: payload.model } : {}),
         ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
         toolsUsed: payload.toolsUsed ?? [],
-        ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-        ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-        ...(payload.latency ? { latency: payload.latency } : {}),
+        ...clawMetricsFields(payload),
         ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
       }).catch(() => {});
       await handleRunCompletion(sessionId, "completed").catch((err) => {
@@ -4805,9 +4817,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-      ...(payload.latency ? { latency: payload.latency } : {}),
+      ...clawMetricsFields(payload),
       ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
   }

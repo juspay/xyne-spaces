@@ -1,0 +1,11 @@
+-- Per-LLM-call latency and token series for a run, written at finalize.
+--
+-- Additive and nullable, same shape of change as "toolStats": existing rows
+-- read as NULL ("not recorded") and every read path treats NULL as absent
+-- rather than as zero. Unlike toolStats there is no backfill — the per-call
+-- series is only observable while the run is executing, so it necessarily
+-- starts from runs completed after this ships.
+--
+-- No index: the column is only ever unnested behind an existing window
+-- predicate on "completedAt" / ("agentSlug","startedAt").
+ALTER TABLE "agent_runs" ADD COLUMN IF NOT EXISTS "llmTurnStats" JSONB;
