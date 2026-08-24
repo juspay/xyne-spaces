@@ -144,6 +144,11 @@ export const UNASSIGNED_FILTER_VALUE = 'unassigned';
 // transport (query args, saved views, counts requests) without schema changes.
 export const ASSIGNEE_INVERT_MARKER = '!invert';
 
+// Ceiling on rows `topicsExplorerTickets` syncs into the browser. Zero has no
+// aggregation, so the Topics Explorer counts client-side; without a cap the
+// 90-day preset on a busy desk would sync a quarter of tickets at once.
+export const TOPICS_EXPLORER_TICKET_LIMIT = 20000;
+
 export interface ParsedAssigneeFilter {
   inverted: boolean;
   includeUnassigned: boolean;
@@ -1427,6 +1432,35 @@ export const queries: AnyQueryRegistry = defineQueries({
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
     }
+  ),
+
+  // Topics Explorer: tickets for one desk in a created-at window. Zero has no
+  // aggregation, so these rows are counted client-side; the row cap and the
+  // single relation below keep that sync bounded.
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
+  topicsExplorerTickets: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      createdAtStart: z.number(),
+      createdAtEnd: z.number(),
+    }).refine(
+      args => args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
+    ({ args: { channelId, createdAtStart, createdAtEnd } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('createdAt', '>=', createdAtStart)
+        .where('createdAt', '<=', createdAtEnd)
+        .orderBy('createdAt', 'desc')
+        // Newest-first ceiling: a 90-day window on a busy desk is otherwise unbounded.
+        .limit(TOPICS_EXPLORER_TICKET_LIMIT)
+        // Only relation pulled: tagMappings carries a denormalized `tagName`, so
+        // grouping by tag needs no second lookup. LLM tags (sentiment, etc.) live
+        // in `non_zero.tags`, which Zero does not mirror, so they can't be grouped.
+        .related('tagMappings'),
   ),
 
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).

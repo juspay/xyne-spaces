@@ -227,6 +227,68 @@ export class DeskTagsConfigController {
     }
   };
 
+  /**
+   * GET /api/channels/:channelId/tags-config/generated-tags-by-conversation
+   *   ?startMs=…&endMs=…&categories=sentiment,priority
+   *
+   * Returns the LLM/manual tag values per conversation for this channel within the
+   * given date range. The tag framework lives in the `non_zero` schema which Zero
+   * does not mirror, so the dashboard cannot read these client-side — this is the
+   * read path that lets it group tickets by tag category.
+   * ACL: channel member.
+   */
+  getGeneratedTagsByConversation = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    // Empty strings are rejected before Number(): Number('') is 0, so `?startMs=`
+    // would otherwise be accepted as epoch 0 and scan all history.
+    const rawStart = req.query['startMs'];
+    const rawEnd = req.query['endMs'];
+    const startMs = typeof rawStart === 'string' && rawStart ? Number(rawStart) : NaN;
+    const endMs = typeof rawEnd === 'string' && rawEnd ? Number(rawEnd) : NaN;
+    const start = new Date(startMs);
+    const end = new Date(endMs);
+
+    const invalid =
+      !Number.isFinite(startMs) || !Number.isFinite(endMs) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
+        ? 'startMs and endMs are required, valid epoch-millisecond values'
+        : startMs > endMs
+          ? 'startMs must be less than or equal to endMs'
+          : null;
+    if (invalid) {
+      res.status(400).json({ error: invalid });
+      return;
+    }
+
+    try {
+      const { rows, truncated } = await tagRepository.findGeneratedTagsByConversation(
+        channelId,
+        deskEmailConfigKey(channelId),
+        start,
+        end,
+      );
+
+      const byConversation = new Map<string, { category: string; tag: string }[]>();
+      for (const row of rows) {
+        const tags = byConversation.get(row.conversationId) ?? [];
+        tags.push({ category: row.tagCategory, tag: row.tag });
+        byConversation.set(row.conversationId, tags);
+      }
+
+      const conversations = [...byConversation].map(([conversationId, tags]) => ({
+        conversationId,
+        tags,
+      }));
+
+      res.status(200).json({ conversations, truncated });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] getGeneratedTagsByConversation failed', { channelId, error });
+      res.status(500).json({ error: 'Failed to load generated tags by conversation' });
+    }
+  };
+
   // Resolves emailId → channelId. Responds 404 if email not found.
   private async getChannelIdFromEmail(emailId: string, res: Response): Promise<string | null> {
     const email = await this.emailRepo.findById(emailId);
