@@ -26,6 +26,7 @@ import { formatExpiryTime } from '../../../utils/statusUtils';
 import { OnCallRotationModal } from '../OnCallRotationModal/OnCallRotationModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { VisibilityTab } from './VisibilityTab';
+import { apiInstance } from '../../../services/clients/apiClient';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -64,6 +65,9 @@ export const AssignmentConfigScreen = ({
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
+  // Members deactivated in this session whose open tickets should be handed off on save
+  const [pendingReassignUserIds, setPendingReassignUserIds] = useState<Set<string>>(new Set());
+  const [reassignPromptUserId, setReassignPromptUserId] = useState<string | null>(null);
 
   // Current time for active set calculation (updates every 5 minutes)
   const [currentTime, setCurrentTime] = useState(Date.now());
@@ -317,6 +321,16 @@ export const AssignmentConfigScreen = ({
 
   const boards = useMemo(() => allBoards || [], [allBoards]);
 
+  // Re-activating a member cancels the handoff queued when they were switched off
+  const clearPendingReassign = (userId: string): void => {
+    setPendingReassignUserIds(prev => {
+      if (!prev.has(userId)) return prev;
+      const next = new Set(prev);
+      next.delete(userId);
+      return next;
+    });
+  };
+
   const handleToggleOnCall = (userId: string): void => {
     if (isPausedFromAssignment(users.find(u => u.id === userId))) return;
     const currentState = localUserStates.get(userId);
@@ -325,6 +339,7 @@ export const AssignmentConfigScreen = ({
       // If turning onCall ON, automatically set isActive to true
       if (!currentState.onCall) {
         newStates.set(userId, { onCall: true, isActive: true });
+        clearPendingReassign(userId);
       } else {
         newStates.set(userId, { ...currentState, onCall: false });
       }
@@ -341,8 +356,14 @@ export const AssignmentConfigScreen = ({
       // If turning isActive OFF, automatically set onCall to false as well
       if (currentState.isActive) {
         newStates.set(userId, { onCall: false, isActive: false });
+        // Deactivating strands their open tickets, so offer the handoff the
+        // group has opted into. Mirrors the member-side pause dialog.
+        if (localReassignOnUnavailable) {
+          setReassignPromptUserId(userId);
+        }
       } else {
         newStates.set(userId, { ...currentState, isActive: true });
+        clearPendingReassign(userId);
       }
       setLocalUserStates(newStates);
       setHasChanges(true);
@@ -730,6 +751,28 @@ export const AssignmentConfigScreen = ({
         throw new Error(failedResult.error.message || 'Failed to save assignment configuration');
       }
 
+      // Queue handoffs only after the states above are persisted, so members
+      // deactivated in this same save can't inherit each other's tickets.
+      const reassignTargets = localReassignOnUnavailable ? [...pendingReassignUserIds] : [];
+      if (reassignTargets.length > 0) {
+        const outcomes = await Promise.allSettled(
+          reassignTargets.map(targetUserId =>
+            apiInstance.post('/user-assignment-state/reassign-member-tickets', {
+              userId: targetUserId,
+              userGroupId,
+            }),
+          ),
+        );
+        const failedCount = outcomes.filter(outcome => outcome.status === 'rejected').length;
+        if (failedCount > 0) {
+          toast.error(`Couldn't hand off tickets for ${failedCount} member(s)`, {
+            description: 'Availability was saved, but their open tickets stayed assigned to them.',
+            duration: 5000,
+          });
+        }
+      }
+      setPendingReassignUserIds(new Set());
+
       setHasChanges(false);
       setPendingSetMappings(null);
       setJustSaved(true);
@@ -748,6 +791,10 @@ export const AssignmentConfigScreen = ({
     setPendingSetMappings(sets);
     setHasChanges(true);
   };
+
+  const reassignPromptUser = reassignPromptUserId
+    ? users.find(u => u.id === reassignPromptUserId)
+    : undefined;
 
   const getUserLocalState = (userId: string): { onCall: boolean; isActive: boolean } => {
     return localUserStates.get(userId) || { onCall: false, isActive: false };
@@ -801,6 +848,11 @@ export const AssignmentConfigScreen = ({
                   <Tooltip content={unavailableTooltip}>
                     <PauseCircle className='size-3.5 text-muted-foreground flex-shrink-0' />
                   </Tooltip>
+                )}
+                {pendingReassignUserIds.has(user.id) && (
+                  <span className='flex-shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground'>
+                    Tickets will be reassigned
+                  </span>
                 )}
               </div>
               <div className='text-sm text-muted-foreground'>{user.email}</div>
@@ -1461,6 +1513,47 @@ export const AssignmentConfigScreen = ({
           onSetsChange={handleSetsChange}
         />
       )}
+
+      {/* Reassign-On-Deactivate Dialog */}
+      <Dialog
+        open={reassignPromptUserId !== null}
+        onOpenChange={open => {
+          if (!open) setReassignPromptUserId(null);
+        }}
+        title='Reassign their open tickets?'
+      >
+        <div className='p-6'>
+          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+            {reassignPromptUser ? getUserDisplayName(reassignPromptUser) : 'This member'} will stop
+            receiving new tickets in this group once you save. Their open tickets can be handed to
+            another eligible member — if none is available, the tickets stay with them.
+          </p>
+
+          <div className='flex justify-end gap-3'>
+            <Button
+              variant='secondary'
+              onClick={() => setReassignPromptUserId(null)}
+              data-track-category='UserGroups'
+              data-track-name='KeepTicketsOnDeactivate'
+            >
+              Keep with them
+            </Button>
+            <Button
+              onClick={() => {
+                if (reassignPromptUserId) {
+                  setPendingReassignUserIds(prev => new Set(prev).add(reassignPromptUserId));
+                }
+                setReassignPromptUserId(null);
+              }}
+              data-track-category='UserGroups'
+              data-track-name='ReassignTicketsOnDeactivate'
+              data-track-metadata={JSON.stringify({ userGroupId })}
+            >
+              Reassign tickets
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Disable Auto-Rotation Warning Dialog */}
       <Dialog

@@ -141,6 +141,54 @@ export class UserAssignmentStateService {
   }
 
   /**
+   * Hand off a member's open tickets in one group after an admin deactivates them.
+   * Same policy as the member pause flow: the group must allow reassignment.
+   * @param userId - Member being deactivated
+   * @param userGroupId - Group whose open tickets should be handed off
+   * @param workspaceId - Caller's workspace, used to scope the group lookup
+   */
+  async reassignMemberTicketsInGroup(
+    userId: string,
+    userGroupId: string,
+    workspaceId: string
+  ): Promise<{ scheduled: boolean; reason?: string }> {
+    try {
+      const group = await this.prisma.userGroup.findFirst({
+        where: { id: userGroupId, workspaceId },
+        select: { id: true, reassignOnUnavailable: true },
+      });
+
+      if (!group) {
+        return { scheduled: false, reason: 'GROUP_NOT_FOUND' };
+      }
+
+      if ((group.reassignOnUnavailable ?? false) !== true) {
+        return { scheduled: false, reason: 'REASSIGNMENT_NOT_ALLOWED' };
+      }
+
+      const membership = await this.prisma.userGroupMapping.findFirst({
+        where: { userId, userGroupId },
+        select: { id: true },
+      });
+
+      if (!membership) {
+        return { scheduled: false, reason: 'NOT_A_GROUP_MEMBER' };
+      }
+
+      await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
+
+      logger.info(
+        `⏳ [ASSIGNMENT-STATE] Admin-initiated reassignment queued for user ${userId} in group ${userGroupId}`
+      );
+
+      return { scheduled: true };
+    } catch (error) {
+      logger.error(`❌ [ASSIGNMENT-STATE] Error scheduling admin reassignment:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Set user as available for assignment (toggle OFF) when user manually removed the unavailability status
    * Restores original states from Redis backup, respecting manual overrides
    * @param userId - User ID
