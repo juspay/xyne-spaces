@@ -73,6 +73,13 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
     return `/chat/canvas/${citation.canvasId}`;
   }
 
+  // Note-taker recordings have no channel and no thread, so they can't be cited
+  // as one. `recordingId` is the call's externalId — the segment the
+  // `recordings/:recordingId` route reads.
+  if (citation.kind === 'recording' && citation.recordingId) {
+    return `/recordings/${citation.recordingId}`;
+  }
+
   if (
     citation.kind === 'ticket' &&
     citation.ticketId &&
@@ -144,6 +151,7 @@ export function getClawCitationLabel(citation: ClawCitation): string {
     return citation.channelName ? `Thread in #${citation.channelName}` : 'Spaces thread';
   }
   if (citation.kind === 'canvas') return 'Canvas';
+  if (citation.kind === 'recording') return 'Recording';
   if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
   if (citation.kind === 'external') return 'Source link';
   if (citation.kind === 'collection-item') return citation.fileName || 'Knowledge base file';

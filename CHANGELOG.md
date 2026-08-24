@@ -1,3 +1,39 @@
+## [1.209.8](https://github.com/juspay/xyne-spaces/compare/v1.209.7...v1.209.8) (2026-08-24)
+
+
+### Bug Fixes
+
+* canvas loader ([#781](https://github.com/juspay/xyne-spaces/issues/781)) ([c345193](https://github.com/juspay/xyne-spaces/commit/c3451933c1d09aa13d57a029678d71f839220879))
+* xyne desk metrics — filter search, AND/OR logic, scroll fix, stable tags ([#843](https://github.com/juspay/xyne-spaces/issues/843)) ([285d4bb](https://github.com/juspay/xyne-spaces/commit/285d4bb3f26117287267fc8ac9921dd3169a6e2d))
+
+## [1.209.7](https://github.com/juspay/xyne-spaces/compare/v1.209.6...v1.209.7) (2026-08-24)
+
+
+### Bug Fixes
+
+* show yellow paused state on tray recording pill ([#932](https://github.com/juspay/xyne-spaces/issues/932)) ([33489e6](https://github.com/juspay/xyne-spaces/commit/33489e65423f216ad732d33d649ef8b05236eeee))
+
+## [1.209.6](https://github.com/juspay/xyne-spaces/compare/v1.209.5...v1.209.6) (2026-08-24)
+
+
+### Bug Fixes
+
+* canvas sidebar starred section, selection highlight, … ([#931](https://github.com/juspay/xyne-spaces/issues/931)) ([59fb541](https://github.com/juspay/xyne-spaces/commit/59fb54166b47ae59cd2547be5bfc55938f4ea1f3))
+
+## [1.209.5](https://github.com/juspay/xyne-spaces/compare/v1.209.4...v1.209.5) (2026-08-24)
+
+
+### Bug Fixes
+
+* keep the recordings list on the tab you left it on ([#906](https://github.com/juspay/xyne-spaces/issues/906)) ([9a5db76](https://github.com/juspay/xyne-spaces/commit/9a5db76b8cdb3da2e843aef930c37bc58c77a1c6))
+
+## [1.209.4](https://github.com/juspay/xyne-spaces/compare/v1.209.3...v1.209.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* ask ai calls with transcript ([#838](https://github.com/juspay/xyne-spaces/issues/838)) ([5f46a00](https://github.com/juspay/xyne-spaces/commit/5f46a00f47d12aa8365c617bbac9f50126490a67))
+
 ## [1.209.3](https://github.com/juspay/xyne-spaces/compare/v1.209.2...v1.209.3) (2026-08-23)
 
 
