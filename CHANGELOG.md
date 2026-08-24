@@ -1,3 +1,10 @@
+## [1.209.7](https://github.com/juspay/xyne-spaces/compare/v1.209.6...v1.209.7) (2026-08-24)
+
+
+### Bug Fixes
+
+* show yellow paused state on tray recording pill ([#932](https://github.com/juspay/xyne-spaces/issues/932)) ([33489e6](https://github.com/juspay/xyne-spaces/commit/33489e65423f216ad732d33d649ef8b05236eeee))
+
 ## [1.209.6](https://github.com/juspay/xyne-spaces/compare/v1.209.5...v1.209.6) (2026-08-24)
 
 
