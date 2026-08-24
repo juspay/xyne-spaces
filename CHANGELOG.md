@@ -1,3 +1,37 @@
+## [1.211.2](https://github.com/juspay/xyne-spaces/compare/v1.211.1...v1.211.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* appscreen and incoming webhook fix ([#919](https://github.com/juspay/xyne-spaces/issues/919)) ([7e37e36](https://github.com/juspay/xyne-spaces/commit/7e37e36cf781acadb88a4c849bd3e239b64b0cf5))
+
+## [1.211.1](https://github.com/juspay/xyne-spaces/compare/v1.211.0...v1.211.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* decoupling projects ([#622](https://github.com/juspay/xyne-spaces/issues/622)) ([d38d214](https://github.com/juspay/xyne-spaces/commit/d38d214459ca833bc4edabd60da444ec6a87b8f5))
+
+## [1.211.0](https://github.com/juspay/xyne-spaces/compare/v1.210.0...v1.211.0) (2026-08-24)
+
+
+### Features
+
+* add recording participants ([#849](https://github.com/juspay/xyne-spaces/issues/849)) ([72c95b0](https://github.com/juspay/xyne-spaces/commit/72c95b02cb2e333c9061b2b7c844c521b334f1ac))
+* enable the non-creators to share the recordings ([#878](https://github.com/juspay/xyne-spaces/issues/878)) ([1223e1f](https://github.com/juspay/xyne-spaces/commit/1223e1f1f4e4878b4abe9cb6882feb6cc8722527))
+
+
+### Bug Fixes
+
+* scribe  labels — pill redesign, transcript side panel trigger  ([#824](https://github.com/juspay/xyne-spaces/issues/824)) ([e66afd8](https://github.com/juspay/xyne-spaces/commit/e66afd88a191348cb2bee3f62c7a6f4a442659f6))
+
+## [1.210.0](https://github.com/juspay/xyne-spaces/compare/v1.209.9...v1.210.0) (2026-08-24)
+
+
+### Features
+
+* UI revamp of automation home screen ([#468](https://github.com/juspay/xyne-spaces/issues/468)) ([bb0ce4c](https://github.com/juspay/xyne-spaces/commit/bb0ce4c0419ba4df9ab11b06e0b24602487a8c6b))
+
 ## [1.209.9](https://github.com/juspay/xyne-spaces/compare/v1.209.8...v1.209.9) (2026-08-24)
 
 

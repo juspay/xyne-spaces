@@ -3,7 +3,7 @@
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -41,10 +41,11 @@ import {
   File02Text,
   EnvelopeDefault,
   Hashtag,
+  SidebarRightClose,
 } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
-import { Tooltip } from '../../components/ui/Tooltip';
+import { cn, Tooltip } from '../../components/ui/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -422,6 +423,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
         ...prev,
         title: recordingRow.title || prev.title,
         labels: recordingRow.labels ?? prev.labels,
+        recordingParticipants: recordingRow.recordingParticipants ?? prev.recordingParticipants,
+        shares: recordingRow.shares ?? prev.shares,
         linkedTicketId,
         linkedTicketMessageId:
           typeof rawLinkedTicketMessageId === 'string' ? rawLinkedTicketMessageId : null,
@@ -848,6 +851,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setShowTranscriptPanel(true);
   };
 
+  // Only the toolbar icon button toggles — the waveform pill and "read transcript"
+  // CTA should always open, never surprise-close, an already-open panel.
+  const toggleTranscriptPanel = (): void => {
+    if (showTranscriptPanel) {
+      setShowTranscriptPanel(false);
+      return;
+    }
+    openTranscriptPanel();
+  };
+
   const handleShowSummaryShimmer = (): void => {
     markSummaryRequested(recordingId);
     setSummaryRunNonce(value => value + 1);
@@ -915,7 +928,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         recordingService.downloadRecordingBlob(recording.externalId, signal),
                     }
                   : {})}
-                {...(transcriptText ? { onMarkerSelect: handleMarkerSelect } : {})}
+                {...(transcriptText
+                  ? { onMarkerSelect: handleMarkerSelect, onOpenTranscript: openTranscriptPanel }
+                  : {})}
               />
 
               <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
@@ -1070,16 +1085,26 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   )}
                 </div>
                 {transcriptText ? (
-                  <Tooltip content='Open transcript' side='left'>
+                  <Tooltip
+                    content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
+                    side='left'
+                  >
                     <Button
-                      onClick={openTranscriptPanel}
+                      onClick={toggleTranscriptPanel}
                       variant='ghost'
-                      className='inline-flex size-8 items-center justify-center rounded-xl border border-border/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                      aria-label='Open transcript'
+                      className={cn(
+                        'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        showTranscriptPanel ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                      aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_transcript_panel'
                     >
-                      <SidebarRightOpen className='size-4' aria-hidden='true' variant='Solid' />
+                      {showTranscriptPanel ? (
+                        <SidebarRightClose className='size-4' aria-hidden='true' variant='Solid' />
+                      ) : (
+                        <SidebarRightOpen className='size-4' aria-hidden='true' variant='Solid' />
+                      )}
                     </Button>
                   </Tooltip>
                 ) : null}
@@ -1115,19 +1140,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
       <ResumeRecordingButton recordingExternalId={recording.externalId} />
 
       {/* Transcript side panel */}
-      {showTranscriptPanel && transcriptText && (
-        <TranscriptSidePanel
-          transcript={transcriptText}
-          target={citationRef}
-          openNonce={citationNonce}
-          markedTimestampsSeconds={markedMomentSeconds}
-          onClose={() => {
-            setShowTranscriptPanel(false);
-            setCitationRef(null);
-          }}
-          className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
-        />
-      )}
+      <AnimatePresence>
+        {showTranscriptPanel && transcriptText && (
+          <TranscriptSidePanel
+            transcript={transcriptText}
+            target={citationRef}
+            openNonce={citationNonce}
+            markedTimestampsSeconds={markedMomentSeconds}
+            onClose={() => {
+              setShowTranscriptPanel(false);
+              setCitationRef(null);
+            }}
+            className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
+          />
+        )}
+      </AnimatePresence>
 
       {isOwner && showPostToChannelModal && hasDetailedSummary && (
         <Dialog

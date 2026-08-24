@@ -106,14 +106,16 @@ export const AppsTable = ({
   // Check if user has admin access
   const hasAdminAccess = appAccessLevel === 'ADMIN';
 
-  // Who may edit, by screen:
-  // - Installed view: editing the install copy -> any XYNE-APPS admin.
+  // Who may OPEN the edit dialog, by screen:
+  // - Installed view: any XYNE-APPS admin, plus the app's creator (webhooks only -- see below).
   // - Org/Marketplace view: editing the app template -> creator only (matches AppsACL.canUpdate).
   const canEditApp = (app: AppRow): boolean => {
     if (appAccessLevel === 'READ' || appAccessLevel === null) return false;
-    if (isInstalledView) return hasAdminAccess;
+    if (isInstalledView) return hasAdminAccess || app.createdBy === currentUserId;
     return app.createdBy === currentUserId;
   };
+
+  const canEditInstallSettings = (): boolean => !isInstalledView || hasAdminAccess;
 
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [editingApp, setEditingApp] = useState<AppRow | null>(null);
@@ -476,6 +478,7 @@ export const AppsTable = ({
             appInstallations={editingApp.installations}
             editMode={isInstalledView ? 'install' : 'template'}
             installedAppId={isInstalledView ? (editingApp.installations?.[0]?.id ?? null) : null}
+            canEditInstallSettings={canEditInstallSettings()}
             onSave={handleSaveEdit}
             onUploadPicture={uploadPictureHandler}
             isLoading={isUpdatingApp}

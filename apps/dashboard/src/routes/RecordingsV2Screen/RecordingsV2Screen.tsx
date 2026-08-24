@@ -33,13 +33,14 @@ import {
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
   findNearestVisibleRecording,
+  formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
-import { normalizeRecordingTags } from '../../utils/recordingUtils';
+import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
@@ -121,9 +122,18 @@ const RecordingsV2Screen = (): ReactElement => {
   }, [handleStartRecording, pendingAutoStart, recordingStatus]);
 
   const availableCreators = useMemo(() => {
-    const creatorIds = new Set(recordings.map(recording => recording.createdByUserId));
-    return users.filter(user => creatorIds.has(user.id));
-  }, [recordings, users]);
+    const ids = new Set<string>();
+    for (const recording of recordings) {
+      for (const id of getRecordingParticipantIds(
+        recording.createdByUserId,
+        recording.recordingParticipants,
+      )) {
+        ids.add(id);
+      }
+    }
+    if (selectedCreatorId) ids.add(selectedCreatorId);
+    return users.filter(user => ids.has(user.id));
+  }, [recordings, users, selectedCreatorId]);
 
   const availableLabels = useMemo(
     () =>
@@ -233,15 +243,9 @@ const RecordingsV2Screen = (): ReactElement => {
     [activeListTab, setActiveListTab],
   );
 
-  const handleCreatorChange = useCallback(
-    (creatorId: string | null): void => {
-      setSelectedCreatorId(creatorId);
-      if (creatorId) {
-        setActiveListTab(creatorId === currentUser?.id ? 'created' : 'shared');
-      }
-    },
-    [currentUser?.id, setActiveListTab],
-  );
+  const handleCreatorChange = useCallback((creatorId: string | null): void => {
+    setSelectedCreatorId(creatorId);
+  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
@@ -569,6 +573,14 @@ const RecordingsV2Screen = (): ReactElement => {
                       <RecordingsV2Pill
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
+                        participantsLabel={formatRecordingParticipants(
+                          getRecordingParticipantIds(
+                            row.recording.createdByUserId,
+                            row.recording.recordingParticipants,
+                          ),
+                          usersById,
+                          currentUser?.id,
+                        )}
                         tags={row.recording.labels.filter(isManualLabel)}
                         resolveLabel={resolveLabel}
                         onOpen={handleOpenRecording}
