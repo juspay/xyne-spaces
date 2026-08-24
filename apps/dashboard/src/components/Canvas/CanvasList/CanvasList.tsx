@@ -1151,10 +1151,39 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return (): void => cancelAnimationFrame(rafId);
   }, [activeFilter, isMobile]);
 
+  const STARRED_SECTION_PAGE_SIZE = 3;
+  const [isStarredSectionExpanded, setIsStarredSectionExpanded] = useState(false);
+
+  const starredCanvases = useMemo(
+    () => itemsWithStarState.filter(canvas => canvas.isStarred),
+    [itemsWithStarState],
+  );
+
+  const visibleStarredCanvases = isStarredSectionExpanded
+    ? starredCanvases
+    : starredCanvases.slice(0, STARRED_SECTION_PAGE_SIZE);
+  const hiddenStarredCount = starredCanvases.length - visibleStarredCanvases.length;
+
+  // The pinned Starred section (below) is its own render of these canvases. Once it's
+  // showing, the chronological list must not also render the same canvas.id a second
+  // time -- two DOM copies sharing one canvas.id would both react to the single
+  // `openCanvasMenuId` state, so opening the "..." menu on either copy marks both as
+  // open and Radix's outside-click handling on the other duplicate closes it back out.
+  const isStarredSectionVisible =
+    starredCanvases.length > 0 &&
+    !showStarredOnly &&
+    !isSpecificChannelScope &&
+    !debouncedSearchQuery.trim();
+  const itemsForMainList = useMemo(() => {
+    if (!isStarredSectionVisible) return itemsWithStarState;
+    const starredIds = new Set(starredCanvases.map(canvas => canvas.id));
+    return itemsWithStarState.filter(canvas => !starredIds.has(canvas.id));
+  }, [isStarredSectionVisible, itemsWithStarState, starredCanvases]);
+
   const filteredCanvases = useMemo(
     () =>
       getFilteredCanvasItems({
-        canvases: itemsWithStarState,
+        canvases: itemsForMainList,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
         showStarredOnly,
@@ -1172,7 +1201,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
-      itemsWithStarState,
+      itemsForMainList,
       onlyCallGeneratedCanvases,
       debouncedSearchQuery,
       selectedLabel,
@@ -1204,6 +1233,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     !hasPrimaryCanvasFilters ||
     filteredCanvases.length >= CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
   const shouldRenderChannelFolderGroups = isSpecificChannelScope;
+
+  const shouldShowStarredSection = isStarredSectionVisible;
   const hasClientSideResultFilters =
     effectiveSearchScope === 'direct' ||
     activeFilter !== 'all' ||
@@ -1648,11 +1679,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         tabIndex={0}
         className={cn(
           'group relative flex min-h-[50px] cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-background hover:text-sidebar-accent-foreground hover:shadow-sm',
-          isMenuOpen
+          isMenuOpen || isSelected
             ? 'bg-background text-sidebar-accent-foreground shadow-sm'
-            : isSelected
-              ? 'bg-sidebar-accent/80 text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground',
+            : 'text-sidebar-foreground',
         )}
         onClick={e => onSelect(e, canvas)}
         data-track-category='CANVAS'
@@ -1812,7 +1841,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     const shouldShowSection = !previousCanvas || getCanvasDateSection(previousCanvas) !== section;
 
     return (
-      <div>
+      <div className='pb-1'>
         {shouldShowSection && (
           <div
             className={`px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50 ${
@@ -1838,6 +1867,45 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       </p>
     </div>
   );
+
+  const renderStarredSection = (): React.ReactNode => {
+    if (!shouldShowStarredSection) return null;
+
+    return (
+      <div className='px-2.5 pb-1 pt-1'>
+        <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50'>
+          Starred
+        </div>
+        {visibleStarredCanvases.map(canvas => (
+          <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+        ))}
+        {hiddenStarredCount > 0 && (
+          <button
+            type='button'
+            onClick={() => setIsStarredSectionExpanded(true)}
+            className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            data-track-category='CANVAS'
+            data-track-name='SHOW_MORE_STARRED_CANVASES'
+          >
+            <ChevronDown className='size-3.5 shrink-0' strokeWidth={2.2} />
+            See {hiddenStarredCount} more
+          </button>
+        )}
+        {isStarredSectionExpanded && starredCanvases.length > STARRED_SECTION_PAGE_SIZE && (
+          <button
+            type='button'
+            onClick={() => setIsStarredSectionExpanded(false)}
+            className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            data-track-category='CANVAS'
+            data-track-name='SHOW_LESS_STARRED_CANVASES'
+          >
+            <ChevronRight className='size-3.5 shrink-0 -rotate-90' strokeWidth={2.2} />
+            Show less
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const renderChannelFolderGroupedList = (): React.ReactNode => (
     <div className='h-full overflow-auto pb-2'>
@@ -2338,11 +2406,18 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ) : shouldRenderChannelFolderGroups ? (
           renderChannelFolderGroupedList()
         ) : filteredCanvases.length === 0 && isFilteredScanIncomplete ? (
-          <div className='flex items-center justify-center h-64'>
-            <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
+          <div className='h-full overflow-auto pb-2'>
+            {renderStarredSection()}
+            <div className='flex items-center justify-center h-64'>
+              <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
+            </div>
           </div>
         ) : filteredCanvases.length === 0 ? (
-          renderCanvasEmptyState()
+          shouldShowStarredSection ? (
+            <div className='h-full overflow-auto pb-2'>{renderStarredSection()}</div>
+          ) : (
+            renderCanvasEmptyState()
+          )
         ) : (
           <Virtuoso
             ref={canvasVirtuosoRef}
@@ -2356,6 +2431,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             rangeChanged={handleVisibleRangeChanged}
             itemContent={(index, canvas) => renderListItem(index, canvas)}
             components={{
+              Header: () => renderStarredSection(),
               Footer: () =>
                 (isLoadingNext && shouldLoadMoreOnListEnd) || isFilteredScanIncomplete ? (
                   <div className='flex items-center justify-center py-4'>

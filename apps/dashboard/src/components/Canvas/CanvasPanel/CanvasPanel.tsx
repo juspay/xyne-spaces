@@ -85,15 +85,27 @@ const CanvasPanel = (): ReactElement => {
     debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
 
+  // react-resizable-panels snaps flex-basis instantly with no CSS transition of its
+  // own. We animate the toggle here (not permanently, so manual drag-resize stays
+  // 1:1 with the pointer instead of lagging behind a transition).
+  const [isSidebarToggleAnimating, setIsSidebarToggleAnimating] = useState(false);
+
   useEffect(() => {
     const panel = canvasPanelRef.current;
     if (!panel) return;
 
+    const isCurrentlyCollapsed = panel.isCollapsed();
+    if (isSidebarCollapsed === isCurrentlyCollapsed) return;
+
+    setIsSidebarToggleAnimating(true);
     if (isSidebarCollapsed) {
-      if (!panel.isCollapsed()) panel.collapse();
-    } else if (panel.isCollapsed()) {
+      panel.collapse();
+    } else {
       panel.expand();
     }
+
+    const timeoutId = window.setTimeout(() => setIsSidebarToggleAnimating(false), 220);
+    return (): void => window.clearTimeout(timeoutId);
   }, [isSidebarCollapsed]);
 
   // Remember which canvas was last opened
@@ -265,6 +277,7 @@ const CanvasPanel = (): ReactElement => {
           <button
             type='button'
             className='flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            style={APP_NO_DRAG_STYLE}
             onClick={expandCanvasSidebar}
             aria-label='Show canvases panel'
             data-track-category='CANVAS'
@@ -491,6 +504,9 @@ const CanvasPanel = (): ReactElement => {
         <Panel
           id='canvas-sidebar'
           panelRef={canvasPanelRef}
+          className={cn(
+            isSidebarToggleAnimating && 'transition-[flex-basis] duration-200 ease-out',
+          )}
           defaultSize={CANVAS_SIDEBAR_DEFAULT_WIDTH}
           minSize={CANVAS_SIDEBAR_MIN_WIDTH}
           maxSize={CANVAS_SIDEBAR_MAX_WIDTH}
