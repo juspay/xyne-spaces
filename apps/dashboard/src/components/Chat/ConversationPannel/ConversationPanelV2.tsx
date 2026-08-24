@@ -131,7 +131,12 @@ const ConversationPanelV2 = ({
   const activityNavigationState = routerLocation.state as {
     linkedItemCreatedAt?: number;
     linkedCutoffCreatedAt?: number | null;
+    jumpNonce?: number;
   } | null;
+  // Per-jump nonce from handleJumpToDate. Folded into the remount key so that
+  // re-picking the SAME date (same `#createdAt=X` hash) still remounts the list.
+  const jumpNonce =
+    typeof activityNavigationState?.jumpNonce === 'number' ? activityNavigationState.jumpNonce : 0;
   const stateLinkedItemCreatedAt =
     typeof activityNavigationState?.linkedItemCreatedAt === 'number'
       ? activityNavigationState.linkedItemCreatedAt
@@ -163,6 +168,13 @@ const ConversationPanelV2 = ({
     stateLinkedItemCreatedAt ??
     (urlConversationId ? initialMessageById?.createdAt : null);
 
+  // A date jump is the ONLY producer of a bare `#createdAt=` hash with no
+  // `origin=` conversation (all activity/search/thread/pin links carry origin).
+  // Single source of truth for both the remount key and the ChatListV4 prop so
+  // they can't drift; distinguishes a picked date from the other carriers of
+  // linkedItemCreatedAt (Unreads-inbox override, search anchors).
+  const isDateJump = hashLinkedItemCreatedAt !== null && !urlConversationId;
+
   // ONE-TIME windowed snapshot, not a subscription. ChatListV3 only reads
   // cachedConversations in its useState initializer (warm-start hydration),
   // but it also writes back into the cache — subscribing here closed a render
@@ -172,10 +184,20 @@ const ConversationPanelV2 = ({
   // has resolved for linked navigation (the loading gate below), so the
   // anchor is available at hydration time. Older/newer pages load through
   // the normal pagination path.
-  const cachedConversations = useMemo(
-    () => getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined),
-    [channelId, urlCreatedAt],
-  );
+  const cachedConversations = useMemo(() => {
+    const snap = getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined);
+    // Date jump to a day the cache doesn't cover: the snapshot is the *recent*
+    // window (newest messages), not the target day. Seeding the list with it
+    // makes a cold jump paint the latest messages and scroll to the tail for a
+    // few ms before the target-anchored fetch lands — the flicker. Start EMPTY
+    // instead, so a cold jump shows a brief loader then the target, never a flash
+    // of the wrong day. Warm jumps (snapshot covers the target) are unaffected.
+    if (isDateJump && typeof urlCreatedAt === 'number') {
+      const oldest = snap[0]?.createdAt;
+      if (oldest === undefined || oldest > urlCreatedAt) return [];
+    }
+    return snap;
+  }, [channelId, urlCreatedAt, isDateJump]);
 
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(skipMarkAsRead || false);
@@ -250,6 +272,12 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  key={
+                    isDateJump
+                      ? `jump-${hashLinkedItemCreatedAt}-${jumpNonce}`
+                      : `list-${channelId}`
+                  }
+                  isDateJump={isDateJump}
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {
