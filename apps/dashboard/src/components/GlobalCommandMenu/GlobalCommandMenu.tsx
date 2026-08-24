@@ -13,7 +13,7 @@ import {
   getDMParticipantIdsToFetch,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
-import { rankChannelsByAffinity } from '../../hooks/useSearchMetrics';
+import { rankChannelsByAffinity } from '../../utils/rankingUtils';
 import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';

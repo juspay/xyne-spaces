@@ -1,4 +1,4 @@
-import { type ReactElement, useState } from 'react';
+import { type ReactElement, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -20,6 +20,7 @@ import {
 } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
+import { RecordingParticipants } from './RecordingParticipants';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
@@ -28,6 +29,7 @@ import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTick
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
+  backTo: string;
   titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
@@ -60,6 +62,7 @@ const HeaderTitle = ({
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
+  backTo,
   titleState,
   onTitleUpdated,
   onLabelsUpdated,
@@ -74,9 +77,11 @@ export const RecordingDetailV2Header = ({
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
+  const labelsUpdateSeqRef = useRef(0);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
+  const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
   const isGeneratingTitle = titleState?.kind === 'generating';
   const displayTitle =
     titleState && titleState.kind !== 'generating'
@@ -129,6 +134,7 @@ export const RecordingDetailV2Header = ({
   /** Labels apply optimistically and roll back if the recording rejects the write. */
   const handleLabelsChange = async (labels: string[]): Promise<void> => {
     const previousLabels = recording.labels ?? [];
+    const seq = ++labelsUpdateSeqRef.current;
     onLabelsUpdated(labels);
 
     try {
@@ -136,7 +142,7 @@ export const RecordingDetailV2Header = ({
     } catch (err) {
       logRecordingError('RecordingDetailV2Header.updateLabels', err);
       toast.error('Failed to update labels');
-      onLabelsUpdated(previousLabels);
+      if (labelsUpdateSeqRef.current === seq) onLabelsUpdated(previousLabels);
     }
   };
 
@@ -203,7 +209,7 @@ export const RecordingDetailV2Header = ({
           <li>
             <button
               type='button'
-              onClick={() => void navigate('/recordings')}
+              onClick={() => void navigate(backTo)}
               className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
               data-track-category='RecordingDetailV2'
               data-track-name='breadcrumb_recordings'
@@ -300,12 +306,18 @@ export const RecordingDetailV2Header = ({
       </div>
 
       {/* Actions row */}
-      <div className='flex items-start'>
+      <div className='flex items-start gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+            recordingParticipants={recording.recordingParticipants}
+            shares={recording.shares}
+          />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
-              canEdit={isOwner}
+              canEdit={canShare}
               isUpdating={isUpdatingTicketLink}
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
@@ -315,7 +327,7 @@ export const RecordingDetailV2Header = ({
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
+          {canShare && (
             <>
               <RecordingSharedWithAvatars
                 recordingExternalId={recording.externalId}
@@ -327,7 +339,7 @@ export const RecordingDetailV2Header = ({
                   variant='outline'
                   size='iconSm'
                   onClick={() => setShowShareModal(true)}
-                  className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  className='w-7 h-6 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
                   aria-label='Share recording'
                   data-track-category='RecordingDetailV2'
                   data-track-name='share_recording'
@@ -354,7 +366,7 @@ export const RecordingDetailV2Header = ({
             </Tooltip>
           )}
 
-          {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
+          {canShare && showShareModal && (
             <Dialog
               open={showShareModal}
               onOpenChange={open => !open && setShowShareModal(false)}
@@ -376,7 +388,7 @@ export const RecordingDetailV2Header = ({
               variant='outline'
               size='sm'
               onClick={onAskAI}
-              className='ml-auto h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
+              className='ml-auto h-7 gap-2 rounded-lg w-24 text-[13px] font-medium border-muted-foreground/20'
               data-track-category='RecordingDetailV2'
               data-track-name='ask_ai_recording'
             >

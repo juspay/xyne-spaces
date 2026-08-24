@@ -241,6 +241,7 @@ import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapPro
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
 import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
@@ -438,6 +439,9 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcRepoId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
+  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
+  // must not also render one (that would double it).
+  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
   const previousSdlcRepoIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -491,8 +495,10 @@ const AppRoot = (): ReactElement => {
   // /sdlc/<repoId> route SdlcScreen renders its own assistant + debugger, so
   // neither app-shell panel should appear there.
   const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null;
+  // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
+  // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && sdlcRepoId === null && !showSdlcDebuggerPanel;
+    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && !isSdlcRoute && !showSdlcDebuggerPanel;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -626,13 +632,64 @@ const AppRoot = (): ReactElement => {
                         />
                       )}
                       {isInPanelWebview ? (
-                        // Inside the browser-panel webview — render only the route
-                        // content. No GlobalTopBar / AppSidebar / right panels /
-                        // ChatDirectory; see useIsInPanelWebview and the doc there.
-                        <main className='flex-1 h-screen'>
-                          <EditWarningModal />
-                          <Outlet />
-                        </main>
+                        isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
+                          // SDLC lane (chrome-free iframe) with Ask AI open: render the
+                          // XyneAI panel INSIDE the frame so Ask AI ships with this lane.
+                          <div className='flex h-screen flex-col'>
+                            <ResizableGroup
+                              orientation='horizontal'
+                              className='flex-1 no-scrollbar overflow-auto'
+                              autoSaveId='sdlc-frame-xyneai'
+                            >
+                              <Panel
+                                id='sdlc-frame-content'
+                                defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                              >
+                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                  <EditWarningModal />
+                                  <Outlet />
+                                </main>
+                              </Panel>
+                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                              </Separator>
+                              <Panel
+                                id='sdlc-frame-xyneai'
+                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
+                              >
+                                <XyneAISidebarZIndexShell>
+                                  <XyneAISidebar
+                                    channelId={xyneAIChannelId}
+                                    threadInfo={xyneAIThreadInfo}
+                                    startFreshChat={xyneAIStartFreshChat}
+                                    canvasInfo={xyneAICanvasInfo}
+                                    initialContextSelections={xyneAIInitialContextSelections}
+                                    contextOpenNonce={xyneAIContextOpenNonce}
+                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                    kbChannelId={xyneAIKbChannelId ?? ''}
+                                    kbDocId={xyneAIKbDocId ?? ''}
+                                    kbDocName={xyneAIKbDocName ?? ''}
+                                    kbOpenNonce={xyneAIKbOpenNonce}
+                                    researchContext={xyneAIResearchContext}
+                                    initialQuery={xyneAIInitialQuery ?? undefined}
+                                    autoSendNonce={xyneAIAutoSendNonce}
+                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                  />
+                                </XyneAISidebarZIndexShell>
+                              </Panel>
+                            </ResizableGroup>
+                          </div>
+                        ) : (
+                          // Inside the browser-panel webview (or SDLC lane with Ask AI
+                          // closed) — render only the route content. No GlobalTopBar /
+                          // AppSidebar / right panels / ChatDirectory.
+                          <main className='flex-1 h-screen'>
+                            <EditWarningModal />
+                            <Outlet />
+                          </main>
+                        )
                       ) : isOnboarding ? (
                         // Onboarding screen - full width without sidebar
                         <main
@@ -1364,15 +1421,27 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'sdlc',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'sdlc/:repoId/:section',
-                  element: <SdlcRouteElement />,
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'team-intelligence',
@@ -1566,27 +1635,15 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'automations',
-                  element: <AutomationsListScreen />,
-                },
-                {
-                  path: 'automations/approvals',
-                  element: <AutomationApprovalsScreen />,
-                },
-                {
-                  path: 'automations/new',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id/runs',
-                  element: <AutomationRunsScreen />,
-                },
-                {
-                  path: 'automations/:id/runs/:runId',
-                  element: <AutomationRunDetailScreen />,
+                  element: <AutomationsScreen />,
+                  children: [
+                    { index: true, element: <AutomationsListScreen /> },
+                    { path: 'approvals', element: <AutomationApprovalsScreen /> },
+                    { path: 'new', element: <AutomationBuilderScreen /> },
+                    { path: ':id', element: <AutomationBuilderScreen /> },
+                    { path: ':id/runs', element: <AutomationRunsScreen /> },
+                    { path: ':id/runs/:runId', element: <AutomationRunDetailScreen /> },
+                  ],
                 },
                 {
                   path: 'apps',
