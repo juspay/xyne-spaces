@@ -2676,6 +2676,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           spacesAppUserId: agent.spacesAppUserId,
           traceId,
           rootAgentSlug: agent.slug,
+          triggerSource: "spaces",
           escalatedProvider,
           // Preserve other prior-session fields where helpful.
           ...(priorSession?.workflowId ? { workflowId: priorSession.workflowId } : {}),
@@ -3054,6 +3055,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       spacesAppUserId: agent.spacesAppUserId,
       traceId,
       rootAgentSlug: agent.slug,
+      triggerSource: "spaces",
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(escalatedProvider ? { escalatedProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
@@ -3988,6 +3990,7 @@ export async function handleAutomationWebhook(
       // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
       // MCP swap on this (not on the resolveMentions proxy).
       isAutomation: true,
+      triggerSource: "automation",
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
@@ -6821,6 +6824,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             chainDepth: currentDepth + 1,
             rootAgentSlug,
             workflowId: binding.workflowId,
+            triggerSource: "spaces",
             ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
           };
           await setSession(runBody.sessionId, targetContext);

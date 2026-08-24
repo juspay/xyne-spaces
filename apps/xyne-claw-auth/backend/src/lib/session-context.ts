@@ -113,6 +113,9 @@ export interface SessionContext {
   externalResultCallback?: ExternalResultCallbackConfig;
   /** Terminal result target for a run dispatched from a per-agent Slack app. */
   slackDelivery?: SlackDeliveryTarget;
+  /** Surface that dispatched this run. Used by MCP tool filtering to apply
+   *  surface-scoped default tools without mutating the stored agent config. */
+  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack";
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via

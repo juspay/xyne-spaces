@@ -9,12 +9,10 @@
  * two surfaces cannot drift: the card a user approves and the card that later
  * describes the created agent are built from the same shape.
  *
- * Capability resolution is deliberately CONSERVATIVE. A flat token is accepted
- * only as an exact match on a catalog subagent NAME or a custom tool SLUG —
- * the two buckets whose meaning does not depend on integration state. MCP-server
- * and gateway tokens need a source-scoped selection key, and guessing their
- * bucket would silently mis-wire the agent, so they come back as `unknown` and
- * are reported on the card instead of being dropped in silence.
+ * Capability resolution is deliberately CONSERVATIVE. A token is accepted only
+ * as an exact match on a catalog subagent name, custom tool slug, MCP tool
+ * selection key, or gateway integration slug. Near-misses are reported on the
+ * card instead of being silently guessed into the wrong bucket.
  */
 
 import { agentIdentity, type AgentCapability, type AgentIdentity } from "xyne-claw-shared";
@@ -25,6 +23,8 @@ import { writeAuditLog } from "./audit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-card");
+
+const trimToken = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
 /** Slug rule enforced everywhere an agent slug is accepted (tool → card → create). */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -51,6 +51,10 @@ export interface ResolvedCapabilities {
   capabilities: AgentCapability[];
   /** config.tools.subagents — matched subagent names. */
   subagents: string[];
+  /** config.tools.direct — matched MCP tool selection keys. */
+  direct: string[];
+  /** config.tools.gateway — matched gateway service/source selection keys. */
+  gateway: string[];
   /** config.tools.custom — matched custom tool slugs. */
   custom: string[];
   /** Tokens that matched nothing. Reported on the card, never persisted. */
@@ -73,18 +77,32 @@ export async function resolveAgentCapabilities(
   const customBySlug = new Map(
     catalog.customGroups.flatMap((g) => g.tools.map((t) => [t.slug, t] as const)),
   );
+  const directBySlug = new Map(
+    catalog.integrations.flatMap((integration) =>
+      [...integration.readTools, ...integration.writeTools].map((tool) => [tool.slug, { integration, tool }] as const),
+    ),
+  );
+  const gatewayBySlug = new Map(
+    catalog.integrations
+      .filter((integration) => integration.kind === "gateway")
+      .map((integration) => [integration.slug, integration] as const),
+  );
 
   const subagents: string[] = [];
+  const direct: string[] = [];
+  const gateway: string[] = [];
   const custom: string[] = [];
   const unknown: string[] = [];
   const seen = new Set<string>();
 
   for (const raw of requested) {
-    const token = raw.trim();
+    const token = trimToken(raw);
     if (!token || seen.has(token)) continue;
     seen.add(token);
     if (subagentByName.has(token)) subagents.push(token);
     else if (customBySlug.has(token)) custom.push(token);
+    else if (directBySlug.has(token)) direct.push(token);
+    else if (gatewayBySlug.has(token)) gateway.push(token);
     else unknown.push(token);
   }
 
@@ -137,6 +155,20 @@ export async function resolveAgentCapabilities(
           : {}),
       };
     }),
+    ...direct.map((slug) => {
+      const match = directBySlug.get(slug);
+      return {
+        id: slug,
+        label: match?.tool.name ?? slug,
+        kind: "tool" as const,
+        ...(match?.integration.slug ? { iconKey: match.integration.slug } : {}),
+      };
+    }),
+    ...gateway.map((slug) => ({
+      id: slug,
+      label: gatewayBySlug.get(slug)?.label ?? slug,
+      kind: "tool" as const,
+    })),
     ...custom.map((slug) => ({
       id: slug,
       label: customBySlug.get(slug)?.name ?? slug,
@@ -144,7 +176,7 @@ export async function resolveAgentCapabilities(
     })),
   ];
 
-  return { capabilities, subagents, custom, unknown };
+  return { capabilities, subagents, direct, gateway, custom, unknown };
 }
 
 /**
@@ -160,16 +192,20 @@ export function toolIdsFromConfig(config: unknown): string[] {
     Array.isArray(tools[key])
       ? (tools[key] as unknown[]).filter((v): v is string => typeof v === "string")
       : [];
-  return [...read("subagents"), ...read("custom")];
+  return [...read("subagents"), ...read("direct"), ...read("gateway"), ...read("custom")];
 }
 
 /** The `config.tools` object, omitting empty buckets so a tool-less agent gets `{}`. */
-export function toConfigTools(resolved: Pick<ResolvedCapabilities, "subagents" | "custom">): {
+export function toConfigTools(resolved: Pick<ResolvedCapabilities, "subagents" | "direct" | "gateway" | "custom">): {
   subagents?: string[];
+  direct?: string[];
+  gateway?: string[];
   custom?: string[];
 } {
   return {
     ...(resolved.subagents.length > 0 ? { subagents: resolved.subagents } : {}),
+    ...(resolved.direct.length > 0 ? { direct: resolved.direct } : {}),
+    ...(resolved.gateway.length > 0 ? { gateway: resolved.gateway } : {}),
     ...(resolved.custom.length > 0 ? { custom: resolved.custom } : {}),
   };
 }
