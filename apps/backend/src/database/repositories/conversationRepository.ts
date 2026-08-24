@@ -1,6 +1,9 @@
 import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { messageSchema } from '@/vespa/src/types';
+import { logger } from '@/utils/logger';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -268,26 +271,154 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
-  async migrateConversationsToChannel(
-    conversationIds: string[],
-    targetChannelId: string
-  ): Promise<number> {
-    if (conversationIds.length === 0) {
-      return 0;
-    }
-
-    const result = await this.db.conversation.updateMany({
+  async getHistoryPreview(
+    channelId: string,
+    createdAfter: Date | null,
+    limit: number
+  ): Promise<
+    Array<{
+      conversationId: string;
+      createdAt: Date;
+      initialMessage: { senderId: string; content: string } | null;
+      attachments: Array<{ id: string; originalFilename: string }>;
+    }>
+  > {
+    const conversations = await this.db.conversation.findMany({
       where: {
-        conversationId: {
-          in: conversationIds
-        }
+        channelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       },
-      data: {
-        channelId: targetChannelId
-      }
+      orderBy: { createdAt: 'asc' },
+      take: limit
     });
 
-    return result.count;
+    if (conversations.length === 0) {
+      return [];
+    }
+
+    const initialMessages = await this.db.message.findMany({
+      where: {
+        messageId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { messageId: true, senderId: true, content: true }
+    });
+    const byId = new Map(initialMessages.map(m => [m.messageId, m]));
+
+    const attachments = await this.db.messageAttachment.findMany({
+      where: {
+        entityId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { id: true, entityId: true, originalFilename: true }
+    });
+    const attachmentsByMessage = new Map<string, Array<{ id: string; originalFilename: string }>>();
+    for (const attachment of attachments) {
+      const bucket = attachmentsByMessage.get(attachment.entityId) ?? [];
+      bucket.push({ id: attachment.id, originalFilename: attachment.originalFilename });
+      attachmentsByMessage.set(attachment.entityId, bucket);
+    }
+
+    return conversations.map(conversation => {
+      const initial = byId.get(conversation.initialMessageId);
+      return {
+        conversationId: conversation.conversationId,
+        createdAt: conversation.createdAt,
+        initialMessage: initial
+          ? { senderId: initial.senderId, content: initial.content }
+          : null,
+        attachments: attachmentsByMessage.get(conversation.initialMessageId) ?? []
+      };
+    });
+  }
+
+  /**
+   * Reparent a channel's conversations into another channel. Messages and attachments hang off
+   * `conversationId` so they follow automatically; `conversationParticipant.channelId` is
+   * denormalized and has to be moved explicitly. Threads move whole, keyed on when the thread
+   * started — one opened before the cutoff stays put even if it has replies after it.
+   */
+  async moveConversationsToChannel(
+    sourceChannelId: string,
+    targetChannelId: string,
+    createdAfter?: Date | null
+  ): Promise<{ moved: number; remaining: number }> {
+    const conversations = await this.db.conversation.findMany({
+      where: {
+        channelId: sourceChannelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {})
+      },
+      select: { conversationId: true }
+    });
+
+    if (conversations.length === 0) {
+      return {
+        moved: 0,
+        remaining: await this.db.conversation.count({ where: { channelId: sourceChannelId } })
+      };
+    }
+
+    const conversationIds = conversations.map(c => c.conversationId);
+
+    const [movedConversations] = await this.db.$transaction([
+      this.db.conversation.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.conversationParticipant.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.conversationLabelMapping.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.draftMessage.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.surfaceNudgeCount.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.releaseEvent.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      })
+    ]);
+
+    await this.reindexMovedMessages(conversationIds);
+
+    const remaining = await this.db.conversation.count({
+      where: { channelId: sourceChannelId }
+    });
+
+    return { moved: movedConversations.count, remaining };
+  }
+
+  private async reindexMovedMessages(conversationIds: string[]): Promise<void> {
+    const messages = await this.db.message.findMany({
+      where: { conversationId: { in: conversationIds }, isDeleted: false },
+      select: { messageId: true }
+    });
+
+    if (messages.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      messages.map(message =>
+        vespaQueue
+          .addJob({ schema: messageSchema, jobType: 'feed', docId: message.messageId })
+          .catch(error =>
+            logger.error(
+              `Failed to queue Vespa re-index for moved message ${message.messageId}:`,
+              error
+            )
+          )
+      )
+    );
   }
 
   /**

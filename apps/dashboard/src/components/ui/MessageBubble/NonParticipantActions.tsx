@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../Button/Button';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, type HistoryScope } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useMutation } from '@tanstack/react-query';
@@ -54,12 +54,12 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
     mutationFn: ({
       channelId,
       userIds,
-      includeHistory,
+      historyScope,
     }: {
       channelId: string;
       userIds: string[];
-      includeHistory: boolean;
-    }) => channelService.addGroupDmParticipants(channelId, { userIds, includeHistory }),
+      historyScope: HistoryScope;
+    }) => channelService.addGroupDmParticipants(channelId, { userIds, historyScope }),
     onSuccess: (response, _variables) => {
       // Delete the non-participant suggestion message
       // The message deletion logic in mutators.ts will automatically handle conversation
@@ -115,7 +115,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
       addGroupDmParticipantsMutation.mutate({
         channelId: activeChannelId,
         userIds,
-        includeHistory: true, // Default to including history for GROUP_DM
+        historyScope: { mode: 'beginning' },
       });
     } else {
       // Use existing Zero mutation for regular channels
