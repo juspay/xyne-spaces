@@ -13,7 +13,6 @@ import {
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
@@ -24,6 +23,7 @@ export interface RecordingsV2PillProps {
     'id' | 'externalId' | 'title' | 'startedAt' | 'endedAt' | 'status' | 'aiSummary' | 'transcript'
   >;
   creator: User | null;
+  participantsLabel: string;
   tags?: string[];
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
@@ -111,6 +111,7 @@ export const RecordingsV2LivePill = ({
 const RecordingsV2Pill = ({
   recording,
   creator,
+  participantsLabel,
   tags = [],
   resolveLabel = (label: string) => label,
   onOpen,
@@ -172,9 +173,7 @@ const RecordingsV2Pill = ({
               </span>
             )}
             <span className='mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
-              <span className='truncate'>
-                {creator ? getUserDisplayName(creator) : 'Unknown creator'}
-              </span>
+              <span className='truncate'>{participantsLabel}</span>
               <span aria-hidden='true'>·</span>
               <span className='shrink-0'>{formatRecordingTimestamp(recording.startedAt)}</span>
             </span>

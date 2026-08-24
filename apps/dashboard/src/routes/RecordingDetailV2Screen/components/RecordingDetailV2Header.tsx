@@ -20,6 +20,7 @@ import {
 } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
+import { RecordingParticipants } from './RecordingParticipants';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
@@ -305,6 +306,12 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex items-start'>
         <div className='flex flex-wrap items-center gap-2'>
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+            recordingParticipants={recording.recordingParticipants}
+            shares={recording.shares}
+          />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
