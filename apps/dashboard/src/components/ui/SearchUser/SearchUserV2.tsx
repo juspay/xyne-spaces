@@ -1,11 +1,14 @@
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { User } from '@xyne/shared';
-import { matchesAllTokens } from '@xyne/shared/utils';
 import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
-import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  matchesUserQuery,
+} from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 import { StatusIndicator } from '../StatusIndicator';
@@ -126,12 +129,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       ? options.filter(opt => {
           // Always pass through current user when "self" is searched
           if (currentUserId && opt.id === currentUserId && isSelfSearch) return true;
-          const displayName = getUserDisplayName(opt);
-          // Token-AND on the name (out-of-order + partial); whole-query substring on email.
-          return (
-            matchesAllTokens(displayName, searchQuery) ||
-            (opt.email?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
-          );
+          return matchesUserQuery(opt, searchQuery);
         })
       : options;
 
