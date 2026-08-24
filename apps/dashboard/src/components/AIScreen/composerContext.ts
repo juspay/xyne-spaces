@@ -35,10 +35,6 @@ export interface ComposerContext {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant: boolean;
-  /** Provider fast mode (⚡ toggle) — same credentials, the agent's fast-mode
-   *  provider profile / run-setting overrides. Only offered when the selected
-   *  agent has fast mode configured; false otherwise. */
-  fastMode: boolean;
   /** Per-run model pin from the composer's model dropdown. The list comes from
    *  the account's allowed models (the agent's shared LiteLLM key's /v1/models);
    *  null = "Default" — the model configured in the DB. A pick is the source of
@@ -65,7 +61,6 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   deepResearchEnabled: false,
   createCanvasEnabled: false,
   instant: false,
-  fastMode: false,
   model: null,
   modelProvider: null,
   thinkingLevel: null,
@@ -86,7 +81,6 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.deepResearchEnabled ||
     ctx.createCanvasEnabled ||
     ctx.instant ||
-    ctx.fastMode ||
     ctx.model !== null ||
     ctx.thinkingLevel !== null
   );
@@ -117,7 +111,6 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
-    ...(ctx.fastMode ? { speed: 'fast' as const } : {}),
     ...(ctx.model
       ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
       : {}),

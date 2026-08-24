@@ -238,10 +238,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
-  // Provider fast mode (⚡). Only meaningful — and only rendered — when the
-  // selected agent has fast mode configured; buildContext forces it false
-  // otherwise so a stale toggle can't ride along after switching agents.
-  const [fastModeEnabled, setFastModeEnabled] = useState(() => seed.fastMode);
   // Per-run model pin + thinking level. The model list is the account's allowed
   // models off the selected agent's shared LiteLLM key; "Default" = the model
   // configured in the DB. Both reset when the agent changes — a pick from one
@@ -268,7 +264,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [composerAgents, selectedAgentSlug],
   );
   const instant = selectedAgent?.instantAgent === true;
-  const fastModeConfigured = selectedAgent?.fastModeConfigured === true;
 
   const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
   const { data: agentModelsData } = useQuery({
@@ -308,7 +303,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
       instant,
-      fastMode: fastModeConfigured ? fastModeEnabled : false,
       model: selectedModel,
       modelProvider: selectedModel ? modelPinProvider : null,
       thinkingLevel,
@@ -321,8 +315,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled,
       createCanvasEnabled,
       instant,
-      fastModeConfigured,
-      fastModeEnabled,
       selectedModel,
       modelPinProvider,
       thinkingLevel,
@@ -811,20 +803,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 disabled={!deepResearchAccessible}
                 trackName='TOGGLE_DEEP_RESEARCH'
               />
-              {/* Provider fast mode — same credentials, faster serving via the
-                  agent's fast-mode setup (Anthropic fast tier / fast profile,
-                  configured in the claw agent's Model & provider tab). Only
-                  rendered for agents that actually have it configured. */}
-              {fastModeConfigured && (
-                <ToolbarButton
-                  icon={<Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                  label={fastModeEnabled ? 'Fast mode enabled' : 'Enable fast mode'}
-                  onClick={() => setFastModeEnabled(v => !v)}
-                  active={fastModeEnabled}
-                  activeClass='bg-secondary text-status-pending'
-                  trackName='TOGGLE_FAST_MODE'
-                />
-              )}
               <ToolbarButton
                 icon={<FileIcon className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
                 label={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}

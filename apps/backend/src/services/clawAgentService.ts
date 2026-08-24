@@ -109,7 +109,6 @@ export interface ClawRunRequest {
   /** Per-message provider fast mode (the composer's ⚡ toggle). Forwarded to
    *  claw-auth's /run/stream, which applies the agent's fast-mode provider
    *  profile + run-setting overrides for this run. Omitted = agent default. */
-  speed?: 'standard' | 'fast';
   /** Per-message thinking level (composer dropdown). Forwarded to claw-auth's
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
@@ -165,10 +164,6 @@ export interface AccessibleClawAgent {
    *  askAI composer shows a locked "Instant" indicator instead of its
    *  normal per-message toggle for such agents, and never for others. */
   instantAgent?: boolean;
-  /** True when the agent has fast mode configured (a fast-mode provider
-   *  profile and/or a default speed in its model settings) — from claw-auth's
-   *  lightAgentProjection. Gates the composer's ⚡ Fast mode toggle. */
-  fastModeConfigured?: boolean;
 }
 
 export interface ClawConversationSummary {
@@ -618,7 +613,6 @@ export async function runClawAgentStream(
     ...(request.deepResearchEnabled && { deepResearchEnabled: true }),
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
-    ...(request.speed && { speed: request.speed }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
@@ -924,9 +918,6 @@ interface RawClawAgent {
   /** Top-level in the light-list response (agents.ts's lightAgentProjection
    *  derives it from config.instantAgent, but doesn't expose config itself). */
   instantAgent?: boolean;
-  /** Computed by claw-auth's lightAgentProjection from config.modelSettings /
-   *  config.fastModeProfile (config itself is not exposed on the light list). */
-  fastModeConfigured?: boolean;
 }
 
 export async function listAccessibleClawAgents(req: {
@@ -1008,7 +999,6 @@ export async function listAccessibleClawAgents(req: {
         rootCollectionId: rootByCollectionId.get(c.collectionId) ?? c.collectionId,
       })),
       instantAgent: agent.instantAgent === true,
-      fastModeConfigured: agent.fastModeConfigured === true,
     };
   });
 

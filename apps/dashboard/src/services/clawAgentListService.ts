@@ -32,10 +32,6 @@ export interface AccessibleClawAgent {
    *  search/single-answer instant KB path — the composer shows a locked
    *  "Instant" indicator for it instead of the normal per-message toggle. */
   instantAgent?: boolean;
-  /** True when the agent has fast mode configured (fast-mode provider profile
-   *  and/or a default speed in its model settings). Gates the composer's
-   *  ⚡ Fast mode toggle — agents without it show no fast-mode affordance. */
-  fastModeConfigured?: boolean;
 }
 
 export async function fetchAccessibleClawAgents(): Promise<AccessibleClawAgent[]> {

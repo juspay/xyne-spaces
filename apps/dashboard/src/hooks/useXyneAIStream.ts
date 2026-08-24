@@ -28,8 +28,6 @@ export interface StreamOverrides {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
-  /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
-  speed?: 'standard' | 'fast';
   /** Per-run model pin from the composer's model dropdown. Absent = hook-level
    *  `model` (the sidebar's picker), which itself defaults to the DB-configured
    *  model. A pick is the source of truth for the run. */
@@ -308,7 +306,6 @@ export const useXyneAIStream = ({
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
-      const eSpeed = ov?.speed;
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
       const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
       const eThinkingLevel = ov?.thinkingLevel ?? thinkingLevel ?? undefined;
@@ -434,7 +431,6 @@ export const useXyneAIStream = ({
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
           instant: eInstant,
-          ...(eSpeed ? { speed: eSpeed } : {}),
           researchContext: eResearchContext,
           attachments,
           parentMessageId,
