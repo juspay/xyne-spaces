@@ -1,14 +1,16 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.199.0",
+  "version": "1.209.3",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
     "dev": "vite",
+    "dev:sdlc": "vite --mode sdlc",
     "dev:test": "vite --mode test",
     "claw:test": "VITE_SANDBOX_TEST_MODE=true vite --mode test",
     "dev:prod": "vite --mode prod-local",
     "build": "tsc --noEmit && vite build",
+    "build:sdlc": "tsc --noEmit && vite build --mode sdlc",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:errors-only": "eslint . --quiet",

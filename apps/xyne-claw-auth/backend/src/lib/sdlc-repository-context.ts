@@ -7,7 +7,6 @@ export interface SdlcRepositoryContext {
   name: string;
   url: string;
   baseBranch: string;
-  write: false;
   agentContext: Record<string, unknown>;
 }
 
@@ -67,7 +66,6 @@ export async function resolveSdlcRepositoryForUser(
         name: context.name,
         url: context.url,
         baseBranch: context.baseBranch,
-        write: false,
         agentContext: context.agentContext,
       },
     };

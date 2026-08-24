@@ -67,6 +67,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/calls', label: 'Calls', icon: PhoneDefault },
   { path: '/recordings', label: 'Recordings', icon: MicOn },
   { path: '/projects', label: 'Tickets', icon: TicketToken },
+  { path: '/sdlc', label: 'SDLC', icon: Atom },
   { path: '/support', label: 'Support', icon: Troubleshoot },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn },
@@ -107,6 +108,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/calls',
   '/recordings',
   '/projects',
+  '/sdlc',
   '/support',
   '/chat/activity',
   '/guide',
@@ -135,7 +137,10 @@ export const filterNavItemsByPermission = (
 
     let hasAccess = true;
     if (requiresAccess) {
-      if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
+      if (resourceName === 'SDLC') {
+        // Any tier (READ/WRITE/ADMIN) unlocks the SDLC screen.
+        hasAccess = permissions.some(p => p.resourceName === resourceName);
+      } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(
           p =>
             p.resourceName === resourceName &&

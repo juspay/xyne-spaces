@@ -73,7 +73,7 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole } from '@xyne/shared';
+import { MessageType, CanvasVisibility, CanvasRole, isBaselineCanvasType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -116,6 +116,7 @@ interface CanvasScreenProps {
   canvasId?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  showAskAiAction?: boolean;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -145,6 +146,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
   onToggleFullscreen,
+  showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -180,6 +182,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const canvasParticipants = canvasWithParticipants?.participants;
 
   const currentUserGroupIds = useCurrentUserGroupIds();
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const adminChannelIds = useMemo(
+    () => new Set((adminParticipations ?? []).map(participant => participant.channelId)),
+    [adminParticipations],
+  );
   const visibleChannels = useAllVisibleChannels();
   const currentUserChannelIds = useMemo(
     () => new Set(visibleChannels.map(channel => channel.id).filter(Boolean)),
@@ -353,6 +360,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
+      const isAdminEditableSdlcBaseline =
+        isBaselineCanvasType(canvasData.sdlcArtifact?.artifactType) &&
+        Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
+
+      if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
 
       if (!accessLevel) {
         const inheritedRoles = [
@@ -423,6 +435,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     state,
     currentUserGroupIds,
     currentUserChannelIds,
+    adminChannelIds,
     queryClient,
   ]);
 
@@ -1352,24 +1365,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
-                          {/* Ask AI */}
-                          <button
-                            type='button'
-                            onClick={handleAskAI}
-                            className={headerIconButtonClass}
-                            title='Ask AI'
-                            aria-label='Ask AI'
-                            data-track-category='CANVAS'
-                            data-track-name='Ask_AI_From_Canvas'
-                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                          >
-                            <img
-                              alt='AI'
-                              width='16'
-                              height='16'
-                              src='/svgs/icons/ai-bot-gradient-star.svg'
-                            />
-                          </button>
+                          {showAskAiAction && (
+                            <button
+                              type='button'
+                              onClick={handleAskAI}
+                              className={headerIconButtonClass}
+                              title='Ask AI'
+                              aria-label='Ask AI'
+                              data-track-category='CANVAS'
+                              data-track-name='Ask_AI_From_Canvas'
+                              data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                            >
+                              <img
+                                alt='AI'
+                                width='16'
+                                height='16'
+                                src='/svgs/icons/ai-bot-gradient-star.svg'
+                              />
+                            </button>
+                          )}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

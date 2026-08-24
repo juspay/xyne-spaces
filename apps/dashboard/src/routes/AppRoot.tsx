@@ -47,6 +47,13 @@ import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
+import SdlcScreen from './SdlcScreen/SdlcScreen';
+import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
+import { APP_BASE_PATH, isSdlcSurface } from '../config';
+import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
+import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
+import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
+import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -183,6 +190,7 @@ import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOver
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
+import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
@@ -416,11 +424,33 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
+  const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
+  const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
+  const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
+  const isSdlcDebuggerOpen = useExternalDebuggerStore(state => state.target !== null);
   const { isMobile } = usePlatform();
-  const isInPanelWebview = useIsInPanelWebview();
+  // No-op outside the SDLC bundle's framed instance.
+  useSdlcFrameBridge();
+
+  // The SDLC bundle wants the same chromeless layout as the browser panel.
+  const isInPanelWebview = useIsInPanelWebview() || isSdlcSurface;
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
+  const sdlcRepoId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
+  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
+  // must not also render one (that would double it).
+  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  const previousSdlcRepoIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previousRepoId = previousSdlcRepoIdRef.current;
+    if (previousRepoId && previousRepoId !== sdlcRepoId) {
+      useExternalDebuggerStore.getState().close();
+      setIsXyneDebuggerOpen(false);
+    }
+    previousSdlcRepoIdRef.current = sdlcRepoId;
+  }, [sdlcRepoId]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -460,7 +490,14 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  const showXyneAIPanel = isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
+  // The external SDLC debugger takes the right panel over Ask AI. On an
+  // /sdlc/<repoId> route SdlcScreen renders its own assistant + debugger, so
+  // neither app-shell panel should appear there.
+  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null;
+  // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
+  // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
+  const showXyneAIPanel =
+    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && !isSdlcRoute && !showSdlcDebuggerPanel;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -578,82 +615,45 @@ const AppRoot = (): ReactElement => {
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}
                   <EditProvider>
-                    {shouldShowMobileHeader && externalId && (
-                      <MobileCallHeader
-                        participants={participants}
-                        activeCalls={activeCalls}
-                        externalId={externalId}
-                        isMicEnabled={isMicEnabled}
-                        onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
-                        onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
-                        onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-                      />
-                    )}
-                    {isInPanelWebview ? (
-                      // Inside the browser-panel webview — render only the route
-                      // content. No GlobalTopBar / AppSidebar / right panels /
-                      // ChatDirectory; see useIsInPanelWebview and the doc there.
-                      <main className='flex-1 h-screen'>
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    ) : isOnboarding ? (
-                      // Onboarding screen - full width without sidebar
-                      <main
-                        className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                      >
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    ) : showXyneAIPanel ||
-                      browserPanelState === 'open' ||
-                      webviewState === 'closed' ||
-                      webviewState === 'idle' ? (
-                      <div className='flex flex-col h-screen'>
-                        <ResizableGroup
-                          orientation='horizontal'
-                          className='flex-1 no-scrollbar overflow-auto'
-                          autoSaveId='app-root-browser'
-                          panelIds={
-                            showXyneAIPanel
-                              ? ['app-root-left', 'app-root-xyneai']
-                              : showBrowserPanel
-                                ? ['app-root-left', 'app-root-browser']
-                                : ['app-root-left']
-                          }
-                        >
-                          <Panel
-                            id='app-root-left'
-                            panelRef={browserPanelLeftRef}
-                            defaultSize={
-                              showXyneAIPanel
-                                ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
-                                : showBrowserPanel
-                                  ? '65%'
-                                  : '100%'
-                            }
-                          >
-                            <div
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                    {/* Above the layout branches, so leaving /sdlc hides the frame
+                      rather than destroying it. */}
+                    <SdlcFrameProvider>
+                      {!isSdlcSurface && <SdlcFrameHost />}
+                      {shouldShowMobileHeader && externalId && (
+                        <MobileCallHeader
+                          participants={participants}
+                          activeCalls={activeCalls}
+                          externalId={externalId}
+                          isMicEnabled={isMicEnabled}
+                          onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
+                          onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
+                          onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+                        />
+                      )}
+                      {isInPanelWebview ? (
+                        isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
+                          // SDLC lane (chrome-free iframe) with Ask AI open: render the
+                          // XyneAI panel INSIDE the frame so Ask AI ships with this lane.
+                          <div className='flex h-screen flex-col'>
+                            <ResizableGroup
+                              orientation='horizontal'
+                              className='flex-1 no-scrollbar overflow-auto'
+                              autoSaveId='sdlc-frame-xyneai'
                             >
-                              <AppSidebar />
-                              <main className='flex-1 no-scrollbar overflow-auto'>
-                                <EditWarningModal />
-                                <Outlet />
-                              </main>
-                            </div>
-                          </Panel>
-                          {showXyneAIPanel ? (
-                            <>
-                              <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                <div
-                                  id='panel-resize-divider'
-                                  className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                ></div>
+                              <Panel
+                                id='sdlc-frame-content'
+                                defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                              >
+                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                  <EditWarningModal />
+                                  <Outlet />
+                                </main>
+                              </Panel>
+                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
                               </Separator>
                               <Panel
-                                id='app-root-xyneai'
-                                panelRef={xyneAIRightPanelRef}
+                                id='sdlc-frame-xyneai'
                                 defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
                                 maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
                                 minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
@@ -671,162 +671,300 @@ const AppRoot = (): ReactElement => {
                                     kbDocId={xyneAIKbDocId ?? ''}
                                     kbDocName={xyneAIKbDocName ?? ''}
                                     kbOpenNonce={xyneAIKbOpenNonce}
+                                    researchContext={xyneAIResearchContext}
+                                    initialQuery={xyneAIInitialQuery ?? undefined}
+                                    autoSendNonce={xyneAIAutoSendNonce}
                                     onDebuggerOpenChange={setIsXyneDebuggerOpen}
                                   />
                                 </XyneAISidebarZIndexShell>
                               </Panel>
-                            </>
-                          ) : (
-                            showBrowserPanel && (
+                            </ResizableGroup>
+                          </div>
+                        ) : (
+                          // Inside the browser-panel webview (or SDLC lane with Ask AI
+                          // closed) — render only the route content. No GlobalTopBar /
+                          // AppSidebar / right panels / ChatDirectory.
+                          <main className='flex-1 h-screen'>
+                            <EditWarningModal />
+                            <Outlet />
+                          </main>
+                        )
+                      ) : isOnboarding ? (
+                        // Onboarding screen - full width without sidebar
+                        <main
+                          className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                        >
+                          <EditWarningModal />
+                          <Outlet />
+                        </main>
+                      ) : showXyneAIPanel ||
+                        showSdlcDebuggerPanel ||
+                        browserPanelState === 'open' ||
+                        webviewState === 'closed' ||
+                        webviewState === 'idle' ? (
+                        <div className='flex flex-col h-screen'>
+                          <ResizableGroup
+                            orientation='horizontal'
+                            className='flex-1 no-scrollbar overflow-auto'
+                            autoSaveId='app-root-browser'
+                            panelIds={
+                              showSdlcDebuggerPanel
+                                ? ['app-root-left', 'app-root-sdlc-debugger']
+                                : showXyneAIPanel
+                                  ? ['app-root-left', 'app-root-xyneai']
+                                  : showBrowserPanel
+                                    ? ['app-root-left', 'app-root-browser']
+                                    : ['app-root-left']
+                            }
+                          >
+                            <Panel
+                              id='app-root-left'
+                              panelRef={browserPanelLeftRef}
+                              defaultSize={
+                                showXyneAIPanel
+                                  ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
+                                  : showSdlcDebuggerPanel || showBrowserPanel
+                                    ? '65%'
+                                    : '100%'
+                              }
+                            >
+                              <div
+                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                              >
+                                <AppSidebar />
+                                <main className='flex-1 no-scrollbar overflow-auto'>
+                                  <EditWarningModal />
+                                  <Outlet />
+                                </main>
+                              </div>
+                            </Panel>
+                            {showSdlcDebuggerPanel ? (
                               <>
-                                <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                  <div
+                                    id='panel-resize-divider'
+                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                  ></div>
                                 </Separator>
                                 <Panel
-                                  id='app-root-browser'
-                                  panelRef={browserPanelRightRef}
+                                  id='app-root-sdlc-debugger'
                                   defaultSize='35%'
-                                  maxSize='50%'
+                                  minSize='30%'
+                                  maxSize='55%'
                                 >
-                                  <div className='h-full'>
-                                    <BrowserPanel />
-                                  </div>
+                                  <SdlcDebuggerPanel />
                                 </Panel>
                               </>
-                            )
-                          )}
-                        </ResizableGroup>
-                      </div>
-                    ) : (
-                      // WebView is open - show panel layout with WebView
-                      <div className='flex flex-col h-screen'>
-                        <ResizableGroup
-                          orientation='horizontal'
-                          className='flex-1 overflow-hidden'
-                          autoSaveId='app-root'
-                        >
-                          <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                            <div
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                            >
-                              <AppSidebar />
-                              <main className='flex-1 no-scrollbar overflow-auto'>
-                                <EditWarningModal />
-                                <Outlet />
-                              </main>
-                            </div>
-                          </Panel>
-                          <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                            <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                          </Separator>
-                          <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
-                            <WebView />
-                          </Panel>
-                        </ResizableGroup>
-                      </div>
-                    )}
-                    {/* Global overlays and IPC handlers — skipped in the panel
+                            ) : showXyneAIPanel ? (
+                              <>
+                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                  <div
+                                    id='panel-resize-divider'
+                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                  ></div>
+                                </Separator>
+                                <Panel
+                                  id='app-root-xyneai'
+                                  panelRef={xyneAIRightPanelRef}
+                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                  minSize={
+                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                  }
+                                >
+                                  <XyneAISidebarZIndexShell>
+                                    <XyneAISidebar
+                                      channelId={xyneAIChannelId}
+                                      threadInfo={xyneAIThreadInfo}
+                                      startFreshChat={xyneAIStartFreshChat}
+                                      canvasInfo={xyneAICanvasInfo}
+                                      initialContextSelections={xyneAIInitialContextSelections}
+                                      contextOpenNonce={xyneAIContextOpenNonce}
+                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                      kbChannelId={xyneAIKbChannelId ?? ''}
+                                      kbDocId={xyneAIKbDocId ?? ''}
+                                      kbDocName={xyneAIKbDocName ?? ''}
+                                      kbOpenNonce={xyneAIKbOpenNonce}
+                                      researchContext={xyneAIResearchContext}
+                                      initialQuery={xyneAIInitialQuery ?? undefined}
+                                      autoSendNonce={xyneAIAutoSendNonce}
+                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                    />
+                                  </XyneAISidebarZIndexShell>
+                                </Panel>
+                              </>
+                            ) : (
+                              showBrowserPanel && (
+                                <>
+                                  <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                  </Separator>
+                                  <Panel
+                                    id='app-root-browser'
+                                    panelRef={browserPanelRightRef}
+                                    defaultSize='35%'
+                                    maxSize='50%'
+                                  >
+                                    <div className='h-full'>
+                                      <BrowserPanel />
+                                    </div>
+                                  </Panel>
+                                </>
+                              )
+                            )}
+                          </ResizableGroup>
+                        </div>
+                      ) : (
+                        // WebView is open - show panel layout with WebView
+                        <div className='flex flex-col h-screen'>
+                          <ResizableGroup
+                            orientation='horizontal'
+                            className='flex-1 overflow-hidden'
+                            autoSaveId='app-root'
+                          >
+                            <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
+                              <div
+                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                              >
+                                <AppSidebar />
+                                <main className='flex-1 no-scrollbar overflow-auto'>
+                                  <EditWarningModal />
+                                  <Outlet />
+                                </main>
+                              </div>
+                            </Panel>
+                            <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                              <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                            </Separator>
+                            <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
+                              <WebView />
+                            </Panel>
+                          </ResizableGroup>
+                        </div>
+                      )}
+                      {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
                     duplicated call UIs, etc. inside the embedded view).
                     AttachmentGalleryModal stays because it's triggered by
                     attachments inside the conversation itself. */}
-                    {!isInPanelWebview && (
-                      <>
-                        <IncomingCallModal />
-                        {import.meta.env.DEV &&
-                          new URLSearchParams(window.location.search).has('devIncomingCall') && (
-                            <IncomingCallDevHarness />
+                      {!isInPanelWebview && (
+                        <>
+                          <IncomingCallModal />
+                          {import.meta.env.DEV &&
+                            new URLSearchParams(window.location.search).has('devIncomingCall') && (
+                              <IncomingCallDevHarness />
+                            )}
+                          <GlobalCallOverlay />
+                          {recordingVersion === 'v2' ? (
+                            <NoteTakerOverlayHost />
+                          ) : (
+                            <RecordingOverlay />
                           )}
-                        <GlobalCallOverlay />
-                        {recordingVersion === 'v2' ? (
-                          <NoteTakerOverlayHost />
-                        ) : (
-                          <RecordingOverlay />
-                        )}
-                        <GlobalUploadProgress />
-                        <NotificationHandler />
-                        <ElectronBadgeSync />
-                        <ElectronUpdateNudge />
-                        <SosAlertBanner />
-                        <CallFromRecentsHandler />
-                        <CloudAgentFloatingHost />
-                        <BrowserPanelHandler />
-                        <GlobalCommandMenu />
-                        <ShortcutsHelpModal
-                          isOpen={isShortcutsModalOpen}
-                          onClose={() => setIsShortcutsModalOpen(false)}
-                        />
-                      </>
-                    )}
-                    <AttachmentGalleryModal />
-                    <ThreadCitationModal />
-                    <TranscriptCitationModal />
-                    <AttachmentCitationPreview />
-                    <ErrorReportModal
-                      isOpen={isErrorReportOpen}
-                      onClose={() => setIsErrorReportOpen(false)}
-                      pendingRecording={pendingRecording}
-                      pendingRecordingFilePath={pendingRecordingFilePath}
-                      onSourceSelected={(source: ScreenSource, withMic: boolean) =>
-                        void startRecording(source, withMic)
-                      }
-                      onSubmitSuccess={() => {
-                        setPendingRecording(null);
-                        setPendingRecordingFilePath(null);
-                      }}
-                      onDiscard={() => {
-                        setPendingRecording(null);
-                        setPendingRecordingFilePath(null);
-                      }}
-                    />
-
-                    {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
-                      <div className='hidden' aria-hidden='true'>
-                        <XyneAISidebar
-                          channelId={xyneAIChannelId}
-                          threadInfo={xyneAIThreadInfo}
-                          startFreshChat={xyneAIStartFreshChat}
-                          canvasInfo={xyneAICanvasInfo}
-                          initialContextSelections={xyneAIInitialContextSelections}
-                          contextOpenNonce={xyneAIContextOpenNonce}
-                          kbCollectionId={xyneAIKbCollectionId ?? ''}
-                          kbChannelId={xyneAIKbChannelId ?? ''}
-                          kbDocId={xyneAIKbDocId ?? ''}
-                          kbDocName={xyneAIKbDocName ?? ''}
-                          kbOpenNonce={xyneAIKbOpenNonce}
-                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                          visible={false}
-                        />
-                      </div>
-                    )}
-                    {/* XyneAI Mobile Drawer */}
-                    {isMobile && !isInPanelWebview && !isOnAIPage && (
-                      <Drawer
-                        open={isXyneAIDrawerOpen}
-                        onOpenChange={open => {
-                          // Don't allow closing during AI onboarding
-                          if (!open && isAIOnboardingActive()) return;
-                          xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                          <GlobalUploadProgress />
+                          <NotificationHandler />
+                          <ElectronBadgeSync />
+                          <ElectronUpdateNudge />
+                          <SosAlertBanner />
+                          <CallFromRecentsHandler />
+                          <CloudAgentFloatingHost />
+                          <BrowserPanelHandler />
+                          <GlobalCommandMenu />
+                          <ShortcutsHelpModal
+                            isOpen={isShortcutsModalOpen}
+                            onClose={() => setIsShortcutsModalOpen(false)}
+                          />
+                        </>
+                      )}
+                      <AttachmentGalleryModal />
+                      <ThreadCitationModal />
+                      <TranscriptCitationModal />
+                      <AttachmentCitationPreview />
+                      <ErrorReportModal
+                        isOpen={isErrorReportOpen}
+                        onClose={() => setIsErrorReportOpen(false)}
+                        pendingRecording={pendingRecording}
+                        pendingRecordingFilePath={pendingRecordingFilePath}
+                        onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                          void startRecording(source, withMic)
+                        }
+                        onSubmitSuccess={() => {
+                          setPendingRecording(null);
+                          setPendingRecordingFilePath(null);
                         }}
-                        title='Xyne AI'
-                        description='Ask questions about your channel'
-                      >
-                        <XyneAISidebar
-                          channelId={xyneAIChannelId}
-                          threadInfo={xyneAIThreadInfo}
-                          startFreshChat={xyneAIStartFreshChat}
-                          canvasInfo={xyneAICanvasInfo}
-                          initialContextSelections={xyneAIInitialContextSelections}
-                          contextOpenNonce={xyneAIContextOpenNonce}
-                          kbCollectionId={xyneAIKbCollectionId ?? ''}
-                          kbChannelId={xyneAIKbChannelId ?? ''}
-                          kbDocId={xyneAIKbDocId ?? ''}
-                          kbDocName={xyneAIKbDocName ?? ''}
-                          kbOpenNonce={xyneAIKbOpenNonce}
-                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                        />
-                      </Drawer>
-                    )}
+                        onDiscard={() => {
+                          setPendingRecording(null);
+                          setPendingRecordingFilePath(null);
+                        }}
+                      />
+
+                      {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                        <div className='hidden' aria-hidden='true'>
+                          <XyneAISidebar
+                            channelId={xyneAIChannelId}
+                            threadInfo={xyneAIThreadInfo}
+                            startFreshChat={xyneAIStartFreshChat}
+                            canvasInfo={xyneAICanvasInfo}
+                            initialContextSelections={xyneAIInitialContextSelections}
+                            contextOpenNonce={xyneAIContextOpenNonce}
+                            kbCollectionId={xyneAIKbCollectionId ?? ''}
+                            kbChannelId={xyneAIKbChannelId ?? ''}
+                            kbDocId={xyneAIKbDocId ?? ''}
+                            kbDocName={xyneAIKbDocName ?? ''}
+                            kbOpenNonce={xyneAIKbOpenNonce}
+                            researchContext={xyneAIResearchContext}
+                            initialQuery={xyneAIInitialQuery ?? undefined}
+                            autoSendNonce={xyneAIAutoSendNonce}
+                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                            visible={false}
+                          />
+                        </div>
+                      )}
+                      {/* XyneAI Mobile Drawer */}
+                      {isMobile && !isInPanelWebview && !isOnAIPage && (
+                        <Drawer
+                          open={isXyneAIDrawerOpen}
+                          onOpenChange={open => {
+                            // Don't allow closing during AI onboarding
+                            if (!open && isAIOnboardingActive()) return;
+                            xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                          }}
+                          title='Xyne AI'
+                          description='Ask questions about your channel'
+                        >
+                          <XyneAISidebar
+                            channelId={xyneAIChannelId}
+                            threadInfo={xyneAIThreadInfo}
+                            startFreshChat={xyneAIStartFreshChat}
+                            canvasInfo={xyneAICanvasInfo}
+                            initialContextSelections={xyneAIInitialContextSelections}
+                            contextOpenNonce={xyneAIContextOpenNonce}
+                            kbCollectionId={xyneAIKbCollectionId ?? ''}
+                            kbChannelId={xyneAIKbChannelId ?? ''}
+                            kbDocId={xyneAIKbDocId ?? ''}
+                            kbDocName={xyneAIKbDocName ?? ''}
+                            kbOpenNonce={xyneAIKbOpenNonce}
+                            researchContext={xyneAIResearchContext}
+                            initialQuery={xyneAIInitialQuery ?? undefined}
+                            autoSendNonce={xyneAIAutoSendNonce}
+                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                          />
+                        </Drawer>
+                      )}
+                      {isMobile && !isInPanelWebview && (
+                        <Drawer
+                          open={isSdlcDebuggerOpen}
+                          onOpenChange={open => {
+                            if (!open) useExternalDebuggerStore.getState().close();
+                          }}
+                          title='Debugger'
+                          description='Inspect this SDLC run'
+                        >
+                          <div className='h-[85vh]'>
+                            <SdlcDebuggerPanel />
+                          </div>
+                        </Drawer>
+                      )}
+                    </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
               </AIOnboardingProvider>
@@ -838,827 +976,859 @@ const AppRoot = (): ReactElement => {
   );
 };
 
-export const router = createBrowserRouter([
-  {
-    element: <ProtectedRoute />,
-    errorElement: <RouterErrorFallback />,
-    children: [
-      {
-        path: '/newWindow/claw',
-        element: <ClawOverlay />,
-      },
-    ],
-  },
-  {
-    element: <SplashScreen />,
-    errorElement: <RouterErrorFallback />,
-    children: [
-      {
-        path: '/',
-        element: <ProtectedRoute />,
-        children: [
-          {
-            index: true,
-            element: <WorkspaceRedirect />,
-          },
-          {
-            path: ':workspaceId',
-            element: <AppRoot />,
-            children: [
-              {
-                index: true,
-                element: <HomeScreen />,
-              },
-              {
-                path: 'ai',
-                children: [
-                  { index: true, element: <Navigate to='chat/new' replace /> },
-                  { path: 'chat/new', element: <AIScreen /> },
-                  { path: 'daily-brief', element: <AIDailyBriefScreen /> },
-                  { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
-                  { path: 'library', element: <AILibraryScreen /> },
-                  {
-                    path: 'admin',
-                    element: (
-                      <RequireClawAdmin>
-                        <AIAdminScreen />
-                      </RequireClawAdmin>
-                    ),
-                  },
-                  { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
-                  { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
-                  { path: 'library/skill/create', element: <AISkillCreateScreen /> },
-                  { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
-                  { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
-                  { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
-                  { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
-                  { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
-                  { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-                  { path: 'knowledge', element: <AIKnowledgeScreen /> },
-                  {
-                    path: 'organization',
-                    element: (
-                      <RequireOrgManager>
-                        <AIOrganizationScreen />
-                      </RequireOrgManager>
-                    ),
-                  },
-                  {
-                    element: <AISectionLayout />,
-                    children: [
-                      {
-                        path: 'digital-twin',
-                        element: <ClawDigitalTwinScreen />,
-                        children: [
-                          { index: true, element: <DigitalTwinMemoriesTab /> },
-                          { path: 'hot', element: <DigitalTwinHotTab /> },
-                          { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                          { path: 'recall', element: <DigitalTwinRecallTab /> },
-                          { path: 'graph', element: <DigitalTwinGraphTab /> },
-                          { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                          { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                        ],
-                      },
-                      { path: 'metrics', element: <ClawMetricsScreen /> },
-                      { path: 'settings', element: <ClawSettingsScreen /> },
-                    ],
-                  },
-                ],
-              },
-              {
-                path: 'onboarding',
-                element: <QuestionnaireScreen />,
-              },
-              {
-                path: 'rca',
-                element: <RCAListScreen />,
-              },
-              {
-                path: 'rca/:rcaId',
-                element: <RCADetailScreen />,
-              },
-              {
-                path: 'chat',
-                element: <ChatScreen />,
-                children: [
-                  // Directory routes (nested under dir)
-                  {
-                    path: 'dir',
-                    children: [
-                      {
-                        index: true,
-                        element: <ChatRedirect />,
-                      },
-                      // Canvas from directory (must come before :channelId)
-                      {
-                        path: 'canvas',
-                        element: <CanvasScreen />,
-                      },
-                      {
-                        path: 'canvas/:canvasId',
-                        element: <CanvasScreen />,
-                      },
-                      // Threads (must come before :channelId)
-                      {
-                        path: 'threads',
-                        element: <UserThreads />,
-                        children: [
-                          { index: true, element: null },
-                          {
-                            path: ':channelId/:conversationId',
-                            element: <ThreadMessages />,
-                          },
-                        ],
-                      },
-                      // Unreads inbox (must come before :channelId)
-                      {
-                        path: 'unreads',
-                        element: <UnreadsInbox />,
-                      },
-                      // Recap (must come before :channelId)
-                      {
-                        path: 'recap',
-                        children: [
-                          {
-                            index: true,
-                            element: <RecapPanel />,
-                          },
-                          {
-                            path: ':channelId',
-                            element: <RecapPanel />,
-                            children: [
-                              {
-                                path: ':conversationId',
-                                element: <ThreadMessages />,
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                      // My Tickets (must come before :channelId)
-                      {
-                        path: 'my-tickets',
-                        element: <MyTicketsScreen />,
-                      },
-                      // Channel routes (must come after specific routes)
-                      {
-                        path: ':channelId',
-                        element: <ChatView />,
-                        children: [
-                          {
-                            index: true,
-                            element: (
-                              <div className='flex items-center justify-center h-full text-muted-foreground'>
-                                Select a conversation to view messages
-                              </div>
-                            ),
-                          },
-                          {
-                            path: 'group/:groupId',
-                            element: <UserGroupSidePanel />,
-                          },
-                          {
-                            path: ':conversationId',
-                            element: <ThreadMessages />,
-                          },
-                          {
-                            path: ':conversationId/profile/:userId',
-                            element: <ProfileSidebar />,
-                          },
-                          {
-                            path: ':conversationId/:ticketId',
-                            element: <ThreadMessages />,
-                          },
-                          {
-                            path: 'profile/:userId',
-                            element: <ProfileSidebar />,
-                          },
-                          {
-                            path: 'tickets/:ticketId',
-                            element: <TicketView />,
-                          },
-                          {
-                            path: 'canvas',
-                            element: <CanvasScreen />,
-                          },
-                          {
-                            path: 'canvas/:canvasId',
-                            element: <CanvasScreen />,
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                  // DM routes (full screen with DM list sidebar)
-                  {
-                    path: 'dm',
-                    element: <DmsPage />,
-                    children: [
-                      { index: true, element: null },
-                      { path: 'compose', element: <KeyedComposeDmPanel /> },
-                      ...sharedChatRoutes,
-                    ],
-                  },
-                  // Bookmarks (full screen with bookmarks list sidebar)
-                  {
-                    path: 'bookmarks',
-                    element: <BookmarksPanel />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
-                  },
-                  // Drafts & Sent combined page
-                  {
-                    path: 'drafts-sent',
-                    element: <DraftsAndSentPage />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
-                  },
-                  // Redirect old drafts route to new combined page
-                  {
-                    path: 'drafts',
-                    element: <Navigate to='../drafts-sent?tab=drafts' replace />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
-                  },
-                  // Redirect old sent route to new combined page
-                  {
-                    path: 'sent',
-                    element: <Navigate to='../drafts-sent?tab=sent' replace />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
-                  },
-                  // Redirect old scheduled route to new combined page
-                  {
-                    path: 'scheduled',
-                    element: <Navigate to='../drafts-sent?tab=scheduled' replace />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
-                  },
-                  // Canvas (full screen with 2-panel layout on desktop)
-                  {
-                    path: 'canvas',
-                    element: <CanvasPanel />,
-                    children: [
-                      {
-                        index: true,
-                        element: null,
-                      },
-                      {
-                        path: ':canvasId',
-                        element: <CanvasScreen />,
-                      },
-                    ],
-                  },
-                  // Activity (full screen with activity list sidebar)
-                  {
-                    path: 'activity',
-                    element: <ActivityListView />,
-                    children: [
-                      { index: true, element: null },
-                      // Desk/Support tickets opened from the Activity list render
-                      // here so the list stays mounted (instead of redirecting to
-                      // the full /support inbox). Static `ticket` segment is matched
-                      // ahead of the shared `:channelId` route.
-                      { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
-                      { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
-                      ...sharedChatRoutes,
-                    ],
-                  },
-                  // Search (full screen)
-                  {
-                    path: 'search',
-                    element: <Search />,
-                  },
-                  // Catch-all redirect for old routes: /chat/:channelId/* -> /chat/dir/:channelId/*
-                  {
-                    path: '*',
-                    element: <DirectoryRedirect />,
-                  },
-                ],
-              },
-              {
-                path: 'search-results',
-                element: <SearchResults />,
-              },
-              {
-                path: 'product-insights',
-                element: (
-                  <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
-                    <ProductInsightsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'ticket-reports',
-                element: (
-                  <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
-                    <TicketReportsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'agents',
-                element: (
-                  <ResourceProtectedRoute resourceName='AGENTS'>
-                    <AgentsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'claw-agents',
-                element: (
-                  <GuestBlockedRoute>
-                    <ClawAgentsScreen />
-                  </GuestBlockedRoute>
-                ),
-                children: [
-                  { index: true, element: <AgentsTab /> },
-                  { path: 'create', element: <ClawAgentCreateScreen /> },
-                  { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
-                  { path: 'mcp', element: <McpTab /> },
-                  { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },
-                  { path: 'skills', element: <SkillsTab /> },
-                  { path: 'skills/create', element: <ClawSkillCreateScreen /> },
-                  { path: 'skills/:skillSlug', element: <ClawSkillDetailScreen /> },
-                  { path: 'subagents', element: <SubagentsTab /> },
-                  { path: 'subagents/create', element: <ClawSubagentCreateScreen /> },
-                  { path: 'subagents/:subagentName', element: <ClawSubagentDetailScreen /> },
-                  { path: 'organization', element: <ClawOrganizationScreen /> },
-                  {
-                    path: 'digital-twin',
-                    element: <ClawDigitalTwinScreen />,
-                    children: [
-                      { index: true, element: <DigitalTwinMemoriesTab /> },
-                      { path: 'hot', element: <DigitalTwinHotTab /> },
-                      { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                      { path: 'recall', element: <DigitalTwinRecallTab /> },
-                      { path: 'graph', element: <DigitalTwinGraphTab /> },
-                      { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                      { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                    ],
-                  },
-                  { path: 'metrics', element: <ClawMetricsScreen /> },
-                  { path: 'settings', element: <ClawSettingsScreen /> },
-                ],
-              },
-              {
-                path: 'knowledge-base',
-                element: <KnowledgeBaseV2Layout />,
-                children: [
-                  {
-                    index: true,
-                    element: <KnowledgeBaseV2Screen />,
-                  },
-                  {
-                    // The file viewer still reads projectId / channelId /
-                    // collectionId / folderId from the URL.
-                    path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-                    element: <FileViewerLayout />,
-                  },
-                  // Back-compat shims: pre-port URLs (path-only nesting) get
-                  // redirected to the new ?cl=&parent= layout so browser
-                  // history entries don't 404 after the route change.
-                  { path: ':projectId', element: <LegacyKbRedirect /> },
-                  { path: ':projectId/:channelId', element: <LegacyKbRedirect /> },
-                  {
-                    path: ':projectId/:channelId/:collectionId',
-                    element: <LegacyKbRedirect />,
-                  },
-                  {
-                    path: ':projectId/:channelId/:collectionId/:folderId',
-                    element: <LegacyKbRedirect />,
-                  },
-                ],
-              },
-              {
-                path: 'memory',
-                element: <MemoryScreen />,
-              },
-              {
-                path: 'analytics',
-                element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
-                    <AnalyticsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'projects',
-                element: (
-                  <ResourceProtectedRoute resourceName='PROJECTS'>
-                    <ProjectsScreen />
-                  </ResourceProtectedRoute>
-                ),
-                children: [
-                  {
-                    index: true,
-                    element: <MyTicketsScreen />,
-                  },
-                  {
-                    path: 'views',
-                    element: <Navigate to='/projects' replace />,
-                  },
-                  {
-                    path: 'views/new',
-                    element: <ProjectViewBuilder />,
-                  },
-                  {
-                    path: 'views/:viewId',
-                    element: <ProjectViewBuilder />,
-                  },
-                  {
-                    path: ':projectId',
-                    element: <KanbanBoardScreen />,
-                  },
-                  {
-                    path: ':projectId/:boardId',
-                    element: <KanbanBoardScreen />,
-                  },
-                  {
-                    path: ':projectId/:boardId/:ticketId',
-                    element: <TicketView />,
-                  },
-                ],
-              },
-              {
-                path: 'team-intelligence',
-                element: (
-                  <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
-                    <TeamIntelligenceScreen />
-                  </ResourceProtectedRoute>
-                ),
-                children: [
-                  {
-                    index: true,
-                    element: <TeamIntelligenceOrgScreen />,
-                  },
-                  {
-                    path: 'team/:teamId',
-                    element: <TeamIntelligenceTeamScreen />,
-                  },
-                  {
-                    path: 'member/:memberEmail',
-                    element: <TeamIntelligenceMemberScreen />,
-                  },
-                ],
-              },
-              {
-                path: 'user-groups',
-                element: (
-                  <ResourceProtectedRoute
-                    resourceName='USER-GROUPS'
-                    minAccess='WRITE'
-                    allowUserGroupCreator
-                  >
-                    <UserGroupsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'listProjects',
-                element: (
-                  <ResourceProtectedRoute resourceName='LISTPROJECTS'>
-                    <ProjectsListView />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'releaseManager',
-                element: <ReleaseManagerView />,
-              },
-              {
-                path: 'listProjects/:projectId',
-                element: <ProjectDetailScreen />,
-              },
-              {
-                path: 'listProjects/:projectId/releases/:releaseTicketId',
-                element: <ReleaseDetailScreen />,
-              },
-              {
-                path: 'calls',
-                element: <CallHistoryScreen />,
-                children: [
-                  {
-                    path: ':callId/detail',
-                    element: <CallDetailScreen />,
-                  },
-                ],
-              },
-              {
-                path: 'calls/:callId/:callType',
-                element: <CallPage />,
-              },
-              {
-                path: 'call/:callId',
-                element: <CallRouteHandler />,
-              },
-              {
-                path: 'recordings',
-                element: <RecordingsRoute />,
-              },
-              {
-                path: 'recordings/:recordingId',
-                element: <RecordingDetailRoute />,
-              },
-              {
-                path: 'user-groups/:userGroupId/assignment-config',
-                element: (
-                  <ResourceProtectedRoute
-                    resourceName='USER-GROUPS'
-                    minAccess='WRITE'
-                    allowUserGroupCreator
-                  >
-                    <AssignmentConfigWrapper />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'analytics-dashboard',
-                element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
-                    <DashboardCreation />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'analytics-dashboard/:dashboardId',
-                element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
-                    <QueryDashboardScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'dashboards',
-                element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
-                    <DynamicDashboardPanel />
-                  </ResourceProtectedRoute>
-                ),
-                children: [
-                  { index: true, element: null },
-                  {
-                    path: ':dashboardId',
-                    element: <DynamicDashboardScreen />,
-                  },
-                ],
-              },
-              {
-                path: 'support',
-                element: (
-                  <ResourceProtectedRoute resourceName='SUPPORT'>
-                    <SaveRoute
-                      keyword='support'
-                      stripSearchParams={['settings', 'openSettings']}
-                      preserveSearchParams={[
-                        'emailConnected',
-                        'emailError',
-                        'channelEmailMailboxConnected',
-                        'deskIntegrations',
-                        'workspaceMailboxConnected',
-                        'email',
-                        'provider',
-                      ]}
-                      redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                    >
-                      <SupportScreen />
-                    </SaveRoute>
-                  </ResourceProtectedRoute>
-                ),
-                children: [
-                  {
-                    path: ':channelId',
-                    element: <Outlet />,
-                    children: [
-                      {
-                        path: ':ticketId',
-                        element: <Outlet />,
-                      },
-                    ],
-                  },
-                ],
-              },
-              {
-                path: 'browser',
-                element: <BrowserTabsScreen />,
-              },
-              {
-                path: 'workspace-management',
-                element: (
-                  <ResourceProtectedRoute resourceName='WORKSPACE'>
-                    <WorkspaceManagementScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'organisations',
-                element: (
-                  <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
-                    <OrganisationsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'forms',
-                element: (
-                  <ResourceProtectedRoute resourceName='FORMS'>
-                    <FormScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'scheduled-messages',
-                element: <ScheduledMessageScreen />,
-              },
-              {
-                path: 'automations',
-                element: <AutomationsListScreen />,
-              },
-              {
-                path: 'automations/approvals',
-                element: <AutomationApprovalsScreen />,
-              },
-              {
-                path: 'automations/new',
-                element: <AutomationBuilderScreen />,
-              },
-              {
-                path: 'automations/:id',
-                element: <AutomationBuilderScreen />,
-              },
-              {
-                path: 'automations/:id/runs',
-                element: <AutomationRunsScreen />,
-              },
-              {
-                path: 'automations/:id/runs/:runId',
-                element: <AutomationRunDetailScreen />,
-              },
-              {
-                path: 'apps',
-                element: <AppsScreen />,
-              },
-              {
-                path: 'resource-access',
-                element: (
-                  <ResourceProtectedRoute resourceName='USERS'>
-                    <ResourceAccessScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'roles',
-                element: (
-                  <ResourceProtectedRoute resourceName='ROLES'>
-                    <RoleManagementScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'jira-migration',
-                element: (
-                  <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                    <JiraMigrationScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'migration/confluence',
-                element: (
-                  <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
-                    <ConfluenceMigrationScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'migration/whatsapp',
-                element: (
-                  <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                    <WhatsAppBulkMigrationScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
-                path: 'guide',
-                element: <UserGuideScreen />,
-              },
-            ],
-          },
-        ],
-      },
+/** Real screen in the SDLC bundle; the framed placeholder in the main one. */
+const SdlcRouteElement = (): ReactElement =>
+  isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
 
-      {
-        path: '/call/:callId',
-        element: (
-          <EncryptionBootstrapProvider>
-            <ZeroProvider>
-              <CallRouteHandler />
-            </ZeroProvider>
-          </EncryptionBootstrapProvider>
-        ),
-      },
-      {
-        path: '/redirected',
-        element: (
-          <EncryptionBootstrapProvider>
-            <ZeroProvider>
-              <CanvasRedirectPage />
-            </ZeroProvider>
-          </EncryptionBootstrapProvider>
-        ),
-      },
-      {
-        path: '/calls/:callId/:callType',
-        element: (
-          <EncryptionBootstrapProvider>
-            <ZeroProvider>
-              <CallPage />
-            </ZeroProvider>
-          </EncryptionBootstrapProvider>
-        ),
-      },
-      {
-        path: '/newWindow/chat/dir',
-        element: (
-          <EncryptionBootstrapProvider>
+export const router = createBrowserRouter(
+  [
+    {
+      element: <ProtectedRoute />,
+      errorElement: <RouterErrorFallback />,
+      children: [
+        {
+          path: '/newWindow/claw',
+          element: <ClawOverlay />,
+        },
+      ],
+    },
+    {
+      element: <SplashScreen />,
+      errorElement: <RouterErrorFallback />,
+      children: [
+        {
+          path: '/',
+          element: <ProtectedRoute />,
+          children: [
+            {
+              index: true,
+              element: <WorkspaceRedirect />,
+            },
+            {
+              path: ':workspaceId',
+              element: <AppRoot />,
+              children: [
+                {
+                  index: true,
+                  element: <HomeScreen />,
+                },
+                {
+                  path: 'ai',
+                  children: [
+                    { index: true, element: <Navigate to='chat/new' replace /> },
+                    { path: 'chat/new', element: <AIScreen /> },
+                    { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                    { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
+                    { path: 'library', element: <AILibraryScreen /> },
+                    {
+                      path: 'admin',
+                      element: (
+                        <RequireClawAdmin>
+                          <AIAdminScreen />
+                        </RequireClawAdmin>
+                      ),
+                    },
+                    { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                    { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                    { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+                    { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+                    { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                    { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+                    { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+                    { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+                    { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                    { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                    {
+                      path: 'organization',
+                      element: (
+                        <RequireOrgManager>
+                          <AIOrganizationScreen />
+                        </RequireOrgManager>
+                      ),
+                    },
+                    {
+                      element: <AISectionLayout />,
+                      children: [
+                        {
+                          path: 'digital-twin',
+                          element: <ClawDigitalTwinScreen />,
+                          children: [
+                            { index: true, element: <DigitalTwinMemoriesTab /> },
+                            { path: 'hot', element: <DigitalTwinHotTab /> },
+                            { path: 'proposals', element: <DigitalTwinProposalsTab /> },
+                            { path: 'recall', element: <DigitalTwinRecallTab /> },
+                            { path: 'graph', element: <DigitalTwinGraphTab /> },
+                            { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
+                            { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                          ],
+                        },
+                        { path: 'metrics', element: <ClawMetricsScreen /> },
+                        { path: 'settings', element: <ClawSettingsScreen /> },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  path: 'onboarding',
+                  element: <QuestionnaireScreen />,
+                },
+                {
+                  path: 'rca',
+                  element: <RCAListScreen />,
+                },
+                {
+                  path: 'rca/:rcaId',
+                  element: <RCADetailScreen />,
+                },
+                {
+                  path: 'chat',
+                  element: <ChatScreen />,
+                  children: [
+                    // Directory routes (nested under dir)
+                    {
+                      path: 'dir',
+                      children: [
+                        {
+                          index: true,
+                          element: <ChatRedirect />,
+                        },
+                        // Canvas from directory (must come before :channelId)
+                        {
+                          path: 'canvas',
+                          element: <CanvasScreen />,
+                        },
+                        {
+                          path: 'canvas/:canvasId',
+                          element: <CanvasScreen />,
+                        },
+                        // Threads (must come before :channelId)
+                        {
+                          path: 'threads',
+                          element: <UserThreads />,
+                          children: [
+                            { index: true, element: null },
+                            {
+                              path: ':channelId/:conversationId',
+                              element: <ThreadMessages />,
+                            },
+                          ],
+                        },
+                        // Unreads inbox (must come before :channelId)
+                        {
+                          path: 'unreads',
+                          element: <UnreadsInbox />,
+                        },
+                        // Recap (must come before :channelId)
+                        {
+                          path: 'recap',
+                          children: [
+                            {
+                              index: true,
+                              element: <RecapPanel />,
+                            },
+                            {
+                              path: ':channelId',
+                              element: <RecapPanel />,
+                              children: [
+                                {
+                                  path: ':conversationId',
+                                  element: <ThreadMessages />,
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        // My Tickets (must come before :channelId)
+                        {
+                          path: 'my-tickets',
+                          element: <MyTicketsScreen />,
+                        },
+                        // Channel routes (must come after specific routes)
+                        {
+                          path: ':channelId',
+                          element: <ChatView />,
+                          children: [
+                            {
+                              index: true,
+                              element: (
+                                <div className='flex items-center justify-center h-full text-muted-foreground'>
+                                  Select a conversation to view messages
+                                </div>
+                              ),
+                            },
+                            {
+                              path: 'group/:groupId',
+                              element: <UserGroupSidePanel />,
+                            },
+                            {
+                              path: ':conversationId',
+                              element: <ThreadMessages />,
+                            },
+                            {
+                              path: ':conversationId/profile/:userId',
+                              element: <ProfileSidebar />,
+                            },
+                            {
+                              path: ':conversationId/:ticketId',
+                              element: <ThreadMessages />,
+                            },
+                            {
+                              path: 'profile/:userId',
+                              element: <ProfileSidebar />,
+                            },
+                            {
+                              path: 'tickets/:ticketId',
+                              element: <TicketView />,
+                            },
+                            {
+                              path: 'canvas',
+                              element: <CanvasScreen />,
+                            },
+                            {
+                              path: 'canvas/:canvasId',
+                              element: <CanvasScreen />,
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    // DM routes (full screen with DM list sidebar)
+                    {
+                      path: 'dm',
+                      element: <DmsPage />,
+                      children: [
+                        { index: true, element: null },
+                        { path: 'compose', element: <KeyedComposeDmPanel /> },
+                        ...sharedChatRoutes,
+                      ],
+                    },
+                    // Bookmarks (full screen with bookmarks list sidebar)
+                    {
+                      path: 'bookmarks',
+                      element: <BookmarksPanel />,
+                      children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    },
+                    // Drafts & Sent combined page
+                    {
+                      path: 'drafts-sent',
+                      element: <DraftsAndSentPage />,
+                      children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    },
+                    // Redirect old drafts route to new combined page
+                    {
+                      path: 'drafts',
+                      element: <Navigate to='../drafts-sent?tab=drafts' replace />,
+                      children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    },
+                    // Redirect old sent route to new combined page
+                    {
+                      path: 'sent',
+                      element: <Navigate to='../drafts-sent?tab=sent' replace />,
+                      children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    },
+                    // Redirect old scheduled route to new combined page
+                    {
+                      path: 'scheduled',
+                      element: <Navigate to='../drafts-sent?tab=scheduled' replace />,
+                      children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    },
+                    // Canvas (full screen with 2-panel layout on desktop)
+                    {
+                      path: 'canvas',
+                      element: <CanvasPanel />,
+                      children: [
+                        {
+                          index: true,
+                          element: null,
+                        },
+                        {
+                          path: ':canvasId',
+                          element: <CanvasScreen />,
+                        },
+                      ],
+                    },
+                    // Activity (full screen with activity list sidebar)
+                    {
+                      path: 'activity',
+                      element: <ActivityListView />,
+                      children: [
+                        { index: true, element: null },
+                        // Desk/Support tickets opened from the Activity list render
+                        // here so the list stays mounted (instead of redirecting to
+                        // the full /support inbox). Static `ticket` segment is matched
+                        // ahead of the shared `:channelId` route.
+                        { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
+                        { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                        ...sharedChatRoutes,
+                      ],
+                    },
+                    // Search (full screen)
+                    {
+                      path: 'search',
+                      element: <Search />,
+                    },
+                    // Catch-all redirect for old routes: /chat/:channelId/* -> /chat/dir/:channelId/*
+                    {
+                      path: '*',
+                      element: <DirectoryRedirect />,
+                    },
+                  ],
+                },
+                {
+                  path: 'search-results',
+                  element: <SearchResults />,
+                },
+                {
+                  path: 'product-insights',
+                  element: (
+                    <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
+                      <ProductInsightsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'ticket-reports',
+                  element: (
+                    <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
+                      <TicketReportsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'agents',
+                  element: (
+                    <ResourceProtectedRoute resourceName='AGENTS'>
+                      <AgentsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'claw-agents',
+                  element: (
+                    <GuestBlockedRoute>
+                      <ClawAgentsScreen />
+                    </GuestBlockedRoute>
+                  ),
+                  children: [
+                    { index: true, element: <AgentsTab /> },
+                    { path: 'create', element: <ClawAgentCreateScreen /> },
+                    { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
+                    { path: 'mcp', element: <McpTab /> },
+                    { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },
+                    { path: 'skills', element: <SkillsTab /> },
+                    { path: 'skills/create', element: <ClawSkillCreateScreen /> },
+                    { path: 'skills/:skillSlug', element: <ClawSkillDetailScreen /> },
+                    { path: 'subagents', element: <SubagentsTab /> },
+                    { path: 'subagents/create', element: <ClawSubagentCreateScreen /> },
+                    { path: 'subagents/:subagentName', element: <ClawSubagentDetailScreen /> },
+                    { path: 'organization', element: <ClawOrganizationScreen /> },
+                    {
+                      path: 'digital-twin',
+                      element: <ClawDigitalTwinScreen />,
+                      children: [
+                        { index: true, element: <DigitalTwinMemoriesTab /> },
+                        { path: 'hot', element: <DigitalTwinHotTab /> },
+                        { path: 'proposals', element: <DigitalTwinProposalsTab /> },
+                        { path: 'recall', element: <DigitalTwinRecallTab /> },
+                        { path: 'graph', element: <DigitalTwinGraphTab /> },
+                        { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
+                        { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                      ],
+                    },
+                    { path: 'metrics', element: <ClawMetricsScreen /> },
+                    { path: 'settings', element: <ClawSettingsScreen /> },
+                  ],
+                },
+                {
+                  path: 'knowledge-base',
+                  element: <KnowledgeBaseV2Layout />,
+                  children: [
+                    {
+                      index: true,
+                      element: <KnowledgeBaseV2Screen />,
+                    },
+                    {
+                      // The file viewer still reads projectId / channelId /
+                      // collectionId / folderId from the URL.
+                      path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                      element: <FileViewerLayout />,
+                    },
+                    // Back-compat shims: pre-port URLs (path-only nesting) get
+                    // redirected to the new ?cl=&parent= layout so browser
+                    // history entries don't 404 after the route change.
+                    { path: ':projectId', element: <LegacyKbRedirect /> },
+                    { path: ':projectId/:channelId', element: <LegacyKbRedirect /> },
+                    {
+                      path: ':projectId/:channelId/:collectionId',
+                      element: <LegacyKbRedirect />,
+                    },
+                    {
+                      path: ':projectId/:channelId/:collectionId/:folderId',
+                      element: <LegacyKbRedirect />,
+                    },
+                  ],
+                },
+                {
+                  path: 'memory',
+                  element: <MemoryScreen />,
+                },
+                {
+                  path: 'analytics',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ANALYTICS'>
+                      <AnalyticsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'projects',
+                  element: (
+                    <ResourceProtectedRoute resourceName='PROJECTS'>
+                      <ProjectsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                  children: [
+                    {
+                      index: true,
+                      element: <MyTicketsScreen />,
+                    },
+                    {
+                      path: 'views',
+                      element: <Navigate to='/projects' replace />,
+                    },
+                    {
+                      path: 'views/new',
+                      element: <ProjectViewBuilder />,
+                    },
+                    {
+                      path: 'views/:viewId',
+                      element: <ProjectViewBuilder />,
+                    },
+                    {
+                      path: ':projectId',
+                      element: <KanbanBoardScreen />,
+                    },
+                    {
+                      path: ':projectId/:boardId',
+                      element: <KanbanBoardScreen />,
+                    },
+                    {
+                      path: ':projectId/:boardId/:ticketId',
+                      element: <TicketView />,
+                    },
+                  ],
+                },
+                {
+                  path: 'sdlc',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:repoId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:repoId/:section',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'team-intelligence',
+                  element: (
+                    <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
+                      <TeamIntelligenceScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                  children: [
+                    {
+                      index: true,
+                      element: <TeamIntelligenceOrgScreen />,
+                    },
+                    {
+                      path: 'team/:teamId',
+                      element: <TeamIntelligenceTeamScreen />,
+                    },
+                    {
+                      path: 'member/:memberEmail',
+                      element: <TeamIntelligenceMemberScreen />,
+                    },
+                  ],
+                },
+                {
+                  path: 'user-groups',
+                  element: (
+                    <ResourceProtectedRoute
+                      resourceName='USER-GROUPS'
+                      minAccess='WRITE'
+                      allowUserGroupCreator
+                    >
+                      <UserGroupsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'listProjects',
+                  element: (
+                    <ResourceProtectedRoute resourceName='LISTPROJECTS'>
+                      <ProjectsListView />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'releaseManager',
+                  element: <ReleaseManagerView />,
+                },
+                {
+                  path: 'listProjects/:projectId',
+                  element: <ProjectDetailScreen />,
+                },
+                {
+                  path: 'listProjects/:projectId/releases/:releaseTicketId',
+                  element: <ReleaseDetailScreen />,
+                },
+                {
+                  path: 'calls',
+                  element: <CallHistoryScreen />,
+                  children: [
+                    {
+                      path: ':callId/detail',
+                      element: <CallDetailScreen />,
+                    },
+                  ],
+                },
+                {
+                  path: 'calls/:callId/:callType',
+                  element: <CallPage />,
+                },
+                {
+                  path: 'call/:callId',
+                  element: <CallRouteHandler />,
+                },
+                {
+                  path: 'recordings',
+                  element: <RecordingsRoute />,
+                },
+                {
+                  path: 'recordings/:recordingId',
+                  element: <RecordingDetailRoute />,
+                },
+                {
+                  path: 'user-groups/:userGroupId/assignment-config',
+                  element: (
+                    <ResourceProtectedRoute
+                      resourceName='USER-GROUPS'
+                      minAccess='WRITE'
+                      allowUserGroupCreator
+                    >
+                      <AssignmentConfigWrapper />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'analytics-dashboard',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ANALYTICS'>
+                      <DashboardCreation />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'analytics-dashboard/:dashboardId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ANALYTICS'>
+                      <QueryDashboardScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'dashboards',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ANALYTICS'>
+                      <DynamicDashboardPanel />
+                    </ResourceProtectedRoute>
+                  ),
+                  children: [
+                    { index: true, element: null },
+                    {
+                      path: ':dashboardId',
+                      element: <DynamicDashboardScreen />,
+                    },
+                  ],
+                },
+                {
+                  path: 'support',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SUPPORT'>
+                      <SaveRoute
+                        keyword='support'
+                        stripSearchParams={['settings', 'openSettings']}
+                        preserveSearchParams={[
+                          'emailConnected',
+                          'emailError',
+                          'channelEmailMailboxConnected',
+                          'deskIntegrations',
+                          'workspaceMailboxConnected',
+                          'email',
+                          'provider',
+                        ]}
+                        redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                      >
+                        <SupportScreen />
+                      </SaveRoute>
+                    </ResourceProtectedRoute>
+                  ),
+                  children: [
+                    {
+                      path: ':channelId',
+                      element: <Outlet />,
+                      children: [
+                        {
+                          path: ':ticketId',
+                          element: <Outlet />,
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  path: 'browser',
+                  element: <BrowserTabsScreen />,
+                },
+                {
+                  path: 'workspace-management',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKSPACE'>
+                      <WorkspaceManagementScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'organisations',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
+                      <OrganisationsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'forms',
+                  element: (
+                    <ResourceProtectedRoute resourceName='FORMS'>
+                      <FormScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'scheduled-messages',
+                  element: <ScheduledMessageScreen />,
+                },
+                {
+                  path: 'automations',
+                  element: <AutomationsListScreen />,
+                },
+                {
+                  path: 'automations/approvals',
+                  element: <AutomationApprovalsScreen />,
+                },
+                {
+                  path: 'automations/new',
+                  element: <AutomationBuilderScreen />,
+                },
+                {
+                  path: 'automations/:id',
+                  element: <AutomationBuilderScreen />,
+                },
+                {
+                  path: 'automations/:id/runs',
+                  element: <AutomationRunsScreen />,
+                },
+                {
+                  path: 'automations/:id/runs/:runId',
+                  element: <AutomationRunDetailScreen />,
+                },
+                {
+                  path: 'apps',
+                  element: <AppsScreen />,
+                },
+                {
+                  path: 'resource-access',
+                  element: (
+                    <ResourceProtectedRoute resourceName='USERS'>
+                      <ResourceAccessScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'roles',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ROLES'>
+                      <RoleManagementScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'jira-migration',
+                  element: (
+                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                      <JiraMigrationScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'migration/confluence',
+                  element: (
+                    <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
+                      <ConfluenceMigrationScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'migration/whatsapp',
+                  element: (
+                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                      <WhatsAppBulkMigrationScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'guide',
+                  element: <UserGuideScreen />,
+                },
+              ],
+            },
+          ],
+        },
+
+        {
+          path: '/call/:callId',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <CallRouteHandler />
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+        },
+        {
+          path: '/redirected',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <CanvasRedirectPage />
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+        },
+        {
+          path: '/calls/:callId/:callType',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <CallPage />
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+        },
+        {
+          path: '/newWindow/chat/dir',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <EditProvider>
+                      <div className='h-full bg-background'>
+                        <Outlet />
+                      </div>
+                      <AttachmentGalleryModal />
+                      <AttachmentCitationPreview />
+                      <ThreadCitationModal />
+                      <TranscriptCitationModal />
+                    </EditProvider>
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+          children: [
+            {
+              path: ':channelId',
+              element: <ChatView />,
+            },
+            {
+              path: ':channelId/:conversationId',
+              element: <ThreadMessages />,
+            },
+            {
+              path: ':channelId/:conversationId/:ticketId',
+              element: <ThreadMessages />,
+            },
+          ],
+        },
+        {
+          path: '/newWindow/create-ticket',
+          element: (
             <ZeroProvider>
               <ZeroFallbackProvider>
                 <InitialStateLoader>
                   <EditProvider>
                     <div className='h-full bg-background'>
-                      <Outlet />
+                      <CreateTicketWindow />
                     </div>
                     <AttachmentGalleryModal />
-                    <AttachmentCitationPreview />
-                    <ThreadCitationModal />
-                    <TranscriptCitationModal />
                   </EditProvider>
                 </InitialStateLoader>
               </ZeroFallbackProvider>
             </ZeroProvider>
-          </EncryptionBootstrapProvider>
-        ),
-        children: [
-          {
-            path: ':channelId',
-            element: <ChatView />,
-          },
-          {
-            path: ':channelId/:conversationId',
-            element: <ThreadMessages />,
-          },
-          {
-            path: ':channelId/:conversationId/:ticketId',
-            element: <ThreadMessages />,
-          },
-        ],
-      },
-      {
-        path: '/newWindow/create-ticket',
-        element: (
-          <ZeroProvider>
-            <ZeroFallbackProvider>
-              <InitialStateLoader>
-                <EditProvider>
-                  <div className='h-full bg-background'>
-                    <CreateTicketWindow />
-                  </div>
-                  <AttachmentGalleryModal />
-                </EditProvider>
-              </InitialStateLoader>
-            </ZeroFallbackProvider>
-          </ZeroProvider>
-        ),
-      },
-      {
-        path: '/invite',
-        element: <AcceptInvitation />,
-      },
-      {
-        path: '/community',
-        element: <CommunityWorkspaceSelectionRoute />,
-      },
-      {
-        path: '/auth',
-        element: <AuthScreen />,
-      },
-      {
-        path: '/workspaces',
-        element: <WorkspaceSelectionScreen />,
-      },
-      {
-        path: '/no-access',
-        element: <NoOrganizationAccessScreen />,
-      },
-      {
-        path: '/launch',
-        element: <LaunchScreen />,
-      },
-      {
-        path: '/system',
-        element: <SystemPalette />,
-      },
-    ],
-  },
-  // Last, so it only matches once every route above has failed to.
-  {
-    path: '*',
-    element: <NotFoundScreen />,
-    errorElement: <RouterErrorFallback />,
-  },
-]);
+          ),
+        },
+        {
+          path: '/invite',
+          element: <AcceptInvitation />,
+        },
+        {
+          path: '/community',
+          element: <CommunityWorkspaceSelectionRoute />,
+        },
+        {
+          path: '/auth',
+          element: <AuthScreen />,
+        },
+        {
+          path: '/workspaces',
+          element: <WorkspaceSelectionScreen />,
+        },
+        {
+          path: '/no-access',
+          element: <NoOrganizationAccessScreen />,
+        },
+        {
+          path: '/launch',
+          element: <LaunchScreen />,
+        },
+        {
+          path: '/system',
+          element: <SystemPalette />,
+        },
+      ],
+    },
+    // Last, so it only matches once every route above has failed to.
+    {
+      path: '*',
+      element: <NotFoundScreen />,
+      errorElement: <RouterErrorFallback />,
+    },
+  ],
+  // The lane serves under /sdlc-app; every route above is matched relative to it.
+  APP_BASE_PATH === '/' ? undefined : { basename: APP_BASE_PATH },
+);

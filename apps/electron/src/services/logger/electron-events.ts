@@ -35,6 +35,7 @@ const ElectronEvent = {
     MEETING_APP_IDENTIFIED: 'meeting_app_identified',
     MEETING_POPUP_SHOWN: 'meeting_popup_shown',
     MEETING_POPUP_SKIPPED_LOGGED_OUT: 'meeting_popup_skipped_logged_out',
+    MEETING_POPUP_SKIPPED_RECORDING: 'meeting_popup_skipped_recording',
     MEETING_POPUP_DISMISSED: 'meeting_popup_dismissed',
     MEETING_POPUP_START_RECORDING: 'meeting_popup_start_recording',
     MEETING_POPUP_HIDDEN: 'meeting_popup_hidden',

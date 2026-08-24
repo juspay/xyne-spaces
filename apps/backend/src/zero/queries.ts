@@ -2,6 +2,8 @@ import {
   createBuilder,
   defineQueries,
   type AnyQueryRegistry,
+  type AnyQueryDefinition,
+  type QueryRegistry,
 } from '@rocicorp/zero';
 import {
   AccessType,
@@ -4011,8 +4013,30 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('name', 'asc');
     },
   ),
+
+  conversationLabelsByChannelIdV2: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
+    ({ args: { channelId } }) => {
+      return zql.conversation_labels
+        .where('channelId', channelId)
+        .orderBy('name', 'asc');
+    },
+  ),
+  // @deprecated Use conversationLabelMappingsByConversationIdV2 when channel membership is known.
   conversationLabelMappingsByConversationId: defineQuery(
     z.object({ conversationId: z.string() }),
+    ({ args: { conversationId } }) => {
+      return zql.conversation_label_mappings
+        .where('conversationId', conversationId)
+        .orderBy('labelName', 'asc');
+    },
+  ),
+  conversationLabelMappingsByConversationIdV2: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { conversationId } }) => {
       return zql.conversation_label_mappings
         .where('conversationId', conversationId)
@@ -4033,6 +4057,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   // KEEP IN SYNC with shared/src/zero/queries.ts mailbox queries.
   myTicketMailbox: defineQuery(
     z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_user_mailbox.where('ticketId', ticketId);
+    },
+  ),
+  myTicketMailboxV2: defineQuery(
+    z.object({
+      ticketId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { ticketId } }) => {
       return zql.ticket_user_mailbox.where('ticketId', ticketId);
     },
@@ -4105,6 +4139,157 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllRepos: defineQuery(() => {
     return zql.repos.orderBy('name', 'asc');
   }),
+  getSdlcRepos: defineQuery(() => {
+    return zql.repos
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project')
+      .related('channel', channel => channel.related('participants').related('channelStats'))
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .orderBy('name', 'asc');
+  }),
+  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  getSdlcRepoByChannelId: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  ),
+  getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
+    return zql.repos
+      .where('id', repoId)
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project')
+      .related('channel', channel =>
+        channel
+          .related('participants')
+          .related('channelStats')
+          .related('canvasFolders', folder =>
+            folder
+              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
+              .related('canvases', canvas => canvas.related('sdlcArtifact')),
+          ),
+      )
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .one();
+  }),
+  getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
+    return zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc');
+  }),
+  sdlcTicketsByIds: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) =>
+      zql.tickets
+        .where(helpers =>
+          helpers.cmp(
+            'id',
+            'IN',
+            ticketIds.length > 0 ? ticketIds : ['__no_sdlc_ticket__'],
+          ),
+        )
+        .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
+  ),
+  sdlcDiscussionConversations: defineQuery(
+    z.object({
+      channelId: z.string(),
+      conversationIds: z.array(z.string()),
+      limit: z.number().int().min(1),
+    }),
+    ({ ctx, args: { channelId, conversationIds, limit } }) =>
+      zql.conversations
+        .where('channelId', channelId)
+        .where(helpers =>
+          helpers.cmp(
+            'conversationId',
+            'IN',
+            conversationIds.length > 0 ? conversationIds : ['__no_sdlc_conversation__'],
+          ),
+        )
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        )
+        .related('participants', participantQuery =>
+          participantQuery.where('userId', ctx.userID).orderBy('joinedAt', 'asc'),
+        )
+        .orderBy('lastActivityAt', 'desc')
+        .limit(limit),
+  ),
+  sdlcDiscussionConversation: defineQuery(
+    z.object({ channelId: z.string(), conversationId: z.string() }),
+    ({ ctx, args: { channelId, conversationId } }) =>
+      zql.conversations
+        .where('channelId', channelId)
+        .where('conversationId', conversationId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        )
+        .related('participants', participantQuery =>
+          participantQuery.where('userId', ctx.userID).orderBy('joinedAt', 'asc'),
+        )
+        .one(),
+  ),
+  sdlcUserActivities: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number().int().min(1).max(50),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { channelId, limit, start } }) => {
+      let query = zql.activities
+        .where('userId', ctx.userID)
+        .where('channelId', channelId)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
+      }
+      return query
+        .limit(limit)
+        .related('message', message => message.related('conversation').related('attachments'))
+        .related('reaction')
+        .related('canvas')
+        .related('call')
+        .related('ticket');
+    },
+  ),
+  sdlcRelatedConversations: defineQuery(
+    z.object({ conversationIds: z.array(z.string()) }),
+    ({ args: { conversationIds } }) =>
+      zql.conversations.where(helpers =>
+        helpers.cmp(
+          'conversationId',
+          'IN',
+          conversationIds.length > 0 ? conversationIds : ['__no_sdlc_related_conversation__'],
+        ),
+      ),
+  ),
   getAllForms: defineQuery(() => {
     return zql.forms
       .related('formFields', q => q.related('globalField'))
@@ -4601,6 +4786,29 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Every latest, non-deleted file across a whole collection (matched on
+  // rootCollectionId, so it spans subfolders). Powers the root "collection
+  // status" drawer, which lists each file's ingestion status + size.
+  collectionFilesByRoot: defineQuery(
+    z.object({ rootCollectionId: z.string() }),
+    ({ args: { rootCollectionId } }) => {
+      return zql.collection_items
+        .where('rootCollectionId', rootCollectionId)
+        .where('isLatest', true)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc')
+        // The attachment joins on entityId only; a collection_item's id (a globally
+        // unique cuid) never keys a non-COLLECTION attachment, so an entityType
+        // filter would be redundant. Only isDeleted matters — skip soft-deleted rows.
+        .related('attachment', a => a.where('isDeleted', false));
+    },
+  ),
+
+  // Single collection by id (e.g. to resolve its name for an Activity row).
+  collectionById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.collections.where('id', id).where('deletedAt', 'IS', null);
+  }),
+
   // Root collections, optionally filtered by scope. Pass { scopeType, scopeId } to
   // scope to a channel; pass {} for ALL collections the user can access (Ask AI
   // picker from any chat). Access is enforced by the collections ACL either way.
@@ -4612,6 +4820,24 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // Like `scopedCollections`, but also relates every latest, non-deleted file
+  // in each collection (via rootCollectionId) so the KB root view can show a
+  // per-collection "X / Y ingested" rollup. Kept separate from
+  // `scopedCollections` so the Ask-AI collection pickers don't pay to sync all
+  // item rows.
+  scopedCollectionsWithItems: defineQuery(
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
+    ({ ctx, args: { scopeType, scopeId } }) => {
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
+        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('allItems', i => i.where('isLatest', true).where('deletedAt', 'IS', null))
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -5056,4 +5282,4 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('userMappings')
       .one();
   }),
-});
+}) as unknown as QueryRegistry<Record<string, AnyQueryDefinition>, typeof schema>;
