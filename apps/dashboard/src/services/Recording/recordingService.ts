@@ -354,6 +354,14 @@ class RecordingService {
     return response.data;
   }
 
+  /** Generate topical labels for a recording that has none yet. Returns the new tag ids. */
+  async generateLabels(callId: string): Promise<string[]> {
+    const response: AxiosResponse<{ success: true; labelIds: string[] }> = await apiInstance.post(
+      `/calls/recordings/${callId}/generate-labels`,
+    );
+    return response.data.labelIds;
+  }
+
   /** `title` names the new doc; omitted, the backend falls back to the recording title. */
   async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(

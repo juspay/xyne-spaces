@@ -151,7 +151,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(availableLabels);
 
   const isManualLabel = useCallback(
-    (label: string): boolean => resolveMethod(label) !== TagMethod.LLM,
+    (label: string): boolean => resolveMethod(label) === TagMethod.MANUAL,
     [resolveMethod],
   );
   const manualLabels = useMemo(
@@ -607,6 +607,9 @@ const RecordingsV2Screen = (): ReactElement => {
                           currentUser?.id,
                         )}
                         tags={row.recording.labels.filter(isManualLabel)}
+                        suggestedTags={row.recording.labels.filter(
+                          label => resolveMethod(label) === TagMethod.AUTOMATED,
+                        )}
                         resolveLabel={resolveLabel}
                         currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}

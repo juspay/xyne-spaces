@@ -24,6 +24,20 @@ export function markResolvedRecordingLabelMethod(id: string, method: TagMethod):
   notifyCacheListeners();
 }
 
+/** Confirm an AI-suggested tag in place (optimistic MANUAL flip, reverts to `revertMethod` on failure). */
+export async function confirmRecordingLabelSuggestion(
+  id: string,
+  revertMethod: TagMethod,
+): Promise<void> {
+  markResolvedRecordingLabelMethod(id, TagMethod.MANUAL);
+  try {
+    await tagsApi.confirmTag(id);
+  } catch (err) {
+    markResolvedRecordingLabelMethod(id, revertMethod);
+    throw err;
+  }
+}
+
 /** Never rejects: a failed batch leaves its ids uncached so a later render retries them. */
 async function fetchLabelBatch(ids: string[]): Promise<void> {
   try {
