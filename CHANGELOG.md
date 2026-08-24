@@ -1,3 +1,10 @@
+## [1.211.1](https://github.com/juspay/xyne-spaces/compare/v1.211.0...v1.211.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* decoupling projects ([#622](https://github.com/juspay/xyne-spaces/issues/622)) ([d38d214](https://github.com/juspay/xyne-spaces/commit/d38d214459ca833bc4edabd60da444ec6a87b8f5))
+
 ## [1.211.0](https://github.com/juspay/xyne-spaces/compare/v1.210.0...v1.211.0) (2026-08-24)
 
 
