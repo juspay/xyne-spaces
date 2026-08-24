@@ -118,7 +118,9 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
     ...(ctx.fastMode ? { speed: 'fast' as const } : {}),
-    ...(ctx.model ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) } : {}),
+    ...(ctx.model
+      ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
+      : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     researchContext: ctx.research,
   };

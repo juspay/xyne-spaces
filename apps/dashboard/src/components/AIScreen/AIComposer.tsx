@@ -213,7 +213,10 @@ function ToolbarButton({
 /** Per-run thinking level for the composer. null = the agent's configured
  *  default. Applies to whichever provider serves the run (same precedence as
  *  the agent's modelSettings.thinkingLevel). */
-const THINKING_LEVEL_OPTIONS: Array<{ value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null; label: string }> = [
+const THINKING_LEVEL_OPTIONS: Array<{
+  value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  label: string;
+}> = [
   { value: null, label: 'Default' },
   { value: 'off', label: 'Off' },
   { value: 'minimal', label: 'Minimal' },
@@ -259,7 +262,8 @@ function ModelThinkingSelector({
     if (!q) return models;
     return models.filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
   }, [models, query]);
-  const thinkingLabel = THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
+  const thinkingLabel =
+    THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
 
   const rowClass = (active: boolean) =>
     cn(
@@ -283,7 +287,13 @@ function ModelThinkingSelector({
         <button
           type='button'
           disabled={disabled}
-          title={selected ? selected.id : defaultModel ? `Recommended (${defaultModel})` : 'Recommended model'}
+          title={
+            selected
+              ? selected.id
+              : defaultModel
+                ? `Recommended (${defaultModel})`
+                : 'Recommended model'
+          }
           aria-label='Model and thinking'
           data-track-category='XyneAI'
           data-track-name='OPEN_MODEL_SELECTOR'
@@ -320,9 +330,13 @@ function ModelThinkingSelector({
           className={rowClass(selectedModel === null)}
         >
           <span className='flex flex-col items-start gap-0.5'>
-            <span className='font-medium'>{defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}</span>
+            <span className='font-medium'>
+              {defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}
+            </span>
             {defaultModel && (
-              <span className='text-[11px] text-muted-foreground truncate max-w-full'>(Recommended)</span>
+              <span className='text-[11px] text-muted-foreground truncate max-w-full'>
+                (Recommended)
+              </span>
             )}
           </span>
           {selectedModel === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
@@ -339,6 +353,8 @@ function ModelThinkingSelector({
                 onChange={e => setQuery(e.target.value)}
                 placeholder='Search models…'
                 data-id='model-search'
+                data-track-category='XyneAI'
+                data-track-name='SEARCH_MODELS'
                 className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
               />
             </div>
@@ -361,7 +377,9 @@ function ModelThinkingSelector({
                     className={rowClass(selectedModel === m.id)}
                   >
                     <span className='font-medium truncate'>{formatModelLabel(m.name)}</span>
-                    {selectedModel === m.id && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+                    {selectedModel === m.id && (
+                      <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+                    )}
                   </button>
                 ))
               )}
@@ -376,11 +394,17 @@ function ModelThinkingSelector({
             type='button'
             onClick={() => setThinkingOpen(v => !v)}
             data-id='thinking-expand'
+            data-track-category='XyneAI'
+            data-track-name='TOGGLE_THINKING_MENU'
             aria-expanded={thinkingOpen}
             className='flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
           >
             <span className='flex items-center gap-1.5 font-medium'>
-              <Brain className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden strokeWidth={1.75} />
+              <Brain
+                className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                aria-hidden
+                strokeWidth={1.75}
+              />
               Thinking
             </span>
             <span className='flex items-center gap-1 text-muted-foreground'>
@@ -399,10 +423,15 @@ function ModelThinkingSelector({
                     setOpen(false);
                   }}
                   data-id={`thinking-option-${o.label.toLowerCase()}`}
+                  data-track-category='XyneAI'
+                  data-track-name='SELECT_THINKING_LEVEL'
+                  data-track-metadata={JSON.stringify({ level: o.label })}
                   className={rowClass(o.value === thinkingLevel)}
                 >
                   <span>{o.label}</span>
-                  {o.value === thinkingLevel && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+                  {o.value === thinkingLevel && (
+                    <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+                  )}
                 </button>
               ))}
             </div>
@@ -458,7 +487,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   // configured in the DB. Both reset when the agent changes — a pick from one
   // agent's list may not exist on another's.
   const [selectedModel, setSelectedModel] = useState<string | null>(() => seed.model);
-  const [thinkingLevel, setThinkingLevel] = useState<'off' | 'minimal' | 'low' | 'medium' | 'high' | null>(() => seed.thinkingLevel);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(() => seed.thinkingLevel);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
