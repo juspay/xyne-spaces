@@ -2994,7 +2994,7 @@ model Canvas {
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
   commentThreads CanvasCommentThread[]
-  suggestions  CanvasSuggestion[]
+  suggestionChanges CanvasSuggestionChange[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
@@ -3047,46 +3047,26 @@ model CanvasVersion {
   @@schema("public")
 }
 
-model CanvasSuggestion {
-  workspaceId String // denormalized tenant key (stamped on insert)
-  id          String   @id @default(cuid())
-  canvasId    String
-  baseBlockIds Json @default("[]")
-  status          String    @default("PENDING") // PENDING | ACCEPTED | REJECTED | STALE
-  createdBy String // the user the agent acted for (no FK constraint)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  canvas  Canvas                   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
-  changes CanvasSuggestionChange[]
-
-  // Deliberately NO @@unique on content: unlike CanvasVersion, an agent may
-  // propose the same text twice and both proposals must be storable.
-  @@index([canvasId, status, createdAt])
-  @@index([createdBy])
-  @@map("canvas_suggestions")
-  @@schema("public")
-}
-
-
 model CanvasSuggestionChange {
-  workspaceId  String // denormalized tenant key (stamped on insert)
-  id           String @id @default(cuid())
-  suggestionId String
-  op String // replace | insert_after | delete
-  blockId String?
-  basePos      Int?
-  beforeContent Json? 
-  afterContent  Json? 
-  status          String    @default("PENDING") // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE
-  orderIndex Int // display order, and tiebreak for inserts sharing an anchor
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  workspaceId      String // denormalized tenant key (stamped on insert)
+  id               String   @id @default(cuid())
+  canvasId         String
+  batchId          String // one agent proposal session; grouping + accept-all scope
+  op               String // insert | replace | delete | move
+  blockId          String? // target block for replace/delete/move; null for insert
+  proposedAnchorId String? // insert/move: block it follows at proposal time; immutable; null = top of doc
+  currentAnchorId  String? // insert/move: forwarding address; deletion events update this only
+  orderIndex       Int // position in the agent's reply
+  beforeContent    Json? // replace/delete: block snapshot for diff display + conflict hash
+  afterContent     Json? // insert/replace: proposed content
+  status           String   @default("PENDING") // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE | SUPERSEDED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  suggestion CanvasSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  canvas Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
 
-  @@index([suggestionId, orderIndex])
-  @@index([blockId])
+  @@index([canvasId, status])
+  @@index([batchId])
   @@map("canvas_suggestion_changes")
   @@schema("public")
 }

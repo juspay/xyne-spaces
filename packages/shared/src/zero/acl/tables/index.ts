@@ -94,7 +94,6 @@ export { AgentsACL } from './agents-acl';
 export { ApplicationReleaseTicketsACL } from './application-release-tickets-acl';
 export { ApplicationsACL } from './applications-acl';
 export { CanvasVersionsACL } from './canvas-versions-acl';
-export { CanvasSuggestionsACL } from './canvas-suggestions-acl';
 export { CanvasSuggestionChangesACL } from './canvas-suggestion-changes-acl';
 export { ChannelUserStatusACL } from './channel-user-status-acl';
 export { ClassificationMappingsACL } from './classification-mappings-acl';

@@ -1354,31 +1354,20 @@ export const canvasVersionTable = table('canvas_versions')
   })
   .primaryKey('id');
 
-export const canvasSuggestionTable = table('canvas_suggestions' /* CanvasSuggestion */)
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    canvasId: string(),
-    baseBlockIds: json(),
-    status: string(), // PENDING | ACCEPTED | REJECTED | STALE
-    createdBy: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey('id');
-
 export const canvasSuggestionChangeTable = table('canvas_suggestion_changes' /* CanvasSuggestionChange */)
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    suggestionId: string(),
-    op: string(), // replace | insert_after | delete
-    blockId: string().optional(),
-    basePos: number().optional(),
+    canvasId: string(),
+    batchId: string(), // one agent proposal session; grouping + accept-all scope
+    op: string(), // insert | replace | delete | move
+    blockId: string().optional(), // target block for replace/delete/move; null for insert
+    proposedAnchorId: string().optional(), // insert/move: block it follows at proposal time; immutable
+    currentAnchorId: string().optional(), // insert/move: forwarding address; deletion events update this
+    orderIndex: number(), // position in the agent's reply
     beforeContent: json().optional(),
     afterContent: json().optional(),
-    status: string(), // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE
-    orderIndex: number(),
+    status: string(), // PENDING | ACCEPTED | REJECTED | STALE | SUPERSEDED
     createdAt: number(),
     updatedAt: number(),
   })
@@ -4001,29 +3990,13 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
   }),
 }));
 
-export const canvasSuggestionTableRelationships = relationships(
-  canvasSuggestionTable,
-  ({ one, many }) => ({
+export const canvasSuggestionChangeTableRelationships = relationships(
+  canvasSuggestionChangeTable,
+  ({ one }) => ({
     canvas: one({
       sourceField: ['canvasId'],
       destField: ['id'],
       destSchema: canvasTable,
-    }),
-    changes: many({
-      sourceField: ['id'],
-      destField: ['suggestionId'],
-      destSchema: canvasSuggestionChangeTable,
-    }),
-  }),
-);
-
-export const canvasSuggestionChangeTableRelationships = relationships(
-  canvasSuggestionChangeTable,
-  ({ one }) => ({
-    suggestion: one({
-      sourceField: ['suggestionId'],
-      destField: ['id'],
-      destSchema: canvasSuggestionTable,
     }),
   }),
 );
@@ -4860,7 +4833,6 @@ export const schema = createSchema({
     canvasFolderTable,
     canvasTable,
     canvasVersionTable,
-    canvasSuggestionTable,
     canvasSuggestionChangeTable,
     canvasCommentThreadTable,
     canvasCommentTable,
@@ -4992,7 +4964,6 @@ export const schema = createSchema({
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasVersionTableRelationships,
-    canvasSuggestionTableRelationships,
     canvasSuggestionChangeTableRelationships,
     canvasCommentThreadTableRelationships,
     canvasCommentTableRelationships,

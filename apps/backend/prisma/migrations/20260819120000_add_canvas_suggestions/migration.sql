@@ -1,29 +1,26 @@
--- CreateTable
-CREATE TABLE "public"."canvas_suggestions" (
-    "workspaceId" TEXT NOT NULL,
-    "id" TEXT NOT NULL,
-    "canvasId" TEXT NOT NULL,
-    "baseBlockIds" JSONB NOT NULL DEFAULT '[]',
-    "status" TEXT NOT NULL DEFAULT 'PENDING',
-    "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+-- Canvas suggestion mode: agent edits to non-empty canvases are parked as
+-- per-block pending changes (insert/replace/delete/move) for human review.
+-- One table; a batchId groups the rows of one agent proposal session.
 
-    CONSTRAINT "canvas_suggestions_pkey" PRIMARY KEY ("id")
-);
+-- DropTables (replaces the earlier two-table layout of this same migration;
+-- branch was never deployed, so no environment has the old shape)
+DROP TABLE IF EXISTS "public"."canvas_suggestion_changes";
+DROP TABLE IF EXISTS "public"."canvas_suggestions";
 
 -- CreateTable
 CREATE TABLE "public"."canvas_suggestion_changes" (
     "workspaceId" TEXT NOT NULL,
     "id" TEXT NOT NULL,
-    "suggestionId" TEXT NOT NULL,
+    "canvasId" TEXT NOT NULL,
+    "batchId" TEXT NOT NULL,
     "op" TEXT NOT NULL,
     "blockId" TEXT,
-    "basePos" INTEGER,
+    "proposedAnchorId" TEXT,
+    "currentAnchorId" TEXT,
+    "orderIndex" INTEGER NOT NULL,
     "beforeContent" JSONB,
     "afterContent" JSONB,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
-    "orderIndex" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -31,14 +28,7 @@ CREATE TABLE "public"."canvas_suggestion_changes" (
 );
 
 -- CreateIndex
-CREATE INDEX "canvas_suggestions_canvasId_status_createdAt_idx" ON "public"."canvas_suggestions"("canvasId", "status", "createdAt");
+CREATE INDEX "canvas_suggestion_changes_canvasId_status_idx" ON "public"."canvas_suggestion_changes"("canvasId", "status");
 
 -- CreateIndex
-CREATE INDEX "canvas_suggestions_createdBy_idx" ON "public"."canvas_suggestions"("createdBy");
-
--- CreateIndex
-CREATE INDEX "canvas_suggestion_changes_suggestionId_orderIndex_idx" ON "public"."canvas_suggestion_changes"("suggestionId", "orderIndex");
-
--- CreateIndex
-CREATE INDEX "canvas_suggestion_changes_blockId_idx" ON "public"."canvas_suggestion_changes"("blockId");
-
+CREATE INDEX "canvas_suggestion_changes_batchId_idx" ON "public"."canvas_suggestion_changes"("batchId");
