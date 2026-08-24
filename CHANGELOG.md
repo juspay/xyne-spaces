@@ -1,3 +1,10 @@
+## [1.213.3](https://github.com/juspay/xyne-spaces/compare/v1.213.2...v1.213.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* Add retry button for failed LLM calls ([#963](https://github.com/juspay/xyne-spaces/issues/963)) ([ba84cff](https://github.com/juspay/xyne-spaces/commit/ba84cffdd13c0442055ecdc73948b0e26443cb94))
+
 ## [1.213.2](https://github.com/juspay/xyne-spaces/compare/v1.213.1...v1.213.2) (2026-08-24)
 
 
