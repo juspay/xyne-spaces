@@ -1,3 +1,10 @@
+## [1.213.0](https://github.com/juspay/xyne-spaces/compare/v1.212.0...v1.213.0) (2026-08-24)
+
+
+### Features
+
+* report PR ticket validation as a GitHub commit status ([#889](https://github.com/juspay/xyne-spaces/issues/889)) ([9e987a3](https://github.com/juspay/xyne-spaces/commit/9e987a324a94acec66ae9084d6a6c915ed6bbb27))
+
 ## [1.212.0](https://github.com/juspay/xyne-spaces/compare/v1.211.3...v1.212.0) (2026-08-24)
 
 
