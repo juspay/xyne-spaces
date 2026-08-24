@@ -45,7 +45,8 @@
     "db:common:deploy": "prisma migrate deploy --schema prisma-common/schema.prisma",
     "db:common:push": "dotenv -e .env.local -- sh -c 'prisma db push --schema prisma-common/schema.prisma'",
     "db:common:studio": "dotenv -e .env.local -- sh -c 'prisma studio --schema prisma-common/schema.prisma'",
-    "prepare": "husky"
+    "prepare": "husky",
+    "encryption:backfill": "dotenv -e .env.local -- tsx src/migration/scripts/backfillEncryptionKeyRotation.ts"
   },
   "keywords": [
     "xyne",
