@@ -1,4 +1,11 @@
-import { type ReactElement, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type TouchEvent as ReactTouchEvent,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -13,11 +20,7 @@ import {
   type RecordingDetail,
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
-import {
-  logRecordingError,
-  resolveRecordingTitle,
-  type RecordingTitleState,
-} from '../../../utils/recordingUtils';
+import { logRecordingError, type RecordingTitleState } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
 import { RecordingParticipants } from './RecordingParticipants';
@@ -60,6 +63,47 @@ const HeaderTitle = ({
     <span className='truncate'>{title}</span>
   );
 
+export interface EditableTitleInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  disabled: boolean;
+  className: string;
+  trackCategory: string;
+  onMouseDown?: (event: ReactMouseEvent<HTMLInputElement>) => void;
+  onTouchStart?: (event: ReactTouchEvent<HTMLInputElement>) => void;
+}
+
+export const EditableTitleInput = ({
+  value,
+  onChange,
+  onSave,
+  onKeyDown,
+  disabled,
+  className,
+  trackCategory,
+  onMouseDown,
+  onTouchStart,
+}: EditableTitleInputProps): ReactElement => (
+  <input
+    type='text'
+    value={value}
+    onChange={event => onChange(event.target.value)}
+    onBlur={onSave}
+    onFocus={event => event.currentTarget.select()}
+    onKeyDown={onKeyDown}
+    disabled={disabled}
+    className={className}
+    // eslint-disable-next-line jsx-a11y/no-autofocus
+    autoFocus
+    data-track-category={trackCategory}
+    data-track-name='edit_title_input'
+    {...(onMouseDown ? { onMouseDown } : {})}
+    {...(onTouchStart ? { onTouchStart } : {})}
+  />
+);
+
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
@@ -81,11 +125,8 @@ export const RecordingDetailV2Header = ({
   const isOwner = recording.createdByUserId === currentUser?.id;
   const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
   const isGeneratingTitle = titleState?.kind === 'generating';
-  const displayTitle =
-    titleState && titleState.kind !== 'generating'
-      ? titleState.text
-      : resolveRecordingTitle(recording.title);
   const {
+    currentTitle,
     isEditingTitle,
     editedTitle,
     isSavingTitle,
@@ -100,6 +141,8 @@ export const RecordingDetailV2Header = ({
     disabled: isGeneratingTitle,
     context: 'RecordingDetailV2Header',
   });
+  const displayTitle =
+    titleState && titleState.kind !== 'generating' ? titleState.text : currentTitle;
   // A still-running recording has no length yet, so the meta line is just when it started.
   const durationMs =
     recording.durationMs ??
@@ -205,19 +248,14 @@ export const RecordingDetailV2Header = ({
                 >
                   {editedTitle || ' '}
                 </span>
-                <input
-                  type='text'
+                <EditableTitleInput
                   value={editedTitle}
-                  onChange={event => handleTitleChange(event.target.value)}
-                  onBlur={() => void handleSaveTitle()}
-                  onFocus={event => event.currentTarget.select()}
+                  onChange={handleTitleChange}
+                  onSave={() => void handleSaveTitle()}
                   onKeyDown={handleTitleKeyDown}
                   disabled={isSavingTitle}
                   className='absolute inset-0 w-full bg-transparent border-0 p-0 text-3xl font-medium text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='edit_title_input'
+                  trackCategory='RecordingDetailV2'
                 />
               </div>
             </div>

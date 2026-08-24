@@ -17,8 +17,9 @@ import { CollaborativeCanvasEditor } from '../../../components/Canvas/Collaborat
 import { LiveTranscriptList } from '../../../components/Notetaker/LiveTranscriptList';
 import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
 import { useEditableRecordingTitle } from '../../RecordingDetailV2Screen/useEditableRecordingTitle';
+import { EditableTitleInput } from '../../RecordingDetailV2Screen/components/RecordingDetailV2Header';
+import { RecordingVisualizer } from '../../RecordingDetailV2Screen/components/LiveRecordingControlBar';
 import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
-import { resolveRecordingTitle } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import {
@@ -101,6 +102,7 @@ const RecordingPanelHeader = ({
   onTitleUpdated,
 }: RecordingPanelHeaderProps): ReactElement => {
   const {
+    currentTitle,
     isEditingTitle,
     editedTitle,
     isSavingTitle,
@@ -114,7 +116,6 @@ const RecordingPanelHeader = ({
     onTitleUpdated,
     context: 'NoteTakerOverlay',
   });
-  const displayTitle = resolveRecordingTitle(title);
 
   const stopPointerPropagation = (event: ReactMouseEvent | ReactTouchEvent): void => {
     event.stopPropagation();
@@ -136,21 +137,16 @@ const RecordingPanelHeader = ({
         {isPaused ? 'Recording paused' : 'Recording'}
       </span>
       {isEditingTitle ? (
-        <input
-          type='text'
+        <EditableTitleInput
           value={editedTitle}
-          onChange={event => handleTitleChange(event.target.value)}
-          onBlur={() => void handleSaveTitle()}
-          onFocus={event => event.currentTarget.select()}
+          onChange={handleTitleChange}
+          onSave={() => void handleSaveTitle()}
           onKeyDown={handleTitleKeyDown}
           onMouseDown={stopPointerPropagation}
           onTouchStart={stopPointerPropagation}
           disabled={isSavingTitle}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
           className='min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-sm font-semibold tracking-tight text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
-          data-track-category={TRACK_CATEGORY}
-          data-track-name='edit_title_input'
+          trackCategory={TRACK_CATEGORY}
         />
       ) : (
         <div className='w-full'>
@@ -172,9 +168,9 @@ const RecordingPanelHeader = ({
           >
             <h2
               className='truncate text-sm font-semibold tracking-tight text-foreground w-min max-w-64'
-              title={displayTitle}
+              title={currentTitle}
             >
-              {displayTitle}
+              {currentTitle}
             </h2>
           </div>
         </div>
@@ -383,27 +379,14 @@ const RecordingControlBar = ({
   );
 };
 
-const PILL_WAVE_BAR_COUNT = 4;
-
 const PillWaveform = ({ isPaused }: { isPaused: boolean }): ReactElement => (
-  <div
-    className='flex h-3 items-center gap-0.5'
+  <span
     role='img'
     aria-label={isPaused ? 'Audio paused' : 'Audio waveform visualization'}
+    className='inline-flex items-center'
   >
-    {Array.from({ length: PILL_WAVE_BAR_COUNT }, (_, i) =>
-      isPaused ? (
-        <div key={i} className='h-1 w-0.5 rounded-full bg-muted-foreground' aria-hidden='true' />
-      ) : (
-        <div
-          key={i}
-          className='rec-overlay-waveform-bar h-3 w-0.5 rounded-full bg-status-success !opacity-100'
-          style={{ animation: `recWaveBar 0.55s ease-in-out ${i * 0.08}s infinite alternate` }}
-          aria-hidden='true'
-        />
-      ),
-    )}
-  </div>
+    <RecordingVisualizer isAnimated={!isPaused} size='sm' colorClassName='bg-status-success' />
+  </span>
 );
 
 const PILL_COLLAPSED_WIDTH_PX = 40;

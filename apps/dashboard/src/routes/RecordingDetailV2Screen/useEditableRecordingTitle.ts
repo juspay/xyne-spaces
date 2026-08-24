@@ -13,6 +13,7 @@ export interface UseEditableRecordingTitleOptions {
 }
 
 export interface UseEditableRecordingTitleResult {
+  currentTitle: string;
   isEditingTitle: boolean;
   editedTitle: string;
   isSavingTitle: boolean;
@@ -104,6 +105,7 @@ export const useEditableRecordingTitle = ({
   };
 
   return {
+    currentTitle,
     isEditingTitle,
     editedTitle,
     isSavingTitle,
