@@ -57,6 +57,67 @@ const log = createLogger("subagent-tools");
  */
 const SUBAGENT_CACHE_TTL_MS = 30 * 60 * 1000;
 
+export interface SubagentArtifact {
+  relPath: string;
+  marker: string;
+  fileName: string;
+  mimeType: string;
+  sha256: string;
+}
+
+function encodeArtifactPart(value: string): string {
+  return encodeURIComponent(value).replace(/%20/g, "+");
+}
+
+export function parseSubagentArtifact(toolName: string, resultText: string): SubagentArtifact | null {
+  if (!toolName.endsWith("__spaces-fetch-attachment") && toolName !== "spaces-fetch-attachment") return null;
+
+  const markerMatch = /^Workspace file marker:\s*(\{\{file:([^}]+)\}\})\s*$/m.exec(resultText);
+  const metadataMatch = /^Attachment metadata:\s*(\{.*\})\s*$/m.exec(resultText);
+  if (!markerMatch || !metadataMatch) return null;
+
+  try {
+    const metadata = JSON.parse(metadataMatch[1]!) as Record<string, unknown>;
+    const fileName = typeof metadata["fileName"] === "string" ? metadata["fileName"] : null;
+    const mimeType = typeof metadata["mimeType"] === "string" ? metadata["mimeType"] : null;
+    const sha256 = typeof metadata["sha256"] === "string" ? metadata["sha256"] : null;
+    if (!fileName || !mimeType || !sha256 || !/^[a-f0-9]{64}$/i.test(sha256)) return null;
+    return {
+      marker: markerMatch[1]!,
+      relPath: markerMatch[2]!,
+      fileName,
+      mimeType,
+      sha256,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function renderSubagentArtifacts(artifacts: SubagentArtifact[]): string {
+  if (artifacts.length === 0) return "";
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const artifact of artifacts) {
+    const key = `${artifact.sha256}:${artifact.relPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const artifactId = artifact.sha256.slice(0, 16);
+    const machineMarker = `[SUBAGENT_ARTIFACT:spaces:${artifactId}:${encodeArtifactPart(artifact.fileName)}:${encodeArtifactPart(artifact.mimeType)}]`;
+    lines.push(
+      `- ${machineMarker} path=\`${artifact.relPath}\` marker=\`${artifact.marker}\` fileName=\`${artifact.fileName}\` mimeType=\`${artifact.mimeType}\` sha256=\`${artifact.sha256}\``,
+    );
+  }
+  if (lines.length === 0) return "";
+  return [
+    "",
+    "---",
+    "**Subagent artifacts available to parent**",
+    "These files were fetched by the child tool and written into the parent workspace `.context/` directory. For MCP tools that accept file input, pass the `marker` value so bytes are forwarded out-of-band instead of through model context.",
+    ...lines,
+  ].join("\n");
+}
+
 /**
  * Per-call timeout for stdio MCPs spawned from xyne-claw (deepwiki, context7,
  * playwright). The `@modelcontextprotocol/sdk` runs an internal timer
@@ -642,6 +703,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // verbatim to the returned text (below) so the parent always has the exact
       // [clf-…#n] tokens to cite, independent of how the inner LLM summarized.
       const citedToolOutputs: string[] = [];
+      // Child `spaces-fetch-attachment` calls persist files into the parent workspace.
+      // Capture their deterministic file markers here and append them to the wrapper
+      // result so the parent can pass `{{file:.context/...}}` to a later MCP tool
+      // (for example GitHub `upload-pr-attachment`) without routing base64 through
+      // either LLM.
+      const subagentArtifacts: SubagentArtifact[] = [];
       let turnStartedAt: number | null = null;
       let firstDeltaAt: number | null = null;
       let turnStreamChars = 0;
@@ -994,6 +1061,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               if (resStr && /\[clf-[^#\s[\]]+#\d+\]/i.test(resStr)) {
                 citedToolOutputs.push(resStr);
               }
+              const artifact = parseSubagentArtifact(event.toolName, resStr);
+              if (artifact) {
+                subagentArtifacts.push(artifact);
+              }
             } catch { /* ignore non-serializable results */ }
 
             // Tier 2: stream nested child invocation up to the parent's progressUrl
@@ -1219,6 +1290,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // unusual but possible. Keep the original fallback wording so callers
           // that special-case "(No findings)" don't regress.
           text = "(No findings)";
+        }
+
+        const artifactAppendix = renderSubagentArtifacts(subagentArtifacts);
+        if (artifactAppendix) {
+          text += artifactAppendix;
+          log.info(`[${def.name}] Appended ${subagentArtifacts.length} subagent artifact marker(s) to parent-visible result`);
         }
 
         // Citation-token safety net: surface any `[clf-…#n]` token from the raw
