@@ -7232,6 +7232,21 @@ const spacesVespaSearch: ToolDef = {
       const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
       const rankProfile = args["rankProfile"] != null ? String(args["rankProfile"]) : undefined;
+      // `fields` — INTERNAL, deliberately absent from inputSchema.
+      //
+      // Column projection (`select <cols>` instead of `select *`), used by
+      // xyne-claw's prefetch to sample many hits for their channelId without
+      // dragging message bodies across the wire (60 hits: ~460KB -> ~20KB).
+      // It is NOT advertised to the model on purpose: it is a performance knob
+      // with no bearing on WHICH rows match, so exposing it would only add a
+      // dimension for the model to reason about and get wrong. The schema sets
+      // no top-level additionalProperties:false, so a caller that knows about
+      // it can pass it; everyone else gets full rows exactly as before.
+      // Entries are validated in buildYqlFromParams against the area's own
+      // columns — nothing raw reaches the YQL.
+      const fields = Array.isArray(args["fields"])
+        ? (args["fields"] as unknown[]).map(String).filter(Boolean)
+        : undefined;
 
       // Tenant scope — every direct-Vespa query is confined to the caller's
       // workspace, resolved from the user record (public.users). Refuse to run
@@ -7247,6 +7262,7 @@ const spacesVespaSearch: ToolDef = {
         {
           searchArea,
           query,
+          ...(fields && fields.length > 0 ? { fields } : {}),
           ...(filters ? { filters } : {}),
           ...(docType ? { docType } : {}),
           ...(groupBy ? { groupBy } : {}),
