@@ -17,13 +17,34 @@ function normalizeOption(option: unknown): string | UserQuestionOption | null {
 }
 
 export const ASK_QUESTION_CONFIG_SCHEMA = {
-  CLAW_AUTH_URL: {
+  XYNE_CLAW_AUTH_URL: {
     label: "Claw Auth Service URL",
     default: "http://localhost:3003",
     required: true as const,
-    placeholder: "http://localhost:3003",
+    placeholder: "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003",
   },
 };
+
+function normalizeBaseUrl(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().replace(/\/+$/, "") : null;
+}
+
+function errorCauseMessage(err: unknown): string | null {
+  if (!(err instanceof Error)) return null;
+  const cause = (err as Error & { cause?: unknown }).cause;
+  if (!cause) return null;
+  if (cause instanceof Error) return cause.message;
+  if (typeof cause === "object") {
+    const record = cause as Record<string, unknown>;
+    const code = typeof record["code"] === "string" ? record["code"] : undefined;
+    const syscall = typeof record["syscall"] === "string" ? record["syscall"] : undefined;
+    const address = typeof record["address"] === "string" ? record["address"] : undefined;
+    const port = typeof record["port"] === "number" || typeof record["port"] === "string" ? String(record["port"]) : undefined;
+    const hostname = typeof record["hostname"] === "string" ? record["hostname"] : undefined;
+    return [code, syscall, hostname ?? address, port].filter(Boolean).join(" ") || JSON.stringify(cause);
+  }
+  return String(cause);
+}
 
 export const askUserQuestion: ToolDefinition = {
   slug: "ask-user-question",
@@ -77,12 +98,18 @@ export const askUserQuestion: ToolDefinition = {
     if (new Set(questions.map(question => question.id)).size !== questions.length) return "Error: each question id must be unique.";
 
     const meta = context.meta ?? {};
-    const authUrl = context.config["CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    const authUrl =
+      normalizeBaseUrl(context.config["XYNE_CLAW_AUTH_URL"]) ??
+      normalizeBaseUrl(process.env["XYNE_CLAW_AUTH_URL"]) ??
+      normalizeBaseUrl(context.config["CLAW_AUTH_URL"]) ??
+      normalizeBaseUrl(process.env["CLAW_AUTH_URL"]) ??
+      "http://localhost:3003";
+    const pendingQuestionsUrl = `${authUrl}/claw/api/v1/pending-questions`;
     const questionId = crypto.randomUUID();
 
     // Store question in xyne-claw-auth Redis
     try {
-      const res = await fetch(`${authUrl}/claw/api/v1/pending-questions`, {
+      const res = await fetch(pendingQuestionsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -108,7 +135,9 @@ export const askUserQuestion: ToolDefinition = {
       const data = (await res.json()) as { success: boolean; error?: string };
       if (!data.success) return `Error storing question: ${data.error ?? "unknown"}`;
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      const message = err instanceof Error ? err.message : String(err);
+      const cause = errorCauseMessage(err);
+      return `Error posting question to ${pendingQuestionsUrl}: ${message}${cause ? ` (${cause})` : ""}`;
     }
 
     // Push to pendingQuestions collector so it's included in callback
