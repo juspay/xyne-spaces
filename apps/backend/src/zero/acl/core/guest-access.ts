@@ -10,31 +10,6 @@ export type TicketScope = {
   projectId: string;
 };
 
-/**
- * @deprecated Project-level guest grants have been removed. Guests get access
- * via channel participation or direct channel/canvas grants only.
- */
-export async function hasGuestProjectAccess(
-  _ctx: QueryContext,
-  _tx: Transaction<Schema>,
-  _projectId: string,
-): Promise<boolean> {
-  return false;
-}
-
-/**
- * @deprecated Project-level guest grants have been removed. Guests get access
- * via channel participation or direct channel/canvas grants only.
- */
-export async function hasGuestProjectAccessForUser(
-  _ctx: QueryContext,
-  _tx: Transaction<Schema>,
-  _userId: string,
-  _projectId: string,
-): Promise<boolean> {
-  return false;
-}
-
 export async function hasGuestChannelAccess(
   ctx: QueryContext,
   tx: Transaction<Schema>,

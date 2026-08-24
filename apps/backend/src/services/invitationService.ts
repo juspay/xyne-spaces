@@ -167,10 +167,6 @@ export class InvitationService {
       throw new Error('Guest invitations must target a channel or canvas');
     }
 
-    if (invitationRole === 'GUEST' && params.entityType === GuestEntity.PROJECT) {
-      throw new Error('Project-level guest invitations are no longer supported; invite the guest to a specific channel instead');
-    }
-
     if (invitationRole === 'GUEST' && params.entityId && params.entityType) {
       await this.validateGuestEntity(params.entityId, params.entityType, workspaceId);
     }

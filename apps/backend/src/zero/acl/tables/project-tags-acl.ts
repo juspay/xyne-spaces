@@ -6,7 +6,6 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-// hasGuestProjectAccess removed — project-level guest grants no longer exist
 
 export class ProjectTagsACL extends BaseACL<'project_tags'> {
 
