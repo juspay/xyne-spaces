@@ -200,6 +200,7 @@ export function useDeskSettingsForm(
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
+    appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -228,6 +229,7 @@ export function useDeskSettingsForm(
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
   const metricsEnabled = pref.draft.metricsEnabled;
   const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
+  const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
   const boardId = emailChannelPreference?.boardId ?? null;
   const classificationEnabledDraft = cls.draft.enabled;
   const classificationEnabledSaved = classificationConfig?.enabled ?? false;
@@ -260,6 +262,10 @@ export function useDeskSettingsForm(
   const setMetricsEnabled = (checked: boolean) => {
     if (!canManage) return;
     pref.setField('metricsEnabled', checked);
+  };
+  const setAppWebhookDeliveryEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pref.setField('appWebhookDeliveryEnabled', checked);
   };
   const setFrtStageNames = (updater: string[] | ((prev: string[]) => string[])) => {
     if (!canManage) return;
@@ -339,6 +345,9 @@ export function useDeskSettingsForm(
       }
       if (d.metricsEnabled !== s.metricsEnabled) {
         patch.metricsEnabled = d.metricsEnabled;
+      }
+      if (d.appWebhookDeliveryEnabled !== s.appWebhookDeliveryEnabled) {
+        patch.appWebhookDeliveryEnabled = d.appWebhookDeliveryEnabled;
       }
       if (d.frtStageNames !== s.frtStageNames) {
         const names = parseFrtStageNames(d.frtStageNames);
@@ -453,6 +462,8 @@ export function useDeskSettingsForm(
     setMetricsEnabled,
     frtStageNames,
     setFrtStageNames,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
     boardId,
     clawAgents,
     classificationEnabledDraft,

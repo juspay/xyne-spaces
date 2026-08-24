@@ -123,18 +123,23 @@ export function buildBaselineDraftMarkdown(
   ].join('\n');
 }
 
-export function finalizeBaselineMetadata(kind: SdlcBaselineKind, metadata: Metadata): Metadata {
+/**
+ * Validates that every required section exists, then returns the deduplicated
+ * source references collected across sections. The caller resets the canvas
+ * metadata to {} and stores the references on the sdlc_artifacts row.
+ */
+export function finalizeBaselineDraft(
+  kind: SdlcBaselineKind,
+  metadata: Metadata
+): BaselineSourceReference[] {
   const missing = baselineDraftMissingSections(kind, metadata);
   if (missing.length > 0) {
     throw new Error(`Cannot finalize ${kind}; missing sections: ${missing.join(', ')}`);
   }
-  const rest = Object.fromEntries(
-    Object.entries(metadata).filter(([key]) => key !== 'draftSections')
-  );
   const sourceReferences = Object.values(baselineDraftSections(metadata)).flatMap(
     section => section.sourceReferences
   );
-  const uniqueSourceReferences = [
+  return [
     ...new Map(
       sourceReferences.map(reference => [
         JSON.stringify([
@@ -148,19 +153,6 @@ export function finalizeBaselineMetadata(kind: SdlcBaselineKind, metadata: Metad
       ])
     ).values(),
   ];
-  return {
-    ...rest,
-    generationStatus: 'READY',
-    completedSections: definitionFor(kind).sections.map((section) => section.key),
-    sdlcSourceReferences: uniqueSourceReferences,
-  };
-}
-
-export function isCompletedBaselineMetadata(metadata: Metadata | null | undefined): boolean {
-  return (
-    metadata?.artifactKind === 'BASELINE' &&
-    (metadata.generationStatus === undefined || metadata.generationStatus === 'READY')
-  );
 }
 
 export function baselineRefreshChanged(
