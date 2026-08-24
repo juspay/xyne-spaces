@@ -188,6 +188,11 @@ const XyneAIRequestSchemaV2 = z.object({
    *  no-ops the pin when it can't serve it, so an unservable id can't silently
    *  swap the model. */
   model: z.string().min(1).optional(),
+  /** Which provider the model pin rides: "litellm" = the agent's shared
+   *  LiteLLM credential, "spaces" = the keyless platform provider (the models
+   *  endpoint's pinProvider says which). Defaults to "litellm" for old
+   *  clients. */
+  modelProvider: z.enum(['litellm', 'spaces']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -282,6 +287,7 @@ export class XyneAIControllerV2 {
       draftMode,
       provider,
       model,
+      modelProvider,
       agentSlug,
     } = parseResult.data;
 
@@ -533,7 +539,7 @@ export class XyneAIControllerV2 {
           // agentConfig: claw-auth merges that over the agent's stored config,
           // and its platform-key strip covers secrets but NOT `tools` /
           // `subagents` / `outputFormat`. A bare model id can't reach those.
-          ...(model && { providerOverride: { provider: 'litellm', model } }),
+          ...(model && { providerOverride: { provider: modelProvider ?? 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
@@ -1110,7 +1116,8 @@ export class XyneAIControllerV2 {
     try {
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
-        req.params['slug']
+        req.params['slug'],
+        (req as any).user?.workspaceId
       );
       res.json(result);
     } catch (error) {

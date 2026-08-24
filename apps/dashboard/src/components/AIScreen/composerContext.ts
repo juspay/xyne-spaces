@@ -44,6 +44,9 @@ export interface ComposerContext {
    *  null = "Default" — the model configured in the DB. A pick is the source of
    *  truth for the run: it overrides the agent's configured model. */
   model: string | null;
+  /** Which provider the model pin rides — the models endpoint's pinProvider.
+   *  null when no model is picked. */
+  modelProvider: 'litellm' | 'spaces' | null;
   /** Per-run thinking level from the composer's thinking dropdown.
    *  null = the agent's configured default. */
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
@@ -64,6 +67,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   instant: false,
   fastMode: false,
   model: null,
+  modelProvider: null,
   thinkingLevel: null,
 };
 
@@ -114,7 +118,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
     ...(ctx.fastMode ? { speed: 'fast' as const } : {}),
-    ...(ctx.model ? { model: ctx.model } : {}),
+    ...(ctx.model ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) } : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     researchContext: ctx.research,
   };

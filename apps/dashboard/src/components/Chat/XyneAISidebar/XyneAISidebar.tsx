@@ -764,6 +764,7 @@ const XyneAISidebar = ({
     }),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
+    modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
   });
 
   // Start fresh chat when startFreshChat flag is set

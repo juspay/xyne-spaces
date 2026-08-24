@@ -34,6 +34,10 @@ export interface StreamOverrides {
    *  `model` (the sidebar's picker), which itself defaults to the DB-configured
    *  model. A pick is the source of truth for the run. */
   model?: string | null;
+  /** Which provider a model pin rides — the models endpoint's pinProvider
+   *  ("litellm" = the agent's shared credential, "spaces" = the keyless
+   *  platform provider). Only sent alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces' | null;
   /** Per-run thinking level. Absent = the agent's configured default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
@@ -72,6 +76,8 @@ interface UseXyneAIStreamParams {
   agentSlug?: string | null;
   /** Per-run model pin from the composer's model picker. Null = agent default. */
   model?: string | null;
+  /** pinProvider for the hook-level `model` (see StreamOverrides.modelProvider). */
+  modelProvider?: 'litellm' | 'spaces' | null;
   /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
   suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
@@ -136,6 +142,7 @@ export const useXyneAIStream = ({
   activities,
   agentSlug,
   model,
+  modelProvider,
   suppressCompletionToast,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
@@ -300,6 +307,7 @@ export const useXyneAIStream = ({
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
       const eSpeed = ov?.speed;
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
+      const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
       const eThinkingLevel = ov?.thinkingLevel;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
@@ -440,6 +448,7 @@ export const useXyneAIStream = ({
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
           ...(isV2 && eModel ? { model: eModel } : {}),
+          ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
           ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
           version: isV2 ? 'v2' : 'v1',

@@ -501,6 +501,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
+  const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
+
   const buildContext = useCallback(
     (): ComposerContext => ({
       channels: selections.channels,
@@ -517,6 +519,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       instant,
       fastMode: fastModeConfigured ? fastModeEnabled : false,
       model: selectedModel,
+      modelProvider: selectedModel ? modelPinProvider : null,
       thinkingLevel,
     }),
     [
@@ -530,6 +533,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       fastModeConfigured,
       fastModeEnabled,
       selectedModel,
+      modelPinProvider,
       thinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
@@ -1059,6 +1063,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
+              {showAgentSelector && (
+                <AIAgentSelector
+                  disabled={pending}
+                  onAgentChange={slug => onAgentChange?.(slug, buildContext())}
+                />
+              )}
               <ModelThinkingSelector
                 models={agentModelsData?.models ?? []}
                 defaultModel={agentModelsData?.defaultModel ?? null}
@@ -1068,12 +1078,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 onSelectThinking={setThinkingLevel}
                 disabled={pending}
               />
-              {showAgentSelector && (
-                <AIAgentSelector
-                  disabled={pending}
-                  onAgentChange={slug => onAgentChange?.(slug, buildContext())}
-                />
-              )}
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
