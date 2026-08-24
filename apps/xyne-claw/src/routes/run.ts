@@ -174,6 +174,8 @@ interface ActiveRunControl {
    *  run before the queued follow-up is dispatched. Unlike /cancel, this must
    *  complete with a posted result so the transcript remains linear. */
   gracefulInterruptRequested?: boolean;
+  gracefulInterruptSummaryTimer?: ReturnType<typeof setTimeout>;
+  requestGracefulInterruptSummary?: () => Promise<boolean>;
   hasCallbackUrl?: boolean;
   sseClientAttached?: boolean;
   sseReconnectGraceTimer?: ReturnType<typeof setTimeout>;
@@ -852,6 +854,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       typeof callbackUrl === "string" ? callbackUrl : undefined,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+      if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
     });
     return;
@@ -984,6 +987,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         clearTimeout(activeRun.sseReconnectGraceTimer);
       }
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+      if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
@@ -1079,6 +1083,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     typeof callbackUrl === "string" ? callbackUrl : undefined,
   ).finally(() => {
     if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+    if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
     activeRuns.delete(sessionId);
   });
 });
@@ -1321,10 +1326,27 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
   }
 
   // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // same-user follow-up wants the active turn to produce/post what it has, then
-  // let claw-auth drain the queued follow-up as the next user turn.
+  // same-user follow-up wants the active turn to summarize/post what it has, then
+  // let claw-auth drain the queued follow-up as the next user turn. Prefer a
+  // model-generated summary via steering, but keep a bounded hard-abort fallback
+  // so a stuck tool/provider cannot block the new prompt forever.
   active.gracefulInterruptRequested = true;
-  active.abortController.abort();
+  if (!active.gracefulInterruptSummaryTimer) {
+    const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
+    const delay = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 15_000;
+    active.gracefulInterruptSummaryTimer = setTimeout(() => {
+      if (!active.abortController.signal.aborted) {
+        clog.warn(`[run] interrupt-with-reply summary timed out; aborting session=${sessionId}`);
+        active.abortController.abort();
+      }
+    }, delay);
+    active.gracefulInterruptSummaryTimer.unref?.();
+  }
+  void active.requestGracefulInterruptSummary?.().then((queued) => {
+    if (!queued && !active.abortController.signal.aborted) {
+      active.abortController.abort();
+    }
+  });
   res.json({ success: true, sessionId, status: "interrupt_requested" });
 });
 
@@ -1410,6 +1432,24 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
     res.status(500).json({ success: false, error: "Failed to clone session" });
   }
 });
+
+function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: string[]; toolInvocations?: Array<{ toolName?: string; isError?: boolean }> }): string {
+  const trimmed = partialResult.trim();
+  const details: string[] = [];
+  const tools = [...new Set(fallback?.toolsUsed ?? [])].slice(0, 8);
+  if (tools.length > 0) details.push(`Tools used so far: ${tools.join(", ")}.`);
+  const invocations = fallback?.toolInvocations ?? [];
+  if (invocations.length > 0) {
+    const lastTool = [...invocations].reverse().find((inv) => typeof inv.toolName === "string" && inv.toolName.trim().length > 0);
+    details.push(`Tool calls completed so far: ${invocations.length}${lastTool?.toolName ? `; latest: ${lastTool.toolName}${lastTool.isError ? " (failed)" : ""}.` : "."}`);
+  }
+  const fallbackText = details.length > 0
+    ? details.join("\n")
+    : "I had not produced a stable partial result yet.";
+  return trimmed
+    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+}
 
 async function processTask(
   sessionId: string,
@@ -3990,6 +4030,13 @@ async function processTask(
         ...(catalogActive ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
         ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
         handoff: handoffControl,
+        gracefulInterrupt: {
+          isRequested: () => activeRuns.get(sessionId)?.gracefulInterruptRequested === true,
+          registerSummaryRequest: (requestSummary) => {
+            const active = activeRuns.get(sessionId);
+            if (active) active.requestGracefulInterruptSummary = requestSummary;
+          },
+        },
       });
 
     // Capture provider-fallback context so an empty FINAL result can tell the
@@ -4342,6 +4389,28 @@ async function processTask(
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
         status: "cancelled",
+      });
+      return;
+    }
+
+    if (activeRuns.get(sessionId)?.gracefulInterruptRequested === true) {
+      log(`Session interrupted with model summary: ${sessionId}`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: buildInterruptSummary(callbackResultText, {
+          toolsUsed: combinedToolsUsed,
+          toolInvocations: result.toolInvocations,
+        }),
+        toolsUsed: combinedToolsUsed,
+        tokenUsage: result.tokenUsage,
+        ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        provider: completedProvider,
+        model: completedModel,
       });
       return;
     }
@@ -4763,15 +4832,10 @@ async function processTask(
       const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
       if (gracefulInterrupt) {
         log(`Session interrupted with reply: ${sessionId}`);
-        const interruptSummary = partialResult
-          ? `✅ Picked up your new message and I’m switching to it now.
-
-**Summary of the work so far:**
-
-${partialResult}`
-          : `✅ Picked up your new message and I’m switching to it now.
-
-**Summary of the work so far:** I had not produced a stable partial result yet.`;
+        const interruptSummary = buildInterruptSummary(partialResult, err instanceof RunCancelledError ? {
+          toolsUsed: err.toolsUsed,
+          toolInvocations: err.toolInvocations,
+        } : undefined);
         await sendCallback(callbackUrl, sessionToken, {
           sessionId,
           userId,
