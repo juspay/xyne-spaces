@@ -1,10 +1,11 @@
 import { createHash } from 'crypto';
+import { isBaselineCanvasType, parseSdlcSourcePaths, parseSdlcSourceReferences } from '@xyne/shared';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { normalizeWikiRelativePath } from './wiki/wikiPaths';
+import { isWikiArchiveFolder, normalizeWikiRelativePath } from './wiki/wikiPaths';
 import {
   parseWikiExecutionContext,
   parseWikiExecutionOutput,
@@ -28,7 +29,7 @@ interface ResolvedArtifact {
   path: string | null;
   artifactKind: 'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC';
   archived: boolean;
-  metadata: Record<string, unknown>;
+  content: Prisma.JsonValue | null;
 }
 
 function metadataRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
@@ -37,20 +38,25 @@ function metadataRecord(value: Prisma.JsonValue | null): Record<string, unknown>
     : {};
 }
 
-function sourceReferences(value: unknown): NonNullable<WikiRevisionEvidence['sourceReferences']> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap(item => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-    const candidate = item as Record<string, unknown>;
-    if (typeof candidate.path !== 'string' || typeof candidate.commitSha !== 'string') return [];
-    return [{
-      path: candidate.path,
-      commitSha: candidate.commitSha,
-      ...(typeof candidate.symbol === 'string' ? { symbol: candidate.symbol } : {}),
-      ...(typeof candidate.startLine === 'number' ? { startLine: candidate.startLine } : {}),
-      ...(typeof candidate.endLine === 'number' ? { endLine: candidate.endLine } : {}),
-    }];
-  });
+function wikiActionFromVersionName(name: string): WikiRevisionEvidence['action'] | null {
+  if (name.startsWith('Wiki audit @')) return 'refined';
+  const match = name.match(/: (create|created|update|updated|archive|archived|restore|restored|moved)$/);
+  if (!match) return null;
+  const raw = match[1];
+  if (raw === 'create' || raw === 'created') return 'created';
+  if (raw === 'archive' || raw === 'archived') return 'archived';
+  if (raw === 'restore' || raw === 'restored') return 'restored';
+  if (raw === 'moved') return 'moved';
+  return 'updated';
+}
+
+function artifactKindForCanvasType(
+  artifactType: string | null | undefined
+): ResolvedArtifact['artifactKind'] | null {
+  if (artifactType === 'WIKI' || artifactType === 'PRD' || artifactType === 'TECH_DOC') {
+    return artifactType;
+  }
+  return isBaselineCanvasType(artifactType) ? 'BASELINE' : null;
 }
 
 function shortCommitRef(commitSha: string): string {
@@ -130,21 +136,25 @@ export class SdlcArtifactVersionStore {
         channelId: repo.channelId,
         workspaceId: input.workspaceId,
         projectId: repo.projectId,
+        sdlcArtifact: { is: { artifactStatus: { not: 'REFRESH_CANDIDATE' } } },
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, title: true, metadata: true, updatedAt: true },
+      select: {
+        id: true,
+        title: true,
+        sdlcArtifact: { select: { artifactType: true } },
+        metadata: true,
+        updatedAt: true,
+        folder: { select: { name: true } },
+      },
     });
     const wanted = new Set(input.kinds ?? []);
     return canvases.flatMap(canvas => {
       const metadata = metadataRecord(canvas.metadata);
-      if (metadata.surface !== 'SDLC' || metadata.repoId !== input.repoId) return [];
-      const artifactKind = metadata.documentKind === 'WIKI'
-        ? 'WIKI'
-        : String(metadata.artifactKind ?? '');
-      if (metadata.refreshCandidate === true) return [];
-      if (!['WIKI', 'BASELINE', 'PRD', 'TECH_DOC'].includes(artifactKind)) return [];
-      if (wanted.size > 0 && !wanted.has(artifactKind as ResolvedArtifact['artifactKind'])) return [];
-      const archived = artifactKind === 'WIKI' && typeof metadata.wikiArchivedAt === 'string';
+      const artifactKind = artifactKindForCanvasType(canvas.sdlcArtifact?.artifactType);
+      if (!artifactKind) return [];
+      if (wanted.size > 0 && !wanted.has(artifactKind)) return [];
+      const archived = artifactKind === 'WIKI' && isWikiArchiveFolder(canvas.folder?.name);
       if (archived && !input.includeArchived) return [];
       return [{
         canvasId: canvas.id,
@@ -299,16 +309,22 @@ export class SdlcArtifactVersionStore {
             channelId: repo.channelId,
             workspaceId: input.workspaceId,
             projectId: repo.projectId,
+            sdlcArtifact: { is: { artifactType: 'WIKI' } },
           },
-          select: { id: true, title: true, metadata: true },
+          select: {
+            id: true,
+            title: true,
+            sdlcArtifact: { select: { artifactType: true } },
+            metadata: true,
+            content: true,
+            folder: { select: { name: true } },
+          },
         })
       : [];
     const canvas = wikiPath
       ? pages.find(page => {
           const metadata = metadataRecord(page.metadata);
-          return metadata.surface === 'SDLC' && metadata.documentKind === 'WIKI' &&
-            metadata.repoId === repo.id &&
-            metadata.wikiRelativePath === wikiPath;
+          return metadata.wikiRelativePath === wikiPath;
         }) ?? null
       : await this.prisma.canvas.findFirst({
           where: {
@@ -316,18 +332,25 @@ export class SdlcArtifactVersionStore {
             channelId: repo.channelId,
             workspaceId: input.workspaceId,
             projectId: repo.projectId,
+            sdlcArtifact: { is: { artifactType: { not: 'DEFAULT' } } },
           },
-          select: { id: true, title: true, metadata: true },
+          select: {
+            id: true,
+            title: true,
+            sdlcArtifact: { select: { artifactType: true } },
+            metadata: true,
+            content: true,
+            folder: { select: { name: true } },
+          },
         });
     if (!canvas) throw new AppError('SDLC artifact not found', 404);
     const metadata = metadataRecord(canvas.metadata);
-    if (metadata.surface !== 'SDLC' || metadata.repoId !== repo.id) {
-      throw new AppError('SDLC artifact not found', 404);
-    }
 
     if (input.selector.type === 'WIKI_PAGE') {
-      if (metadata.documentKind !== 'WIKI') throw new AppError('SDLC artifact not found', 404);
-      const archived = typeof metadata.wikiArchivedAt === 'string';
+      if (canvas.sdlcArtifact?.artifactType !== 'WIKI') {
+        throw new AppError('SDLC artifact not found', 404);
+      }
+      const archived = isWikiArchiveFolder(canvas.folder?.name);
       if (archived && !input.selector.includeArchived) {
         throw new AppError('SDLC artifact not found', 404);
       }
@@ -337,21 +360,21 @@ export class SdlcArtifactVersionStore {
         path: String(metadata.wikiRelativePath),
         artifactKind: 'WIKI',
         archived,
-        metadata,
+        content: canvas.content,
       };
     }
 
-    const artifactKind = metadata.artifactKind;
-    if (!['BASELINE', 'PRD', 'TECH_DOC'].includes(String(artifactKind))) {
+    const artifactKind = artifactKindForCanvasType(canvas.sdlcArtifact?.artifactType);
+    if (!artifactKind || artifactKind === 'WIKI') {
       throw new AppError('SDLC artifact not found', 404);
     }
     return {
       canvasId: canvas.id,
       title: canvas.title,
       path: null,
-      artifactKind: artifactKind as ResolvedArtifact['artifactKind'],
+      artifactKind,
       archived: false,
-      metadata,
+      content: canvas.content,
     };
   }
 
@@ -423,40 +446,41 @@ export class SdlcArtifactVersionStore {
       }
     }
 
-    const metadata = artifact.metadata;
-    const currentVersionId = metadata.wikiCanvasVersionId;
-    const action = metadata.wikiRevisionKind;
-    const commitSha = metadata.wikiLastCommitSha;
-    const contentHash = metadata.wikiContentHash;
+    // Current-revision fallback for pruned/legacy executions: rebuild it from
+    // the provenance row (sdlc_artifacts) plus the latest version row.
+    const [entity, latestVersion] = await Promise.all([
+      this.prisma.sdlcArtifact.findUnique({
+        where: { artifactId: artifact.canvasId },
+        select: { generationCommit: true, sourcePaths: true, sourceReferences: true },
+      }),
+      this.prisma.canvasVersion.findFirst({
+        where: { canvasId: artifact.canvasId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true, name: true },
+      }),
+    ]);
+    const action = latestVersion ? wikiActionFromVersionName(latestVersion.name) : null;
     if (
-      typeof currentVersionId === 'string' && !evidence.has(currentVersionId) &&
-      typeof action === 'string' &&
-      ['created', 'updated', 'archived', 'restored', 'refined', 'moved'].includes(action) &&
-      typeof commitSha === 'string' && typeof contentHash === 'string'
+      latestVersion && !evidence.has(latestVersion.id) &&
+      action && entity?.generationCommit
     ) {
-      const paths = Array.isArray(metadata.wikiSourcePaths)
-        ? metadata.wikiSourcePaths.filter((path): path is string => typeof path === 'string')
+      const blocks = Array.isArray(artifact.content)
+        ? (artifact.content as unknown as BlockNoteBlock[])
         : [];
-      const archivedPaths = Array.isArray(metadata.wikiArchivedSourcePaths)
-        ? metadata.wikiArchivedSourcePaths.filter((path): path is string => typeof path === 'string')
-        : [];
-      evidence.set(currentVersionId, {
+      const markdown = await convertBlockNoteToMarkdown(blocks);
+      evidence.set(latestVersion.id, {
         status: 'CURRENT_METADATA',
         revision: {
-          action: action as WikiRevisionEvidence['action'],
-          commitSha,
+          action,
+          commitSha: entity.generationCommit,
           canvasId: artifact.canvasId,
-          canvasVersionId: currentVersionId,
-          contentHash,
-          sourcePaths: paths.length > 0 ? paths : archivedPaths,
+          canvasVersionId: latestVersion.id,
+          contentHash: createHash('sha256').update(markdown).digest('hex'),
+          sourcePaths: parseSdlcSourcePaths(entity.sourcePaths),
           path: artifact.path ?? undefined,
           title: artifact.title,
           archived: artifact.archived,
-          sourceReferences: sourceReferences(
-            artifact.archived
-              ? metadata.wikiArchivedSourceReferences
-              : metadata.wikiSourceReferences
-          ),
+          sourceReferences: parseSdlcSourceReferences(entity.sourceReferences),
         },
       });
     }

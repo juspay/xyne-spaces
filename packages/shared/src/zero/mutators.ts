@@ -102,6 +102,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
@@ -1749,8 +1750,8 @@ export const mutators = defineMutators({
             id: sdlcDiscussion.linkId,
             workspaceId: ctx.workspaceId,
             repoId: sdlcDiscussion.repoId,
-            sourceType: 'CANVAS',
-            sourceId: sdlcDiscussion.ownerCanvasId,
+            sourceType: sdlcDiscussion.ownerType,
+            sourceId: sdlcDiscussion.ownerId,
             targetType: 'CONVERSATION',
             targetId: conversationId,
             relationType: 'DISCUSSION',
@@ -5686,9 +5687,8 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
-        const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
-        const isSdlcBaseline =
-          canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
+        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
+        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
         if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');
@@ -7840,6 +7840,77 @@ export const mutators = defineMutators({
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
       },
     ),
+
+    createTrack: defineMutator(
+      z.object({
+        id: z.string(),
+        repoId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(2000).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          name: args.name,
+          description: args.description,
+          status: 'ACTIVE',
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+    updateTrack: defineMutator(
+      z.object({
+        trackId: z.string(),
+        name: z.string().trim().min(1).max(120).optional(),
+        description: z.string().trim().max(2000).nullable().optional(),
+        status: sdlcTrackStatusSchema.optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+        if (!track) {
+          throw new Error('SDLC track not found');
+        }
+        const repo = await tx.run(zql.repos.where('id', track.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.update({
+          id: args.trackId,
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.description !== undefined ? { description: args.description } : {}),
+          ...(args.status !== undefined ? { status: args.status } : {}),
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
   },
   form: {
     update: defineMutator(
@@ -9451,6 +9522,7 @@ export const mutators = defineMutators({
         autoDraftAgentSlug: z.string().optional().nullable(),
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
+        appWebhookDeliveryEnabled: z.boolean().optional(),
       }),
       async ({
         tx,
@@ -9467,6 +9539,7 @@ export const mutators = defineMutators({
           autoDraftAgentSlug,
           metricsEnabled,
           frtStageNames,
+          appWebhookDeliveryEnabled,
         },
       }) => {
         const existing = await tx.run(
@@ -9485,6 +9558,7 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+            ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -9510,6 +9584,7 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: 0.5,
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
+            appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
           });
         }
       },

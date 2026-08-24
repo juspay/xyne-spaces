@@ -7,6 +7,7 @@ import {
   WorkspaceRole,
   CanvasVisibility,
 } from '@xyne/shared';
+import { isBaselineCanvasType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -175,6 +176,7 @@ class CanvasAuthService {
           channelId: true,
           folderId: true,
           projectId: true,
+          sdlcArtifact: { select: { artifactType: true } },
           metadata: true,
         },
       });
@@ -197,6 +199,7 @@ class CanvasAuthService {
             channelId: true,
             folderId: true,
             projectId: true,
+            sdlcArtifact: { select: { artifactType: true } },
             metadata: true,
           },
         });
@@ -213,9 +216,7 @@ class CanvasAuthService {
 
       const isCreator = canvas.createdBy === userId;
       const currentUserContext = await this.getCurrentUserContext(userId);
-      const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
-      const isSdlcBaseline =
-        canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
+      const isSdlcBaseline = isBaselineCanvasType(canvas.sdlcArtifact?.artifactType);
       const isSdlcBaselineChannelAdmin = Boolean(
         isSdlcBaseline &&
         canvas.channelId &&

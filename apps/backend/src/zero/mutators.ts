@@ -97,6 +97,7 @@ import {
   sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   FLOW_STAGE_NAMES,
   FlowPlanSchema,
@@ -2441,6 +2442,20 @@ export function createMutators(
             ) {
               throw new Error('Invalid SDLC discussion owner');
             }
+            if (existingDiscussion.length > 0) {
+              throw new Error('Conversation already has an SDLC discussion owner');
+            }
+            if (sdlcDiscussion.ownerType === 'TRACK') {
+              const track = await tx.run(
+                zql.sdlc_tracks.where('id', sdlcDiscussion.ownerId).one(),
+              );
+              if (!track || track.repoId !== repo.id) {
+                throw new Error('Invalid SDLC discussion owner');
+              }
+            } else {
+            if (!sdlcDiscussion.surfaceType || !sdlcDiscussion.surfaceId) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
             const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
               {
                 workspaceId: authData.workspaceId,
@@ -2450,8 +2465,16 @@ export function createMutators(
                 surfaceId: sdlcDiscussion.surfaceId,
               },
               {
-                getCanvas: async id =>
-                  (await tx.run(zql.canvases.where('id', id).one())) ?? null,
+                getCanvas: async id => {
+                  const canvas = await tx.run(zql.canvases.where('id', id).one());
+                  if (!canvas) return null;
+                  // Kind lives on the artifact row now; a canvas with no SDLC
+                  // artifact is not a valid discussion owner.
+                  const artifact = await tx.run(
+                    zql.sdlc_artifacts.where('artifactId', id).one(),
+                  );
+                  return { ...canvas, artifactType: artifact?.artifactType ?? '' };
+                },
                 getTicket: async id => {
                   const ticket = await tx.run(zql.tickets.where('id', id).one());
                   return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
@@ -2477,11 +2500,9 @@ export function createMutators(
                 },
               },
             );
-            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerCanvasId) {
+            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerId) {
               throw new Error('Invalid SDLC discussion owner');
             }
-            if (existingDiscussion.length > 0) {
-              throw new Error('Conversation already has an SDLC discussion owner');
             }
           }
 
@@ -2503,8 +2524,8 @@ export function createMutators(
               id: sdlcDiscussion.linkId,
               workspaceId: authData.workspaceId,
               repoId: sdlcDiscussion.repoId,
-              sourceType: 'CANVAS',
-              sourceId: sdlcDiscussion.ownerCanvasId,
+              sourceType: sdlcDiscussion.ownerType,
+              sourceId: sdlcDiscussion.ownerId,
               targetType: 'CONVERSATION',
               targetId: conversationId,
               relationType: 'DISCUSSION',
@@ -9217,9 +9238,10 @@ export function createMutators(
               (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
             guestSharedRole === CanvasRole.EDITOR ||
             guestSharedRole === CanvasRole.OWNER;
-          const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
-          const isSdlcBaseline =
-            canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
+          const sdlcArtifact = await tx.run(
+            zql.sdlc_artifacts.where('artifactId', params.id).one(),
+          );
+          const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
           if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
             throw new Error('You do not have permission to edit this canvas');
@@ -10735,6 +10757,77 @@ export function createMutators(
           }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
         }
+      ),
+
+      createTrack: defineMutator(
+        z.object({
+          id: z.string(),
+          repoId: z.string(),
+          name: z.string().trim().min(1).max(120),
+          description: z.string().trim().max(2000).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          await tx.mutate.sdlc_tracks.insert({
+            id: args.id,
+            workspaceId: authData.workspaceId,
+            repoId: args.repoId,
+            name: args.name,
+            description: args.description,
+            status: 'ACTIVE',
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
+            updatedAt: args.timestamp,
+          });
+        },
+      ),
+      updateTrack: defineMutator(
+        z.object({
+          trackId: z.string(),
+          name: z.string().trim().min(1).max(120).optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          status: sdlcTrackStatusSchema.optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+          if (!track) {
+            throw new Error('SDLC track not found');
+          }
+          const repo = await tx.run(zql.repos.where('id', track.repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          await tx.mutate.sdlc_tracks.update({
+            id: args.trackId,
+            ...(args.name !== undefined ? { name: args.name } : {}),
+            ...(args.description !== undefined ? { description: args.description } : {}),
+            ...(args.status !== undefined ? { status: args.status } : {}),
+            updatedAt: args.timestamp,
+          });
+        },
       ),
     },
     form: {
@@ -14925,6 +15018,7 @@ export function createMutators(
           autoDraftAgentSlug: z.string().optional().nullable(),
           metricsEnabled: z.boolean().optional(),
           frtStageNames: z.string().optional().nullable(),
+          appWebhookDeliveryEnabled: z.boolean().optional(),
         }),
         async ({
           tx,
@@ -14940,6 +15034,7 @@ export function createMutators(
             autoDraftAgentSlug,
             metricsEnabled,
             frtStageNames,
+            appWebhookDeliveryEnabled,
           },
         }) => {
           const existing = await tx.run(
@@ -14958,6 +15053,7 @@ export function createMutators(
               ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
               ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
               ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+              ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -14984,6 +15080,7 @@ export function createMutators(
               priorityClassificationThreshold: 0.5,
               metricsEnabled: metricsEnabled ?? false,
               frtStageNames: frtStageNames ?? null,
+              appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
             });
           }
         },

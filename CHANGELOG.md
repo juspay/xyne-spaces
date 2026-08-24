@@ -1,3 +1,73 @@
+## [1.209.4](https://github.com/juspay/xyne-spaces/compare/v1.209.3...v1.209.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* ask ai calls with transcript ([#838](https://github.com/juspay/xyne-spaces/issues/838)) ([5f46a00](https://github.com/juspay/xyne-spaces/commit/5f46a00f47d12aa8365c617bbac9f50126490a67))
+
+## [1.209.3](https://github.com/juspay/xyne-spaces/compare/v1.209.2...v1.209.3) (2026-08-23)
+
+
+### Bug Fixes
+
+* render SDLC call mini-view in host via frame bridge ([#924](https://github.com/juspay/xyne-spaces/issues/924)) ([#926](https://github.com/juspay/xyne-spaces/issues/926)) ([afa388c](https://github.com/juspay/xyne-spaces/commit/afa388c7ad19f7a2975f41bf85bbf9423be0d004))
+
+## [1.209.2](https://github.com/juspay/xyne-spaces/compare/v1.209.1...v1.209.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* use the system channel-naming rule for SDLC repo channels ([#905](https://github.com/juspay/xyne-spaces/issues/905)) ([491275b](https://github.com/juspay/xyne-spaces/commit/491275bee416c7c4a157bc85e665b0cd28457d56))
+
+## [1.209.1](https://github.com/juspay/xyne-spaces/compare/v1.209.0...v1.209.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* make  Outbound webhook url optional in app desk ([#840](https://github.com/juspay/xyne-spaces/issues/840)) ([d29a0fd](https://github.com/juspay/xyne-spaces/commit/d29a0fd40c0c7e03188dc39b1fd0ccfa0c3930ad))
+
+## [1.209.0](https://github.com/juspay/xyne-spaces/compare/v1.208.3...v1.209.0) (2026-08-21)
+
+
+### Features
+
+* deploy the SDLC surface as an independent lane ([#761](https://github.com/juspay/xyne-spaces/issues/761)) ([1015488](https://github.com/juspay/xyne-spaces/commit/10154887e7346af9decc50b8ac619e6cf45ae264)), closes [#692](https://github.com/juspay/xyne-spaces/issues/692)
+
+## [1.208.3](https://github.com/juspay/xyne-spaces/compare/v1.208.2...v1.208.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* carry channel-send attachments through pending-message framework ([#862](https://github.com/juspay/xyne-spaces/issues/862)) ([28ad879](https://github.com/juspay/xyne-spaces/commit/28ad879a19eda0529609091c0f44196fe6b579d8)), closes [#281](https://github.com/juspay/xyne-spaces/issues/281)
+
+## [1.208.2](https://github.com/juspay/xyne-spaces/compare/v1.208.1...v1.208.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* remove unread mentions hover opacity ([#900](https://github.com/juspay/xyne-spaces/issues/900)) ([c3a46e3](https://github.com/juspay/xyne-spaces/commit/c3a46e349f042d54035e62fb11e4a0c91fa05eae))
+
+## [1.208.1](https://github.com/juspay/xyne-spaces/compare/v1.208.0...v1.208.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* fixes reaction hover tooltip max 2 cap on names issue ([#894](https://github.com/juspay/xyne-spaces/issues/894)) ([bce423c](https://github.com/juspay/xyne-spaces/commit/bce423c7af9ccd0dca2e5183f2f46a2421c4373f))
+
+## [1.208.0](https://github.com/juspay/xyne-spaces/compare/v1.207.2...v1.208.0) (2026-08-21)
+
+
+### Features
+
+* setup internal claw calls ([#778](https://github.com/juspay/xyne-spaces/issues/778)) ([cf6f5e0](https://github.com/juspay/xyne-spaces/commit/cf6f5e009a9dbbf23e752af74c1edf0e2414e4a7))
+
+## [1.207.2](https://github.com/juspay/xyne-spaces/compare/v1.207.1...v1.207.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* resolve release-canvas creator under service scope ([#883](https://github.com/juspay/xyne-spaces/issues/883)) ([79c5491](https://github.com/juspay/xyne-spaces/commit/79c549146fad05d35c19ccb52797a0b1d5e0e2b9))
+
 ## [1.207.1](https://github.com/juspay/xyne-spaces/compare/v1.207.0...v1.207.1) (2026-08-21)
 
 

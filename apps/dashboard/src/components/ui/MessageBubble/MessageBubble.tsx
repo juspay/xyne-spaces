@@ -1632,6 +1632,28 @@ export interface GroupedReaction {
   orderIndex: number;
 }
 
+const MAX_TOOLTIP_REACTOR_NAMES = 50;
+
+const formatReactorNames = (
+  users: GroupedReaction['users'],
+  currentUserId: string | undefined,
+): string => {
+  const names = users.map(u => (u.userId === currentUserId ? 'You' : u.name));
+  const selfIndex = currentUserId ? users.findIndex(u => u.userId === currentUserId) : -1;
+  if (selfIndex > 0) {
+    names.unshift(...names.splice(selfIndex, 1));
+  }
+
+  const overflow = names.length - MAX_TOOLTIP_REACTOR_NAMES;
+  if (overflow > 0) {
+    const shown = names.slice(0, MAX_TOOLTIP_REACTOR_NAMES).join(', ');
+    return `${shown} and ${overflow} ${overflow === 1 ? 'other' : 'others'}`;
+  }
+
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+};
+
 /**
  * Displays reaction emojis for a message with user tooltips.
  * Each reaction is clickable to toggle the reaction.
@@ -1748,13 +1770,8 @@ export const ReactionView = ({
     <>
       <div className='flex items-center gap-1 flex-wrap'>
         {groupedReactionsArray.map(reaction => {
-          const visibleUserNames = reaction.users.slice(0, 2).map(u => u.name);
-          const remainingUserCount = reaction.users.length - visibleUserNames.length;
-          const userNames =
-            remainingUserCount > 0
-              ? `${visibleUserNames.join(', ')} and ${remainingUserCount} ${remainingUserCount === 1 ? 'other' : 'others'}`
-              : visibleUserNames.join(', ');
-          const verb = reaction.users.length === 1 ? 'has' : 'have';
+          const userNames = formatReactorNames(reaction.users, user?.id);
+          const verb = reaction.users.length === 1 && !reaction.userHasReacted ? 'has' : 'have';
           // For custom emojis, show the emoji name instead of the full ID
           const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
           const tooltipContent = (

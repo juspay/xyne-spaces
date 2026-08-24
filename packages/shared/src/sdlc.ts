@@ -15,29 +15,102 @@ export const SDLC_BASELINE_COUNT = SDLC_BASELINE_KINDS.length;
 export const sdlcBaselineKindSchema = z.enum(SDLC_BASELINE_KINDS);
 export type SdlcBaselineKind = z.infer<typeof sdlcBaselineKindSchema>;
 
-function sdlcTimestamp(
-  value: string | number | Date | null | undefined,
-): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value !== "string") return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function isSdlcBaselineApprovalCurrent(input: {
-  approvedAt?: string | number | Date | null;
-  lastEditedAt?: string | number | Date | null;
-}): boolean {
-  const approvedAt = sdlcTimestamp(input.approvedAt);
-  if (approvedAt === null) return false;
-  const lastEditedAt = sdlcTimestamp(input.lastEditedAt);
-  return lastEditedAt === null || lastEditedAt <= approvedAt;
-}
-
 export const SDLC_ARTIFACT_KINDS = ["BASELINE", "PRD", "TECH_DOC"] as const;
 export const sdlcArtifactKindSchema = z.enum(SDLC_ARTIFACT_KINDS);
 export type SdlcArtifactKind = z.infer<typeof sdlcArtifactKindSchema>;
+
+export const SDLC_CANVAS_TYPES = [
+  "PRD",
+  "TECH_DOC",
+  "WIKI",
+  ...SDLC_BASELINE_KINDS,
+] as const;
+export type SdlcCanvasType = (typeof SDLC_CANVAS_TYPES)[number];
+
+export const BASELINE_CANVAS_TYPES: ReadonlySet<string> = new Set(
+  SDLC_BASELINE_KINDS,
+);
+
+export function isBaselineCanvasType(
+  value: string | null | undefined,
+): value is SdlcBaselineKind {
+  return typeof value === "string" && BASELINE_CANVAS_TYPES.has(value);
+}
+
+export function canvasTypeForSdlcArtifact(
+  kind: SdlcArtifactKind,
+  baselineKind?: SdlcBaselineKind | null,
+): SdlcCanvasType {
+  if (kind === "BASELINE") {
+    if (!baselineKind) {
+      throw new Error("Baseline artifacts require a baselineKind");
+    }
+    return baselineKind;
+  }
+  return kind;
+}
+
+export const CANVAS_STATUS_ACTIVE = "ACTIVE";
+
+/**
+ * Stored shape of sdlc_artifacts.sourceReferences (stringified JSON).
+ * All parsing/stringifying of that column goes through the helpers below.
+ */
+export const sdlcStoredSourceReferenceSchema = z.object({
+  path: z.string().min(1),
+  commitSha: z.string().min(1),
+  symbol: z.string().min(1).optional(),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
+});
+export type SdlcStoredSourceReference = z.infer<
+  typeof sdlcStoredSourceReferenceSchema
+>;
+const sdlcStoredSourceReferencesSchema = z
+  .array(sdlcStoredSourceReferenceSchema)
+  .max(500);
+
+export function parseSdlcSourceReferences(
+  value: string | null | undefined,
+): SdlcStoredSourceReference[] {
+  if (!value) return [];
+  try {
+    const result = sdlcStoredSourceReferencesSchema.safeParse(
+      JSON.parse(value),
+    );
+    return result.success ? result.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export function stringifySdlcSourceReferences(
+  references: readonly SdlcStoredSourceReference[],
+): string | null {
+  return references.length > 0 ? JSON.stringify(references) : null;
+}
+
+export function parseSdlcSourcePaths(
+  value: string | null | undefined,
+): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (path): path is string => typeof path === "string" && path.length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function stringifySdlcSourcePaths(
+  paths: readonly string[],
+): string | null {
+  return paths.length > 0 ? JSON.stringify(paths) : null;
+}
 
 export const SDLC_ENTITY_TYPES = [
   "CANVAS",
@@ -52,6 +125,7 @@ export const SDLC_ENTITY_TYPES = [
   "PULL_REQUEST",
   "REPOSITORY",
   "WORKFLOW_EXECUTION",
+  "TRACK",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -64,19 +138,49 @@ export const SDLC_RELATION_TYPES = [
   "PULL_REQUEST",
   "DISCUSSION",
   "WIKI_RUN",
+  "TRACK_ITEM",
+  "CALL",
 ] as const;
 
 export const sdlcRelationTypeSchema = z.enum(SDLC_RELATION_TYPES);
 export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
-export const sdlcDiscussionSchema = z.object({
-  repoId: z.string().min(1),
-  ownerCanvasId: z.string().min(1),
-  surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]),
-  surfaceId: z.string().min(1),
-  linkId: z.string().min(1),
-});
+export const sdlcDiscussionSchema = z
+  .object({
+    repoId: z.string().min(1),
+    ownerType: z.enum(["CANVAS", "TRACK"]),
+    ownerId: z.string().min(1),
+    surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
+    surfaceId: z.string().min(1).optional(),
+    linkId: z.string().min(1),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.ownerType === "CANVAS" &&
+      (!value.surfaceType || !value.surfaceId)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CANVAS discussions require surfaceType and surfaceId",
+      });
+    }
+  });
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
+
+export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;
+export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
+
+/**
+ * Call-to-SDLC linking context passed from the call initiator through LiveKit
+ * room metadata. Owner is a canvas or a track; the webhook writes
+ * OWNER -> CALL [CALL] and OWNER -> CONVERSATION [DISCUSSION] links.
+ */
+export const sdlcCallLinkSchema = z.object({
+  repoId: z.string().min(1),
+  ownerType: z.enum(["CANVAS", "TRACK"]),
+  ownerId: z.string().min(1),
+});
+export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
 
 export const SDLC_SETUP_STATUSES = [
   "NOT_STARTED",
@@ -253,7 +357,9 @@ export const sdlcSourceReferenceInputSchema = z.object({
   startLine: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional(),
 });
-export type SdlcSourceReferenceInput = z.infer<typeof sdlcSourceReferenceInputSchema>;
+export type SdlcSourceReferenceInput = z.infer<
+  typeof sdlcSourceReferenceInputSchema
+>;
 
 export const sdlcSourceReferencesSchema = z
   .array(sdlcSourceReferenceInputSchema)
@@ -459,28 +565,32 @@ const sdlcRunAuthoritySchema = z.union([
   }),
 ]);
 
-export const createSdlcPullRequestSchema = z.object({
-  repoId: z.string().min(1),
-  title: z.string().trim().min(1).max(256),
-  body: z.string().max(65_536).default(""),
-  head: z.string().trim().min(1).max(255),
-  base: z.string().trim().min(1).max(255),
-  commitHash: z
-    .string()
-    .trim()
-    .regex(/^[0-9a-f]{40}$/i),
-}).and(sdlcRunAuthoritySchema);
+export const createSdlcPullRequestSchema = z
+  .object({
+    repoId: z.string().min(1),
+    title: z.string().trim().min(1).max(256),
+    body: z.string().max(65_536).default(""),
+    head: z.string().trim().min(1).max(255),
+    base: z.string().trim().min(1).max(255),
+    commitHash: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-f]{40}$/i),
+  })
+  .and(sdlcRunAuthoritySchema);
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
 
-export const bootstrapSdlcRuntimeCredentialSchema = z.object({
-  agentSlug: z.literal("sdlc-agent"),
-  repoId: z.string().min(1),
-  operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
-  sandboxId: z.string().min(1).max(256),
-  sandboxPublicKey: z.string().min(32).max(1024),
-}).and(sdlcRunAuthoritySchema);
+export const bootstrapSdlcRuntimeCredentialSchema = z
+  .object({
+    agentSlug: z.literal("sdlc-agent"),
+    repoId: z.string().min(1),
+    operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
+    sandboxId: z.string().min(1).max(256),
+    sandboxPublicKey: z.string().min(32).max(1024),
+  })
+  .and(sdlcRunAuthoritySchema);
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
@@ -495,6 +605,7 @@ export const createSdlcClawArtifactSchema = z
     setupExecutionId: z.string().min(1).optional(),
     workflowExecutionId: z.string().min(1).optional(),
     parentCanvasId: z.string().min(1).optional(),
+    trackId: z.string().min(1).optional(),
     generationCommit: z.string().trim().max(255).optional(),
     sourceReferences: sdlcSourceReferencesSchema,
   })
@@ -511,10 +622,16 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
-    if (value.kind === "TECH_DOC" && !value.parentCanvasId) {
+    if ((value.kind === "PRD" || value.kind === "TECH_DOC") && !value.trackId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Tech Doc artifacts require a parent PRD",
+        message: "PRD and Tech Doc artifacts require a track",
+      });
+    }
+    if (value.trackId && value.kind !== "PRD" && value.kind !== "TECH_DOC") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "trackId is only supported for PRD and Tech Doc artifacts",
       });
     }
   });
@@ -522,15 +639,14 @@ export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
 >;
 
-export const updateSdlcClawArtifactSchema = z
-  .object({
-    repoId: z.string().min(1),
-    kind: z.enum(["PRD", "TECH_DOC"]),
-    canvasId: z.string().min(1),
-    title: z.string().trim().min(1).max(255).optional(),
-    markdown: z.string().min(1).max(5_000_000),
-    sourceReferences: sdlcSourceReferencesSchema,
-  });
+export const updateSdlcClawArtifactSchema = z.object({
+  repoId: z.string().min(1),
+  kind: z.enum(["PRD", "TECH_DOC"]),
+  canvasId: z.string().min(1),
+  title: z.string().trim().min(1).max(255).optional(),
+  markdown: z.string().min(1).max(5_000_000),
+  sourceReferences: sdlcSourceReferencesSchema,
+});
 export type UpdateSdlcClawArtifactInput = z.infer<
   typeof updateSdlcClawArtifactSchema
 >;
@@ -573,46 +689,20 @@ export const createSdlcLinkSchema = z.object({
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
-export interface SdlcCanvasMetadata {
-  surface: "SDLC";
-  repoId: string;
-  artifactKind: SdlcArtifactKind;
-  baselineKind?: SdlcBaselineKind;
-  generationStatus?: "GENERATING" | "READY";
-  completedSections?: string[];
-  generationCommit?: string;
-  setupExecutionId?: string;
-  approvedAt?: string;
-  approvedBy?: string;
-  knowledgeDocumentId?: string;
-  sdlcSourceReferences?: Array<{
-    path: string;
-    commitSha: string;
-    symbol?: string;
-    startLine?: number;
-    endLine?: number;
-  }>;
-}
+export const createSdlcTrackSchema = z.object({
+  repoId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).optional(),
+});
+export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
-export interface SdlcWikiCanvasMetadata {
-  source: "sdlc-wiki-pipeline";
-  surface: "SDLC";
-  documentKind: "WIKI";
-  repoId: string;
-  projectId: string;
-  repositoryUrl: string;
-  wikiRelativePath: string;
-  wikiSourcePaths: string[];
-  wikiLastCommitSha: string;
-  wikiContentHash: string;
-  wikiCanvasVersionId: string;
-  wikiSyncedAt: string;
-  wikiArchivedAt?: string;
-  wikiArchivedByCommit?: string;
-}
-
-export interface SdlcChannelMetadata {
-  surface: "SDLC";
-  hiddenFromChat: true;
-  repoId: string;
+export function inferRepositoryNameFromUrl(raw: string): string | null {
+  const value = raw.trim().replace(/^git@([^:]+):/, "https://$1/");
+  const path = value.includes("://") ? value.split("://")[1] : value;
+  const segments = (path ?? "")
+    .split(/[?#]/)[0]!
+    .replace(/\.git$/i, "")
+    .split("/")
+    .filter(Boolean);
+  return segments.length >= 3 ? segments.at(-1)! : null;
 }

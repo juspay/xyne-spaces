@@ -4162,6 +4162,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('sdlcEntityLinks')
       .orderBy('name', 'asc');
   }),
+  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  getSdlcRepoByChannelId: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  ),
   getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
     return zql.repos
       .where('id', repoId)
@@ -4173,7 +4180,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
-            folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
+            folder
+              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
+              .related('canvases', canvas => canvas.related('sdlcArtifact')),
           ),
       )
       .related('setupExecution')
