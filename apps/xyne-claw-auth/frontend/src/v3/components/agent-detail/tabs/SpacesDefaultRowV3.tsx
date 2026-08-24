@@ -52,18 +52,38 @@ interface ModelSettings {
   temperature?: number;
   maxTokens?: number;
   thinkingLevel?: string;
+  /** Provider fast mode (Anthropic `speed: "fast"`). Edited in the "Select
+   *  providers" card above, not here — this row only preserves it on save so
+   *  the two editors don't clobber each other's modelSettings. */
+  speed?: "standard" | "fast";
 }
 
 interface Props {
   agent: Agent;
+  /** "standard" edits config.modelSettings. "fast" edits
+   *  config.fastModeProfile.modelSettings — per-field OVERRIDES applied only
+   *  to fast-mode runs; blank fields inherit the standard value. Mount with
+   *  `key={view}` so the draft reseeds when the view switches. */
+  view?: "standard" | "fast";
 }
 
-export function SpacesDefaultRowV3({ agent }: Props) {
-  const readSettings = (): ModelSettings => {
+export function SpacesDefaultRowV3({ agent, view = "standard" }: Props) {
+  const isFast = view === "fast";
+  const readStandard = (): ModelSettings => {
     const cfg = (agent.config ?? {}) as Record<string, unknown>;
     const msRaw = cfg["modelSettings"];
     return msRaw && typeof msRaw === "object" && !Array.isArray(msRaw) ? (msRaw as ModelSettings) : {};
   };
+  const readSettings = (): ModelSettings => {
+    if (!isFast) return readStandard();
+    const cfg = (agent.config ?? {}) as Record<string, unknown>;
+    const profile = cfg["fastModeProfile"];
+    const msRaw = profile && typeof profile === "object" && !Array.isArray(profile)
+      ? (profile as Record<string, unknown>)["modelSettings"]
+      : undefined;
+    return msRaw && typeof msRaw === "object" && !Array.isArray(msRaw) ? (msRaw as ModelSettings) : {};
+  };
+  const standard = readStandard();
 
   const initial = readSettings();
   const [savedSettings, setSavedSettings] = useState<ModelSettings>(initial);
@@ -128,6 +148,9 @@ export function SpacesDefaultRowV3({ agent }: Props) {
       settings.maxTokens = m;
     }
     if (thinkingLevel) settings.thinkingLevel = thinkingLevel;
+    // Fast mode is owned by the provider card above — carry it through untouched.
+    // (Only the standard bag carries `speed`; the fast bag would be circular.)
+    if (!isFast && readSettings().speed === "fast") settings.speed = "fast";
     if (thinkingConflict) {
       showSnackbar({ variant: "error", title: 'Temperature requires thinking "Off" — thinking models ignore temperature' });
       return;
@@ -139,14 +162,26 @@ export function SpacesDefaultRowV3({ agent }: Props) {
     setSaving(true);
     try {
       const cfg = { ...((agent.config ?? {}) as Record<string, unknown>) };
-      if (Object.keys(settings).length > 0) cfg["modelSettings"] = settings as unknown as Record<string, unknown>;
-      else delete cfg["modelSettings"];
-      await updateAgent(agent.slug, { config: cfg });
-      // Mutate the prop-derived config (same pattern as the provider-order
-      // card) so other saves in this mount merge against fresh values.
       const live = agent.config as Record<string, unknown>;
-      if (cfg["modelSettings"]) live["modelSettings"] = cfg["modelSettings"];
-      else delete live["modelSettings"];
+      if (isFast) {
+        // Merge into the fast profile, preserving providers/providerOrder/models.
+        const profile = { ...((cfg["fastModeProfile"] as Record<string, unknown> | undefined) ?? {}) };
+        if (Object.keys(settings).length > 0) profile["modelSettings"] = settings as unknown as Record<string, unknown>;
+        else delete profile["modelSettings"];
+        if (Object.keys(profile).length > 0) cfg["fastModeProfile"] = profile;
+        else delete cfg["fastModeProfile"];
+        await updateAgent(agent.slug, { config: cfg });
+        if (cfg["fastModeProfile"]) live["fastModeProfile"] = cfg["fastModeProfile"];
+        else delete live["fastModeProfile"];
+      } else {
+        if (Object.keys(settings).length > 0) cfg["modelSettings"] = settings as unknown as Record<string, unknown>;
+        else delete cfg["modelSettings"];
+        await updateAgent(agent.slug, { config: cfg });
+        // Mutate the prop-derived config (same pattern as the provider-order
+        // card) so other saves in this mount merge against fresh values.
+        if (cfg["modelSettings"]) live["modelSettings"] = cfg["modelSettings"];
+        else delete live["modelSettings"];
+      }
       setSavedSettings(settings);
       setEditing(false);
     } catch (err) {
@@ -155,6 +190,11 @@ export function SpacesDefaultRowV3({ agent }: Props) {
       setSaving(false);
     }
   };
+
+  // Inherit labels for the fast view — what a blank field falls back to.
+  const stdModelLabel = standard.model || "platform default";
+  const stdThinkingLabel = standard.thinkingLevel || "platform setting";
+  const inheritOptionLabel = isFast ? `Same as standard (${stdModelLabel})` : "Platform default (from environment)";
 
   // Compact summary of the saved non-default settings for the collapsed row.
   const summaryParts: string[] = [];
@@ -171,6 +211,11 @@ export function SpacesDefaultRowV3({ agent }: Props) {
             <span className="inline-flex items-center text-[11px] font-medium text-xyne-fg-tertiary bg-xyne-surface-sunken border border-xyne-border rounded-full px-2 py-0.5">
               Platform default
             </span>
+            {isFast && (
+              <span data-id="spaces-fast-overrides-badge" className="inline-flex items-center text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-700/60">
+                Fast mode overrides
+              </span>
+            )}
             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-xyne-success-fg">
               <span className="w-1.5 h-1.5 rounded-full bg-xyne-success" />
               Always available
@@ -180,7 +225,7 @@ export function SpacesDefaultRowV3({ agent }: Props) {
             <>
               <div className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-0.5 text-[12px]">
                 <span className="text-xyne-fg-tertiary">Model</span>
-                <span className="text-xyne-fg-primary font-mono truncate">{savedSettings.model || "Platform default"}</span>
+                <span className="text-xyne-fg-primary font-mono truncate">{savedSettings.model || (isFast ? `Same as standard (${stdModelLabel})` : "Platform default")}</span>
                 {summaryParts.length > 0 && (
                   <>
                     <span className="text-xyne-fg-tertiary">Settings</span>
@@ -189,8 +234,9 @@ export function SpacesDefaultRowV3({ agent }: Props) {
                 )}
               </div>
               <div className="text-[11px] text-xyne-fg-tertiary">
-                No credential needed. Used when no provider above serves the run, and as the final quota fallback.
-                To run on your own key and pick from its models, add a “LiteLLM (own key)” provider above.
+                {isFast
+                  ? "Overrides applied only to fast-mode runs. Blank fields use the standard settings."
+                  : "No credential needed. Used when no provider above serves the run, and as the final quota fallback. To run on your own key and pick from its models, add a “LiteLLM (own key)” provider above."}
               </div>
             </>
           )}
@@ -218,7 +264,7 @@ export function SpacesDefaultRowV3({ agent }: Props) {
               onChange={(e) => setModelMode(e.target.value === "custom" ? "custom" : "default")}
               className={INPUT_CLASS}
             >
-              <option value="default">Platform default (from environment)</option>
+              <option value="default">{inheritOptionLabel}</option>
               <option value="custom">Custom model…</option>
             </select>
             {modelMode === "custom" && (
@@ -235,21 +281,26 @@ export function SpacesDefaultRowV3({ agent }: Props) {
               />
             )}
             <p className="mt-1 text-[11px] text-xyne-fg-muted">
-              {modelMode === "custom"
-                ? "Any model id served by the platform LiteLLM proxy. Applies to runs served by Spaces — premium providers keep the model set on their own credential."
-                : "Runs on whichever model the platform is configured with (LITELLM_MODEL). Switch to a custom model to pin this agent to a specific one."}
+              {isFast
+                ? "Model for fast-mode Spaces runs. Leave on inherit to use the standard model."
+                : modelMode === "custom"
+                  ? "Any model id served by the platform LiteLLM proxy. Applies to runs served by Spaces — premium providers keep the model set on their own credential."
+                  : "Runs on whichever model the platform is configured with (LITELLM_MODEL). Switch to a custom model to pin this agent to a specific one."}
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={LABEL_CLASS}>Thinking level</label>
               <select
+                data-id="spaces-thinking-level"
                 value={thinkingLevel}
                 onChange={(e) => setThinkingLevel(e.target.value)}
                 className={INPUT_CLASS}
               >
                 {THINKING_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                  <option key={o.value} value={o.value}>
+                    {o.value === "" && isFast ? `Same as standard (${stdThinkingLabel})` : o.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -258,7 +309,7 @@ export function SpacesDefaultRowV3({ agent }: Props) {
               <input
                 value={temperature}
                 onChange={(e) => setTemperature(e.target.value)}
-                placeholder="provider default"
+                placeholder={isFast ? `same as standard (${standard.temperature ?? "provider default"})` : "provider default"}
                 inputMode="decimal"
                 className={INPUT_CLASS}
               />
@@ -277,7 +328,7 @@ export function SpacesDefaultRowV3({ agent }: Props) {
               <input
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(e.target.value)}
-                placeholder="16384"
+                placeholder={isFast ? `same as standard (${standard.maxTokens ?? 16384})` : "16384"}
                 inputMode="numeric"
                 className={INPUT_CLASS}
               />
@@ -286,9 +337,9 @@ export function SpacesDefaultRowV3({ agent }: Props) {
           </div>
 
           <p className="mt-3 text-[11px] text-xyne-fg-tertiary">
-            Temperature, thinking and max tokens apply to whichever provider serves the run
-            (including quota fallbacks). The model applies only to Spaces runs; premium providers
-            pick their model on their credential. Model changes are recorded in the admin audit log.
+            {isFast
+              ? "These override the standard settings for fast-mode runs only. Thinking, temperature and max tokens apply to whichever provider serves the run."
+              : "Temperature, thinking and max tokens apply to whichever provider serves the run (including quota fallbacks). The model applies only to Spaces runs; premium providers pick their model on their credential. Model changes are recorded in the admin audit log."}
           </p>
 
           <div className="mt-4 flex items-center gap-2">

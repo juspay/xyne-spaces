@@ -2991,6 +2991,10 @@ export async function sendChatMessage(
     /** Trusted SDLC repository selection. The backend resolves and authorizes
      *  the id; URL/branch values are never accepted from the browser. */
     researchContext?: { type: "repository"; id: string; name?: string };
+    /** Per-turn provider fast mode (Anthropic `speed: "fast"`): same credential
+     *  and model, faster tier. Overrides the agent's modelSettings.speed for
+     *  this run only. */
+    speed?: "standard" | "fast";
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -3037,6 +3041,7 @@ export async function sendChatMessage(
       ...(requestOptions?.designSelection ? { designSelection: requestOptions.designSelection } : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
       ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
+      ...(requestOptions?.speed ? { speed: requestOptions.speed } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });

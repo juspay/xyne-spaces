@@ -12,7 +12,7 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -871,6 +871,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designArtifactAttachmentId,
       designSelection,
       researchContext,
+      speed: rawSpeed,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -895,8 +896,18 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designArtifactAttachmentId?: string;
       designSelection?: unknown;
       researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
+      /** Per-message provider fast mode (composer toggle). Rides the agent's
+       *  modelSettings.speed for this run only — same credential, same model,
+       *  Anthropic's faster tier. Omitted = agent default. */
+      speed?: "standard" | "fast";
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const speedOverride: "standard" | "fast" | undefined =
+      rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    if (rawSpeed !== undefined && !speedOverride) {
+      res.status(400).json({ success: false, error: 'speed must be "standard" or "fast"' });
+      return;
+    }
 
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ success: false, error: "message is required" });
@@ -1297,8 +1308,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
-    const agentLevelProvider = (agent.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
-    const rawProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    // Effective speed for THIS run: the composer toggle wins, else the agent
+    // default. Fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — same credential keys, possibly different
+    // providers/models. See lib/agent-provider-config.ts.
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agent.config);
+    const speedConfig = providerConfigForSpeed(agent.config, effectiveSpeed);
+    const agentLevelProvider = speedConfig["provider"] as string | undefined;
+    const rawProviderOrder = speedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
       : [];
@@ -1327,6 +1344,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const cfg = buildProviderConfig(row.provider, row);
       if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
     }
+    applyFastModeModels(providerConfigs, agent.config, effectiveSpeed);
 
     // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
     // rationale). Mutates the resolved config's apiKey and persists the rotated
@@ -1406,6 +1424,17 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
+    // Per-message fast-mode toggle wins over the agent's saved
+    // modelSettings.speed for this run only (not persisted to the agent).
+    if (speedOverride) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        modelSettings: {
+          ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+          speed: speedOverride,
+        },
+      };
+    }
     const effectiveAgentConfig = disableTools
       ? {
           ...(runAgentConfig ?? {}),

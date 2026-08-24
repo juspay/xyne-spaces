@@ -30,6 +30,7 @@ import { IntegrationCard } from "./IntegrationCard";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
 import { parseGatewaySource } from "../../lib/gatewayKeys";
+import { MAX_DELEGATIONS_PER_RUN_OPTIONS, MAX_DELEGATIONS_PER_RUN_BOUNDS } from "../../lib/delegationBudget";
 
 /* ── Tab model ─────────────────────────────────────────────────────────
    Four-layer mental model: who the agent is (Persona), what it knows
@@ -1541,6 +1542,12 @@ interface Props {
   // discipline — only the Spaces render is hidden.
   draftPostTodos: boolean;
   onDraftPostTodosChange: (v: boolean) => void;
+  // Plan tracking opt-OUT (agent.config.planTracking). Default ON. Unlike
+  // postTodos (which only hides the card), turning this OFF removes the
+  // todo-write/todo-read tools AND the primer that mandates them, so the agent
+  // spends no turns on plan bookkeeping.
+  draftPlanTracking: boolean;
+  onDraftPlanTrackingChange: (v: boolean) => void;
   // Verify-responses opt-in (agent.config.verifyResponses). When on, the agent
   // delivers its final answer via the submit-response tool, which checks the
   // draft's factual claims against gathered tool evidence before it's posted.
@@ -1593,6 +1600,10 @@ interface Props {
   // a plan. Pre-filled with the default; only shown/saved when plan mode is on.
   draftPlanModePrompt: string;
   onDraftPlanModePromptChange: (v: string) => void;
+  // Per-run delegation budget (agent.config.maxDelegationsPerRun). Bounds how
+  // many child-agent delegations one top-level run may make. Default 3.
+  draftMaxDelegations: number;
+  onDraftMaxDelegationsChange: (v: number) => void;
 
   // Dialog callbacks
   onOpenSkillPicker: () => void;
@@ -1725,6 +1736,8 @@ export function AgentDetailLeftColumn({
   onDraftPrefetchContextChange,
   draftPostTodos,
   onDraftPostTodosChange,
+  draftPlanTracking,
+  onDraftPlanTrackingChange,
   draftVerifyResponses,
   draftVerifyResponseCriteria,
   onDraftVerifyResponseCriteriaChange,
@@ -1739,6 +1752,8 @@ export function AgentDetailLeftColumn({
   onDraftPlanModeChange,
   draftPlanModePrompt,
   onDraftPlanModePromptChange,
+  draftMaxDelegations,
+  onDraftMaxDelegationsChange,
   draftOutputFormatEnabled,
   onDraftOutputFormatEnabledChange,
   draftOutputType,
@@ -2562,7 +2577,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -2780,6 +2795,74 @@ export function AgentDetailLeftColumn({
           </div>
         </div>
       )}
+
+      {/* Plan tracking — opt-OUT switch (agent.config.planTracking). Default ON.
+          Distinct from "Post TODOs", which only hides the rendered card: this
+          removes the todo-write/todo-read tools AND the primer that requires
+          them. Worth turning off for agents that answer in one message —
+          `todo-write` ends the assistant turn like any tool call, and the primer
+          mandates a todo-only turn at BOTH ends of a run (before the first tool
+          call, and again immediately before the final answer). On a slow model
+          that measured ~50% of wall-clock on ask-ai runs, for zero data. */}
+      {(canEdit || !draftPlanTracking) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Plan Tracking</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Give this agent the <code className="text-xyne-fg-tertiary">todo-write</code> checklist tools and require a plan before it starts work.
+                {" "}
+                <span className="text-xyne-fg-tertiary">On by default. Turn it off for agents that answer in a single message &mdash; each plan update costs a full model round trip, and the checklist card adds little when there is nothing to track.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftPlanTracking}
+                onChange={(e) => onDraftPlanTrackingChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Plan Tracking"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftPlanTracking ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+      {/* Delegation budget — per-run cap on child-agent delegations
+          (agent.config.maxDelegationsPerRun). Each delegation is a full nested
+          agent run, so the cap is a cost / blast-radius guard. Raise it for
+          orchestrators that fan out (analyzer -> N generators -> code-writer);
+          leave at the default (3) for simple agents. The runtime re-clamps to
+          [1,25], so this control can never widen the real bound. */}
+      <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Delegation Budget</div>
+            <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+              Maximum child-agent delegations this agent may make in a single run. Each delegation is a full nested agent run.
+              {" "}
+              <span className="text-xyne-fg-tertiary">Raise it for orchestrators that fan out to several sub-agents in one run; keep the default ({MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT}) for simple agents. The runtime clamps to [{MAX_DELEGATIONS_PER_RUN_BOUNDS.MIN}, {MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX}].</span>
+            </p>
+          </div>
+          <label className="flex shrink-0 items-center gap-2 select-none">
+            <select
+              value={draftMaxDelegations}
+              onChange={(e) => onDraftMaxDelegationsChange(Number(e.target.value))}
+              disabled={!canEdit}
+              className="rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 text-[12px] text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Delegation budget (max delegations per run)"
+            >
+              {MAX_DELEGATIONS_PER_RUN_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                  {n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
 
       {(canEdit || draftSuggestGoal) && (
         <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">

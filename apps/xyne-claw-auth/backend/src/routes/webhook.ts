@@ -36,7 +36,7 @@ import {
 } from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -1282,6 +1282,43 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     return lines.join("\n");
   }
 
+  if (tool === "spaces-update-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [`**Update ${tickets.length} Tickets**`, ``];
+
+    const defaults: string[] = [];
+    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
+    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
+    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
+    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
+    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
+      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
+    }
+    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
+
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const ticketId = String(ticket["ticketId"] ?? "(no id)");
+      const changes: string[] = [];
+      const status = ticket["status"] ?? params["defaultStatus"];
+      const stage = ticket["stage"] ?? params["defaultStage"];
+      const priority = ticket["priority"] ?? params["defaultPriority"];
+      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
+      if (status) changes.push(`status \u2192 ${String(status)}`);
+      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
+      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
+      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
+      if (ticket["title"]) changes.push(`title`);
+      if (ticket["description"]) changes.push(`description`);
+      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
+      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
+      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
+    }
+    return lines.join("\n");
+  }
+
   if (tool === "spaces-schedule-call") {
     const title = params["title"] as string ?? "Call";
     const startsAt = params["startsAt"] as string ?? "";
@@ -2371,13 +2408,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     //   1. personal provider (user picked in agent settings + has own creds)
     //   2. agent-level provider (agent.config.provider + agentProviderCredentials)
     //   3. "spaces" / LiteLLM platform default
-    const agentLevelProvider = (agentRow?.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
+    // Agent-default fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — see lib/agent-provider-config.ts.
+    const mentionSpeed = agentDefaultSpeed(agentRow?.config);
+    const mentionSpeedConfig = providerConfigForSpeed(agentRow?.config, mentionSpeed);
+    const agentLevelProvider = mentionSpeedConfig["provider"] as string | undefined;
     // Owners can also pin an ordered preference list under config.providerOrder.
     // We use it (a) to pick which agent-level provider to bind as the parent
     // model, and (b) to thread the full fallback chain into the runtime so
     // claw can walk it on quota exhaustion instead of dropping straight to
     // LiteLLM. Validation: keep only known provider strings.
-    const rawProviderOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const rawProviderOrder = mentionSpeedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
       : [];
@@ -2440,6 +2481,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         providerScope[provider] = "agent";
       }
     }
+    applyFastModeModels(providerConfigs, agentRow?.config, mentionSpeed);
 
     // Refresh the Claude OAuth token before use — it's short-lived. Codex
     // already stores+refreshes a bundle; Claude historically stored a raw token
