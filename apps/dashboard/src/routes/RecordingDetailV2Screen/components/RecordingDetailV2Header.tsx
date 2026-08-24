@@ -308,6 +308,8 @@ export const RecordingDetailV2Header = ({
           <RecordingParticipants
             recordingExternalId={recording.externalId}
             createdByUserId={recording.createdByUserId}
+            recordingParticipants={recording.recordingParticipants}
+            shares={recording.shares}
           />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink

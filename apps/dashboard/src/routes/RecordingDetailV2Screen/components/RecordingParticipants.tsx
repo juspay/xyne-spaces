@@ -1,14 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Search, Share2, Users, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { queries } from '../../../zero/queries';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useActiveUsers, useUsersById, useSelf, searchUsers } from '../../../hooks/useUsers';
-import { recordingService } from '../../../services/Recording/recordingService';
+import { useRecordingParticipants } from '../../../hooks/useRecordingParticipants';
+import type { RecordingParticipantShare } from '../../../services/Recording/recordingService';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { getRecordingParticipantIds, logRecordingError } from '../../../utils/recordingUtils';
-import { getApiErrorMessage } from '../../../utils/apiError';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import AvatarGroup from '../../../components/ui/Avatar/AvatarGroup';
 import { Popover } from '../../../components/ui/Popover/Popover';
@@ -18,137 +13,45 @@ import { cn } from '../../../utils/classNames';
 interface RecordingParticipantsProps {
   recordingExternalId: string;
   createdByUserId: string | undefined;
+  recordingParticipants: readonly string[] | null | undefined;
+  shares: readonly RecordingParticipantShare[] | null | undefined;
 }
 
 export function RecordingParticipants({
   recordingExternalId,
   createdByUserId,
+  recordingParticipants,
+  shares,
 }: RecordingParticipantsProps): ReactElement | null {
-  const [query, setQuery] = useState('');
-  const [highlighted, setHighlighted] = useState(0);
-  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
-  const [pending, setPending] = useState<ReadonlyMap<string, 'add' | 'remove'>>(new Map());
-  const searchRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
-
-  const users = useActiveUsers();
-  const usersById = useUsersById();
-  const self = useSelf();
-  const [recordingRow] = useCachedQuery(
-    queries.oatsRecordingByExternalId({ callId: recordingExternalId }),
-  );
-
-  const canManage = Boolean(self?.id && createdByUserId && self.id === createdByUserId);
-
-  const serverIds = useMemo(
-    () => getRecordingParticipantIds(createdByUserId, recordingRow?.recordingParticipants),
-    [recordingRow, createdByUserId],
-  );
-
-  const participantIds = useMemo(() => {
-    if (pending.size === 0) return serverIds;
-    const ids = serverIds.filter(id => pending.get(id) !== 'remove');
-    for (const [id, change] of pending) {
-      if (change === 'add' && !ids.includes(id)) ids.push(id);
-    }
-    return ids;
-  }, [serverIds, pending]);
-
-  useEffect(() => {
-    setPending(current => {
-      const next = new Map(current);
-      for (const [id, change] of current) {
-        if (serverIds.includes(id) === (change === 'add')) next.delete(id);
-      }
-      return next.size === current.size ? current : next;
-    });
-  }, [serverIds]);
-
-  const withAccess = useMemo(() => {
-    const shared = new Set<string>();
-    for (const share of recordingRow?.shares ?? []) {
-      if (share.userId) shared.add(share.userId);
-    }
-    if (createdByUserId) shared.add(createdByUserId);
-    return shared;
-  }, [recordingRow, createdByUserId]);
-
-  const accessKnown = !(recordingRow?.shares ?? []).some(
-    share => Boolean(share.userGroupId) || Boolean(share.channelId),
-  );
-
-  const participants = useMemo(
-    () => participantIds.map(id => usersById.get(id)).filter(Boolean),
-    [participantIds, usersById],
-  );
-
-  const trimmedQuery = query.trim();
-  const results = useMemo(() => {
-    if (!trimmedQuery) return [];
-    const already = new Set(participantIds);
-    return searchUsers(
-      users.filter(user => !already.has(user.id)),
-      trimmedQuery,
-      6,
-    );
-  }, [trimmedQuery, users, participantIds]);
-
-  useEffect(() => setHighlighted(0), [trimmedQuery]);
-  const activeIndex = highlighted < results.length ? highlighted : 0;
-
-  const withBusy = async (userId: string, work: () => Promise<void>): Promise<void> => {
-    setBusyIds(current => new Set(current).add(userId));
-    try {
-      await work();
-    } finally {
-      setBusyIds(current => {
-        const next = new Set(current);
-        next.delete(userId);
-        return next;
-      });
-    }
-  };
-
-  const changeParticipant = (action: 'add' | 'remove', userId: string): void => {
-    setPending(current => new Map(current).set(userId, action));
-    void withBusy(userId, async () => {
-      try {
-        await recordingService.manageRecordingParticipant(recordingExternalId, action, userId);
-      } catch (error) {
-        setPending(current => {
-          const next = new Map(current);
-          next.delete(userId);
-          return next;
-        });
-        logRecordingError('RecordingParticipants.change', error);
-        toast.error(
-          action === 'add' ? 'Could not add participant' : 'Could not remove participant',
-          {
-            description: getApiErrorMessage(error, 'Unable to update participants'),
-          },
-        );
-      }
-    });
-  };
-
-  const shareWith = (userId: string): void => {
-    void withBusy(userId, async () => {
-      try {
-        await recordingService.grantRecordingAccess(recordingExternalId, [
-          { type: 'user', id: userId },
-        ]);
-        toast.success('Recording shared');
-      } catch (error) {
-        logRecordingError('RecordingParticipants.share', error);
-        toast.error('Could not share recording', {
-          description: getApiErrorMessage(error, 'Unable to share this recording'),
-        });
-      }
-    });
-  };
-
-  const total = participantIds.length;
-  const withoutAccess = participantIds.filter(id => !withAccess.has(id)).length;
+  const {
+    self,
+    searchRef,
+    canManage,
+    total,
+    participants,
+    participantIds,
+    busyIds,
+    withAccess,
+    accessKnown,
+    sharesLoaded,
+    withoutAccess,
+    changeParticipant,
+    shareWith,
+    query,
+    setQuery,
+    trimmedQuery,
+    results,
+    activeIndex,
+    onSearchKeyDown,
+    pickResult,
+    highlightResult,
+  } = useRecordingParticipants({
+    recordingExternalId,
+    createdByUserId,
+    recordingParticipants,
+    shares,
+  });
 
   if (total === 0) return null;
 
@@ -209,7 +112,7 @@ export function RecordingParticipants({
     >
       <div className='flex items-center justify-between gap-2 border-b border-border px-3 py-2.5'>
         <span className='text-[13px] font-medium'>Participants</span>
-        {recordingRow && total > 0 && accessKnown && (
+        {sharesLoaded && total > 0 && accessKnown && (
           <span className='text-[11px] tabular-nums text-muted-foreground'>
             {withoutAccess === 0
               ? `all ${total} have access`
@@ -225,23 +128,7 @@ export function RecordingParticipants({
             ref={searchRef}
             value={query}
             onChange={event => setQuery(event.target.value)}
-            onKeyDown={event => {
-              if (results.length === 0) return;
-              if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                setHighlighted((activeIndex + 1) % results.length);
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                setHighlighted((activeIndex - 1 + results.length) % results.length);
-              } else if (event.key === 'Enter') {
-                event.preventDefault();
-                const picked = results[activeIndex];
-                if (picked) {
-                  setQuery('');
-                  changeParticipant('add', picked.id);
-                }
-              }
-            }}
+            onKeyDown={onSearchKeyDown}
             role='combobox'
             aria-expanded={results.length > 0}
             aria-controls='recording-participant-results'
@@ -274,11 +161,8 @@ export function RecordingParticipants({
               aria-selected={index === activeIndex}
               type='button'
               disabled={busyIds.has(user.id)}
-              onMouseMove={() => setHighlighted(index)}
-              onClick={() => {
-                setQuery('');
-                changeParticipant('add', user.id);
-              }}
+              onMouseMove={() => highlightResult(index)}
+              onClick={() => pickResult(user.id)}
               className={cn(
                 'flex w-full items-center gap-2.5 px-3 py-2 text-left disabled:opacity-50',
                 index === activeIndex && 'bg-muted',

@@ -178,7 +178,15 @@ export interface CitationSegment {
   snippet: string;
 }
 
+export interface RecordingParticipantShare {
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+}
+
 export interface RecordingDetail extends Recording {
+  recordingParticipants?: readonly string[] | null;
+  shares?: readonly RecordingParticipantShare[] | null;
   transcript: string | null;
   identifiedTranscript: string | null;
   hasIdentifiedTranscript: boolean;
