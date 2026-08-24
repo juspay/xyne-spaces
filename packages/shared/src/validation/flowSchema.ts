@@ -252,6 +252,18 @@ export const agentSummaryComponentSchema = baseComponentSchema.extend({
       global: z.number().int().nonnegative().optional(),
       personal: z.number().int().nonnegative().optional(),
       label: z.string().optional(),
+      /** Sample rows, each opening the agent's own page. Server-picked. */
+      agents: z
+        .array(
+          z
+            .object({
+              slug: z.string().min(1),
+              name: z.string().min(1),
+              description: z.string().optional(),
+            })
+            .strict(),
+        )
+        .optional(),
     })
     .strict(),
 });
@@ -909,6 +921,36 @@ export const mcpConfigurePropsSchema = z
   })
   .strict();
 
+
+export const mcpSuggestItemSchema = z
+  .object({
+    serverType: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    connected: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpSuggestPropsSchema = z
+  .object({
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    connectors: z.array(mcpSuggestItemSchema).min(1),
+    /** Roster mode: render a "Browse MCPs" footer into the connector library. */
+    browseAll: z.boolean().optional(),
+    /** Total connectors available, so the footer can say what is not shown. */
+    totalCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const mcpSuggestComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcp_suggest'),
+  props: mcpSuggestPropsSchema,
+});
+
+export type McpSuggestItem = z.infer<typeof mcpSuggestItemSchema>;
+export type McpSuggestProps = z.infer<typeof mcpSuggestPropsSchema>;
+
 export const mcpConfigureComponentSchema = baseComponentSchema.extend({
   type: z.literal('mcpConfigure'),
   props: mcpConfigurePropsSchema,
@@ -945,6 +987,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     chartComponentSchema,
     agentComponentSchema,
     mcpConfigureComponentSchema,
+    mcpSuggestComponentSchema,
     slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
@@ -982,7 +1025,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema

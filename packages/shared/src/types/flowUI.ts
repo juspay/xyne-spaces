@@ -36,6 +36,7 @@ export type FlowComponentType =
   | 'mcpConfigure'
   | 'slash_command_artifact'
   | 'agent_summary'
+  | 'mcp_suggest'
 
 
 export interface FlowComponent {
