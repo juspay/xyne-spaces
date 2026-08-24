@@ -1,3 +1,10 @@
+## [1.209.6](https://github.com/juspay/xyne-spaces/compare/v1.209.5...v1.209.6) (2026-08-24)
+
+
+### Bug Fixes
+
+* canvas sidebar starred section, selection highlight, … ([#931](https://github.com/juspay/xyne-spaces/issues/931)) ([59fb541](https://github.com/juspay/xyne-spaces/commit/59fb54166b47ae59cd2547be5bfc55938f4ea1f3))
+
 ## [1.209.5](https://github.com/juspay/xyne-spaces/compare/v1.209.4...v1.209.5) (2026-08-24)
 
 
