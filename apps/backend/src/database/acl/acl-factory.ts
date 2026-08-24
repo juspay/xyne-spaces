@@ -271,8 +271,6 @@ export class ACLFactory {
       return new ReleaseEventsACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
-    case 'sdlcEntityLink':
-      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':

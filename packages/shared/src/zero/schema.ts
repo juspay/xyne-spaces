@@ -1419,31 +1419,11 @@ export const repoTable = table('repos')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(), // e.g., "xyne-spaces"
-    url: string(), // SSH or HTTPS URL
-    canonicalUrl: string().optional(),
-    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
-    prefix: string(), // Branch prefix: "feature"
+    name: string(),                     // e.g., "xyne-spaces"
+    url: string(),                      // SSH or HTTPS URL
+    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
+    prefix: string(),                   // Branch prefix: "feature"
     createdBy: string(),
-    projectId: string().optional(),
-    channelId: string().optional(),
-    sdlcSetupExecutionId: string().optional(),
-    accessCapabilities: json().optional(),
-  })
-  .primaryKey('id');
-
-export const sdlcEntityLinkTable = table('sdlc_entity_links')
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    repoId: string(),
-    sourceType: string(),
-    sourceId: string(),
-    targetType: string(),
-    targetId: string(),
-    relationType: string(),
-    createdBy: string(),
-    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2604,11 +2584,6 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: canvasTable,
   }),
-  repos: many({
-    sourceField: ['id'],
-    destField: ['projectId'],
-    destSchema: repoTable,
-  }),
   projectTags: many({
     sourceField: ['id'],
     destField: ['projectId'],
@@ -3261,11 +3236,6 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
-  sdlcRepos: many({
-    sourceField: ['id'],
-    destField: ['channelId'],
-    destSchema: repoTable,
-  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
@@ -3293,37 +3263,6 @@ export const channelBoardMappingTableRelationships = relationships(
     }),
   }),
 );
-
-export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
-  project: one({
-    sourceField: ['projectId'],
-    destField: ['id'],
-    destSchema: projectTable,
-  }),
-  channel: one({
-    sourceField: ['channelId'],
-    destField: ['id'],
-    destSchema: channelTable,
-  }),
-  setupExecution: one({
-    sourceField: ['sdlcSetupExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
-  sdlcEntityLinks: many({
-    sourceField: ['id'],
-    destField: ['repoId'],
-    destSchema: sdlcEntityLinkTable,
-  }),
-}));
-
-export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
-  repo: one({
-    sourceField: ['repoId'],
-    destField: ['id'],
-    destSchema: repoTable,
-  }),
-}));
 
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
@@ -4679,7 +4618,6 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
-    sdlcEntityLinkTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4775,8 +4713,6 @@ export const schema = createSchema({
     channelTableRelationships,
     channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
-    repoTableRelationships,
-    sdlcEntityLinkTableRelationships,
     messageTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
@@ -4944,7 +4880,6 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
-export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;

@@ -58,7 +58,6 @@ export const generateMermaidId = (): string => {
 interface RenderDiagramParams {
   chart: string;
   messageId: string | undefined;
-  isDark: boolean;
   lastRenderedChart: string;
   onSuccess: (svg: string, chart: string) => void;
   onError: (error: string) => void;
@@ -71,7 +70,6 @@ interface RenderDiagramParams {
 export const renderMermaidDiagram = async ({
   chart,
   messageId,
-  isDark,
   lastRenderedChart,
   onSuccess,
   onError,
@@ -83,9 +81,8 @@ export const renderMermaidDiagram = async ({
     return;
   }
 
-  // Theme is part of the render identity; switching themes must replace the
-  // SVG even when the diagram source is unchanged.
-  if (lastRenderedChart === `${isDark ? 'dark' : 'light'}:${chart}`) return;
+  // Skip if chart hasn't changed
+  if (lastRenderedChart === chart) return;
 
   // Validate Mermaid syntax
   const hasValidSyntax = isValidMermaidSyntax(chart);
@@ -97,10 +94,9 @@ export const renderMermaidDiagram = async ({
   }
 
   // Try to load from cache first if messageId is provided
-  const themedMessageId = messageId ? `${messageId}:${isDark ? 'dark' : 'light'}` : undefined;
-  if (themedMessageId) {
+  if (messageId) {
     try {
-      const cached = await loadMermaidDiagram(themedMessageId);
+      const cached = await loadMermaidDiagram(messageId);
       if (cached && cached.diagram === chart && cached.renderedSvg) {
         // Re-sanitize: cache entries may predate the securityLevel fix.
         onSuccess(sanitizeMermaidSvg(cached.renderedSvg), chart);
@@ -121,13 +117,6 @@ export const renderMermaidDiagram = async ({
   onLoading(true);
 
   try {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: isDark ? 'dark' : 'default',
-      securityLevel: 'antiscript',
-      fontFamily: 'Inter, sans-serif',
-      suppressErrorRendering: true,
-    });
     // Generate unique ID for each diagram
     const id = generateMermaidId();
 
@@ -138,8 +127,8 @@ export const renderMermaidDiagram = async ({
     onError('');
 
     // Save the sanitized SVG so cached entries are clean going forward
-    if (themedMessageId) {
-      void saveMermaidDiagram(themedMessageId, chart, safeSvg);
+    if (messageId) {
+      void saveMermaidDiagram(messageId, chart, safeSvg);
     }
   } catch (err) {
     logger.error(LogEvent.FRONTEND_ERROR, {

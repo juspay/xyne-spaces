@@ -26,7 +26,6 @@ import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import rehypeHighlight from 'rehype-highlight';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   StreamingMarkdownBlocks,
@@ -1591,10 +1590,9 @@ MessageItem.displayName = 'MessageItem';
 // types, discard the real DOM nodes and rebuild them (re-firing the mount fade
 // = the blink). Hoisted to module scope so identity can never change.
 const ANSWER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
-const STATIC_ANSWER_REHYPE_PLUGINS = [rehypeHighlight];
 // Word-fade spans for live-streamed answers (see rehypeStreamWordFade). Only
 // applied on the everStreamed path so history messages carry no extra spans.
-const ANSWER_REHYPE_PLUGINS = [rehypeHighlight, rehypeStreamWordFade];
+const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
 // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
 // non-http(s) schemes, which would erase the href before the `a` override can
 // intercept it and substitute a ClawCitationChip. Same fix as v3
@@ -1781,7 +1779,7 @@ const MessageContent = ({
     (markdown: string): ReactElement => (
       <ReactMarkdown
         remarkPlugins={ANSWER_REMARK_PLUGINS}
-        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : STATIC_ANSWER_REHYPE_PLUGINS}
+        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : undefined}
         urlTransform={preserveUrlTransform}
         components={answerComponents}
       >
@@ -2051,7 +2049,6 @@ const SummarizerContent = ({
           <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
-              rehypePlugins={STATIC_ANSWER_REHYPE_PLUGINS}
               components={{
                 ...sidebarMarkdownComponents,
                 p: ({ children }) => {

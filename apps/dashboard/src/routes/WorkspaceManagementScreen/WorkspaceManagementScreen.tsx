@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
-import { Settings, Mail, ChevronLeft, UserCheck, GitBranch } from 'lucide-react';
+import { Settings, Mail, ChevronLeft, UserCheck } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,16 +8,13 @@ import { cn } from '../../utils/classNames';
 import { GeneralAndMembersTab } from './GeneralAndMembersTab';
 import { InvitationsTab } from './InvitationsTab';
 import { GuestUsersTab } from './GuestUsersTab';
-import { RepositoryCredentialsTab } from './RepositoryCredentialsTab';
 import * as Tabs from '@radix-ui/react-tabs';
 
 export const WorkspaceManagementScreen = (): ReactElement => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const [activeTab, setActiveTab] = useState('general');
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(
-    searchParams.get('tab') === 'repository-credentials' ? 'repository-credentials' : 'general',
-  );
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -71,11 +68,6 @@ export const WorkspaceManagementScreen = (): ReactElement => {
           <Tabs.Root value={activeTab} onValueChange={setActiveTab} className='w-full'>
             <Tabs.List className='flex gap-0 -mb-px'>
               <TabTrigger value='general' icon={Settings} label='General & Members' />
-              <TabTrigger
-                value='repository-credentials'
-                icon={GitBranch}
-                label='Repository credentials'
-              />
               <TabTrigger value='invitations' icon={Mail} label='Invitations' />
               <TabTrigger value='guests' icon={UserCheck} label='Guest Users' />
             </Tabs.List>
@@ -93,9 +85,6 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               </Tabs.Content>
               <Tabs.Content value='invitations' className='outline-none h-full'>
                 <InvitationsTab isActive={activeTab === 'invitations'} />
-              </Tabs.Content>
-              <Tabs.Content value='repository-credentials' className='outline-none h-full'>
-                <RepositoryCredentialsTab isActive={activeTab === 'repository-credentials'} />
               </Tabs.Content>
               <Tabs.Content value='guests' className='outline-none h-full'>
                 <GuestUsersTab isActive={activeTab === 'guests'} />

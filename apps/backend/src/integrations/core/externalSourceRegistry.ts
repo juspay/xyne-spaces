@@ -16,7 +16,6 @@ const externalSourceDisplayInfo = new Map<string, { name: string; email: string 
 const DISPLAY_BOT_EXCLUDED_SOURCE_TYPES = new Set([
   'google_calendar',
   'microsoft_calendar',
-  'sdlc_vcs_credential',
 ]);
 
 /**

@@ -243,7 +243,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
     }
 
     // Get a client token with full authorization for write operations
-    const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
+    const clientToken = await ysweetGetClientToken(canvasId, {
       authorization: 'full',
     });
 

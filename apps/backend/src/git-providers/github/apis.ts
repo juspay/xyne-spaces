@@ -40,25 +40,25 @@ export class GithubManager implements IGitProvider {
   parseRepoFromUrl(repoUrl: string): { owner: string; repo: string } | null {
     try {
       // SSH format: git@github.com:owner/repo.git
-      const sshMatch = repoUrl.match(/git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
+      const sshMatch = repoUrl.match(/git@github\.com:([^\/]+)\/(.+?)(?:\.git)?$/);
       if (sshMatch) {
         return { owner: sshMatch[1], repo: sshMatch[2] };
       }
 
       // HTTPS format: https://github.com/owner/repo.git or https://github.com/owner/repo
-      const httpsMatch = repoUrl.match(/https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+      const httpsMatch = repoUrl.match(/https:\/\/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
       if (httpsMatch) {
         return { owner: httpsMatch[1], repo: httpsMatch[2] };
       }
 
       // GitHub Enterprise SSH format: git@github.enterprise.com:owner/repo.git
-      const gheSshMatch = repoUrl.match(/git@[^:]+:([^/]+)\/(.+?)(?:\.git)?$/);
+      const gheSshMatch = repoUrl.match(/git@[^:]+:([^\/]+)\/(.+?)(?:\.git)?$/);
       if (gheSshMatch && this.isGitHubUrl(repoUrl)) {
         return { owner: gheSshMatch[1], repo: gheSshMatch[2] };
       }
 
       // GitHub Enterprise HTTPS format
-      const gheHttpsMatch = repoUrl.match(/https:\/\/[^/]+\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+      const gheHttpsMatch = repoUrl.match(/https:\/\/[^\/]+\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
       if (gheHttpsMatch && this.isGitHubUrl(repoUrl)) {
         return { owner: gheHttpsMatch[1], repo: gheHttpsMatch[2] };
       }
@@ -95,8 +95,7 @@ export class GithubManager implements IGitProvider {
     title: string,
     description: string,
     xyneId?: string,
-    ticketId?: string,
-    draft: boolean = false,
+    ticketId?: string
   ): Promise<string | undefined> {
     if (!baseBranch || !headBranch || !projectName || !repoName) {
         logger.error('[BitbucketManager] Missing required parameters to create PR:', {
@@ -129,7 +128,6 @@ export class GithubManager implements IGitProvider {
           body: prBody,
           head: headBranch,
           base: baseBranch,
-          draft,
         },
         { headers: this.getHeaders() }
       );

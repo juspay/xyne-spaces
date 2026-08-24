@@ -13,7 +13,6 @@ import { FormFieldType } from '@xyne/shared';
 import { useVespaTicketSearch } from '../../hooks/useVespaTicketSearch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { sortByKanbanPosition } from './KanbanBoardScreen.utils';
-import { withTicketChannelScope } from './ticketChannelScope';
 
 export type KanbanTicketsPageRow = Ticket & {
   assignments?: TicketAssignment[];
@@ -38,7 +37,6 @@ export type KanbanPageGroupBy =
 
 export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
-  channelId?: string;
   projectId?: string;
   boardId?: string;
   userId?: string;
@@ -240,37 +238,33 @@ const toQueryFilters = (
 export const buildKanbanTicketsPageArgs = (
   options: UseKanbanTicketsPageOptions,
   start: KanbanTicketsPageQueryArgs['start'],
-): KanbanTicketsPageQueryArgs =>
-  withTicketChannelScope(
-    {
-      viewMode: options.viewMode,
-      projectId: options.projectId,
-      boardId: options.boardId,
-      userId: options.userId,
-      groupId: options.groupId,
-      excludeFlowSteps: options.excludeFlowSteps,
-      columnType: options.columnType,
-      stageName: options.stageName,
-      limit: options.pageSize ?? DEFAULT_PAGE_SIZE,
-      start,
-      groupBy: options.groupBy,
-      groupKey: options.groupKey,
-      formFieldValue: getFormFieldValue(options.groupBy, options.groupKey),
-      vespaTicketIds: options.vespaTicketIds,
-      dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
-        options.filters,
-        options.zeroOnlyDynamicFieldIds,
-      ),
-      filters: toQueryFilters(options.filters),
-      formEntityValueFieldIds: options.formEntityValueFieldIds,
-      ...(options.dynamicFieldDateRanges
-        ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
-        : {}),
-      showOverdueOnly: options.showOverdueOnly,
-      overdueReferenceTime: options.overdueReferenceTime ?? undefined,
-    },
-    options.channelId,
-  );
+): KanbanTicketsPageQueryArgs => ({
+  viewMode: options.viewMode,
+  projectId: options.projectId,
+  boardId: options.boardId,
+  userId: options.userId,
+  groupId: options.groupId,
+  excludeFlowSteps: options.excludeFlowSteps,
+  columnType: options.columnType,
+  stageName: options.stageName,
+  limit: options.pageSize ?? DEFAULT_PAGE_SIZE,
+  start,
+  groupBy: options.groupBy,
+  groupKey: options.groupKey,
+  formFieldValue: getFormFieldValue(options.groupBy, options.groupKey),
+  vespaTicketIds: options.vespaTicketIds,
+  dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
+    options.filters,
+    options.zeroOnlyDynamicFieldIds,
+  ),
+  filters: toQueryFilters(options.filters),
+  formEntityValueFieldIds: options.formEntityValueFieldIds,
+  ...(options.dynamicFieldDateRanges
+    ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
+    : {}),
+  showOverdueOnly: options.showOverdueOnly,
+  overdueReferenceTime: options.overdueReferenceTime ?? undefined,
+});
 
 const normalizeIdentity = (value: string | null | undefined): string =>
   (value ?? '').replace(/^user:/, '');
@@ -435,16 +429,9 @@ export const useKanbanTicketsPage = (
   const directVespaPage = useMemo(
     () =>
       shouldUseDirectVespaRows
-        ? applyLocalVespaFilters(
-            options.channelId
-              ? (vespaTicketSearch.searchResults?.filter(
-                  ticket => ticket.channelId === options.channelId,
-                ) ?? null)
-              : vespaTicketSearch.searchResults,
-            options.filters,
-          )
+        ? applyLocalVespaFilters(vespaTicketSearch.searchResults, options.filters)
         : null,
-    [localFilterKey, options.channelId, shouldUseDirectVespaRows, vespaTicketSearch.searchResults],
+    [localFilterKey, shouldUseDirectVespaRows, vespaTicketSearch.searchResults],
   );
   const vespaTicketIds = requiresVespaTicketIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? [])

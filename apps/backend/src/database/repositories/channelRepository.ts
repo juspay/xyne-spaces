@@ -173,13 +173,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async delete(id: string): Promise<Channel> {
-    const attachedSdlcRepository = await this.db.repo.findFirst({
-      where: { channelId: id, projectId: { not: null } },
-      select: { id: true },
-    });
-    if (attachedSdlcRepository) {
-      throw new Error('Detach SDLC repositories before deleting their hidden channel');
-    }
     const result = await this.db.channel.delete({
       where: { id }
     });

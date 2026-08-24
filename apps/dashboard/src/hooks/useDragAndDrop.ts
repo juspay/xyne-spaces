@@ -45,8 +45,6 @@ interface UseDragAndDropProps {
   stageFormMap?: Map<string, string>; // Map of stageId -> formId
   isNonLinearBoard?: boolean;
   transitions?: StageTransitionInfo[];
-  /** Keep sortable ordering but prevent moving a ticket to another stage/status column. */
-  allowCrossColumnMove?: boolean;
 }
 
 export const useDragAndDrop = ({
@@ -61,7 +59,6 @@ export const useDragAndDrop = ({
   stageFormMap = new Map(),
   isNonLinearBoard = false,
   transitions,
-  allowCrossColumnMove = true,
 }: UseDragAndDropProps): {
   activeTicket: Ticket | null;
   handleDragStart: (event: DragStartEvent) => void;
@@ -182,10 +179,6 @@ export const useDragAndDrop = ({
 
         // Handle moving to a different stage
         if (newStageName && activeTicket.stageName !== newStageName) {
-          if (!allowCrossColumnMove) {
-            toast.info('Ticket stages are updated by the SDLC workflow');
-            return;
-          }
           const currentStage = stages.find(s => s.name === activeTicket.stageName);
 
           if (currentStage && targetStage) {
@@ -640,10 +633,6 @@ export const useDragAndDrop = ({
 
         // Handle moving to a different status
         if (newStatus && activeTicket.statusV2 !== newStatus) {
-          if (!allowCrossColumnMove) {
-            toast.info('Ticket stages are updated by the SDLC workflow');
-            return;
-          }
           // Update local state immediately for smooth UI
           setLocalTickets(prev =>
             prev.map(t => (t.id === activeTicket.id ? { ...t, statusV2: newStatus } : t)),
@@ -680,10 +669,8 @@ export const useDragAndDrop = ({
       onBackwardStageChange,
       stageFormMap,
       currentUser,
-      currentUserRoleIds,
       isNonLinearBoard,
       transitions,
-      allowCrossColumnMove,
     ],
   );
 
