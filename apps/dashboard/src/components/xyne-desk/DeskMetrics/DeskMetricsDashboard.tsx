@@ -115,7 +115,11 @@ const TagsInCategorySubmenu = ({
       <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
         {category}
       </div>
-      <div className='max-h-72 overflow-y-auto p-1'>
+      <div
+        className='max-h-72 overflow-y-auto p-1'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {availableTags.length === 0 ? (
           <div className='p-6 text-center text-sm text-muted-foreground'>No tags available</div>
         ) : (
@@ -945,6 +949,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const [assigneePopoverOpen, setAssigneePopoverOpen] = useState(false);
   const [customFieldPopoverOpen, setCustomFieldPopoverOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+  const [filterSearch, setFilterSearch] = useState('');
+  // Stable tag list per category: grows as tags are seen, never shrinks.
+  // Prevents mutually-exclusive tags (e.g. sentiment) from disappearing when
+  // selecting one tag filters the cohort and the API stops returning the others.
+  const [stableTagsInCategory, setStableTagsInCategory] = useState<string[]>([]);
 
   useEffect(() => {
     setCustomFieldPopoverOpen(false);
@@ -1038,6 +1047,20 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedUserGroupIds,
     selectedTagValues,
   );
+
+  useEffect(() => {
+    if (selectedTagCategory === null) {
+      setStableTagsInCategory([]);
+      return;
+    }
+    const fresh = (data?.tagBreakdown ?? [])
+      .filter(tb => tb.tagCategory === selectedTagCategory)
+      .map(tb => `${tb.tagCategory}:${tb.tag}`);
+    setStableTagsInCategory(prev => {
+      const prevForCategory = prev.filter(k => k.startsWith(`${selectedTagCategory}:`));
+      return [...new Set([...prevForCategory, ...fresh])];
+    });
+  }, [selectedTagCategory, data?.tagBreakdown]);
 
   const availableCustomFields = useMemo(() => {
     const fields = new Map<string, DeskMetricsCustomFieldDefinition>();
@@ -1477,12 +1500,15 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     open={customFieldPopoverOpen}
                     onOpenChange={nextOpen => {
                       setCustomFieldPopoverOpen(nextOpen);
-                      if (!nextOpen) setActiveSubmenu(null);
+                      if (!nextOpen) {
+                        setActiveSubmenu(null);
+                        setFilterSearch('');
+                      }
                     }}
                     align='start'
                     sideOffset={6}
                     collisionPadding={12}
-                    className='max-h-[400px] w-56 overflow-y-auto rounded-lg border border-border bg-background p-0 shadow-lg'
+                    className='w-56 rounded-lg border border-border bg-background p-0 shadow-lg'
                     onInteractOutside={event => {
                       const target = event.target;
                       if (
@@ -1507,300 +1533,235 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       </button>
                     }
                   >
-                    <div className='py-1'>
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__priority'}
-                        onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__priority' : null)}
+                    <>
+                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
+                        <Search size={14} className='shrink-0 text-muted-foreground' />
+                        <input
+                          type='text'
+                          value={filterSearch}
+                          onChange={e => setFilterSearch(e.target.value)}
+                          onKeyDown={e => e.stopPropagation()}
+                          placeholder='Search filters…'
+                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                          data-track-category='DeskMetrics'
+                          data-track-name='SearchFilters'
+                        />
+                      </div>
+                      <div
+                        className='max-h-[360px] overflow-y-auto py-1'
+                        onWheel={e => e.stopPropagation()}
+                        onTouchMove={e => e.stopPropagation()}
                       >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__priority' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenPriorityFilterSubmenu'
+                        {(!filterSearch || 'priority'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__priority'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__priority' : null)
+                            }
                           >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <BarChart4 size={16} className='shrink-0' />
-                              <span>Priority</span>
-                              {selectedPriorities.length > 0 && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__priority' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenPriorityFilterSubmenu'
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <BarChart4 size={16} className='shrink-0' />
+                                  <span>Priority</span>
+                                  {selectedPriorities.length > 0 && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <PrioritySubmenu
+                                  selectedPriorities={selectedPriorities}
+                                  onChange={setSelectedPriorities}
+                                />
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {(!filterSearch || 'user groups'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__userGroups'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__userGroups' : null)
+                            }
                           >
-                            <PrioritySubmenu
-                              selectedPriorities={selectedPriorities}
-                              onChange={setSelectedPriorities}
-                            />
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__userGroups'}
-                        onOpenChange={nextOpen =>
-                          setActiveSubmenu(nextOpen ? '__userGroups' : null)
-                        }
-                      >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__userGroups' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenUserGroupFilterSubmenu'
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__userGroups' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenUserGroupFilterSubmenu'
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <Users size={16} className='shrink-0' />
+                                  <span>User Groups</span>
+                                  {selectedUserGroupIds.length > 0 && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <UserGroupSubmenu
+                                  selectedGroups={selectedUserGroupIds}
+                                  onChange={setSelectedUserGroupIds}
+                                  onClose={() => setActiveSubmenu(null)}
+                                />
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {(!filterSearch || 'tag category'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__tagCategory'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__tagCategory' : null)
+                            }
                           >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <Users size={16} className='shrink-0' />
-                              <span>User Groups</span>
-                              {selectedUserGroupIds.length > 0 && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
-                          >
-                            <UserGroupSubmenu
-                              selectedGroups={selectedUserGroupIds}
-                              onChange={setSelectedUserGroupIds}
-                              onClose={() => setActiveSubmenu(null)}
-                            />
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      {/* Tag Category (single-select) */}
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__tagCategory'}
-                        onOpenChange={nextOpen =>
-                          setActiveSubmenu(nextOpen ? '__tagCategory' : null)
-                        }
-                      >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenTagCategorySubmenu'
-                          >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <Tag size={16} className='shrink-0' />
-                              <span>Tag Category</span>
-                              {selectedTagCategory !== null && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
-                          >
-                            <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
-                              <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                                Select Category
-                              </div>
-                              <div className='max-h-72 overflow-y-auto p-1'>
-                                {(data?.tagCategories ?? []).length === 0 ? (
-                                  <div className='p-6 text-center text-sm text-muted-foreground'>
-                                    No categories
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenTagCategorySubmenu'
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <Tag size={16} className='shrink-0' />
+                                  <span>Tag Category</span>
+                                  {selectedTagCategory !== null && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
+                                  <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                                    Select Category
                                   </div>
-                                ) : (
-                                  <div className='space-y-0.5'>
-                                    {(data?.tagCategories ?? []).map(tc => (
-                                      <button
-                                        key={tc.tagCategory}
-                                        type='button'
-                                        onClick={() => {
-                                          setSelectedTagCategory(
-                                            selectedTagCategory === tc.tagCategory
-                                              ? null
-                                              : tc.tagCategory,
-                                          );
-                                          setActiveSubmenu(null);
-                                        }}
-                                        data-track-category='DeskMetrics'
-                                        data-track-name='SelectTagCategory'
-                                        className={cn(
-                                          'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
-                                          selectedTagCategory === tc.tagCategory
-                                            ? 'bg-accent text-accent-foreground'
-                                            : 'text-foreground hover:bg-muted',
-                                        )}
-                                      >
-                                        <span className='truncate'>{tc.tagCategory}</span>
-                                        <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
-                                          {tc.count}
-                                        </span>
-                                      </button>
-                                    ))}
+                                  <div
+                                    className='max-h-72 overflow-y-auto p-1'
+                                    onWheel={e => e.stopPropagation()}
+                                    onTouchMove={e => e.stopPropagation()}
+                                  >
+                                    {(data?.tagCategories ?? []).length === 0 ? (
+                                      <div className='p-6 text-center text-sm text-muted-foreground'>
+                                        No categories
+                                      </div>
+                                    ) : (
+                                      <div className='space-y-0.5'>
+                                        {(data?.tagCategories ?? []).map(tc => (
+                                          <button
+                                            key={tc.tagCategory}
+                                            type='button'
+                                            onClick={() => {
+                                              setSelectedTagCategory(
+                                                selectedTagCategory === tc.tagCategory
+                                                  ? null
+                                                  : tc.tagCategory,
+                                              );
+                                              setActiveSubmenu(null);
+                                            }}
+                                            data-track-category='DeskMetrics'
+                                            data-track-name='SelectTagCategory'
+                                            className={cn(
+                                              'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
+                                              selectedTagCategory === tc.tagCategory
+                                                ? 'bg-accent text-accent-foreground'
+                                                : 'text-foreground hover:bg-muted',
+                                            )}
+                                          >
+                                            <span className='truncate'>{tc.tagCategory}</span>
+                                            <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
+                                              {tc.count}
+                                            </span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      {/* Tags within selected category */}
-                      {selectedTagCategory !== null && (
-                        <PopoverPrimitive.Root
-                          open={activeSubmenu === '__tags'}
-                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__tags' : null)}
-                        >
-                          <PopoverPrimitive.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                activeSubmenu === '__tags' && 'bg-muted font-medium',
-                              )}
-                              data-track-category='DeskMetrics'
-                              data-track-name='OpenTagsSubmenu'
-                            >
-                              <div className='flex min-w-0 items-center gap-3'>
-                                <Tag size={16} className='shrink-0' />
-                                <span>Tags</span>
-                                {selectedTagValues.length > 0 && (
-                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                )}
-                              </div>
-                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                            </button>
-                          </PopoverPrimitive.Trigger>
-                          <PopoverPrimitive.Portal>
-                            <PopoverPrimitive.Content
-                              side='right'
-                              align='start'
-                              sideOffset={4}
-                              collisionPadding={12}
-                              className='z-[70] outline-none'
-                              data-custom-field-submenu='true'
-                              onOpenAutoFocus={event => event.preventDefault()}
-                            >
-                              <TagsInCategorySubmenu
-                                availableTags={(data?.tagBreakdown ?? [])
-                                  .filter(tb => tb.tagCategory === selectedTagCategory)
-                                  .map(tb => `${tb.tagCategory}:${tb.tag}`)}
-                                category={selectedTagCategory}
-                                selectedTags={selectedTagValues}
-                                onChange={setSelectedTagValues}
-                              />
-                            </PopoverPrimitive.Content>
-                          </PopoverPrimitive.Portal>
-                        </PopoverPrimitive.Root>
-                      )}
-
-                      {!isMultiDesk && stageOptions.length > 0 && (
-                        <PopoverPrimitive.Root
-                          open={activeSubmenu === '__stages'}
-                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__stages' : null)}
-                        >
-                          <PopoverPrimitive.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                activeSubmenu === '__stages' && 'bg-muted font-medium',
-                              )}
-                              data-track-category='DeskMetrics'
-                              data-track-name='OpenStageFilterSubmenu'
-                            >
-                              <div className='flex min-w-0 items-center gap-3'>
-                                <Circle size={16} className='shrink-0' />
-                                <span>Stages</span>
-                                {selectedStageNames.length > 0 && (
-                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                )}
-                              </div>
-                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                            </button>
-                          </PopoverPrimitive.Trigger>
-                          <PopoverPrimitive.Portal>
-                            <PopoverPrimitive.Content
-                              side='right'
-                              align='start'
-                              sideOffset={4}
-                              collisionPadding={12}
-                              className='z-[70] outline-none'
-                              data-custom-field-submenu='true'
-                              onOpenAutoFocus={event => event.preventDefault()}
-                            >
-                              <StagesSubmenu
-                                selectedStages={selectedStageNames}
-                                onChange={setSelectedStageNames}
-                                availableStages={[...stageOptions]}
-                              />
-                            </PopoverPrimitive.Content>
-                          </PopoverPrimitive.Portal>
-                        </PopoverPrimitive.Root>
-                      )}
-                      {!isMultiDesk &&
-                        availableCustomFields.map(definition => {
-                          const key = definition.fieldName;
-                          const FieldIcon = getIconForFieldType(definition.fieldType);
-                          const isOpen = activeSubmenu === key;
-                          const isActive = activeCustomFieldKeys.includes(key);
-
-                          return (
+                                </div>
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {/* Tags within selected category */}
+                        {selectedTagCategory !== null &&
+                          (!filterSearch || 'tags'.includes(filterSearch.toLowerCase())) && (
                             <PopoverPrimitive.Root
-                              key={key}
-                              open={isOpen}
-                              onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
+                              open={activeSubmenu === '__tags'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__tags' : null)
+                              }
                             >
                               <PopoverPrimitive.Trigger asChild>
                                 <button
                                   type='button'
                                   className={cn(
                                     'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                    isOpen && 'bg-muted font-medium',
+                                    activeSubmenu === '__tags' && 'bg-muted font-medium',
                                   )}
                                   data-track-category='DeskMetrics'
-                                  data-track-name='OpenCustomFieldFilterSubmenu'
-                                  data-track-metadata={JSON.stringify({ fieldName: key })}
+                                  data-track-name='OpenTagsSubmenu'
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
-                                    <FieldIcon className='h-4 w-4 shrink-0' />
-                                    <span className='truncate' title={key}>
-                                      {key}
-                                    </span>
-                                    {isActive && (
+                                    <Tag size={16} className='shrink-0' />
+                                    <span>Tags</span>
+                                    {selectedTagValues.length > 0 && (
                                       <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
                                     )}
                                   </div>
@@ -1820,24 +1781,142 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
-                                  <DynamicFieldSubmenu
-                                    fieldId={definition.id}
-                                    fieldName={key}
-                                    fieldType={definition.fieldType}
-                                    fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
-                                    selectedValue={selectedCustomFieldValues[key] ?? []}
-                                    onChange={value => {
-                                      if (!Array.isArray(value)) return;
-                                      updateCustomFieldValues(key, value);
-                                    }}
-                                    onClose={() => setActiveSubmenu(null)}
+                                  <TagsInCategorySubmenu
+                                    availableTags={stableTagsInCategory}
+                                    category={selectedTagCategory}
+                                    selectedTags={selectedTagValues}
+                                    onChange={setSelectedTagValues}
                                   />
                                 </PopoverPrimitive.Content>
                               </PopoverPrimitive.Portal>
                             </PopoverPrimitive.Root>
-                          );
-                        })}
-                    </div>
+                          )}
+
+                        {!isMultiDesk &&
+                          stageOptions.length > 0 &&
+                          (!filterSearch || 'stages'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__stages'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__stages' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__stages' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenStageFilterSubmenu'
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <Circle size={16} className='shrink-0' />
+                                    <span>Stages</span>
+                                    {selectedStageNames.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <StagesSubmenu
+                                    selectedStages={selectedStageNames}
+                                    onChange={setSelectedStageNames}
+                                    availableStages={[...stageOptions]}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                        {!isMultiDesk &&
+                          availableCustomFields
+                            .filter(
+                              def =>
+                                !filterSearch ||
+                                def.fieldName.toLowerCase().includes(filterSearch.toLowerCase()),
+                            )
+                            .map(definition => {
+                              const key = definition.fieldName;
+                              const FieldIcon = getIconForFieldType(definition.fieldType);
+                              const isOpen = activeSubmenu === key;
+                              const isActive = activeCustomFieldKeys.includes(key);
+
+                              return (
+                                <PopoverPrimitive.Root
+                                  key={key}
+                                  open={isOpen}
+                                  onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
+                                >
+                                  <PopoverPrimitive.Trigger asChild>
+                                    <button
+                                      type='button'
+                                      className={cn(
+                                        'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                        isOpen && 'bg-muted font-medium',
+                                      )}
+                                      data-track-category='DeskMetrics'
+                                      data-track-name='OpenCustomFieldFilterSubmenu'
+                                      data-track-metadata={JSON.stringify({ fieldName: key })}
+                                    >
+                                      <div className='flex min-w-0 items-center gap-3'>
+                                        <FieldIcon className='h-4 w-4 shrink-0' />
+                                        <span className='truncate' title={key}>
+                                          {key}
+                                        </span>
+                                        {isActive && (
+                                          <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                        )}
+                                      </div>
+                                      <ChevronRight
+                                        size={16}
+                                        className='shrink-0 text-muted-foreground'
+                                      />
+                                    </button>
+                                  </PopoverPrimitive.Trigger>
+                                  <PopoverPrimitive.Portal>
+                                    <PopoverPrimitive.Content
+                                      side='right'
+                                      align='start'
+                                      sideOffset={4}
+                                      collisionPadding={12}
+                                      className='z-[70] outline-none'
+                                      data-custom-field-submenu='true'
+                                      onOpenAutoFocus={event => event.preventDefault()}
+                                    >
+                                      <DynamicFieldSubmenu
+                                        fieldId={definition.id}
+                                        fieldName={key}
+                                        fieldType={definition.fieldType}
+                                        fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
+                                        selectedValue={selectedCustomFieldValues[key] ?? []}
+                                        onChange={value => {
+                                          if (!Array.isArray(value)) return;
+                                          updateCustomFieldValues(key, value);
+                                        }}
+                                        onClose={() => setActiveSubmenu(null)}
+                                      />
+                                    </PopoverPrimitive.Content>
+                                  </PopoverPrimitive.Portal>
+                                </PopoverPrimitive.Root>
+                              );
+                            })}
+                      </div>
+                    </>
                   </Popover>
 
                   {hasAnyFiltersActive && (

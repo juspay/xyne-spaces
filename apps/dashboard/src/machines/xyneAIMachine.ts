@@ -1,6 +1,7 @@
 import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
+import type { CanvasRole } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 // Available XyneAI states
 export type XyneAIState = 'closed' | 'open';
@@ -70,7 +71,10 @@ export interface CanvasSelectionContext {
  * context that it sends to the Claw API.
  */
 export interface AskAIInitialContextSelections {
-  canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  /** `canvasRole` marks what an auto-attached canvas IS (a recording attaches
+   *  both its AI summary and the user's own notes) so the agent can weigh them
+   *  differently. Must stay declared here or the role is dropped in transit. */
+  canvases: Array<{ id: string; title: string; canvasId?: string; canvasRole?: CanvasRole }>;
   tickets?: Array<{ id: string; title: string; xyneId?: string; status?: string }>;
   recordings: Array<{
     id: string;

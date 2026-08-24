@@ -13,7 +13,6 @@ export interface WikiAuditFinding {
     | 'BROKEN_MERMAID_FENCE'
     | 'INVALID_MERMAID'
     | 'UNSAFE_MERMAID'
-    | 'SUSPICIOUS_BROAD_REWRITE'
     | 'SOURCE_OVERLAP_NOT_UPDATED'
     | 'SHALLOW_FILE_INVENTORY'
     | 'MISSING_SOURCE_POINTERS'
@@ -26,8 +25,6 @@ export function auditWikiContent(input: {
   map: WikiMapEntry[];
   markdownByPath: ReadonlyMap<string, string>;
   staleSourcesByPath?: ReadonlyMap<string, string[]>;
-  previousContentLengthByPath?: ReadonlyMap<string, number>;
-  mutationModeByPath?: ReadonlyMap<string, string>;
   changedSourcePaths?: readonly string[];
   runTargetSha?: string;
 }): WikiAuditFinding[] {
@@ -141,19 +138,6 @@ export function auditWikiContent(input: {
         code: 'SOURCE_OVERLAP_NOT_UPDATED',
         path: page.path,
         detail: 'Page owns a source changed by this run but was not updated at the target checkpoint',
-      });
-    }
-    const previousLength = input.previousContentLengthByPath?.get(page.path);
-    if (
-      previousLength !== undefined &&
-      previousLength >= 2_000 &&
-      markdown.length < previousLength * 0.6 &&
-      input.mutationModeByPath?.get(page.path) === 'update'
-    ) {
-      findings.push({
-        code: 'SUSPICIOUS_BROAD_REWRITE',
-        path: page.path,
-        detail: `Whole-page update shrank content from ${previousLength} to ${markdown.length} characters`,
       });
     }
     for (const concept of page.concepts) {

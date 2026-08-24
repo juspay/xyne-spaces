@@ -24,7 +24,6 @@ export function resolveWikiRevisionSources(input: {
   action: 'create' | 'update' | 'archive' | 'restore';
   requestedSourcePaths: string[];
   currentSourcePaths: unknown;
-  archivedSourcePaths: unknown;
 }): { activeSourcePaths: string[]; evidenceSourcePaths: string[] } {
   if (input.action !== 'archive') {
     return {
@@ -34,11 +33,7 @@ export function resolveWikiRevisionSources(input: {
   }
 
   const evidenceSourcePaths = [
-    ...new Set([
-      ...stringPaths(input.archivedSourcePaths),
-      ...stringPaths(input.currentSourcePaths),
-      ...input.requestedSourcePaths,
-    ]),
+    ...new Set([...stringPaths(input.currentSourcePaths), ...input.requestedSourcePaths]),
   ];
   return { activeSourcePaths: [], evidenceSourcePaths };
 }

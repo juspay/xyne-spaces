@@ -1,5 +1,6 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ArrowLeft, PauseCircle, Settings02 } from '@xyne/icons';
@@ -51,6 +52,7 @@ export const AssignmentConfigScreen = ({
 }: AssignmentConfigScreenProps): ReactElement => {
   const navigate = useNavigate();
   const zero = useZero();
+  const { userID } = useAuthContextValues();
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
   const [boardWeight, setBoardWeight] = useState<string>('1');
   const [isSaving, setIsSaving] = useState(false);
@@ -106,6 +108,13 @@ export const AssignmentConfigScreen = ({
           userGroupId,
           boardId: 'nonexistent',
         }),
+  );
+
+  // Workload/complexity data is ACL-scoped to group members: if the viewer isn't
+  // in the group, those queries silently sync empty rather than erroring.
+  const isCurrentUserGroupMember = useMemo(
+    () => (userGroupMembers ?? []).some(mapping => mapping.userId === userID),
+    [userGroupMembers, userID],
   );
 
   const allUsers = useActiveUsers();
@@ -1215,6 +1224,7 @@ export const AssignmentConfigScreen = ({
               workloadMappings={userWorkloadMappings}
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
+              isCurrentUserGroupMember={isCurrentUserGroupMember}
             />
           )}
         </div>

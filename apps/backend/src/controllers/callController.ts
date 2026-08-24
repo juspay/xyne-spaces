@@ -24,6 +24,7 @@ import {
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@xyne/storage';
+import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
@@ -48,6 +49,7 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -397,6 +399,7 @@ export class CallController {
         sttModel,
         conversationId,
         artifactMessageId,
+        sdlcLink,
       } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
@@ -689,6 +692,43 @@ export class CallController {
       // Generate room link
       const roomLink = buildCallInviteUrl(callExternalId);
 
+      // SDLC linking context: validated here, applied by the LiveKit webhook when
+      // the call record (and its conversation) are created. Invalid input is
+      // dropped with a warning rather than failing the call.
+      let validatedSdlcLink: SdlcCallLink | null = null;
+      if (sdlcLink) {
+        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
+        if (parsedSdlcLink.success) {
+          const link = parsedSdlcLink.data;
+          const sdlcRepo = await db.repo.findFirst({
+            where: { id: link.repoId, channelId: channel.id },
+            select: { id: true },
+          });
+          const linkTargetValid = sdlcRepo
+            ? link.ownerType === 'CANVAS'
+              ? Boolean(
+                  await db.canvas.findFirst({
+                    where: { id: link.ownerId, channelId: channel.id },
+                    select: { id: true },
+                  }),
+                )
+              : Boolean(
+                  await db.sdlcTrack.findFirst({
+                    where: { id: link.ownerId, repoId: link.repoId },
+                    select: { id: true },
+                  }),
+                )
+            : false;
+          if (linkTargetValid) {
+            validatedSdlcLink = link;
+          } else {
+            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
+          }
+        } else {
+          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
+        }
+      }
+
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
@@ -701,6 +741,7 @@ export class CallController {
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
+        ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
       });
 
       stage = 'livekit_room_creation';
@@ -1407,6 +1448,8 @@ export class CallController {
             typeof callMetadata?.linkedTicketMessageId === 'string'
               ? callMetadata.linkedTicketMessageId
               : null,
+          // Google Docs exported from this recording's summary, newest first.
+          googleDocs: readRecordingGoogleDocLinks(call.metadata),
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
