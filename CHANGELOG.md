@@ -1,3 +1,10 @@
+## [1.215.0](https://github.com/juspay/xyne-spaces/compare/v1.214.0...v1.215.0) (2026-08-24)
+
+
+### Features
+
+* add share, download, and delete actions to recordings list ([#909](https://github.com/juspay/xyne-spaces/issues/909)) ([29288e2](https://github.com/juspay/xyne-spaces/commit/29288e2057bab41ce8d439e9c770bdfc9d96dd15))
+
 ## [1.214.0](https://github.com/juspay/xyne-spaces/compare/v1.213.3...v1.214.0) (2026-08-24)
 
 
