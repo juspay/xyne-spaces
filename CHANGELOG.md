@@ -1,3 +1,10 @@
+## [1.211.3](https://github.com/juspay/xyne-spaces/compare/v1.211.2...v1.211.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* Remove meeting detection feature for recording and calls ([#892](https://github.com/juspay/xyne-spaces/issues/892)) ([a1b64b6](https://github.com/juspay/xyne-spaces/commit/a1b64b64642442798c47e1cf9bcc123e71485bc9))
+
 ## [1.211.2](https://github.com/juspay/xyne-spaces/compare/v1.211.1...v1.211.2) (2026-08-24)
 
 
