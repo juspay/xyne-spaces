@@ -5453,45 +5453,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
-  /**
-   * Messages authored by a given user, newest first, with optional date bounds.
-   *
-   * The arbitrary-user counterpart to `userSentMessagesPaginated`, which is fixed to
-   * the caller. Built for "everything person X wrote, in order" — previously only
-   * reachable by fanning out relevance-ranked searches across date windows, which
-   * could not distinguish a genuinely quiet window from a truncated one.
-   *
-   * `MessagesACL` still applies, so this reveals nothing the caller could not
-   * already read; it only makes the ordering and paging reliable.
-   */
-  messagesBySenderPaginated: defineQuery(
-    z.object({
-      userId: z.string(),
-      limit: z.number(),
-      start: z.object({ messageId: z.string(), createdAt: z.number() }).nullable(),
-      /** Inclusive epoch-ms lower bound on createdAt. */
-      after: z.number().optional(),
-      /** Inclusive epoch-ms upper bound on createdAt. */
-      before: z.number().optional(),
-    }),
-    ({ args: { userId, limit, start, after, before } }) => {
-      let query = zql.messages.where('senderId', userId).where('isDeleted', false);
-
-      if (after !== undefined) query = query.where('createdAt', '>=', after);
-      if (before !== undefined) query = query.where('createdAt', '<=', before);
-
-      query = query.orderBy('createdAt', 'desc').orderBy('messageId', 'desc');
-
-      if (start) {
-        query = query.start(
-          { messageId: start.messageId, createdAt: start.createdAt },
-          { inclusive: false },
-        );
-      }
-
-      return query.limit(limit).related('attachments').related('conversation');
-    },
-  ),
 
   // ── Scheduled Messages ────────────────────────────────────────────────────
   /** All delayed messages for the current user that are still pending */

@@ -64,30 +64,25 @@ export class MessagesResource extends Resource {
   /**
    * List messages authored by a given user, newest first.
    *
-   * Prefer this over `search.query({ from: userId })` when assembling someone's
-   * authored history: search ranks by relevance and has a practical offset ceiling,
-   * so a thin page is indistinguishable from a truncated one. This orders by
-   * `createdAt` and cursors cleanly.
+   * Uses Vespa search under the hood, similar to cmd+k's `from:@xyz` filter.
+   * Results are ordered by newest first and use offset-based pagination.
    *
    * Read ACL still applies — you see only messages in conversations you can read.
    *
    * @example
-   * // Walk a user's whole history
-   * let cursor: MessageCursor | undefined;
-   * const all: Message[] = [];
-   * for (;;) {
-   *   const page = await sdk.messages.listByUser({ userId, limit: 100, start: cursor });
-   *   all.push(...page);
-   *   const last = page[page.length - 1];
-   *   if (page.length < 100 || !last) break;
-   *   cursor = { messageId: last.messageId, createdAt: last.createdAt };
-   * }
+   * const messages = await sdk.messages.listByUser({ userId: 'cms5x8t0t...' });
+   *
+   * // Pagination
+   * const page1 = await sdk.messages.listByUser({ userId, limit: 50, offset: 0 });
+   * const page2 = await sdk.messages.listByUser({ userId, limit: 50, offset: 50 });
    */
   listByUser(options: {
     userId: string;
     limit?: number;
-    start?: MessageCursor;
+    offset?: number;
+    /** Inclusive epoch-ms lower bound. */
     after?: number;
+    /** Inclusive epoch-ms upper bound. */
     before?: number;
   }): Promise<Message[]> {
     return this.call(messagesOperations.listByUser, options);

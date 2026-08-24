@@ -8,7 +8,7 @@
  * replies into an existing one.
  */
 
-import { query, mutator } from './types.js';
+import { query, mutator, api } from './types.js';
 import { newId, now } from '../core/ids.js';
 import type { Message, MessageType } from '../types/index.js';
 
@@ -61,33 +61,74 @@ export const messagesOperations = {
   ),
 
   /**
-   * Messages authored by a given user, newest first.
-   * Maps to: Zero query 'messagesBySenderPaginated'
+   * Messages authored by a given user, newest first (via Vespa search).
+   * Maps to: GET /api/sdk/search with from=userId, type=messages
    *
-   * Use this rather than searching with `from=<userId>` when building someone's
-   * authored history: search is relevance-ranked with a practical offset ceiling, so
-   * a thin page cannot be distinguished from a truncated one. This is ordered by
-   * `createdAt` and cursors cleanly.
+   * Uses Vespa search under the hood, similar to cmd+k's `from:@xyz` filter.
+   * Results are ordered by newest first. Uses offset-based pagination.
    */
-  listByUser: query<
+  listByUser: api<
     {
       userId: string;
       limit?: number;
-      start?: MessageCursor;
+      offset?: number;
       /** Inclusive epoch-ms lower bound. */
       after?: number;
       /** Inclusive epoch-ms upper bound. */
       before?: number;
     },
     Message[]
-  >('messagesBySenderPaginated', {
+  >('GET', '/api/sdk/search', {
     mapArgs: (args) => ({
-      userId: args.userId,
+      q: '', // Empty query for filter-only search
+      from: args.userId,
+      type: 'messages',
+      orderBy: 'newest',
       limit: args.limit ?? 50,
-      start: args.start ?? null,
-      ...(args.after !== undefined ? { after: args.after } : {}),
-      ...(args.before !== undefined ? { before: args.before } : {}),
+      offset: args.offset ?? 0,
+      // Convert epoch-ms to ISO date format for search
+      ...(args.after !== undefined
+        ? { after: new Date(args.after).toISOString().split('T')[0] }
+        : {}),
+      ...(args.before !== undefined
+        ? { before: new Date(args.before).toISOString().split('T')[0] }
+        : {}),
     }),
+    mapResult: (raw: unknown): Message[] => {
+      // The SDK search endpoint returns a different format than the standard search
+      const response = raw as {
+        results: Array<{
+          id: string;
+          context: string;
+          searchContext: {
+            messageId: string;
+            conversationId: string;
+            channelId: string;
+            senderId: string;
+            msgType: string;
+            createdAtTimestamp: number;
+          };
+        }>;
+      };
+      return response.results.map((r) => ({
+        messageId: r.searchContext?.messageId ?? r.id,
+        conversationId: r.searchContext?.conversationId ?? '',
+        childConversationId: null,
+        senderId: r.searchContext?.senderId ?? '',
+        workspaceId: '',
+        content: r.context ?? '',
+        msgType: (r.searchContext?.msgType ?? 'USER') as Message['msgType'],
+        hasAttachment: false,
+        edited: false,
+        isDeleted: false,
+        showInChannel: false,
+        visibleTo: null,
+        isSent: true,
+        nudgeCount: null,
+        metadata: {},
+        createdAt: r.searchContext?.createdAtTimestamp ?? 0,
+      }));
+    },
   }),
 
   /**
