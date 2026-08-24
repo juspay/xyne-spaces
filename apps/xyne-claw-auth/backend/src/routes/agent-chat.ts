@@ -871,6 +871,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designSelection,
       researchContext,
       speed: rawSpeed,
+      thinkingLevel: rawThinkingLevel,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -899,12 +900,23 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
        *  modelSettings.speed for this run only — same credential, same model,
        *  Anthropic's faster tier. Omitted = agent default. */
       speed?: "standard" | "fast";
+      /** Per-message thinking level (the composer's model menu). Rides the
+       *  agent's modelSettings.thinkingLevel for this run only. */
+      thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
     const speedOverride: "standard" | "fast" | undefined =
       rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
     if (rawSpeed !== undefined && !speedOverride) {
       res.status(400).json({ success: false, error: 'speed must be "standard" or "fast"' });
+      return;
+    }
+    const CHAT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+    const thinkingOverride = typeof rawThinkingLevel === "string" && (CHAT_THINKING_LEVELS as readonly string[]).includes(rawThinkingLevel)
+      ? rawThinkingLevel as (typeof CHAT_THINKING_LEVELS)[number]
+      : undefined;
+    if (rawThinkingLevel !== undefined && !thinkingOverride) {
+      res.status(400).json({ success: false, error: `thinkingLevel must be one of: ${CHAT_THINKING_LEVELS.join(", ")}` });
       return;
     }
 
@@ -1423,16 +1435,31 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
-    // Per-message fast-mode toggle wins over the agent's saved
-    // modelSettings.speed for this run only (not persisted to the agent).
-    if (speedOverride) {
+    // Per-message fast-mode / thinking overrides win over the agent's saved
+    // modelSettings for this run only (not persisted to the agent). The
+    // thinking pick also outranks the fast profile's thinking override —
+    // claw overlays fastModeProfile.modelSettings over modelSettings on fast
+    // runs, so mirror the choice into the profile too when one exists.
+    if (speedOverride || thinkingOverride) {
       runAgentConfig = {
         ...(runAgentConfig ?? {}),
         modelSettings: {
           ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
-          speed: speedOverride,
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
         },
       };
+      const profile = runAgentConfig["fastModeProfile"];
+      if (thinkingOverride && profile && typeof profile === "object" && !Array.isArray(profile)
+          && (profile as Record<string, unknown>)["modelSettings"]) {
+        runAgentConfig["fastModeProfile"] = {
+          ...(profile as Record<string, unknown>),
+          modelSettings: {
+            ...((profile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+            thinkingLevel: thinkingOverride,
+          },
+        };
+      }
     }
     const effectiveAgentConfig = disableTools
       ? {
