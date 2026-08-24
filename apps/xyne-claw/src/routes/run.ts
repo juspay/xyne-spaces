@@ -2237,7 +2237,6 @@ async function processTask(
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
     const directPickSuffixes = toolsConfigEarly?.direct ?? [];
-    const explicitCustomSlugs = toolsConfigEarly?.custom ?? [];
 
     // Per-run registry for background (run_in_background) subagents. Shared by
     // reference with the subagent tools (via the progressCtx below) and with
@@ -2257,7 +2256,6 @@ async function processTask(
       customTools: customToolDefs,
       ...(customSubagents ? { customSubagents } : {}),
       includeSubagentTools: fastModeEnabled,
-      explicitCustomSlugs,
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -2270,7 +2268,6 @@ async function processTask(
             groups: allGroups,
             customTools: customToolDefs,
             directPickSuffixes,
-            explicitCustomSlugs,
           }),
         }
       : buildSubagentTools(
@@ -2305,7 +2302,6 @@ async function processTask(
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
           customSubagents,
           directPickSuffixes,
-          explicitCustomSlugs,
         );
 
     let fastMetaTools: ToolDefinition[] = [];
@@ -2506,7 +2502,6 @@ async function processTask(
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
           calleeDirectPickSuffixes,
-          calleeToolsConfig?.custom ?? [],
         );
         const calleeSandboxSelected = (calleeToolsConfig?.custom ?? []).some((s) => s.startsWith("sandbox-"));
         const calleeParentHoistedTools = calleeCustom.tools.filter((t) => {
