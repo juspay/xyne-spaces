@@ -1927,12 +1927,22 @@ async function processTask(
 
     // Surface-default tool injection, per run only. Slack already injects its
     // subagent in claw-auth before dispatch; Spaces runs arrive directly from
-    // the Spaces webhook and need the same default here so mention/automation
-    // runs can read the room without mutating the stored agent config. A missing
-    // tools object means the agent is unrestricted, so do not create one.
+    // the Spaces webhook and need the same default here so mention/automation/
+    // scheduled runs can read the room without mutating the stored agent config.
+    // Scheduled jobs post into a Spaces channel too, so they get the same spaces
+    // default as an interactive mention. A missing tools object means the agent
+    // is unrestricted, so do not create one.
     const effectiveTools = effectiveConfig["tools"];
+    const isSpacesSurfaceEvent =
+      eventType === "APP_MENTIONED" ||
+      eventType === "DIRECT_MESSAGE" ||
+      eventType === "USER_MENTIONED" ||
+      eventType === "automation" ||
+      eventType === "scheduled_job" ||
+      eventType === "scheduled" ||
+      (conversationId?.startsWith("scheduled_") ?? false);
     if (
-      (eventType === "APP_MENTIONED" || eventType === "DIRECT_MESSAGE" || eventType === "USER_MENTIONED" || eventType === "automation") &&
+      isSpacesSurfaceEvent &&
       effectiveTools &&
       typeof effectiveTools === "object" &&
       !Array.isArray(effectiveTools)

@@ -730,12 +730,17 @@ async function withSurfaceDefaultToolsConfig(
   // Spaces-originated runs already carry the agent's Spaces app/user context in
   // the session and credential fallback. Give those runs the Spaces subagent by
   // default, matching Slack's surface-default injection, without mutating the
-  // stored agent config or granting Spaces tools to API/chat/scheduled runs.
+  // stored agent config or granting Spaces tools to API/chat runs. Scheduled
+  // jobs post their result into a Spaces channel, so a scheduled run that
+  // carries Spaces app context counts as a Spaces surface too and gets the same
+  // default (a non-Spaces scheduled run, lacking that context, does not).
+  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
   const isSpacesSurface =
     runCtx?.triggerSource === "spaces" ||
     runCtx?.triggerSource === "automation" ||
     runCtx?.isAutomation === true ||
-    (runCtx?.triggerSource == null && !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery);
+    (runCtx?.triggerSource === "scheduled" && hasSpacesContext) ||
+    (runCtx?.triggerSource == null && hasSpacesContext);
   if (isSpacesSurface) {
     effective = withSubagent(effective, "spaces");
   }

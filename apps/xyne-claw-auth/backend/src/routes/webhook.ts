@@ -4783,6 +4783,38 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
   }
 
+  // Pending write-action footer: a DETERMINISTIC correction, not an LLM claim.
+  // Write tools now live in child subagent palettes too, so a parent (or child)
+  // can queue a signed write and then narrate as if it already ran — the write
+  // itself is gated (nothing executes until the approval card at ~6689 is
+  // approved), but the TEXT can still mislead. This footer is minted from the
+  // same `payload.pendingActions` that drives those approval cards, so it states
+  // exactly what is queued and can never drift from what actually got queued.
+  // Gated on a non-empty result (like the memory footer) so it corrects a
+  // narration rather than resurrecting an empty turn; an empty turn's approval
+  // card stands on its own.
+  const pendingActionList = Array.isArray(
+    (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions,
+  )
+    ? (payload as { pendingActions: Array<Record<string, unknown>> }).pendingActions
+    : [];
+  if (payload.status === "completed" && resultWithCitations.trim() && pendingActionList.length > 0) {
+    const toolNames = [
+      ...new Set(
+        pendingActionList
+          .map((a) => (typeof a["tool"] === "string" ? a["tool"].trim() : ""))
+          .filter((t) => t.length > 0),
+      ),
+    ];
+    const shown = toolNames.slice(0, 6).map((t) => `\`${t}\``);
+    const extra = toolNames.length - shown.length;
+    const toolList = extra > 0 ? `${shown.join(", ")} +${extra} more` : shown.join(", ");
+    const n = pendingActionList.length;
+    const noun = n === 1 ? "action is" : "actions are";
+    const tail = toolList ? `: ${toolList}` : "";
+    resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_⏳ ${n} write ${noun} queued and awaiting your approval — nothing has run yet${tail}. Approve the card${n === 1 ? "" : "s"} to execute._`;
+  }
+
   // When an active /goal loop is running, prefix every turn's user-facing reply
   // with a turn counter for clarity. The goal's turnCount is still pre-increment
   // here (recordTurnAndDecide bumps it in the relooper hook below), so the turn
