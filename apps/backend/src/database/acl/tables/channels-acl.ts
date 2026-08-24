@@ -43,6 +43,12 @@ export class ChannelsACL extends BaseQueryACL<
   }
 
   async canCreate(data: Prisma.ChannelUncheckedCreateInput): Promise<boolean> {
+    // DM channels are not project-owned product channels. The bot-DM app route
+    // creates them with the historical sentinel projectId `default`; requiring
+    // that to be a real Project makes /api/apps/channel/openDm fail at the ACL
+    // layer before participants can be added.
+    if (data.scopeType === 'DM' || data.scopeType === 'GROUP_DM') return true
+
     if (data.projectId) {
       const project = await this.prisma.project.findFirst({
         where: { id: data.projectId, workspaceId: this.ctx.workspaceId },

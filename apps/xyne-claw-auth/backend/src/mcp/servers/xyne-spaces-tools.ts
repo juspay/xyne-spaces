@@ -6964,6 +6964,9 @@ const userSendMessage: ToolDef = {
     "Different from `apps-send-message`: that one posts as the bot identity. " +
     "Pick user-send-message when the human explicitly asks you to write something on their behalf in another place; " +
     "pick apps-send-message when the bot is autonomously broadcasting (run-completion ping, alert, etc.). " +
+    "If an earlier bot-DM/apps-send-message attempt failed, this tool is a fallback with different attribution and/or visibility; " +
+    "do not call it until the human has explicitly approved the fallback destination and that it will appear as them. " +
+    "Set fallbackReason so the approval card makes that change visible. " +
     "" +
     "@-mention shorthand `@Name[userId]` is server-expanded; resolve userIds via spaces-users / spaces-search first.",
   inputSchema: {
@@ -6982,6 +6985,10 @@ const userSendMessage: ToolDef = {
       content: {
         type: "string",
         description: "Message body. Supports HTML for @mentions and basic formatting.",
+      },
+      fallbackReason: {
+        type: "string",
+        description: "Required when this message is a fallback after bot/app delivery failed. Explain the failed method and why this user-attributed destination is being proposed.",
       },
     },
     required: ["content"],

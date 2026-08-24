@@ -1261,7 +1261,11 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     const content = (params["content"] as string ?? "").slice(0, 300);
     const conversationId = params["conversationId"] as string | undefined;
     const channelId = params["channelId"] as string | undefined;
+    const fallbackReason = typeof params["fallbackReason"] === "string" ? params["fallbackReason"].trim().slice(0, 300) : "";
     const lines = [`**Send Message as You**`, ``];
+    if (fallbackReason) {
+      lines.push(`**Fallback reason:** ${fallbackReason}${String(params["fallbackReason"] ?? "").length > 300 ? "..." : ""}`, ``);
+    }
     if (channelId) {
       lines.push(`**Destination:** post NEW message to #${options?.channelName ?? channelId}`);
     } else if (conversationId) {
