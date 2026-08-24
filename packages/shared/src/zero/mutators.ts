@@ -116,6 +116,49 @@ async function getCanvasThreadCommentCount(
   return comments.filter(comment => comment.deletedAt == null).length;
 }
 
+const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
+  [CollectionRole.VIEWER]: 1,
+  [CollectionRole.EDITOR]: 2,
+  [CollectionRole.OWNER]: 3,
+};
+
+/**
+ * Resolve a user's CollectionRole on a collection from its collection_permissions
+ * rows, considering a direct grant (userId), a grant made to a group they
+ * belong to (userGroupId), or a grant made to a channel they participate in
+ * (channelId — always VIEWER, enforced at grant time, but still needs to be
+ * visible here so a channel-only Viewer can exercise "any role can share").
+ * Mirrors apps/backend's identical helper (and collectionAccess.ts's
+ * resolveCollectionAccess) so the client's optimistic result agrees with the
+ * server's authoritative one. Membership is resolved at check-time, not
+ * fanned out into per-member rows.
+ */
+async function resolveCollectionPermissionRole(
+  tx: Transaction<Schema>,
+  collectionId: string,
+  userId: string,
+): Promise<CollectionRole | null> {
+  const permissions = await tx.run(zql.collection_permissions.where('collectionId', collectionId));
+  const groupIds = new Set(
+    (await tx.run(zql.user_group_mappings.where('userId', userId))).map(m => m.userGroupId),
+  );
+  const channelIds = new Set(
+    (await tx.run(zql.channel_participants.where('userId', userId))).map(cp => cp.channelId),
+  );
+
+  let role: CollectionRole | null = null;
+  for (const p of permissions) {
+    const matches =
+      p.userId === userId ||
+      (p.userGroupId !== null && groupIds.has(p.userGroupId)) ||
+      (p.channelId !== null && channelIds.has(p.channelId));
+    if (!matches) continue;
+    const candidate = p.role as CollectionRole;
+    if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
+  }
+  return role;
+}
+
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
 function buildInitialMessageMd(msg: {
   messageId: string;
@@ -11722,15 +11765,10 @@ export const mutators = defineMutators({
         // separate, permanent label, not the sole authority. Either grants
         // full owner privilege here.
         const isCreator = collection.ownerId === ctx.userID;
-        const permission = isCreator
+        const permissionRole = isCreator
           ? null
-          : await tx.run(
-              zql.collection_permissions
-                .where('collectionId', id)
-                .where('userId', ctx.userID)
-                .one(),
-            );
-        const canActAsOwner = isCreator || permission?.role === CollectionRole.OWNER;
+          : await resolveCollectionPermissionRole(tx, id, ctx.userID);
+        const canActAsOwner = isCreator || permissionRole === CollectionRole.OWNER;
 
         // Visibility is owner-only: changing isPrivate flips who can see the
         // collection at all, so EDITOR permissions are not enough.
@@ -11747,7 +11785,7 @@ export const mutators = defineMutators({
         }
 
         // Verify OWNER or EDITOR permission for name/description edits
-        if (!canActAsOwner && (!permission || permission.role === CollectionRole.VIEWER)) {
+        if (!canActAsOwner && (!permissionRole || permissionRole === CollectionRole.VIEWER)) {
           throw new Error('Collection update failed: requires EDITOR or OWNER permission');
         }
 
@@ -11772,13 +11810,8 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', id)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (permission?.role !== CollectionRole.OWNER) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, id, ctx.userID);
+          if (permissionRole !== CollectionRole.OWNER) {
             throw new Error('Collection deletion failed: only an owner can delete a collection');
           }
         }
@@ -11816,13 +11849,8 @@ export const mutators = defineMutators({
         const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
         const isOwner = parentCollection.ownerId === ctx.userID;
         if (!isOwner) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', rootCollectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Folder creation failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11858,13 +11886,8 @@ export const mutators = defineMutators({
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
         if (!isOwner) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Item deletion failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11895,13 +11918,8 @@ export const mutators = defineMutators({
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
         if (!isOwner) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Item rename failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11935,13 +11953,8 @@ export const mutators = defineMutators({
         if (collection.ownerId !== ctx.userID) {
           // Anyone with an explicit role (Viewer/Editor/Owner) can share —
           // there's no separate delegated "canShare" permission.
-          const granterPermission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!granterPermission) {
+          const granterRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!granterRole) {
             throw new Error('Permission grant failed: you do not have access to this collection');
           }
         }
@@ -12017,13 +12030,8 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          const granterPermission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (granterPermission?.role !== CollectionRole.OWNER) {
+          const granterRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (granterRole !== CollectionRole.OWNER) {
             throw new Error('Permission revoke failed: only an owner can revoke permissions');
           }
         }
