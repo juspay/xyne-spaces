@@ -202,6 +202,7 @@ export class YqlBuilder {
     sort?: string,
     useExactMatch: boolean = false,
     rankProfile?: string,
+    userEmail?: string,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -267,13 +268,39 @@ export class YqlBuilder {
         }
       }
 
-      // `personalized` only: caller as rank-only terms on the search block so the profile can
-      // read matches(userId|mentions|threadSenders). rank()'s extra args never change what
-      // matches; every other profile's YQL is untouched. Needs chat_message selected
-      // (`mentions` exists only there).
-      if (rankProfile === RankProfile.personalizedRank && userId && schemas.includes(messageSchema)) {
-        const me = params.bind('involvedUser', userId);
-        whereConditions[0] = `rank(${whereConditions[0]}, userId contains ${me}, mentions contains ${me}, threadSenders contains ${me})`;
+      // `personalized` only: caller as rank-only terms on the search block so each schema's
+      // profile can read matches(<field>) for its involvement (B1) tier. rank()'s extra args
+      // never change what matches; every other profile's YQL is untouched. Each field group is
+      // gated on its schema being selected — Vespa rejects a rank arg whose field exists in no
+      // selected source. mail's from/to hold EMAIL addresses, so those bind the caller's email.
+      if (rankProfile === RankProfile.personalizedRank && userId) {
+        const rankTerms = new Set<string>();
+        let meId: string | undefined;
+        const me = () => (meId ??= params.bind('involvedUser', userId));
+        if (schemas.includes(messageSchema)) {
+          rankTerms.add(`userId contains ${me()}`);      // I sent it
+          rankTerms.add(`mentions contains ${me()}`);    // I'm mentioned
+          rankTerms.add(`threadSenders contains ${me()}`); // I replied in the thread
+        }
+        if (schemas.includes(ticketSchema)) {
+          rankTerms.add(`createdBy contains ${me()}`);       // I created it
+          rankTerms.add(`assignedTo contains ${me()}`);      // assigned to me
+          rankTerms.add(`ticketMentions contains ${me()}`);  // mentioned in the ticket
+          rankTerms.add(`threadMentions contains ${me()}`);  // mentioned in its thread
+          rankTerms.add(`threadSenders contains ${me()}`);   // I replied in its thread
+        }
+        if (schemas.includes(fileSchema)) {
+          rankTerms.add(`ownerId contains ${me()}`);   // I own it
+          rankTerms.add(`createdBy contains ${me()}`); // I uploaded it
+        }
+        if (schemas.includes(mailSchema) && userEmail) {
+          const meEmail = params.bind('involvedEmail', userEmail);
+          rankTerms.add(`"from" contains ${meEmail}`); // I sent it (`from` is a YQL keyword — must be quoted)
+          rankTerms.add(`to contains ${meEmail}`);   // addressed to me
+        }
+        if (rankTerms.size > 0) {
+          whereConditions[0] = `rank(${whereConditions[0]}, ${[...rankTerms].join(', ')})`;
+        }
       }
     }
     // Build app-specific conditions.
