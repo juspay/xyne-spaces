@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "UserBundleOverride"]
 }
 
 datasource db {
@@ -873,6 +873,24 @@ model User {
   @@index([workspaceId, id])
   @@map("users")
   @@schema("public")
+}
+
+// Per-user frontend bundle override.
+// A row here routes a specific user to a non-default bundle folder in the
+// GCS bundle bucket (served by /api/bundles/me/*). Absence of a row (or
+// enabled=false) means the user gets DEFAULT_BUNDLE_NAME.
+model UserBundleOverride {
+  id         String   @id @default(cuid())
+  userId     String   @unique                 // users.id (relationMode=prisma, no hard FK)
+  bundleName String                           // GCS folder to serve, e.g. "beta-v2"
+  enabled    Boolean  @default(true)
+  note       String?                          // optional human note about why this override exists
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("user_bundle_overrides")
+  @@schema("non_zero")
 }
 
 // User Preferences

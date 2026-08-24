@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getStorageService } from '@/services/storage';
+import { BundleOverrideService } from '@/services/bundleOverrideService';
 import path from 'path';
 
 // MIME type mapping for common frontend assets
@@ -46,15 +47,51 @@ export class BundleController {
   }
 
   /**
-   * Serve a file from GCS bundle bucket
+   * Serve a file from GCS bundle bucket for an explicit branch/folder.
    * Route: GET /api/bundles/:branchName/*
    */
   public static async serveBundle(req: Request, res: Response): Promise<void> {
-    try {
-      const { branchName } = req.params;
-      // Capture the rest of the path after /api/bundles/:branchName/
-      const filePath = req.params[0] || 'index.html';
+    const { branchName } = req.params;
+    // Capture the rest of the path after /api/bundles/:branchName/
+    const filePath = req.params[0] || 'index.html';
+    await this.streamBundleFile(req, res, branchName, filePath);
+  }
 
+  /**
+   * Serve a file from the bundle folder resolved for the authenticated user.
+   * Route: GET /api/bundles/me/*  (optionalAuthenticate)
+   *
+   * If the user has an enabled override row, that folder is served; otherwise
+   * the configured default bundle folder is served. Unauthenticated requests
+   * also get the default bundle.
+   */
+  public static async serveUserBundle(req: Request, res: Response): Promise<void> {
+    // req.params[0] is the wildcard portion after /api/bundles/me/
+    const filePath = req.params[0] || 'index.html';
+    const userId = req.user?.id;
+    const branchName = await BundleOverrideService.resolveBundleName(userId);
+
+    logger.info(`Resolved user bundle folder`, {
+      userId: userId ?? 'anonymous',
+      branchName,
+      filePath,
+    });
+
+    await this.streamBundleFile(req, res, branchName, filePath);
+  }
+
+  /**
+   * Shared logic: validate + stream a single file from {branchName}/{filePath}
+   * in the GCS bundle bucket, with SPA index.html fallback for extensionless
+   * routes and appropriate cache headers.
+   */
+  private static async streamBundleFile(
+    req: Request,
+    res: Response,
+    branchName: string,
+    filePath: string,
+  ): Promise<void> {
+    try {
       // Validate branch name to prevent directory traversal
       if (!branchName || branchName.includes('..') || branchName.includes('/')) {
         res.status(400).json({
@@ -153,6 +190,98 @@ export class BundleController {
           timestamp: new Date().toISOString(),
         });
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin CRUD for per-user bundle overrides (requireAdmin — see routes)
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/bundles/admin/overrides */
+  public static async listOverrides(_req: Request, res: Response): Promise<void> {
+    try {
+      const overrides = await BundleOverrideService.list();
+      res.json({
+        success: true,
+        data: { overrides, defaultBundleName: BundleOverrideService.getDefaultBundleName() },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('[BundleOverride] listOverrides error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to list bundle overrides',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /** POST /api/bundles/admin/overrides  body: { userId, bundleName, enabled?, note? } */
+  public static async upsertOverride(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId, bundleName, enabled, note } = req.body ?? {};
+
+      if (!userId || typeof userId !== 'string' || !bundleName || typeof bundleName !== 'string') {
+        res.status(400).json({
+          success: false,
+          error: 'userId and bundleName are required strings',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      // Reject folder names that would escape the bucket prefix
+      if (bundleName.includes('..') || bundleName.includes('/')) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid bundleName',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const override = await BundleOverrideService.upsert({
+        userId,
+        bundleName,
+        enabled: typeof enabled === 'boolean' ? enabled : undefined,
+        note: typeof note === 'string' ? note : null,
+      });
+
+      res.json({ success: true, data: override, timestamp: new Date().toISOString() });
+    } catch (error) {
+      logger.error('[BundleOverride] upsertOverride error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save bundle override',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /** DELETE /api/bundles/admin/overrides/:userId */
+  public static async deleteOverride(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const existing = await BundleOverrideService.getByUserId(userId);
+
+      if (!existing) {
+        res.status(404).json({
+          success: false,
+          error: 'Override not found',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      await BundleOverrideService.remove(userId);
+      res.json({ success: true, timestamp: new Date().toISOString() });
+    } catch (error) {
+      logger.error('[BundleOverride] deleteOverride error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete bundle override',
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 }
