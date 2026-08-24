@@ -81,6 +81,10 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import {
+  createSdlcLinkSchema,
+  sdlcDiscussionSchema,
+} from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -98,6 +102,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
@@ -399,6 +404,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -1647,11 +1662,21 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
+        sdlcDiscussion: sdlcDiscussionSchema.optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
+        args: {
+          channelId,
+          content,
+          type,
+          conversationId,
+          messageId,
+          timestamp,
+          attachmentIds,
+          sdlcDiscussion,
+        },
       }) => {
         if (content === '') {
           throw new Error('Message content or files are required to start a conversation');
@@ -1742,6 +1767,21 @@ export const mutators = defineMutators({
             createdAt: now,
           }),
         });
+
+        if (sdlcDiscussion) {
+          await tx.mutate.sdlc_entity_links.insert({
+            id: sdlcDiscussion.linkId,
+            workspaceId: ctx.workspaceId,
+            repoId: sdlcDiscussion.repoId,
+            sourceType: sdlcDiscussion.ownerType,
+            sourceId: sdlcDiscussion.ownerId,
+            targetType: 'CONVERSATION',
+            targetId: conversationId,
+            relationType: 'DISCUSSION',
+            createdBy: ctx.userID,
+            createdAt: now,
+          });
+        }
 
         await tx.mutate.messages.insert({
           messageId,
@@ -4079,6 +4119,8 @@ export const mutators = defineMutators({
           kanbanPosition?: string | null;
         }
 
+        const currentTicket = await tx.run(zql.tickets.where('id', id).one());
+        if (!currentTicket) throw new Error('Ticket not found');
         const updateData: TicketUpdateData = {
           updatedBy: ctx.userID,
           updatedAt: updatedAt,
@@ -5668,8 +5710,10 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
+        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
+        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
-        if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');
         }
         const {
@@ -5734,6 +5778,16 @@ export const mutators = defineMutators({
       if (canvas.createdBy !== ctx.userID) {
         throw new Error('Only the creator can delete the canvas');
       }
+
+      const discussionLinks = await tx.run(
+        zql.sdlc_entity_links
+          .where('sourceType', 'CANVAS')
+          .where('sourceId', id)
+          .where('relationType', 'DISCUSSION'),
+      );
+      await Promise.all(
+        discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+      );
 
       await tx.mutate.canvases.delete({ id });
     }),
@@ -7733,6 +7787,152 @@ export const mutators = defineMutators({
       },
     ),
   },
+  sdlc: {
+    createLink: defineMutator(
+      createSdlcLinkSchema.extend({
+        id: z.string(),
+        repoId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const sourceExists = args.sourceType === 'CANVAS'
+          ? Boolean(await tx.run(
+              zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+            ))
+          : args.sourceType === 'TICKET'
+            ? Boolean(await tx.run(
+                zql.tickets.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+              ))
+            : args.sourceType === 'CHANNEL'
+              ? args.sourceId === repo.channelId
+              : false;
+        if (!sourceExists) {
+          throw new Error('Relationship source does not belong to this SDLC repository');
+        }
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          sourceType: args.sourceType,
+          sourceId: args.sourceId,
+          targetType: args.targetType,
+          targetId: args.targetId,
+          relationType: args.relationType,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+    deleteLink: defineMutator(
+      z.object({ repoId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { repoId, linkId } }) => {
+        const repo = await tx.run(zql.repos.where('id', repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const link = await tx.run(
+          zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one(),
+        );
+        if (!link) {
+          throw new Error('SDLC relationship not found');
+        }
+        await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+      },
+    ),
+
+    createTrack: defineMutator(
+      z.object({
+        id: z.string(),
+        repoId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(2000).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          name: args.name,
+          description: args.description,
+          status: 'ACTIVE',
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+    updateTrack: defineMutator(
+      z.object({
+        trackId: z.string(),
+        name: z.string().trim().min(1).max(120).optional(),
+        description: z.string().trim().max(2000).nullable().optional(),
+        status: sdlcTrackStatusSchema.optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+        if (!track) {
+          throw new Error('SDLC track not found');
+        }
+        const repo = await tx.run(zql.repos.where('id', track.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.update({
+          id: args.trackId,
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.description !== undefined ? { description: args.description } : {}),
+          ...(args.status !== undefined ? { status: args.status } : {}),
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+  },
   form: {
     update: defineMutator(
       z.object({
@@ -8921,24 +9121,6 @@ export const mutators = defineMutators({
         }
       },
     ),
-    // Delete a label from the catalog and cascade-remove all its conversation mappings.
-    // Only the owner (createdBy) may delete their label.
-    deleteLabel: defineMutator(
-      z.object({ labelId: z.string() }),
-      async ({ tx, ctx, args: { labelId } }) => {
-        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-        if (!label) throw new Error('Label not found');
-        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-        const mappings = await tx.run(
-          zql.conversation_label_mappings.where('labelId', labelId),
-        );
-        for (const mapping of mappings) {
-          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-        }
-        await tx.mutate.conversation_labels.delete({ id: labelId });
-      },
-    ),
   },
   // Thread types — what kind of thread this is, as a stringified JSON array on the
   // conversation row. The caller sends the FULL desired set: the column is one value, so a
@@ -9363,6 +9545,7 @@ export const mutators = defineMutators({
         autoDraftAgentSlug: z.string().optional().nullable(),
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
+        appWebhookDeliveryEnabled: z.boolean().optional(),
       }),
       async ({
         tx,
@@ -9379,6 +9562,7 @@ export const mutators = defineMutators({
           autoDraftAgentSlug,
           metricsEnabled,
           frtStageNames,
+          appWebhookDeliveryEnabled,
         },
       }) => {
         const existing = await tx.run(
@@ -9397,6 +9581,7 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+            ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -9422,6 +9607,7 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: 0.5,
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
+            appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
           });
         }
       },

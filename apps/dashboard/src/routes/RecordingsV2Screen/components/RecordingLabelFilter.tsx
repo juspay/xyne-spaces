@@ -15,6 +15,8 @@ interface RecordingLabelFilterProps {
 }
 
 const TRIGGER_CLASS_NAME = 'h-9 gap-1.5 rounded-xl border-border px-3 font-medium shadow-none';
+const LIST_INHERITS_POPOVER_CLASS_NAME =
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
 
 export function RecordingLabelFilter({
   labels,
@@ -71,6 +73,7 @@ export function RecordingLabelFilter({
       emptyMessage='No labels found'
       trackCategory='RecordingsV2'
       trackName='toggle_label_filter'
+      className={LIST_INHERITS_POPOVER_CLASS_NAME}
       trigger={
         <Button
           type='button'

@@ -289,6 +289,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
 
         <TagGenerationConfig
           canManage={canManage}
+          channelId={channelId}
           categories={tagCategories}
           isLoading={isTagConfigLoading}
           isSaving={isTagConfigSaving}

@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '../../../utils/classNames';
 import { FileCardPreviewV2 } from './FileCardPreviewV2';
 import { IngestStatusV2 } from './IngestStatusV2';
+import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
@@ -111,10 +112,10 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
         type='button'
         onClick={isRenaming ? undefined : onClick}
         className={cn(
-          // Surface uses `ai-page-bg` so the card blends with the
+          // Surface uses `bg-background` so the card blends with the
           // knowledge-base page background instead of the slightly warm
           // `bg-secondary` token (which read as yellowish against the page).
-          'ai-page-bg flex w-full flex-col items-start gap-3 rounded-2xl border p-4 text-left transition',
+          'bg-background flex w-full flex-col items-start gap-3 rounded-2xl border p-4 text-left transition',
           String(file.ingestionStatus) === 'PENDING' ||
             String(file.ingestionStatus) === 'PROCESSING'
             ? 'animate-pulse border-ring/60 ring-1 ring-ring/25'
@@ -192,6 +193,9 @@ interface FolderCardV2Props {
    *  view — folders inside a collection don't surface this in V1 either.
    *  Visibility (public/private) lives inside the share dialog. */
   onShare?: (() => void) | undefined;
+  /** Opens the per-collection ingestion status drawer. Wired at the KB root
+   *  only; clicking the badge must not trigger folder navigation. */
+  onOpenStatus?: ((entry: CollectionChild) => void) | undefined;
   /** Inline-rename mode (see FileCardV2Props for details). */
   isRenaming?: boolean;
   onRenameCommit?: ((next: string) => void | Promise<void>) | undefined;
@@ -205,20 +209,36 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
   onDelete,
   onRename,
   onShare,
+  onOpenStatus,
   isRenaming,
   onRenameCommit,
   onRenameCancel,
 }) => {
   return (
     <div className='group relative'>
-      <button
-        type='button'
+      {/* Rendered as a role=button div (not a <button>) so the status badge can
+          be a real nested button on the folder glyph. */}
+      <div
+        role='button'
+        tabIndex={isRenaming ? -1 : 0}
         onClick={isRenaming ? undefined : onClick}
+        onKeyDown={
+          isRenaming
+            ? undefined
+            : (e): void => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onClick();
+                }
+              }
+        }
         className={cn(
           // Matches FileCardV2's surface so mixed folder + file grids feel
           // consistent across light and dark themes.
           'ai-page-bg flex w-full flex-col items-start gap-3 rounded-2xl border border-border p-4 text-left transition',
-          isRenaming ? '' : 'hover:border-ring/40 hover:bg-muted active:scale-[0.99]',
+          isRenaming
+            ? ''
+            : 'cursor-pointer hover:border-ring/40 hover:bg-muted active:scale-[0.99]',
         )}
         title={folder.name}
         data-track-category='knowledge-base'
@@ -227,18 +247,27 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
         {/* Plain outline glyph — same bounding box FileCardPreviewV2 reserves
             so rows line up evenly across mixed folder + file grids. */}
         <div className='pl-1 pt-1'>
-          <div className='flex h-[4.5rem] w-14 items-center justify-center'>
+          <div className='relative flex h-[4.5rem] w-14 items-center justify-center'>
             <Folder className='h-10 w-10 text-muted-foreground' strokeWidth={1.5} />
+            <span className='absolute bottom-2 right-0'>
+              <CollectionStatusBadgeV2 entry={folder} onOpenStatus={onOpenStatus} />
+            </span>
           </div>
         </div>
         <span className='flex w-full min-w-0 flex-col gap-0.5'>
-          {isRenaming && onRenameCommit && onRenameCancel ? (
-            <InlineName initial={folder.name} onCommit={onRenameCommit} onCancel={onRenameCancel} />
-          ) : (
-            <span className='truncate text-[13.5px] font-medium text-foreground'>
-              {folder.name}
-            </span>
-          )}
+          <span className='flex min-w-0 items-center gap-1.5'>
+            {isRenaming && onRenameCommit && onRenameCancel ? (
+              <InlineName
+                initial={folder.name}
+                onCommit={onRenameCommit}
+                onCancel={onRenameCancel}
+              />
+            ) : (
+              <span className='truncate text-[13.5px] font-medium text-foreground'>
+                {folder.name}
+              </span>
+            )}
+          </span>
           <span
             className='truncate text-[11.5px] text-muted-foreground'
             title={caption ?? 'Folder'}
@@ -246,7 +275,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
             {caption ?? 'Folder'}
           </span>
         </span>
-      </button>
+      </div>
       {!isRenaming && (onShare || onRename || onDelete) ? (
         <div className='absolute right-2 top-2 flex gap-1'>
           {onShare ? (

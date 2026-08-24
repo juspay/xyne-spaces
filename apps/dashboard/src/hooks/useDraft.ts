@@ -130,7 +130,11 @@ export function useDraftAttachments() {
             duration = thumbnailResult.duration;
             thumbnailBlob = thumbnailResult.blob;
           } catch (error) {
-            console.warn('Failed to generate thumbnail for video:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to generate thumbnail for video:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -145,7 +149,11 @@ export function useDraftAttachments() {
             const blob = await generateDocumentThumbnail(file);
             if (blob) thumbnailBlob = blob;
           } catch (error) {
-            console.warn('Failed to generate thumbnail for document:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to generate thumbnail for document:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -163,7 +171,11 @@ export function useDraftAttachments() {
               height = dims.height;
             }
           } catch (error) {
-            console.warn('Failed to get image dimensions:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to get image dimensions:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -304,7 +316,11 @@ export function useDraftAttachments() {
           file,
         }));
       } catch (error) {
-        console.error('Failed to upload files:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to upload files:'),
+          error: error,
+        });
         logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
           fileCount: filesArray.length,
           error: error instanceof Error ? error.message : String(error),

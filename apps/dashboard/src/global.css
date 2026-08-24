@@ -110,6 +110,9 @@
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
 
+    --diff-stat-add-fg: #16a34a;
+    --diff-stat-del-fg: #dc2626;
+
     /* Workflow status colors - accessible on light bg */
     --status-new: #6b7280;
     --status-pending: #d97706;
@@ -150,6 +153,19 @@
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(15, 17, 20, 0.42);
+    --call-modal-shadow: 0 24px 60px -12px rgba(15, 17, 20, 0.28), 0 2px 8px rgba(15, 17, 20, 0.08);
+    --call-accept-bg: #16a34a;
+    --call-accept-fg: #ffffff;
+    --call-accept-bg-hover: #15803d;
+    --call-accept-bg-active: #126c34;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #16a34a;
+    --call-notice-icon: #d97706;
   }
 
   /* Classic theme - default theme with current design */
@@ -241,6 +257,8 @@
     --pr-badge-merged-fg: #3716a3;
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
+    --diff-stat-add-fg: #16a34a;
+    --diff-stat-del-fg: #dc2626;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
@@ -276,6 +294,19 @@
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(15, 17, 20, 0.42);
+    --call-modal-shadow: 0 24px 60px -12px rgba(15, 17, 20, 0.28), 0 2px 8px rgba(15, 17, 20, 0.08);
+    --call-accept-bg: #16a34a;
+    --call-accept-fg: #ffffff;
+    --call-accept-bg-hover: #15803d;
+    --call-accept-bg-active: #126c34;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #16a34a;
+    --call-notice-icon: #d97706;
   }
 
   /* Midnight theme - dark theme variant */
@@ -374,6 +405,9 @@
     --pr-badge-danger-bg: #2a1414;
     --pr-badge-danger-fg: #f87171;
 
+    --diff-stat-add-fg: #4ade80;
+    --diff-stat-del-fg: #f87171;
+
     /* Workflow status colors - accessible on dark bg */
     --status-new: #b0b4ba;
     --status-pending: #fbbf24;
@@ -416,6 +450,19 @@
 
     --chat-composer-border: rgba(255, 255, 255, 0.06);
     --chat-composer-border-active: rgba(255, 255, 255, 0.2);
+    /* Incoming-call modal — see components/Call/IncomingCall/ */
+    --call-modal-overlay: rgba(0, 0, 0, 0.55);
+    --call-modal-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+    --call-accept-bg: #4ade80;
+    --call-accept-fg: #0b2e1a;
+    --call-accept-bg-hover: #6ee7a0;
+    --call-accept-bg-active: #86efac;
+    --call-decline-bg: #e01e1e;
+    --call-decline-fg: #ffffff;
+    --call-decline-bg-hover: #c22525;
+    --call-decline-bg-active: #a81d1d;
+    --call-ring-accent: #4ade80;
+    --call-notice-icon: #f59e0b;
   }
 }
 
@@ -1675,6 +1722,15 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   }
 }
 
+/* Incoming-call modal — the radar rings are also removed at the React level via
+   framer-motion's useReducedMotion; this is a backstop for any that still mount. */
+@media (prefers-reduced-motion: reduce) {
+  .incoming-call-card,
+  .incoming-call-radar {
+    animation: none !important;
+  }
+}
+
 /* ===========================================================
    Chat Message Tailwind-Compatible Styling Layer
    =========================================================== */
@@ -1685,6 +1741,15 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: normal;
+}
+
+.jp-message-html:has(.flow-artifact-wide) {
+  display: block;
+  width: 100%;
+}
+
+.flow-ui-container:has(.flow-artifact-wide) {
+  max-width: none;
 }
 
 /* Make inline emojis larger than surrounding text */
@@ -1833,6 +1898,10 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 [data-message-preview="true"] .message-html-root br {
+  display: none !important;
+}
+
+[data-message-preview="true"] .message-html-root .xyne-code-block button {
   display: none !important;
 }
 
@@ -2024,6 +2093,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: var(--mention-color);
   border-radius: 4px;
   padding: 2px 4px;
+  white-space: nowrap;
 }
 
 .mention-text::before {
@@ -2727,6 +2797,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding-bottom: 10px;
 }
 .canvas-surface .bn-editor [data-content-type="codeBlock"] {
+  width: 100%;
+  min-width: 0;
   background-color: hsl(var(--foreground) / 0.04);
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--foreground) / 0.06);
@@ -2739,9 +2811,69 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   line-height: 1.55;
   padding: 12px;
 }
+.canvas-surface .bn-editor .canvas-highlighted-code pre {
+  width: max-content;
+  min-width: 100%;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px;
+  white-space: pre;
+  overflow: visible;
+}
+.canvas-surface .bn-editor .canvas-highlighted-code {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.canvas-surface .bn-editor .canvas-highlighted-code .hljs {
+  min-height: 100%;
+  background: transparent;
+}
+/* Keep BlockNote's editable text/caret above the highlighted, inert mirror.
+   The glyphs are transparent so the token spans below remain visible. */
+.canvas-surface .bn-editor .canvas-highlighted-code .canvas-code-editor {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: hsl(var(--foreground));
+}
+.canvas-surface .bn-editor .canvas-highlighted-code .canvas-code-editor::selection {
+  background: hsl(var(--primary) / 0.24);
+}
 /* Language dropdown (revealed on hover) picks up the theme text colour. */
 .canvas-surface .bn-editor [data-content-type="codeBlock"] > div > select {
   color: hsl(var(--muted-foreground));
+}
+
+/* Mermaid renders its own unified Diagram/Code surface. Remove the generic
+   code-block card around it so the Canvas does not show nested cards. */
+.canvas-surface .bn-editor [data-content-type="codeBlock"]:has([data-wiki-mermaid="true"]) {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Repository source citations are emitted only by the trusted Wiki backend as
+   canonical GitHub blob links. Distinguish them from ordinary prose links. */
+.canvas-surface .bn-editor a[href^="https://github.com/"][href*="/blob/"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.3rem;
+  background: hsl(var(--muted) / 0.55);
+  padding: 0.08rem 0.38rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.canvas-surface .bn-editor a[href^="https://github.com/"][href*="/blob/"]::before {
+  content: "<>";
+  color: hsl(var(--muted-foreground));
+  font-size: 0.82em;
 }
 
 /* Table — token-based borders + subtle header row (BlockNote hardcodes #ddd). */
@@ -3473,12 +3605,16 @@ img.inline-emoji,
  * The blend design system uses styled-components with hardcoded light-mode colors
  * from module-level defaults (R.colors.gray). Hover states use !important CSS
  * which can't be overridden by inline styles from the ThemeProvider context.
+ *
+ * `.rdp-root` is excluded because react-day-picker builds a real <table>: each
+ * week is a <tr> of day <td>s, so without the guard hovering any day paints the
+ * whole week row. :where() keeps the exclusion specificity-free.
  */
-[data-theme="midnight"] tr:hover > td {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) > td {
   background-color: #222530 !important;
 }
 
-[data-theme="midnight"] tr:hover {
+[data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) {
   background-color: #222530 !important;
 }
 
@@ -3802,22 +3938,32 @@ img.inline-emoji,
 /* Blend DataTable header cells - ensure proper dark mode text color.
    These target app data grids. Message tables must be excluded: the markdown
    renderer emits a real <thead> (the composer does not), so without the guard
-   the two paths get different header colours in midnight. */
+   the two paths get different header colours in midnight. `.rdp-root` is
+   excluded for the same reason — react-day-picker's weekday row is a real
+   <thead><th>, which otherwise picks up the data-grid header surface. */
 [data-theme="midnight"]
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ),
 [data-theme="midnight"]
   th
-  span:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  span:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 
 /* Specific targeting for table header text with lower contrast */
 [data-theme="midnight"]
   thead
-  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  th:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
   background-color: #1a1a1a !important;
 }
@@ -3826,7 +3972,7 @@ img.inline-emoji,
 [data-theme="midnight"]
   th
   :is(p, div, span):not(
-    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ) {
   color: #d1d5db !important;
 }
@@ -3834,7 +3980,9 @@ img.inline-emoji,
 /* Ensure high contrast for all header content */
 [data-theme="midnight"]
   thead
-  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
+  *:not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
+  ) {
   color: #d1d5db !important;
 }
 
@@ -3947,16 +4095,6 @@ img.inline-emoji,
   background-image: url("/images/404-dark.png");
 }
 
-/* AI page background — soft neutral for light themes, near-black for midnight */
-[data-theme="classic"] .ai-page-bg,
-[data-theme="summer_breeze"] .ai-page-bg {
-  background-color: hsl(220 16% 97%);
-}
-
-[data-theme="midnight"] .ai-page-bg {
-  background-color: #0e0f11;
-}
-
 /* Knowledge Base section header/footer backgrounds */
 [data-theme="classic"] .ai-kb-section,
 [data-theme="summer_breeze"] .ai-kb-section {
@@ -3967,10 +4105,10 @@ img.inline-emoji,
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* AI composer — match the page bg in the soft-neutral palette */
+/* AI composer — match the page bg (overrides the component's own literal) */
 [data-theme="classic"] .ai-composer-wrapper,
 [data-theme="summer_breeze"] .ai-composer-wrapper {
-  background-color: hsl(220 16% 97%);
+  background-color: hsl(var(--background));
 }
 
 /* AI composer dark mode overrides */
@@ -4449,6 +4587,24 @@ img.inline-emoji,
 .flow-run-view .react-flow__edge {
   cursor: default;
   pointer-events: none;
+}
+
+/* Flow run search: hits get an indigo ring, everything else fades back.
+   Classes are set on the React Flow node wrappers from KanbanBoardScreen. */
+.flow-run-view .react-flow__node.flow-search-hit {
+  outline: 3px solid rgb(99 102 241 / 0.65);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.flow-run-view .react-flow__node.flow-search-miss {
+  opacity: 0.25;
+  filter: grayscale(0.6);
+  transition: opacity 150ms ease;
+}
+
+.flow-run-view--searching .react-flow__edge {
+  opacity: 0.35;
 }
 
 /* ----------------------------

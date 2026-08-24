@@ -1,5 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -40,6 +41,7 @@ import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWit
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
+import { SearchQueryInput } from './SearchQueryInput';
 import {
   useAllVisibleChannels,
   useAllChannels,
@@ -172,7 +174,8 @@ function buildSelectedMentions(
 }
 
 const SearchResults = (): ReactElement => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const [selectedPanel, setSelectedPanel] = useState<SidePanelState>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -489,6 +492,30 @@ const SearchResults = (): ReactElement => {
       mentionChannelName,
     ],
   );
+
+  // Editing the query in the header re-runs the search through the URL, the same path a
+  // cmd+K search takes, so back/forward and the overlay's query restore keep working.
+  // Filters live in their own params and are deliberately left untouched.
+  const handleQuerySubmit = useCallback(
+    (next: string) => {
+      if (next === query) return;
+      setSearchParams(
+        prev => {
+          const params = new URLSearchParams(prev);
+          if (next) params.set('query', next);
+          else params.delete('query');
+          // `display` is the pre-rendered label the top bar shows, built from mention
+          // names when the search was launched. It can't be patched from here, so drop
+          // it and let the bar fall back to the query it now shows.
+          params.delete('display');
+          return params;
+        },
+        { preventScrollReset: true },
+      );
+    },
+    [query, setSearchParams],
+  );
+
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
@@ -744,11 +771,25 @@ const SearchResults = (): ReactElement => {
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
-        {query && (
-          <p className='pt-4 text-base text-muted-foreground'>
-            Results for: <span className='font-semibold text-foreground'>{query}</span>
-          </p>
-        )}
+        <div className='pt-4 flex items-center gap-2'>
+          {/* This page is only ever arrived at from somewhere — the cmd+K palette, or a
+              link out of it — and it is the one screen that renders no AppNavigator, so it
+              had no in-app way back at all. Going back lands on the palette's own history
+              entry, which reopens cmd+K with the search still in it. */}
+          <button
+            type='button'
+            aria-label='Back'
+            onClick={() => void navigate(-1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_BACK'
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div className='flex-1 min-w-0'>
+            <SearchQueryInput query={query} onSubmit={handleQuerySubmit} isSearching={isLoading} />
+          </div>
+        </div>
         <div className='mt-3'>
           <SearchFilterBar filters={filters} onFiltersChange={handleFiltersChange} />
         </div>
@@ -775,7 +816,17 @@ const SearchResults = (): ReactElement => {
           </div>
         )}
       </div>
-      <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto px-4'>
+      <div
+        ref={scrollRef}
+        className={cn(
+          // pb-16 so the last card clears the bottom of the viewport instead of sitting
+          // flush against it (and above the floating compare bar when it's up).
+          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
+          // A re-search keeps the previous results on screen rather than blanking to a
+          // spinner — they fade back while the new ones land, and the box spins.
+          isLoading && results.length > 0 && 'opacity-50 transition-opacity duration-150',
+        )}
+      >
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
           <ResultsBody
             query={query}

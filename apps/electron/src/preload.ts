@@ -150,6 +150,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
 
+  onLinkOpenedExternal: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
+    ipcRenderer.on('link-opened-external', listener);
+    return () => ipcRenderer.removeListener('link-opened-external', listener);
+  },
+
   onReloadActiveBrowserTab: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('reload-active-browser-tab', listener);
@@ -231,12 +237,6 @@ const electronAPI = {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
-  // Log listener
-  onLog: (callback: (message: any) => void) => {
-    const listener = (_event: unknown, message: any) => callback(message);
-    ipcRenderer.on('electron-log', listener);
-    return () => ipcRenderer.removeListener('electron-log', listener);
-  },
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
   saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>
@@ -435,9 +435,5 @@ const electronAPI = {
 if (isTrustedOrigin()) {
   contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 } else {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[preload] Untrusted origin — electronAPI bridge withheld:',
-    window.location.origin,
-  );
+  // The privileged bridge is intentionally withheld for untrusted origins.
 }

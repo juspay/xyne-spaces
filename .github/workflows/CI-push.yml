@@ -21,3 +21,30 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+
+  semantic-release:
+    name: "Prod: Semantic Release"
+    needs: ci
+    if: github.ref_name == 'main' || startsWith(github.ref_name, 'release-')
+    runs-on: ubuntu-latest
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ssh-key: ${{ secrets.SEMANTIC_RELEASE_SSH_KEY }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prod=false --filter xyne-spaces
+
+      - name: Run semantic-release
+        run: pnpm exec semantic-release

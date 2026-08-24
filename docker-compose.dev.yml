@@ -1,6 +1,6 @@
 services:
   ysweet:
-    image: ghcr.io/xynehq/y-sweet:sha-dceb9d1
+    image: ghcr.io/juspay/y-sweet:sha-221d5af
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-ysweet
     ports:
       - "${YSWEET_BIND_PORT:-8080}:8080"
@@ -146,7 +146,7 @@ services:
 
   # Zero Cache Server
   zero-cache:
-    image: mirror.gcr.io/rocicorp/zero:1.6.0
+    image: mirror.gcr.io/rocicorp/zero:1.9.0
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-zero-cache
     # ZERO_AUTH_SECRET is injected from apps/backend/.env.local (gitignored) so the
     # backend and zero-cache always share the same secret; never hardcode it here.
@@ -173,7 +173,7 @@ services:
       - ZERO_PORT=4848
       # OTEL metrics export
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.6.0
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.9.0
       - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
     ports:
       - "${ZERO_BIND_PORT_1:-4848}:4848"
@@ -235,7 +235,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./otelCollector/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./docker/dev-infra/configs/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
       - "${OTEL_HTTP_BIND_PORT:-4318}:4318" # OTLP HTTP receiver (Browser sends here)
       - "${OTEL_GRPC_BIND_PORT:-4317}:4317" # OTLP gRPC receiver

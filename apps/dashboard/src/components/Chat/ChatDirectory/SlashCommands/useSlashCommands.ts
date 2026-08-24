@@ -16,7 +16,12 @@ import { useQuickCall } from '../../../../hooks/useQuickCall';
 import { useActiveUserSearch, useUsers } from '../../../../hooks/useUsers';
 import { useChannelSearch, useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { useLastVisitedChannel } from '../../../../hooks/useLastVisitedChannel';
-import { CMDK_USER_LIMIT } from '../../../../hooks/useSearchMetrics';
+import {
+  CMDK_USER_LIMIT,
+  rankUsersWithMfu,
+  rankChannelsByAffinity,
+} from '../../../../hooks/useSearchMetrics';
+import { useAffinityCallback } from '../../../../hooks/useAffinityCallback';
 import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
 import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
@@ -68,6 +73,11 @@ interface UseSlashCommandsParams {
   navigate: (path: string) => void;
   /** Metrics: emit a slash-command click (command applied / target picked). Optional. */
   onCommandClick?: (info: SlashCommandClickInfo) => void;
+  /**
+   * User ID → recency index in the 1:1 DM list (0 = most recent). Shared with the main Cmd+K
+   * people ranking so the `/chat`/`/call` user picker uses the same affinity-then-recency order.
+   */
+  dmContactRecency: Map<string, number>;
 }
 
 interface CommandGhost {
@@ -147,7 +157,11 @@ export function useSlashCommands({
   resetSearchState,
   navigate,
   onCommandClick,
+  dmContactRecency,
 }: UseSlashCommandsParams): UseSlashCommandsReturn {
+  // One shared signal that affinity weights have loaded — reuses the app-wide AffinityService
+  // instance (no extra /users/me/affinity call), and re-ranks the at-rest picker when weights land.
+  const affinityVersion = useAffinityCallback();
   // Raw command text is kept here (NOT fed to the search hook) so Vespa is never queried while a
   // command is active. Once a target is picked, `commandTarget` holds it (a user OR a channel) and
   // drives the composer / call-confirm; the search field keeps its hidden `/<cmd> <query>` text.
@@ -225,31 +239,59 @@ export function useSlashCommands({
   const commandUsers = useActiveUserSearch(commandQuery, CMDK_USER_LIMIT);
   const commandUserResults = useMemo(() => {
     if (!showUserResults) return [];
-    // `/call` can't call yourself, so keep excluding self there.
-    if (!isComposePicker) return commandUsers.filter(u => u.id !== currentUserID);
-    // `/chat` can message your self-DM. With a query typed, let the search decide (self appears
-    // when its name matches); at rest, pin "You" first so the self-DM is reachable without typing.
-    if (commandQuery.trim()) return commandUsers;
-    const withoutSelf = commandUsers.filter(u => u.id !== currentUserID);
+    // Rank exactly like the main Cmd+K people list: relevance tier → affinity weight → DM recency
+    // (rankUsersWithMfu also recovers weighted matches sliced past the CMDK_USER_LIMIT cap).
+    // `void affinityVersion` re-ranks the at-rest picker once weights finish loading.
+    void affinityVersion;
+    // `/call` can't call yourself — exclude self from BOTH the candidates and the recovery pool,
+    // else rankUsersWithMfu could pull a weighted self back in from `allUsers`.
+    if (!isComposePicker) {
+      const base = commandUsers.filter(u => u.id !== currentUserID);
+      const pool = allUsers.filter(u => u.id !== currentUserID);
+      return rankUsersWithMfu(base, pool, commandQuery, dmContactRecency);
+    }
+    // `/chat` can message your self-DM. Self is ranked like any other candidate (by its own weight
+    // + DM recency), NOT pinned — pinning "You" would push it above more-weighted contacts. At rest
+    // inject self when the cap sliced it out so the self-DM stays reachable; with a query, let
+    // matching decide (self surfaces only when its name matches).
     const self = usersById.get(currentUserID);
-    return self ? [self, ...withoutSelf] : withoutSelf;
-  }, [showUserResults, isComposePicker, commandQuery, commandUsers, usersById, currentUserID]);
+    const candidates =
+      !commandQuery.trim() && self && !commandUsers.some(u => u.id === self.id)
+        ? [...commandUsers, self]
+        : commandUsers;
+    return rankUsersWithMfu(candidates, allUsers, commandQuery, dmContactRecency);
+  }, [
+    showUserResults,
+    isComposePicker,
+    commandQuery,
+    commandUsers,
+    allUsers,
+    usersById,
+    currentUserID,
+    dmContactRecency,
+    affinityVersion,
+  ]);
   // Channel picker candidates: real group channels (DEFAULT scope) the user can access.
   const commandChannels = useChannelSearch(commandQuery, CMDK_USER_LIMIT);
   const visibleChannels = useAllVisibleChannels();
   const commandChannelResults = useMemo(() => {
     if (!showChannelResults) return [];
+    void affinityVersion;
     const visibleIds = new Set(visibleChannels.map(c => c.id));
-    return commandChannels.filter(
+    const filtered = commandChannels.filter(
       c => c.scopeType === ChannelScopeType.DEFAULT && visibleIds.has(c.id),
     );
-  }, [showChannelResults, commandChannels, visibleChannels]);
+    // Empty query → affinity-then-recency (matches the Cmd+K channel browse order). A typed query
+    // keeps the Fuse relevance order from useChannelSearch untouched.
+    return commandQuery.trim() ? filtered : rankChannelsByAffinity(filtered);
+  }, [showChannelResults, commandChannels, visibleChannels, commandQuery, affinityVersion]);
 
   // Group-DM picker candidates: the user's GROUP_DM channels, shown for both `/chat` and `/call`.
   // A group DM's `channel.name` is a comma-joined id list, so channel search can't match it by
   // name — resolve friendly participant labels here and filter on those instead.
   const commandGroupDmResults = useMemo<CommandGroupDm[]>(() => {
     if (!isPickerCommand || !showChannelResults) return [];
+    void affinityVersion;
     const query = commandQuery.trim().toLowerCase();
     const groups = visibleChannels
       .filter(c => c.scopeType === ChannelScopeType.GROUP_DM)
@@ -258,8 +300,15 @@ export function useSlashCommands({
         label: getDMSearchableNames(channel, currentUserID, usersById).join(', '),
       }))
       .filter(g => g.label);
-    const matched = query ? groups.filter(g => g.label.toLowerCase().includes(query)) : groups;
-    return matched.slice(0, CMDK_USER_LIMIT);
+    if (query) {
+      return groups.filter(g => g.label.toLowerCase().includes(query)).slice(0, CMDK_USER_LIMIT);
+    }
+    // Empty query → order by affinity-then-recency (same as the Cmd+K browse list), re-pairing the
+    // ranked channels with their resolved participant labels.
+    const labelByChannelId = new Map(groups.map(g => [g.channel.id, g.label]));
+    return rankChannelsByAffinity(groups.map(g => g.channel))
+      .map(channel => ({ channel, label: labelByChannelId.get(channel.id) ?? '' }))
+      .slice(0, CMDK_USER_LIMIT);
   }, [
     isPickerCommand,
     showChannelResults,
@@ -267,6 +316,7 @@ export function useSlashCommands({
     visibleChannels,
     usersById,
     currentUserID,
+    affinityVersion,
   ]);
 
   // `/goto` candidates: the nav-bar sections the current user can see (permission/electron/claw

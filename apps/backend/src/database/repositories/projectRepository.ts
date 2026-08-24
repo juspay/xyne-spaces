@@ -175,6 +175,13 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
   }
 
   async delete(id: string): Promise<Project> {
+    const attachedSdlcRepository = await this.db.repo.findFirst({
+      where: { projectId: id, channelId: { not: null } },
+      select: { id: true },
+    });
+    if (attachedSdlcRepository) {
+      throw new Error('Detach SDLC repositories before deleting their project');
+    }
     const result = await this.db.project.delete({
       where: { id }
     });
@@ -183,7 +190,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // try {
     //   await queueProjectIngestion({ id: result.id }, 'delete');
     // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project deletion for Vespa: ${result.id}`, error);
     //   // Don't throw - project is still deleted in DB
     // }
 

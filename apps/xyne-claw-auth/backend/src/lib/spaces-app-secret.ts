@@ -93,8 +93,8 @@ export async function backfillSigningSecretFromSpacesDb(args: {
 /**
  * Fetch the signing secret for an agent's Spaces app via API and persist it.
  * Returns true on success, false on any failure (logged). Callers should
- * treat false as "warn but don't fail the parent flow" — verification will
- * stay in warn-only mode for this agent until a future retry succeeds.
+ * treat false as a webhook-readiness failure: signature verification is
+ * fail-closed, so this agent cannot receive webhooks until a retry succeeds.
  */
 export async function fetchAndStoreSigningSecretFromSpacesApi(args: {
   agentId: string;

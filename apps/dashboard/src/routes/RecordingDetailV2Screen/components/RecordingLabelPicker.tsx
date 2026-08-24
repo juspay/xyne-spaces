@@ -7,13 +7,18 @@ import { SearchableMultiSelect } from '../../../components/ui/SearchableMultiSel
 import type { SearchableMultiSelectOption } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import { Button } from '../../../components/ui/Button/Button';
 import { tagsApi } from '../../../api/tagsApi';
+import { useOverflowFit } from '../../../hooks/useOverflowFit';
 import { useRecordingLabelSuggestions } from '../../../hooks/useRecordingLabelSuggestions';
 import {
   markResolvedRecordingLabelMethod,
   useResolvedRecordingLabels,
 } from '../../../hooks/useResolvedRecordingLabels';
 import { cn } from '../../../utils/classNames';
-import { getRecordingTagDotColor, normalizeRecordingTags } from '../../../utils/recordingUtils';
+import {
+  getRecordingTagDotColor,
+  normalizeRecordingTags,
+  slugifyRecordingLabel,
+} from '../../../utils/recordingUtils';
 
 export interface RecordingLabelPickerProps {
   labels: string[];
@@ -21,8 +26,9 @@ export interface RecordingLabelPickerProps {
   onChange: (labels: string[]) => void;
 }
 
-/** Labels beyond this collapse into a "+n" chip so the header stays on one line. */
-const MAX_VISIBLE_LABELS = 3;
+const LABEL_STRIP_MAX_WIDTH = 388;
+const LABEL_CHIP_GAP = 6;
+const LABEL_MAX_LENGTH = 40;
 
 const CHIP_CLASS_NAME =
   'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground whitespace-nowrap scrollbar-none data-[theme=midnight]:bg-muted/50';
@@ -33,14 +39,23 @@ const SUGGESTION_CHIP_CLASS_NAME =
 const READ_ONLY_TRIGGER_CLASS_NAME =
   'inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
 
-function LabelChip({ label }: { label: string }): ReactElement {
+const LIST_INHERITS_POPOVER_CLASS_NAME =
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
+
+function LabelChip({
+  label,
+  canTruncate = false,
+}: {
+  label: string;
+  canTruncate?: boolean;
+}): ReactElement {
   return (
-    <span className={CHIP_CLASS_NAME}>
+    <span className={cn(CHIP_CLASS_NAME, canTruncate && 'min-w-0 shrink')}>
       <span
         className={cn('size-1.5 shrink-0 rounded-full', getRecordingTagDotColor(label))}
         aria-hidden='true'
       />
-      <span>{label}</span>
+      <span className={cn(canTruncate && 'truncate')}>{label}</span>
     </span>
   );
 }
@@ -111,6 +126,7 @@ export function RecordingLabelPicker({
   const options = useMemo<SearchableMultiSelectOption[]>(
     () =>
       normalizeRecordingTags([...suggestions, ...labels])
+        .filter(label => resolveMethod(label) !== TagMethod.LLM)
         .map(label => ({ value: label, displayLabel: resolveLabel(label) }))
         .sort((left, right) => left.displayLabel.localeCompare(right.displayLabel))
         .map(({ value, displayLabel }) => ({
@@ -125,14 +141,27 @@ export function RecordingLabelPicker({
             />
           ),
         })),
-    [labels, suggestions, resolveLabel],
+    [labels, suggestions, resolveLabel, resolveMethod],
   );
 
-  const visibleLabels = confirmedLabels.slice(0, MAX_VISIBLE_LABELS);
+  const { measureRef, visibleCount } = useOverflowFit<HTMLSpanElement>({
+    itemCount: confirmedLabels.length,
+    containerWidth: LABEL_STRIP_MAX_WIDTH,
+    gap: LABEL_CHIP_GAP,
+    minVisible: 1,
+  });
+
+  const shownCount = Math.min(visibleCount, confirmedLabels.length);
+  const visibleLabels = confirmedLabels.slice(0, shownCount);
   const overflowCount = confirmedLabels.length - visibleLabels.length;
 
   const handleCreate = (label: string): void => {
-    onChange(normalizeRecordingTags([...labels, label]));
+    const slug = slugifyRecordingLabel(label);
+    if (!slug) {
+      toast.error('Label needs at least one letter or number');
+      return;
+    }
+    onChange(normalizeRecordingTags([...labels, slug]));
   };
 
   /** Tick: keep the AI-suggested tag — flips its Tag row to `manual` in place, no labels change needed. */
@@ -152,14 +181,30 @@ export function RecordingLabelPicker({
   };
 
   const appliedLabels = (
-    <span className='flex max-w-72 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
+    <span
+      className='relative flex flex-nowrap items-center gap-1.5 overflow-hidden'
+      style={{ maxWidth: LABEL_STRIP_MAX_WIDTH }}
+    >
+      <span
+        ref={measureRef}
+        aria-hidden='true'
+        className='pointer-events-none invisible absolute left-0 top-0 flex w-max flex-nowrap items-center gap-1.5'
+      >
+        {confirmedLabels.map(label => (
+          <LabelChip key={label} label={resolveLabel(label)} />
+        ))}
+        <span className={cn(CHIP_CLASS_NAME, 'text-muted-foreground')}>
+          +{confirmedLabels.length}
+        </span>
+      </span>
+
       {visibleLabels.map(label => (
-        <LabelChip key={label} label={resolveLabel(label)} />
+        <LabelChip key={label} label={resolveLabel(label)} canTruncate />
       ))}
       {overflowCount > 0 && (
         <span
           className={cn(CHIP_CLASS_NAME, 'text-muted-foreground')}
-          title={confirmedLabels.slice(MAX_VISIBLE_LABELS).map(resolveLabel).join(', ')}
+          title={confirmedLabels.slice(shownCount).map(resolveLabel).join(', ')}
         >
           +{overflowCount}
         </span>
@@ -168,18 +213,16 @@ export function RecordingLabelPicker({
   );
 
   const suggestionPills =
-    canEdit && suggestedLabels.length > 0 ? (
-      <span className='flex shrink-0 items-center gap-1.5'>
-        {suggestedLabels.map(label => (
+    canEdit && suggestedLabels.length > 0
+      ? suggestedLabels.map(label => (
           <SuggestedLabelChip
             key={label}
             label={resolveLabel(label)}
             onConfirm={() => void handleConfirmSuggestion(label)}
             onReject={() => handleRejectSuggestion(label)}
           />
-        ))}
-      </span>
-    ) : null;
+        ))
+      : null;
 
   if (!canEdit) {
     if (labels.length === 0) return null;
@@ -195,15 +238,17 @@ export function RecordingLabelPicker({
   }
 
   return (
-    <div className='flex items-center gap-1.5'>
+    <>
       <SearchableMultiSelect
         options={options}
         selectedValues={labels}
         onSelectedValuesChange={onChange}
         onCreateOption={handleCreate}
+        className={LIST_INHERITS_POPOVER_CLASS_NAME}
         isOpen={isOpen}
         onOpenChange={setIsOpen}
         searchPlaceholder='Search or create...'
+        searchMaxLength={LABEL_MAX_LENGTH}
         searchAriaLabel='Search or create a label'
         listAriaLabel='Labels'
         emptyMessage='No labels yet'
@@ -215,7 +260,7 @@ export function RecordingLabelPicker({
             variant='outline'
             size='sm'
             className={cn(
-              'h-7 gap-1.5 rounded-lg text-xs font-normal',
+              'h-7 gap-1.5 rounded-lg text-xs font-normal ',
               confirmedLabels.length === 0
                 ? 'border-dashed border-muted-foreground/40 px-3 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
                 : 'px-2',
@@ -239,6 +284,6 @@ export function RecordingLabelPicker({
         }
       />
       {suggestionPills}
-    </div>
+    </>
   );
 }

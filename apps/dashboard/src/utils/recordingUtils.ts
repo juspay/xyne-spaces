@@ -3,6 +3,7 @@
  * Common time formatting and display helpers for recording screens
  */
 
+import { normalizeTagName, TAG_FORMAT_REGEX } from '@xyne/shared';
 import { logger, Event } from './logger';
 
 /**
@@ -92,9 +93,6 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
-/** How long after the call ends a title still counts as on its way. */
-export const TITLE_SHIMMER_WINDOW_MS = 90 * 1000;
-
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
 
@@ -125,7 +123,7 @@ export const getRecordingTitleState = (
 
   const sinceEndedMs = now - endedAtMs;
 
-  if (recording.hasTranscript && !recording.hasSummary && sinceEndedMs < TITLE_SHIMMER_WINDOW_MS) {
+  if (recording.hasTranscript && !recording.hasSummary) {
     return { kind: 'generating' };
   }
   if (!recording.hasTranscript && sinceEndedMs >= NO_TRANSCRIPT_AFTER_MS) {
@@ -203,6 +201,14 @@ export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
 };
 
+/** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
+export const slugifyRecordingLabel = (raw: string): string | null => {
+  const slug = normalizeTagName(raw);
+  if (!slug) return null;
+  const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
+  return TAG_FORMAT_REGEX.test(safe) ? safe : null;
+};
+
 /**
  * Get initials from a name (up to 2 characters)
  * @param name - Full name
@@ -245,3 +251,23 @@ export const STT_MODEL_LABELS: Record<string, string> = {
 export const STT_MODELS = ['google', 'azure', 'deepgram'] as const;
 
 export type SttModel = (typeof STT_MODELS)[number];
+
+/**
+ * Pull a recording's two document ids out of `Call.metadata`.
+ *
+ * Neither has a column of its own: the note-taker webhook stamps `notesCanvasId`
+ * (older rows carry `notesCanvasViewAccessId` instead) and the summary pipeline
+ * stamps `detailedSummaryCanvasId`. Both are absent for recordings created before
+ * those canvases existed, so every caller must handle nulls.
+ */
+export const readRecordingCanvasIds = (
+  metadata: unknown,
+): { summaryCanvasId: string | null; notesCanvasId: string | null } => {
+  const meta = (metadata ?? null) as Record<string, unknown> | null;
+  const rawSummary = meta?.['detailedSummaryCanvasId'];
+  const rawNotes = meta?.['notesCanvasId'] ?? meta?.['notesCanvasViewAccessId'];
+  return {
+    summaryCanvasId: typeof rawSummary === 'string' && rawSummary ? rawSummary : null,
+    notesCanvasId: typeof rawNotes === 'string' && rawNotes ? rawNotes : null,
+  };
+};

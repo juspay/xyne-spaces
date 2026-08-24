@@ -28,6 +28,7 @@ import {
   resumeRecordingFromOutside,
   setOverlayMinimized,
   setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -559,11 +560,13 @@ export function setupIpcHandlers(): void {
 
   // Meeting popup actions
   ipcMain.on('meeting-popup:dismiss', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_DISMISSED, {}, 'MeetingDetector');
     // Just close the popup — do NOT show/focus the main window
     hideMeetingPopup();
   });
 
   ipcMain.on('meeting-popup:start-recording', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
       // Navigate and auto-start recording without stealing focus from the meeting
@@ -618,6 +621,7 @@ export function setupIpcHandlers(): void {
       event,
       state: {
         active: boolean;
+        starting?: boolean;
         startTime?: number;
         paused?: boolean;
         pauseStartedAt?: number | null;
@@ -626,6 +630,7 @@ export function setupIpcHandlers(): void {
     ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
+      setRecordingStarting(!!state?.starting);
       syncRecordingState(!!state?.active, state?.startTime, {
         paused: !!state?.paused,
         pauseStartedAt: state?.pauseStartedAt ?? null,
@@ -652,6 +657,13 @@ export function setupIpcHandlers(): void {
 
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
+    Logger.info(
+      enabled
+        ? ElectronEvent.MEETING_DETECTION_ENABLED
+        : ElectronEvent.MEETING_DETECTION_DISABLED,
+      { enabled },
+      'MeetingDetector',
+    );
     if (enabled) {
       meetingDetectorService.start();
     } else {

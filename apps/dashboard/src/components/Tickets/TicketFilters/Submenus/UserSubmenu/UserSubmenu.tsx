@@ -321,7 +321,12 @@ export const UserSubmenu = ({
       </div>
       {rows.length > 0 ? (
         isVirtualized ? (
-          <div role='listbox' aria-multiselectable='true'>
+          <div
+            role='listbox'
+            aria-multiselectable='true'
+            onWheel={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <Virtuoso
               data={rows}
               // Row-height estimate so the scroll range is right before rows measure.
@@ -335,7 +340,13 @@ export const UserSubmenu = ({
             />
           </div>
         ) : (
-          <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+          <div
+            className='max-h-80 overflow-y-auto p-1'
+            role='listbox'
+            aria-multiselectable='true'
+            onWheel={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className='space-y-0.5'>{rows.map(item => renderRow(item))}</div>
           </div>
         )

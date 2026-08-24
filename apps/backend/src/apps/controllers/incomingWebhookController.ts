@@ -12,6 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
   buildSentinelRawFallbackTicketDescription,
@@ -999,6 +1000,37 @@ class IncomingWebhookController {
     if (typeof subscribeUrl !== 'string' || !subscribeUrl) {
       logger.warn('[Incoming-Webhook] SNS confirm called without a SubscribeURL');
       return { type: 'ack' };
+    }
+
+    // SSRF guard: this endpoint is authenticated but SubscribeURL is fully
+    // attacker-controlled body input. A genuine SNS confirmation URL is always
+    // https on sns.<region>.amazonaws.com, so pin the host to that AND run the
+    // shared private-range/DNS guard to defeat DNS rebinding. Failures fall
+    // through to the standard `ack` (no error toast, reason logged).
+    let parsedSubscribeUrl: URL;
+    try {
+      parsedSubscribeUrl = new URL(subscribeUrl);
+    } catch {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: invalid SubscribeURL');
+      return { type: 'ack' };
+    }
+    const isAmazonSnsHost =
+      parsedSubscribeUrl.protocol === 'https:' &&
+      /^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(parsedSubscribeUrl.hostname);
+    if (!isAmazonSnsHost) {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: SubscribeURL is not an Amazon SNS https host', {
+        host: parsedSubscribeUrl.hostname,
+      });
+      return { type: 'ack' };
+    }
+    try {
+      await assertWebhookUrlSafe(subscribeUrl);
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) {
+        logger.warn('[Incoming-Webhook] SNS confirm blocked by SSRF guard', { error: error.message });
+        return { type: 'ack' };
+      }
+      throw error;
     }
 
     try {

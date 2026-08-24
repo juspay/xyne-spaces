@@ -76,7 +76,13 @@ import {
   DEFAULT_CONTAINER,
   DM_CONTAINER,
 } from './useChannelSectionDnd';
-import { ChannelSection, ChannelType, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
+import {
+  ChannelSection,
+  ChannelType,
+  ChannelScopeType,
+  isDeskChannelType,
+  NotificationLevel,
+} from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
@@ -359,7 +365,12 @@ const ChatDirectory = ({
     const allOrdered = [...starred, ...channels, ...directMessages];
     let hasUnread = false;
     for (const c of allOrdered) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
 
       const count = unreadCounts[c.id] ?? 0;
 
@@ -389,11 +400,17 @@ const ChatDirectory = ({
   const unreadChannelIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of flatSidebarChannels ?? []) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
       const status = allChannelsUserStatus.find(
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
       let isUnread = hasUnreadCount;
       if (!isDM) {

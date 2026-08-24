@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { ConversationParticipant, Prisma } from '@prisma/client';
 import { ConversationParticipation } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
-import { ThreadListCursor, ThreadListSection } from '@/utils/threadListCursor';
+import { ThreadListCursor, ThreadListSection, ThreadListSort } from '@/utils/threadListCursor';
 import { ACLFactory } from '@/database/acl';
 import { getContextOrNull } from '@/database/tenant/context';
 
@@ -216,12 +216,25 @@ export class ConversationParticipantRepository extends BaseRepository<
    */
   async findUserThreadsPage(
     limit: number,
-    cursor: ThreadListCursor | null
+    cursor: ThreadListCursor | null,
+    sort: ThreadListSort = 'sections'
   ): Promise<ThreadListPage> {
     let pageRows: ThreadListSectionRow[];
     let hasMore: boolean;
 
-    if (cursor?.section === 'read') {
+    // 'recent' mode: a single flat list ordered by lastReplyAt desc, with no
+    // read/unread divider and WITHOUT mutating read-state.
+    if (sort === 'recent' || cursor?.section === 'recent') {
+      const recentRows = await this.findUserThreadSection(
+        'recent',
+        limit + 1,
+        cursor?.participantId
+      );
+      hasMore = recentRows.length > limit;
+      pageRows = recentRows
+        .slice(0, limit)
+        .map((row) => ({ row, section: 'recent' as const }));
+    } else if (cursor?.section === 'read') {
       const readRows = await this.findUserThreadSection(
         'read',
         limit + 1,
@@ -282,7 +295,9 @@ export class ConversationParticipantRepository extends BaseRepository<
     const userId = tenantContext.userId;
     const lastReplyAtField = this.db.conversationParticipant.fields.lastReplyAt;
     const sectionWhere: Prisma.ConversationParticipantWhereInput =
-      section === 'unread'
+      section === 'recent'
+        ? {}
+        : section === 'unread'
         ? {
             OR: [
               { lastReadAt: null },

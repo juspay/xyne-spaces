@@ -12,13 +12,15 @@ interface RecordingStoreSnapshot {
 }
 
 export type RecordingStoreEvent =
-  | { type: 'requestAutoStart' }
+  | { type: 'requestAutoStart'; conversationId?: string; channelId?: string }
   | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';
       sttModel?: 'google' | 'azure' | 'deepgram';
       defaultLayout?: RecordingLayout;
+      conversationId?: string;
+      channelId?: string;
     }
   | {
       type: 'recordingStarted';

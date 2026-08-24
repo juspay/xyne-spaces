@@ -231,6 +231,8 @@ export class ACLFactory {
       return new MerchantsACL(ctx, prisma)
     case 'message':
       return new MessagesACL(ctx, prisma)
+    case 'messageArtifact':
+      return new BaseQueryACL(ctx, prisma)
     case 'messageAttachment':
       return new MessageAttachmentsACL(ctx, prisma)
     case 'model':
@@ -271,6 +273,12 @@ export class ACLFactory {
       return new ReleaseEventsACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
+    case 'sdlcEntityLink':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcArtifact':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcTrack':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
@@ -496,6 +504,8 @@ export class ACLFactory {
     case 'ticketExport':
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
+      return new BaseQueryACL(ctx, prisma)
+    default:
       return new BaseQueryACL(ctx, prisma)
     }
   }

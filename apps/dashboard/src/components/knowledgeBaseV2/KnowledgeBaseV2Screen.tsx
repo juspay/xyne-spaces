@@ -6,6 +6,7 @@ import {
   File,
   FolderOpen,
   FolderPlus,
+  Link2,
   Loader2,
   Plus,
   Upload,
@@ -33,11 +34,23 @@ import {
 import { CollectionTreeNode } from '../../components/knowledgeBase/tree/treeTypes';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, IngestionStatus } from '@xyne/shared';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useAllVisibleChannels, useVisibleProjects } from '../../hooks/useChannels';
 import { EntryGridV2 } from '../../components/knowledgeBaseV2/components/EntryGridV2';
 import { EntryListV2, ColumnDef } from '../../components/knowledgeBaseV2/components/EntryListV2';
+import {
+  CollectionStatusDrawer,
+  StatusDrawerTarget,
+} from '../../components/knowledgeBaseV2/components/CollectionStatusDrawer';
+import { AddDriveLinkModal } from '../../components/knowledgeBaseV2/components/AddDriveLinkModal';
+import { DriveConnectDialog } from '../../components/knowledgeBaseV2/components/DriveConnectDialog';
+import {
+  runDriveImport,
+  takePendingDriveImport,
+} from '../../components/knowledgeBaseV2/utils/driveImport';
 import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
 import { ViewToggleV2, ViewMode } from '../../components/knowledgeBaseV2/components/ViewToggleV2';
 import { EmptyPaneV2 } from '../../components/knowledgeBaseV2/components/EmptyPaneV2';
@@ -71,6 +84,26 @@ const SP_COLLECTION = 'cl';
 const SP_PARENT = 'parent';
 const SP_QUERY = 'q';
 
+/** A folder id + all descendant folder ids (used to scope a file listing to a subtree). */
+function collectSubtreeFolderIds(
+  rootId: string,
+  nodes: Record<string, CollectionTreeNode>,
+): string[] {
+  const ids = new Set<string>([rootId]);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (cur === undefined) break;
+    for (const childId of nodes[cur]?.childrenIds ?? []) {
+      if (nodes[childId]?.type === 'FOLDER' && !ids.has(childId)) {
+        ids.add(childId);
+        stack.push(childId);
+      }
+    }
+  }
+  return [...ids];
+}
+
 export const KnowledgeBaseV2Screen: React.FC = () => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -79,6 +112,36 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const spCollectionId = searchParams.get(SP_COLLECTION);
   const spParentId = searchParams.get(SP_PARENT);
   const spQuery = searchParams.get(SP_QUERY) ?? '';
+
+  // Resume a Drive import after the full-page "Connect Google Drive" OAuth redirect.
+  // The backend returns us to this KB URL with ?driveOAuth=success|driveOAuthError;
+  // we clear those params and re-run the import that was stashed before the redirect.
+  const handledDriveOAuthReturn = useRef(false);
+  useEffect(() => {
+    if (handledDriveOAuthReturn.current) return;
+    const success = searchParams.get('driveOAuth');
+    const errorCode = searchParams.get('driveOAuthError');
+    if (!success && !errorCode) return;
+    handledDriveOAuthReturn.current = true;
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('driveOAuth');
+    next.delete('driveOAuthError');
+    setSearchParams(next, { replace: true });
+
+    const pending = takePendingDriveImport();
+    if (errorCode) {
+      toast.error('Google Drive connection failed. Please try again.');
+      return;
+    }
+    if (pending) {
+      // Post-connect resume: don't offer connect again (avoid a loop) — a token
+      // now exists, so private files import; if it still fails, show the error.
+      runDriveImport(pending, { allowConnect: false });
+    } else {
+      toast.success('Google Drive connected.');
+    }
+  }, [searchParams, setSearchParams]);
 
   const {
     activeCollection,
@@ -126,6 +189,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // `activeCollection` machine slot, so opening the modal also seeds that
   // slot from the chosen card and we restore it on close.
   const [shareTarget, setShareTarget] = useState<CollectionChild | null>(null);
+  // Collection whose ingestion status drawer is open (root view only).
+  const [statusFor, setStatusFor] = useState<StatusDrawerTarget | null>(null);
+  // "Add from Google Drive link" modal (inside a collection).
+  const [driveLinkOpen, setDriveLinkOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
@@ -207,6 +274,43 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const isAtRoot = !collectionId;
   const isAtCollectionRoot = !!collectionId && !spParentId;
 
+  // Inside a collection, load ALL its files so each subfolder can show the same
+  // rolled-up ingestion badge the root collections do. (The tree loads files
+  // lazily per folder, so it alone can't roll up an unopened subfolder.)
+  const [allCollectionFiles] = useCachedQuery(
+    queries.collectionFilesByRoot({ rootCollectionId: collectionId ?? '' }),
+    // Only inside a collection — never register this on the KB root. Object form
+    // is required; a bare boolean is ignored by useCachedQuery (always enabled).
+    { enabled: !isAtRoot && !!collectionId },
+  );
+
+  // folderId → rolled-up counts of every file anywhere beneath it (recursive).
+  const subfolderRollup = useMemo(() => {
+    const map = new Map<
+      string,
+      { total: number; failed: number; processing: number; pending: number }
+    >();
+    if (isAtRoot || !collectionId) return map;
+    for (const f of allCollectionFiles ?? []) {
+      const status = (f.ingestionStatus ?? '').toUpperCase() as IngestionStatus;
+      // Attribute the file to each ancestor subfolder, stopping at the root collection.
+      let cur: string | null = f.collectionId;
+      while (cur && cur !== collectionId) {
+        let r = map.get(cur);
+        if (!r) {
+          r = { total: 0, failed: 0, processing: 0, pending: 0 };
+          map.set(cur, r);
+        }
+        r.total += 1;
+        if (status === IngestionStatus.FAILED) r.failed += 1;
+        else if (status === IngestionStatus.PROCESSING) r.processing += 1;
+        else if (status === IngestionStatus.PENDING) r.pending += 1;
+        cur = nodes[cur]?.parentId ?? null;
+      }
+    }
+    return map;
+  }, [isAtRoot, collectionId, allCollectionFiles, nodes]);
+
   // ── Build entries ────────────────────────────────────────────────────
   const entries: CollectionChild[] = useMemo(() => {
     if (isAtRoot) {
@@ -216,9 +320,12 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         type: 'FOLDER' as NodeType,
         size: 0,
         updatedAt: new Date().toISOString(),
-        ingestionStatus: null,
+        ingestionStatus: c.ingestionStatus ?? null,
         mimeType: '',
         parentId: null,
+        fileTotal: c.fileTotal,
+        fileIngested: c.fileIngested,
+        fileFailed: c.fileFailed,
       }));
     }
 
@@ -227,17 +334,44 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     return childIds
       .map(id => nodes[id])
       .filter((n): n is CollectionTreeNode => Boolean(n))
-      .map(node => ({
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        size: node.size ?? 0,
-        updatedAt: node.updatedAt,
-        ingestionStatus: node.uploadStatus,
-        mimeType: node.mimeType ?? '',
-        parentId: node.parentId,
-      }));
-  }, [isAtRoot, globalCollections.collections, spParentId, nodes, rootChildrenIds]);
+      .map(node => {
+        const child: CollectionChild = {
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          size: node.size ?? 0,
+          updatedAt: node.updatedAt,
+          ingestionStatus: node.uploadStatus,
+          mimeType: node.mimeType ?? '',
+          parentId: node.parentId,
+        };
+        // Give subfolders the same rolled-up status badge as root collections.
+        if (node.type === 'FOLDER') {
+          const r = subfolderRollup.get(node.id);
+          if (r && r.total > 0) {
+            child.ingestionStatus =
+              r.processing > 0
+                ? IngestionStatus.PROCESSING
+                : r.pending > 0
+                  ? IngestionStatus.PENDING
+                  : r.failed > 0
+                    ? IngestionStatus.FAILED
+                    : null;
+            child.fileTotal = r.total;
+            child.fileFailed = r.failed;
+            child.fileIngested = r.total - r.failed - r.processing - r.pending;
+          }
+        }
+        return child;
+      });
+  }, [
+    isAtRoot,
+    globalCollections.collections,
+    spParentId,
+    nodes,
+    rootChildrenIds,
+    subfolderRollup,
+  ]);
 
   const folderCount = entries.filter(e => e.type === 'FOLDER').length;
   const fileCount = entries.filter(e => e.type === 'FILE').length;
@@ -406,6 +540,30 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       return 'Collection';
     },
     [globalCollections, channelNameById, projectNameById],
+  );
+
+  // Open the per-collection ingestion status drawer (root badge click).
+  const onOpenStatus = useCallback(
+    (entry: CollectionChild): void => {
+      if (isAtRoot) {
+        setStatusFor({
+          id: entry.id,
+          name: entry.name,
+          location: locationOf(entry),
+          rootCollectionId: entry.id,
+        });
+        return;
+      }
+      if (!collectionId) return;
+      // Subfolder: scope the drawer to files under this folder (itself + descendants).
+      setStatusFor({
+        id: entry.id,
+        name: entry.name,
+        rootCollectionId: collectionId,
+        folderIds: collectSubtreeFolderIds(entry.id, nodes),
+      });
+    },
+    [isAtRoot, collectionId, locationOf, nodes],
   );
 
   // ── Open entry ───────────────────────────────────────────────────────
@@ -715,7 +873,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   return (
     <div
-      className='flex h-full flex-col ai-page-bg'
+      className='flex h-full flex-col bg-background'
       onDragOver={e => {
         e.preventDefault();
         if (collectionId) {
@@ -729,7 +887,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       }}
       onDrop={onDrop}
     >
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border ai-page-bg px-5 py-2.5'>
+      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-5 py-2.5'>
         <div className='flex min-w-0 flex-1 items-center gap-2'>
           <button
             type='button'
@@ -845,6 +1003,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
                     Upload folder
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setDriveLinkOpen(true)}>
+                    <Link2 className='h-4 w-4' strokeWidth={1.75} />
+                    Add from Drive link
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <input
@@ -917,6 +1079,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
+                  onOpenStatus={onOpenStatus}
                   {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
                 />
               ) : (
@@ -932,6 +1095,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
+                  onOpenStatus={onOpenStatus}
                   {...(isAtRoot
                     ? {
                         onShare,
@@ -990,6 +1154,17 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             );
           })()
         : null}
+
+      <CollectionStatusDrawer collection={statusFor} onClose={() => setStatusFor(null)} />
+
+      <AddDriveLinkModal
+        isOpen={driveLinkOpen}
+        onClose={() => setDriveLinkOpen(false)}
+        collectionId={collectionId ?? null}
+        collectionName={activeCollection?.name ?? rootLabel}
+        parentId={spParentId}
+      />
+      <DriveConnectDialog />
     </div>
   );
 };

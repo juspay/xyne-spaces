@@ -13,10 +13,9 @@ import { KbPdfViewer } from './KbPdfViewer';
 import { VespaDocView } from './VespaDocView';
 
 // KB-local override map. Substitutes the shared viewers with the thin
-// wrappers under `./Kb*Viewer.tsx`, which apply `fileViewerOverrides.css`
-// so the inner surfaces pick up the cream / midnight `ai-page-bg` instead
-// of the shared `bg-background`. Keys mirror the `FileType.type` strings
-// emitted by `detectFileType`. Unmapped types fall through to the shared
+// wrappers under `./Kb*Viewer.tsx`, which supply the full-size shell the KB
+// route lays out against. Keys mirror the `FileType.type` strings emitted by
+// `detectFileType`. Unmapped types fall through to the shared
 // FILE_TYPE_CONFIG entry untouched.
 const KB_VIEWER_OVERRIDES: Record<
   string,
@@ -293,7 +292,7 @@ export const FileViewerPanel: React.FC<{
     const ViewerComponent = KB_VIEWER_OVERRIDES[fileType.type] ?? config.component;
 
     return (
-      <div className={`${config.wrapperClass} ai-page-bg max-w-full max-h-full`}>
+      <div className={`${config.wrapperClass} bg-background max-w-full max-h-full`}>
         <ViewerComponent
           source={fileData}
           fileName={file.name}
@@ -315,14 +314,12 @@ export const FileViewerPanel: React.FC<{
   };
 
   return (
-    // `ai-page-bg` is the KB root's background class — warm cream in
-    // classic/summer_breeze, near-black in midnight. Pulling it onto the
-    // viewer page so the file panel sits on the same surface as the
-    // listing it came from instead of a flat white.
-    <div className='h-full w-full flex flex-col ai-page-bg' ref={contentRef}>
+    // `bg-background` is the shared page surface, so the file panel sits on
+    // the same colour as the listing it came from.
+    <div className='h-full w-full flex flex-col bg-background' ref={contentRef}>
       {/* Slim toolbar — back / filename · meta / download. Mirrors
           xyne-search's PdfViewer top bar; no gradient, no Ask-AI. */}
-      <div className='flex h-12 flex-shrink-0 items-center gap-3 border-b border-border ai-page-bg px-3'>
+      <div className='flex h-12 flex-shrink-0 items-center gap-3 border-b border-border bg-background px-3'>
         <button
           type='button'
           onClick={handleBackNavigation}
@@ -392,7 +389,7 @@ export const FileViewerPanel: React.FC<{
         </button>
       </div>
 
-      <div className='flex min-h-0 flex-1 ai-page-bg'>
+      <div className='flex min-h-0 flex-1 bg-background'>
         <div className='min-w-0 flex-1 overflow-auto'>{renderContent()}</div>
         {vespaInspectorOpen && fileId && (
           <aside

@@ -9,12 +9,78 @@ import {
 } from '../config';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
-import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
-
-// LogLevel is the single source of truth from shared
-export { LogLevel } from '@xyne/shared/logger';
+import {
+  detectReactNativeWebView,
+  reactNativeBridge,
+  setReactNativeBridgeLogger,
+} from './reactNativeBridge';
 
 import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
+
+// EventType remains explicit here to document the typed telemetry subset.
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type LogEvent = EventType | string;
+
+const ERROR_DEDUP_WINDOW_IN_MS = 5_000;
+const MAX_LIBRARY_STACK_FRAMES = 3;
+const SENSITIVE_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
+
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]',
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const stackFor = (error: Error): string | undefined =>
+  error.stack ? redact(limitLibraryStackFrames(error.stack)) : undefined;
+
+const serializeError = (value: unknown): Record<string, unknown> => {
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  return {
+    name: value.name,
+    message: redact(value.message),
+    stack: stackFor(value),
+  };
+};
+
+const findError = (value: unknown, depth = 0): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_KEYS.has(key)) continue;
+    if (item instanceof Error) return item;
+    if (depth === 0) {
+      const nestedError = findError(item, depth + 1);
+      if (nestedError) return nestedError;
+    }
+  }
+  return undefined;
+};
 
 export const NotificationSocketState = {
   CONNECTED: 'connected',
@@ -77,6 +143,7 @@ export const Event = {
   VESPA_SEARCH_CLICK: 'vespa_search_click',
   VESPA_SEARCH_SESSION_END: 'vespa_search_session_end',
   VESPA_SEARCH_TAB_CLICK: 'vespa_search_tab_click',
+  VESPA_SEARCH_SHOW_RESULTS: 'vespa_search_show_results',
   APP_LOADER_HIDDEN: 'app_loader_hidden',
   INITIAL_STATE_HYDRATION_COMPLETE: 'initial_state_hydration_complete',
   INITIAL_STATE_HYDRATION_FAILED: 'initial_state_hydration_failed',
@@ -127,6 +194,25 @@ export const Event = {
   CANVAS_SYNC_COMPLETE: 'canvas_sync_complete',
   CANVAS_DELETED: 'canvas_deleted',
   CANVAS_DUPLICATED: 'canvas_duplicated',
+  // Canvas load lifecycle (debug slow loading)
+  CANVAS_LOAD_STARTED: 'canvas_load_started',
+  CANVAS_LOAD_FROM_STATE: 'canvas_load_from_state',
+  CANVAS_LOAD_COMPLETE: 'canvas_load_complete',
+  CANVAS_LOAD_SLOW: 'canvas_load_slow',
+  CANVAS_LOAD_EMPTY: 'canvas_load_empty',
+  CANVAS_EDITOR_MOUNTED: 'canvas_editor_mounted',
+  // Canvas save lifecycle (debug save-not-happening)
+  CANVAS_SAVE_REQUESTED: 'canvas_save_requested',
+  CANVAS_SAVE_SKIPPED_UNCHANGED: 'canvas_save_skipped_unchanged',
+  CANVAS_SAVE_SKIPPED_NO_CANVAS: 'canvas_save_skipped_no_canvas',
+  CANVAS_SAVE_BLOCKED: 'canvas_save_blocked',
+  CANVAS_SAVE_STARTED: 'canvas_save_started',
+  CANVAS_SAVE_COMPLETE: 'canvas_save_complete',
+  CANVAS_SAVE_FAILED: 'canvas_save_failed',
+  CANVAS_SAVE_SLOW: 'canvas_save_slow',
+  CANVAS_SAVE_RERUN_QUEUED: 'canvas_save_rerun_queued',
+  CANVAS_AUTOSAVE_TRIGGERED: 'canvas_autosave_triggered',
+  CANVAS_TITLE_SAVED: 'canvas_title_saved',
   LIVEKIT_HEARTBEAT: 'livekit_heartbeat',
   LIVEKIT_ROOM_DISCONNECTED: 'livekit_room_disconnected',
   LIVEKIT_PARTICIPANT_DISCONNECTED: 'livekit_participant_disconnected',
@@ -160,6 +246,49 @@ export const Event = {
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
+const normalizeDedupValue = (value: unknown, seen: WeakSet<object> = new WeakSet()): unknown => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol') {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return serializeError(value);
+  }
+  if (typeof value !== 'object') {
+    return Object.prototype.toString.call(value);
+  }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeDedupValue(item, seen));
+  }
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .reduce<Record<string, unknown>>((normalized, key) => {
+      normalized[key] = normalizeDedupValue((value as Record<string, unknown>)[key], seen);
+      return normalized;
+    }, {});
+};
+
+const createErrorDedupKey = (
+  event: LogEvent,
+  stack: string,
+  extraFields?: Record<string, unknown>,
+): string =>
+  JSON.stringify({
+    event,
+    stack,
+    extraFields: normalizeDedupValue(extraFields ?? {}),
+  });
 
 export interface LogEntry {
   clientSessionId: string;
@@ -167,7 +296,7 @@ export interface LogEntry {
   emailId: string | null;
   timestamp: number;
   level: LogLevel;
-  event: EventType;
+  event: LogEvent;
   latency?: number | null;
   version: string;
   pageViewId?: string | null;
@@ -197,6 +326,7 @@ export class Logger implements LoggerConfig {
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
   private pageViewId: string | null = null;
   private pageUrl: string | null = null;
+  private recentErrors = new Map<string, number>();
 
   constructor(config: { clientSessionId: string; platform_name: Platform }) {
     this.clientSessionId = config.clientSessionId;
@@ -229,11 +359,8 @@ export class Logger implements LoggerConfig {
         payload,
       };
       this.worker.postMessage(initMessage);
-      this.worker.onerror = error => {
-        console.error('Logger worker error:', error);
-      };
-    } catch (error) {
-      console.error('Failed to initialize logger worker:', error);
+    } catch {
+      /* Intentionally ignored. */
     }
   }
 
@@ -320,7 +447,7 @@ export class Logger implements LoggerConfig {
 
   private postLogMessage(
     level: LogLevel,
-    event: EventType,
+    event: LogEvent,
     extraFields?: Record<string, unknown>,
     consoleLog?: boolean,
   ): void {
@@ -346,20 +473,44 @@ export class Logger implements LoggerConfig {
     }
   }
 
-  debug(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  debug(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.DEBUG, event, extraFields, consoleLog);
   }
 
-  info(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  info(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.INFO, event, extraFields, consoleLog);
   }
 
-  warn(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  warn(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.WARN, event, extraFields, consoleLog);
   }
 
-  error(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
-    this.postLogMessage(LogLevel.ERROR, event, extraFields, consoleLog);
+  error(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    const message = extraFields?.['message'];
+    const error =
+      findError(extraFields ?? {}) ?? new Error(typeof message === 'string' ? message : event);
+    const serializedError = serializeError(error);
+    const stack = typeof serializedError['stack'] === 'string' ? serializedError['stack'] : '';
+    const now = Date.now();
+    const dedupKey = createErrorDedupKey(event, stack, extraFields);
+    const previous = this.recentErrors.get(dedupKey);
+    for (const [key, timestamp] of this.recentErrors) {
+      if (now - timestamp > ERROR_DEDUP_WINDOW_IN_MS) {
+        this.recentErrors.delete(key);
+      }
+    }
+    if (previous && now - previous < ERROR_DEDUP_WINDOW_IN_MS) return;
+    this.recentErrors.set(dedupKey, now);
+    this.postLogMessage(
+      LogLevel.ERROR,
+      event,
+      {
+        ...extraFields,
+        error: serializedError,
+        release: __APP_VERSION__,
+      },
+      consoleLog,
+    );
   }
 
   pushlogs(): void {
@@ -389,8 +540,8 @@ const getClientSessionId = async (): Promise<string | null> => {
     } else if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {
       return await reactNativeBridge.getClientSessionId();
     }
-  } catch (error) {
-    console.error('Error getting client session ID for logger:', error);
+  } catch {
+    /* Intentionally ignored. */
   }
   return null;
 };
@@ -398,9 +549,6 @@ const getClientSessionId = async (): Promise<string | null> => {
 export const getLogger = async (): Promise<Logger> => {
   if (!loggerInstance) {
     const clientSessionId = await getClientSessionId();
-    if (!clientSessionId) {
-      console.warn('Failed to get client session ID from native, generating a new one');
-    }
     loggerInstance = new Logger({
       clientSessionId: clientSessionId ?? uuidv4(),
       platform_name: detectPlatform(),
@@ -416,6 +564,7 @@ export const getLogger = async (): Promise<Logger> => {
 };
 
 export const logger = await getLogger();
+setReactNativeBridgeLogger(logger);
 
 export const cleanupLogger = (): void => {
   if (loggerInstance) {
