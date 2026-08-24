@@ -246,6 +246,54 @@ function pushThreadCitation(
   });
 }
 
+/**
+ * Strip Vespa's `<hi>` highlight tags for use as a citation LABEL. `cleanSnippet`
+ * turns them into `**bold**`, which is right for prose but renders as literal
+ * asterisks inside a chip, so labels get the plain form.
+ */
+function plainLabel(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const stripped = text.replace(/<\/?hi>/gi, "").trim();
+  return stripped || undefined;
+}
+
+/**
+ * Cite a call at whatever target it actually has.
+ *
+ * A channel call lives in a thread, so `pushThreadCitation` is right for it. A
+ * note-taker recording has neither channel nor conversation — it is created from
+ * a LiveKit webhook and never posted anywhere — so a thread citation silently
+ * produced nothing while the row still rendered an inline `[clf-…#N]` token.
+ * That left a chip with no citation behind it, which the dashboard treats as an
+ * unlinkable auto-citation and routes to the debug panel on click. Recordings
+ * get a `recording` citation pointing at `/recordings/:externalId` instead.
+ *
+ * Returns whether anything was emitted, so callers can skip the inline token for
+ * a call that has no linkable target at all rather than render a dead chip.
+ */
+function pushCallCitation(
+  out: Citation[],
+  call: { id: string; externalId?: string; callType?: string; channelId?: string },
+  conversationId: string | undefined,
+  chunkIndex: number,
+  label?: string,
+): boolean {
+  if (call.callType === "HEADLESS" && call.externalId) {
+    out.push({
+      kind: "recording",
+      recordingId: call.externalId,
+      chunkIndex,
+      ...(label ? { label } : {}),
+    });
+    return true;
+  }
+  if (call.channelId) {
+    pushThreadCitation(out, call.channelId, conversationId, chunkIndex, label);
+    return true;
+  }
+  return false;
+}
+
 function pushCanvasCitation(
   out: Citation[],
   viewAccessId: string | undefined | null,
@@ -730,7 +778,8 @@ const spacesSearch: ToolDef = {
     "Only skip the fetch step when the snippet itself unambiguously and completely answers the question.\n\n" +
     "## When NOT to use spaces-search\n" +
     "- Ticket queries by status/priority/assignee/board/tag/stage/project → use **spaces-tickets** (richer filters, structured output).\n" +
-    "- Meeting content (action items, decisions, transcripts) → use **spaces-meeting-insights**.\n" +
+    "- Meeting content by TOPIC (action items, decisions, what was said) → **spaces-meeting-insights** (vector search);\n" +
+    "  a known call, an exact list, or one transcript in full → **spaces-calls** (deterministic; includeTranscript=true).\n" +
     "- Reading a specific thread → use **spaces-messages** with `conversationId`.\n" +
     "- Recent activity for the user → use **spaces-activity**.\n\n" +
     "## Scoping (important)\n" +
@@ -1025,7 +1074,8 @@ const spacesSearchV2: ToolDef = {
     "Only skip the fetch step when the snippet itself unambiguously and completely answers the question.\n\n" +
     "## When NOT to use spaces-search\n" +
     "- Ticket queries by status/priority/assignee/board/tag/stage/project → use **spaces-tickets** (richer filters, structured output).\n" +
-    "- Meeting content (action items, decisions, transcripts) → use **spaces-meeting-insights**.\n" +
+    "- Meeting content by TOPIC (action items, decisions, what was said) → **spaces-meeting-insights** (vector search);\n" +
+    "  a known call, an exact list, or one transcript in full → **spaces-calls** (deterministic; includeTranscript=true).\n" +
     "- Reading a specific thread → use **spaces-messages** with `conversationId`.\n" +
     "- Recent activity for the user → use **spaces-activity**.\n\n" +
     "## Scoping (important)\n" +
@@ -3689,20 +3739,119 @@ interface CanvasRow {
 
 // ── spaces-calls ────────────────────────────────────────────────────
 
+/**
+ * Exact lookup of one call by either identifier. Search results and context
+ * blocks hand back the internal id while the call HTTP APIs are keyed by
+ * `externalId`, so accept both and normalise here rather than making the model
+ * guess which one it is holding. Two point queries, no fuzzy matching.
+ */
+async function resolveCallById(ref: string): Promise<CallRow[]> {
+  for (const field of ["id", "externalId"] as const) {
+    const rows = (await interact({
+      model: "call",
+      operation: "findMany",
+      where: { [field]: { equals: ref } },
+      take: 1,
+    })) as CallRow[] | null;
+    if (rows && rows.length > 0) return rows;
+  }
+  return [];
+}
+
+/**
+ * Pull one call's complete transcript. `call.transcript` is only a storage path
+ * — for regular calls (transcriptService) and for HEADLESS recordings
+ * (noteTakerTranscriptService) alike — so the text comes from the same route the
+ * web app's download button uses. That route re-checks call-audience and
+ * recording-view permission and streams the formatted .txt out of storage, which
+ * keeps this tool from opening a second, weaker path to the same content.
+ *
+ * Returns a formatted block (never throws) so a transcript problem degrades to a
+ * note under the call rather than failing the whole listing.
+ */
+async function fetchFullTranscript(
+  call: CallRow,
+  offset: number,
+  limit: number | undefined,
+): Promise<string> {
+  const label = call.title || call.externalId || call.id;
+  if (!call.externalId) return `\n\n(No transcript: call "${label}" has no externalId.)`;
+  if (!call.transcript) return `\n\n(No transcript: "${label}" was never transcribed.)`;
+
+  let text: string;
+  try {
+    text = await spacesFetchText(
+      `/api/calls/claw/${encodeURIComponent(call.externalId)}/download-transcript`,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("403")) return `\n\n(No transcript: you do not have access to "${label}".)`;
+    if (msg.includes("404")) return `\n\n(No transcript: not available yet for "${label}".)`;
+    return `\n\n(Transcript fetch failed for "${label}": ${msg})`;
+  }
+
+  const total = text.length;
+  const start = Math.max(0, offset);
+  const slice = limit === undefined ? text.slice(start) : text.slice(start, start + limit);
+  const end = start + slice.length;
+  const footer =
+    end < total || start > 0
+      ? `\n\n(Characters ${start}-${end} of ${total}.` +
+        (end < total ? ` Call again with transcriptOffset=${end} for the rest.)` : ")")
+      : `\n\n(Complete transcript — ${total} characters.)`;
+
+  return `\n\n--- FULL TRANSCRIPT: ${label} ---\n\n${slice}${footer}`;
+}
+
 const spacesCalls: ToolDef = {
   name: "spaces-calls",
   description:
-    "Search and list calls, meetings, and RECORDINGS in Spaces. Filter by title, channel, status " +
-    "(ACTIVE/ENDED/SCHEDULED), call type (VIDEO/AUDIO/HEADLESS), organizer, creator, or recurring; page with limit/offset. " +
-    "HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list only recordings. " +
+    "DETERMINISTIC (exact, non-semantic) lookup of calls, meetings, and RECORDINGS in Spaces, AND the way to read " +
+    "one call's FULL transcript verbatim. Every filter here is an exact database match — title substring, channel, " +
+    "status (ACTIVE/ENDED/SCHEDULED), call type (VIDEO/AUDIO/HEADLESS), organizer, creator, participant, date range, " +
+    "recurring — so the same args always return the same rows, in a defined order, with an exact count. No embeddings, " +
+    "no relevance ranking, nothing dropped below a score threshold. " +
+    "Use this when you KNOW what you are looking for: a specific call, everything in a channel, every recording last " +
+    "week, or the complete text of one meeting. Use spaces-meeting-insights instead when you only know the TOPIC and " +
+    "need semantic/vector search to find which call discussed it. " +
+    "HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list only recordings; " +
+    "recordings carry transcripts exactly like regular calls and `includeTranscript` works the same for both. " +
     "Returns call ids, titles, organizer + creator names, channel, status, timing, and the participant list with each " +
-    "person's attendance (accepted / declined / left / missed, external guests included). The AI summary is returned " +
-    "inline; the readable TRANSCRIPT text is indexed in Vespa (file schema, subApp=TRANSCRIPT) — search or read it with " +
-    "spaces-meeting-insights (semantic) or spaces-search type=transcript. (A regular meeting call's summary may also be " +
-    "posted in its Spaces thread — open via spaces-messages.)",
+    "person's attendance (accepted / declined / left / missed, external guests included), plus the AI summary inline. " +
+    "Pass `callId` to fetch one call by id or externalId, and `includeTranscript: true` to get its complete " +
+    "`[MM:SS] Speaker: text` transcript — the whole document, not a snippet (page it with transcriptOffset/transcriptLimit). " +
+    "(A regular meeting call's summary may also be posted in its Spaces thread — open via spaces-messages.)",
   inputSchema: {
     type: "object",
     properties: {
+      callId: {
+        type: "string",
+        description:
+          "Fetch ONE specific call by its id or externalId — an exact lookup that ignores every other filter. " +
+          "Take the id from a spaces-meeting-insights result, from a previous spaces-calls row ('ID: ...'), or from " +
+          "an attached call's context block. Combine with includeTranscript to read that call in full.",
+      },
+      includeTranscript: {
+        type: "boolean",
+        default: false,
+        description:
+          "Include the COMPLETE verbatim transcript text ('[MM:SS] Speaker: text'), not a snippet. Only honoured when " +
+          "the query resolves to a single call — pass `callId`, or filter narrowly enough to return one row. Works " +
+          "for recordings (HEADLESS) exactly as it does for calls. Long meetings run to tens of thousands of " +
+          "characters; page with transcriptOffset/transcriptLimit rather than re-fetching.",
+      },
+      transcriptOffset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description: "Character offset to resume the transcript from (used with includeTranscript).",
+      },
+      transcriptLimit: {
+        type: "number",
+        minimum: 1,
+        description:
+          "Max transcript characters to return (default: the whole transcript). Only set this to page something huge.",
+      },
       search: { type: "string", description: "Filter by call title (case-insensitive partial match)" },
       channelId: { type: "string", description: "Filter by channel ID" },
       status: {
@@ -3784,17 +3933,42 @@ const spacesCalls: ToolDef = {
       if (Object.keys(startedAt).length > 0) where["startedAt"] = startedAt;
       if (typeof args["isRecurring"] === "boolean") where["isRecurring"] = { equals: args["isRecurring"] };
 
-      const rows = (await interact({
-        model: "call",
-        operation: "findMany",
-        where,
-        orderBy: [{ lastActivityAt: "desc" }],
-        take: (args["limit"] as number | undefined) ?? 100,
-        skip: (args["offset"] as number | undefined) ?? 0,
-      })) as CallRow[];
+      // `callId` is an exact single-call lookup, so it replaces the filter set
+      // rather than joining it — the caller already knows which call they want.
+      const callIdArg = String(args["callId"] ?? "").trim();
+      const rows = callIdArg
+        ? await resolveCallById(callIdArg)
+        : ((await interact({
+            model: "call",
+            operation: "findMany",
+            where,
+            orderBy: [{ lastActivityAt: "desc" }],
+            take: (args["limit"] as number | undefined) ?? 100,
+            skip: (args["offset"] as number | undefined) ?? 0,
+          })) as CallRow[]);
 
-      if (!rows || rows.length === 0)
+      if (!rows || rows.length === 0) {
+        if (callIdArg) return ok(`No call found with id "${callIdArg}" (or you do not have access to it).`);
         return ok(args["search"] ? `No calls found matching "${args["search"]}".` : "No calls found.");
+      }
+
+      // Full transcript is a per-call fetch out of object storage, so only do it
+      // when the query has narrowed to one call — otherwise a broad list would
+      // pull down 100 transcripts and bury the list itself.
+      let transcriptBlock = "";
+      if (args["includeTranscript"] === true) {
+        if (rows.length > 1) {
+          transcriptBlock =
+            `\n\n(Transcript not included: ${rows.length} calls matched. Re-run with callId=<id> ` +
+            `for the one you want, or narrow the filters to a single call.)`;
+        } else {
+          transcriptBlock = await fetchFullTranscript(
+            rows[0]!,
+            Number(args["transcriptOffset"] ?? 0),
+            args["transcriptLimit"] !== undefined ? Number(args["transcriptLimit"]) : undefined,
+          );
+        }
+      }
 
       // Cite each call's Spaces conversation THREAD — that's where the call
       // summary + transcript live, and it stays readable after the call ends.
@@ -3869,26 +4043,40 @@ const spacesCalls: ToolDef = {
           parts.push(`  Participants (${plist.length}): ${shown.join(", ")}${more}`);
         }
         // AI summary is stored as TEXT on the call row, so surface it inline.
-        // The transcript field is a GCS path (not text) — the readable transcript
-        // is indexed as searchable chunks in Vespa (file schema, subApp=TRANSCRIPT),
-        // so point the agent at the tools that read it rather than dumping a URL.
+        // The transcript field is a storage path (not text), so advertise the
+        // arg that fetches the text rather than dumping a path the agent can't use.
         if (c.aiSummary) parts.push(`  Summary: ${cleanSnippet(c.aiSummary)}`);
         if (c.transcript)
           parts.push(
-            `  Transcript: available — search/read it with spaces-meeting-insights, or spaces-search type=transcript`,
+            `  Transcript: available — re-run with callId=${c.id}, includeTranscript=true to read it in full`,
           );
         parts.push(`  ID: ${c.id}`);
         const conversationId = (c.metadata as { conversationId?: string } | null | undefined)?.conversationId;
-        pushThreadCitation(citations, c.channelId, conversationId, idx + 1, c.title ?? "Call");
-        return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
+        // Only prefix the inline citation token when the row actually has a
+        // link target — a token with no citation behind it renders as a chip
+        // that goes nowhere (it opens the debug panel).
+        const cited = pushCallCitation(citations, c, conversationId, idx + 1, c.title ?? "Call");
+        return cited
+          ? prefixChunk(idx + 1, parts[0]!, parts.slice(1))
+          : [parts[0]!, ...parts.slice(1)].join("\n");
       });
       const channelInfo = await resolveChannelInfo(
         citations.map((c) => c.channelId).filter((v): v is string => !!v),
       );
       applyChannelInfo(citations, channelInfo);
 
+      // A callId lookup is a single exact row, so the list pagination footer
+      // ("call again with offset=…") would be misleading — skip it there.
+      const listFooter = callIdArg
+        ? ""
+        : paginationFooter({
+            returned: rows.length,
+            limit: Number(args["limit"] ?? 100),
+            offset: Number(args["offset"] ?? 0),
+          });
+
       return okCited(
-        `${rows.length} call(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        `${rows.length} call(s):\n\n${lines.join("\n\n")}${listFooter}${transcriptBlock}`,
         citations,
       );
     } catch (e) {
@@ -3899,6 +4087,8 @@ const spacesCalls: ToolDef = {
 
 interface CallRow {
   id: string;
+  /** Public id the call HTTP APIs are keyed by (…/download-transcript, recording detail). */
+  externalId?: string;
   title?: string;
   description?: string;
   callType?: string;
@@ -3908,9 +4098,10 @@ interface CallRow {
   createdByUserId?: string;
   /** AI meeting/recording summary — stored as TEXT on the call row. */
   aiSummary?: string;
-  /** GCS path to the transcript (NOT the text); non-empty = a transcript exists.
-   *  The readable transcript is indexed as searchable chunks in the Vespa `file`
-   *  schema (subApp=TRANSCRIPT) — read it via spaces-meeting-insights / type=transcript. */
+  /** Storage path to the transcript (NOT the text); non-empty = a transcript exists.
+   *  Set the same way for calls (transcriptService) and HEADLESS recordings
+   *  (noteTakerTranscriptService). Search its text via spaces-meeting-insights /
+   *  type=transcript; fetch the whole document with includeTranscript here. */
   transcript?: string;
   startsAt?: string;
   endsAt?: string;
@@ -4839,10 +5030,17 @@ const spacesTriggerAgent: ToolDef = {
 const spacesMeetingInsights: ToolDef = {
   name: "spaces-meeting-insights",
   description:
-    "Semantic search INSIDE the transcripts + AI summaries of Spaces calls & recordings (the '/recordings' " +
-    "content and any call that was transcribed). Searches the transcript text for summaries, action items, " +
-    "decisions, Q&A, pain points, and merchant discussions. " +
-    "Use this when the user asks what was said/decided/actioned in a call or recording. " +
+    "SEMANTIC / VECTOR search INSIDE the transcripts + AI summaries of Spaces calls & recordings (the '/recordings' " +
+    "content and any call that was transcribed). Hybrid embedding + keyword search over the transcript text for " +
+    "summaries, action items, decisions, Q&A, pain points, and merchant discussions. " +
+    "Because it is ranked and not exhaustive, it returns the best-matching calls by relevance — a call can match on " +
+    "meaning without sharing your wording, and a weak match can fall below the score cut. Never treat its result " +
+    "count as a complete or exact census of calls. " +
+    "Use it when you know the TOPIC but not which call: 'what did we decide about pricing', 'who complained about " +
+    "onboarding'. When you already know WHICH call (or want an exact, repeatable list — this channel, last week, " +
+    "type=HEADLESS), use spaces-calls instead: its filters are deterministic exact matches with an exact count. " +
+    "Each result carries the matching excerpt of the transcript plus the call's AI summary; for the WHOLE transcript " +
+    "of one call, follow up with spaces-calls using the returned call id and includeTranscript=true. " +
     "This is the CONTENT side of calls — pair it with spaces-calls, which lists calls/recordings and their " +
     "metadata (participants, attendance, status, timing, summary). " +
     "Prefer this over spaces-search for questions about what was discussed in a call. " +
@@ -4949,8 +5147,9 @@ const spacesMeetingInsights: ToolDef = {
 
           const context = r.context ?? "";
           if (context) {
-            // Full context — no cap; highlights preserved. Oversized output is
-            // handled centrally by claw's promoteIfOversized().
+            // The matched transcript excerpt (Vespa's best-scoring chunk), not a
+            // substring of it — no cap here, highlights preserved. Oversized
+            // output is handled centrally by claw's promoteIfOversized().
             subLines.push(cleanSnippet(context));
           }
 
@@ -4963,15 +5162,39 @@ const spacesMeetingInsights: ToolDef = {
           if (meta["platform"]) metaParts.push(`Platform: ${meta["platform"]}`);
           if (metaParts.length > 0) subLines.push(metaParts.join(" · "));
 
-          // Harvest a thread citation when the search row carries channel +
-          // conversation IDs (matches what spaces-search:harvest does at :241).
+          // The id spaces-calls needs to pull this call's transcript in full.
+          const callId = (sc["callId"] as string | undefined) ?? r.id;
+          if (callId)
+            subLines.push(`Full transcript: spaces-calls callId=${callId} includeTranscript=true`);
+
+          // Cite the call this transcript belongs to. A channel call resolves to
+          // its thread; a note-taker recording has no channel, so it resolves to
+          // its /recordings page instead of silently emitting nothing.
           const channelId =
             (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
           const conversationId =
             (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
-          pushThreadCitation(citations, channelId, conversationId, chunkIndex, r.title || "Meeting");
+          const externalId =
+            (sc["externalId"] as string | undefined) ?? (meta["externalId"] as string | undefined);
+          const callType =
+            (sc["callType"] as string | undefined) ?? (meta["callType"] as string | undefined);
+          const cited = pushCallCitation(
+            citations,
+            {
+              id: callId ?? r.id,
+              ...(externalId ? { externalId } : {}),
+              ...(callType ? { callType } : {}),
+              ...(channelId ? { channelId } : {}),
+            },
+            conversationId,
+            chunkIndex,
+            plainLabel(r.title) ?? "Meeting",
+          );
 
-          return prefixChunk(chunkIndex, `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`, subLines);
+          const heading = `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`;
+          return cited
+            ? prefixChunk(chunkIndex, heading, subLines)
+            : [heading, ...subLines].join("\n");
         })
         .join("\n\n---\n\n");
 

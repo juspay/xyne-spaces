@@ -32,7 +32,15 @@ import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireUserAuth } from "../middleware/require-auth.js";
-import { countUserRecords } from "../services/userMemoryFetcher.js";
+import {
+  countUserRecords,
+  fetchUserCalls,
+  fetchUserCanvases,
+  fetchUserMessages,
+} from "../services/userMemoryFetcher.js";
+import { assembleConversationUnits, isContextAssemblerEnabled } from "../services/contextAssembler.js";
+import { packRecordsIntoBatches } from "../services/userMemoryBatcher.js";
+import { recordPipelineEvent } from "../services/digitalTwinPipelineEvents.js";
 import {
   curateAndPersistBatch,
   ensureTwinBank,
@@ -105,6 +113,8 @@ const inFlightDisables = new Set<string>();
 
 /** Dedupe concurrent soul-synthesis rebuilds per user (N LLM calls, ~30-60s). */
 const inFlightSynth = new Set<string>();
+/** Pipeline events currently being retried, so a double-click doesn't double-run. */
+const inFlightRetry = new Set<string>();
 
 /** Per-user in-flight flag for a manual memory-delete (all / range). Surfaced in
  *  /status as memoryDeleteInProgress so the UI can show a live indicator. */
@@ -1533,6 +1543,81 @@ digitalTwinRouter.get("/pipeline/events", requireUserAuth, async (req, res) => {
     res.json({ success: true, data: { events, nextBefore } });
   } catch (err) {
     logger.error("[digital-twin] GET /pipeline/events failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// Re-run one pipeline event's window. Only for runs that produced nothing —
+// an "ok" run already created candidates, so re-running it would duplicate them.
+// Fetch + LLM distill takes minutes, so this returns 202 and the work continues
+// in the background, writing its own events that the feed picks up.
+digitalTwinRouter.post("/pipeline/events/:id/retry", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const eventId = String(req.params["id"] ?? "");
+    const event = await prisma.digitalTwinPipelineEvent.findFirst({
+      where: { id: eventId, userId },
+      select: { id: true, sourceKind: true, status: true, windowFrom: true, windowTo: true },
+    });
+    if (!event) {
+      res.status(404).json({ success: false, error: "Event not found" });
+      return;
+    }
+    // upload / twin-approval / synthesize runs have no source window to re-walk.
+    if (!event.sourceKind) {
+      res.status(400).json({ success: false, error: "This run has no source window to retry" });
+      return;
+    }
+    if (event.status !== "error" && event.status !== "empty") {
+      res.status(400).json({ success: false, error: "Only failed or empty runs can be retried" });
+      return;
+    }
+    if (inFlightRetry.has(eventId)) {
+      res.status(202).json({ success: true, data: { status: "already-running" } });
+      return;
+    }
+
+    inFlightRetry.add(eventId);
+    res.status(202).json({ success: true, data: { status: "started" } });
+
+    const kind = event.sourceKind as BackfillSource;
+    const window = { from: event.windowFrom, to: event.windowTo };
+    const source = `retry:${new Date().toISOString().slice(0, 10)}:${kind}`;
+
+    setImmediate(async () => {
+      try {
+        const records =
+          kind === "calls"
+            ? await fetchUserCalls(userId, window)
+            : kind === "canvases"
+              ? await fetchUserCanvases(userId, window)
+              : isContextAssemblerEnabled()
+                ? await assembleConversationUnits(userId, window)
+                : await fetchUserMessages(userId, window);
+
+        if (records.length === 0) {
+          // Still empty. Record it so the feed shows the retry happened and
+          // the window is genuinely bare, not that the button did nothing.
+          await recordPipelineEvent({ userId, source, window, status: "empty", recordCount: 0 });
+          return;
+        }
+        for (const batch of packRecordsIntoBatches(records)) {
+          await curateAndPersistBatch({ userId, window, records: batch, source });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn("[digital-twin] pipeline retry failed", { userId, eventId, err: message });
+        await recordPipelineEvent({ userId, source, window, status: "error", recordCount: 0, error: message });
+      } finally {
+        inFlightRetry.delete(eventId);
+      }
+    });
+  } catch (err) {
+    logger.error("[digital-twin] POST /pipeline/events/:id/retry failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
