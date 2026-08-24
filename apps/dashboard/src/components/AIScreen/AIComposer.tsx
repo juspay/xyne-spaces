@@ -389,7 +389,7 @@ function ModelThinkingSelector({
             </span>
           </button>
           {thinkingOpen && (
-            <div className='absolute right-0 top-0 z-50 w-40 translate-x-[calc(100%+6px)] rounded-lg border border-border bg-popover p-1 shadow-lg'>
+            <div className='absolute bottom-0 right-0 z-50 w-40 translate-x-[calc(100%+6px)] rounded-lg border border-border bg-popover p-1 shadow-lg'>
               {THINKING_LEVEL_OPTIONS.map(o => (
                 <button
                   key={o.label}
