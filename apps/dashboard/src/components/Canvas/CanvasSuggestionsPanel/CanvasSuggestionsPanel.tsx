@@ -228,7 +228,11 @@ export const CanvasSuggestionsPanel = ({
             onClick={() => {
               void run(
                 'accept-all',
-                mutators.canvasSuggestion.acceptAll({ canvasId, timestamp: Date.now() }),
+                mutators.canvasSuggestion.resolveAll({
+                  canvasId,
+                  accept: true,
+                  timestamp: Date.now(),
+                }),
                 'Failed to accept changes',
               );
             }}
@@ -244,7 +248,11 @@ export const CanvasSuggestionsPanel = ({
             onClick={() => {
               void run(
                 'reject-all',
-                mutators.canvasSuggestion.rejectAll({ canvasId, timestamp: Date.now() }),
+                mutators.canvasSuggestion.resolveAll({
+                  canvasId,
+                  accept: false,
+                  timestamp: Date.now(),
+                }),
                 'Failed to reject changes',
               );
             }}

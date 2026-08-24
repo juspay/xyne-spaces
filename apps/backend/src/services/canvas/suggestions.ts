@@ -7,20 +7,45 @@
  * Y-Sweet write, then statuses — all under a per-canvas lock.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { createBlockRenderer } from './blockRender';
-import { hashBlocks, stableStringify } from './blockHash';
 import type { DerivedOp } from './blockLabels';
 import { applyOps, type SuggestionRowLike } from './suggestionApply';
 // Relative import on purpose: the backend's "@xyne/shared" alias points at the
 // package's BUILT output, and this pure module must be usable (and testable)
 // without a rebuild. The dashboard imports the same file via "@xyne/shared".
 import { computeDeletionEvents } from '../../../../../packages/shared/src/canvas/blockDeletionEvents';
+
+function stableStringify(value: unknown): string {
+  const normalize = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v && typeof v === 'object') {
+      const record = v as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .filter(k => record[k] !== undefined)
+          .map(k => [k, normalize(record[k])])
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
+
+/** Fingerprint of one block, including its children. */
+function hashBlocks(blocks: BlockNoteBlock[]): string {
+  return sha256(stableStringify(blocks));
+}
+
+/** Look up a block by id anywhere in the tree, including nested children. */
 
 const LOCK_TTL_SECONDS = 30;
 
@@ -56,13 +81,8 @@ export async function createSuggestionBatch({ workspaceId, canvasId, ops }: Crea
   const prisma = DatabaseClient.getInstance();
   const batchId = randomUUID();
 
-  // Row ids first: an insert's id doubles as its future block id, and anchors
-  // may reference a same-reply new block by op key.
+  // An insert's row id doubles as its future block id.
   const idByKey = new Map(ops.map(op => [op.key, randomUUID()]));
-  const anchorIdOf = (op: DerivedOp): string | null => {
-    if (op.anchor === null || op.anchor === undefined) return null;
-    return op.anchor.kind === 'block' ? op.anchor.ref : (idByKey.get(op.anchor.ref) as string);
-  };
 
   const rows = ops.map(op => ({
     workspaceId,
@@ -71,8 +91,8 @@ export async function createSuggestionBatch({ workspaceId, canvasId, ops }: Crea
     batchId,
     op: op.op,
     blockId: op.blockId ?? null,
-    proposedAnchorId: op.op === 'insert' || op.op === 'move' ? anchorIdOf(op) : null,
-    currentAnchorId: op.op === 'insert' || op.op === 'move' ? anchorIdOf(op) : null,
+    proposedAnchorId: op.op === 'insert' || op.op === 'move' ? (op.anchor ?? null) : null,
+    currentAnchorId: op.op === 'insert' || op.op === 'move' ? (op.anchor ?? null) : null,
     orderIndex: op.orderIndex,
     ...(op.beforeContent !== undefined ? { beforeContent: toJsonSafe(op.beforeContent) as never } : {}),
     ...(op.afterMarkdown !== undefined ? { afterContent: { markdown: op.afterMarkdown } as never } : {}),
@@ -124,7 +144,20 @@ export async function applySuggestionChanges(changeIds: string[], actorUserId: s
       const renderer = await createBlockRenderer(current);
       const preIds = topLevelIds(current);
 
-      const outcome = await applyOps(current, rows as SuggestionRowLike[], renderer.toBlocks);
+      // Every placement row of the involved batches — accepted ones included —
+      // so placements land behind siblings that precede them in the reply.
+      const batchIds = [...new Set(rows.map(r => r.batchId))];
+      const siblings = await prisma.canvasSuggestionChange.findMany({
+        where: { batchId: { in: batchIds }, op: { in: ['insert', 'move'] } },
+        select: { id: true, op: true, blockId: true, orderIndex: true },
+      });
+      const siblingOrder = new Map<string, number>();
+      for (const s of siblings) {
+        const blockId = s.op === 'insert' ? s.id : s.blockId;
+        if (blockId) siblingOrder.set(blockId, s.orderIndex);
+      }
+
+      const outcome = await applyOps(current, rows as SuggestionRowLike[], renderer.toBlocks, siblingOrder);
 
       const markStatuses = async (ids: string[], status: string): Promise<void> => {
         if (!ids.length) return;
