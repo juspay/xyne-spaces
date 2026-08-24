@@ -1489,6 +1489,7 @@ model Workspace {
   workspaceType String?
   joinPolicy    String?
   landingChannelId String?
+  logo             String?         // Object-storage path to workspace logo/profile image (served via GET /api/workspaces/:id/logo)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
