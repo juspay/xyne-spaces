@@ -213,7 +213,6 @@ export class PullRequestValidationService {
     success: boolean,
     description: string
   ): Promise<void> {
-    const url = process.env.FRONTEND_URL || '';
     try {
       if (target.provider === VCSProviderType.GITHUB) {
         await githubManager.postCommitStatus(
@@ -223,7 +222,6 @@ export class PullRequestValidationService {
           success ? 'success' : 'failure',
           PR_VALIDATION_CONFIG.BUILD_STATUS.NAME,
           description,
-          url || undefined,
         );
         return;
       }
@@ -232,7 +230,7 @@ export class PullRequestValidationService {
         success ? 'SUCCESSFUL' : 'FAILED',
         PR_VALIDATION_CONFIG.BUILD_STATUS.KEY,
         PR_VALIDATION_CONFIG.BUILD_STATUS.NAME,
-        url,
+        process.env.FRONTEND_URL || '',
         description,
       );
     } catch (error) {
