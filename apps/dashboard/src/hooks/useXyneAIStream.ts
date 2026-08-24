@@ -30,6 +30,12 @@ export interface StreamOverrides {
   instant?: boolean;
   /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
   speed?: 'standard' | 'fast';
+  /** Per-run model pin from the composer's model dropdown. Absent = hook-level
+   *  `model` (the sidebar's picker), which itself defaults to the DB-configured
+   *  model. A pick is the source of truth for the run. */
+  model?: string | null;
+  /** Per-run thinking level. Absent = the agent's configured default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
   ticketIds?: string[];
   canvasIds?: string[];
@@ -293,6 +299,8 @@ export const useXyneAIStream = ({
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
       const eSpeed = ov?.speed;
+      const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
+      const eThinkingLevel = ov?.thinkingLevel;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
@@ -431,7 +439,8 @@ export const useXyneAIStream = ({
           agentSlug: agentSlug ?? undefined,
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
-          ...(isV2 && model ? { model } : {}),
+          ...(isV2 && eModel ? { model: eModel } : {}),
+          ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
           version: isV2 ? 'v2' : 'v1',
         },

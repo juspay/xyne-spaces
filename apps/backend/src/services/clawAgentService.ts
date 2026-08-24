@@ -108,6 +108,10 @@ export interface ClawRunRequest {
    *  claw-auth's /run/stream, which applies the agent's fast-mode provider
    *  profile + run-setting overrides for this run. Omitted = agent default. */
   speed?: 'standard' | 'fast';
+  /** Per-message thinking level (composer dropdown). Forwarded to claw-auth's
+   *  /run/stream, which merges it over the agent's modelSettings for this run.
+   *  Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
 }
 
 export interface ClawRunStreamResult {
@@ -613,6 +617,7 @@ export async function runClawAgentStream(
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.speed && { speed: request.speed }),
+    ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),

@@ -28,11 +28,16 @@ import {
   Hash,
   Lock,
   Zap,
+  Brain,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
+import { ModelSelector } from '../Chat/XyneAISidebar/components/ModelSelector';
+import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
+import { Popover } from '../ui/Popover';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
@@ -200,6 +205,70 @@ function ToolbarButton({
   );
 }
 
+/** Per-run thinking level for the composer. null = the agent's configured
+ *  default. Applies to whichever provider serves the run (same precedence as
+ *  the agent's modelSettings.thinkingLevel). */
+const THINKING_LEVEL_OPTIONS: Array<{ value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null; label: string }> = [
+  { value: null, label: 'Default' },
+  { value: 'off', label: 'Off' },
+  { value: 'minimal', label: 'Minimal' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
+
+function ThinkingSelector({
+  value,
+  onSelect,
+  disabled,
+}: {
+  value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  onSelect: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = THINKING_LEVEL_OPTIONS.find(o => o.value === value) ?? { value: null, label: 'Default' };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <button
+          type='button'
+          disabled={disabled}
+          title={value ? `Thinking: ${current.label} (this chat)` : 'Thinking level — agent default'}
+          aria-label='Thinking level'
+          data-track-name='OPEN_THINKING_SELECTOR'
+          className={cn(
+            'flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-sm transition-colors',
+            disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
+            value ? 'text-status-pending' : 'text-muted-foreground',
+          )}
+        >
+          <Brain className='h-3.5 w-3.5 shrink-0' aria-hidden strokeWidth={1.75} />
+          <span className='font-medium'>{value ? current.label : 'Thinking'}</span>
+          <ChevronDown className='h-3 w-3 shrink-0' aria-hidden />
+        </button>
+      }
+      className='w-40 p-1'
+    >
+      {THINKING_LEVEL_OPTIONS.map(o => (
+        <button
+          key={o.label}
+          type='button'
+          onClick={() => { onSelect(o.value); setOpen(false); }}
+          className={cn(
+            'flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent',
+            o.value === value && 'bg-accent font-medium',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </Popover>
+  );
+}
+
 export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function AIComposer(
   {
     autoFocus,
@@ -240,6 +309,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   // selected agent has fast mode configured; buildContext forces it false
   // otherwise so a stale toggle can't ride along after switching agents.
   const [fastModeEnabled, setFastModeEnabled] = useState(() => seed.fastMode);
+  // Per-run model pin + thinking level. The model list is the account's allowed
+  // models off the selected agent's shared LiteLLM key; "Default" = the model
+  // configured in the DB. Both reset when the agent changes — a pick from one
+  // agent's list may not exist on another's.
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => seed.model);
+  const [thinkingLevel, setThinkingLevel] = useState<'off' | 'minimal' | 'low' | 'medium' | 'high' | null>(() => seed.thinkingLevel);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -259,6 +334,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   );
   const instant = selectedAgent?.instantAgent === true;
   const fastModeConfigured = selectedAgent?.fastModeConfigured === true;
+
+  const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const { data: agentModelsData } = useQuery({
+    queryKey: ['claw-agent-models', modelAgentSlug],
+    queryFn: () => fetchClawAgentModels(modelAgentSlug),
+    staleTime: 60_000,
+  });
+  useEffect(() => {
+    setSelectedModel(null);
+    setThinkingLevel(null);
+  }, [modelAgentSlug]);
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -286,6 +372,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       createCanvasEnabled,
       instant,
       fastMode: fastModeConfigured ? fastModeEnabled : false,
+      model: selectedModel,
+      thinkingLevel,
     }),
     [
       selections,
@@ -297,6 +385,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       instant,
       fastModeConfigured,
       fastModeEnabled,
+      selectedModel,
+      thinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -825,6 +915,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
+              <ModelSelector
+                selectedModel={selectedModel}
+                models={agentModelsData?.models ?? []}
+                defaultModel={agentModelsData?.defaultModel ?? null}
+                onSelect={setSelectedModel}
+                disabled={pending}
+                compact
+              />
+              <ThinkingSelector value={thinkingLevel} onSelect={setThinkingLevel} disabled={pending} />
               {showAgentSelector && (
                 <AIAgentSelector
                   disabled={pending}

@@ -95,6 +95,8 @@ export interface StreamRequest {
   instant?: boolean;
   /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
   speed?: 'standard' | 'fast';
+  /** Per-run thinking level (composer dropdown). Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -1055,6 +1057,7 @@ class XyneAIStreamManager {
           createCanvasEnabled: request.createCanvasEnabled ?? false,
           instant: request.instant ?? false,
           ...(request.speed ? { speed: request.speed } : {}),
+          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {

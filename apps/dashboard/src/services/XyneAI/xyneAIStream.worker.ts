@@ -39,6 +39,8 @@ export interface WorkerStartStreamMessage {
       instant?: boolean;
       /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
       speed?: 'standard' | 'fast';
+      /** Per-run thinking level (composer dropdown). Absent = agent default. */
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
       messageAttachmentIds?: string[];
@@ -187,6 +189,7 @@ async function executeStream(
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         instant: requestBody.instant ?? false,
         ...(requestBody.speed ? { speed: requestBody.speed } : {}),
+        ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,

@@ -111,6 +111,9 @@ const XyneAIRequestSchemaV2 = z.object({
   // Per-message provider fast mode (the composer's ⚡ toggle). Single word →
   // no snake_case alias needed. Absent = the agent's configured default.
   speed: z.enum(['standard', 'fast']).optional(),
+  // Per-run thinking level from the composer's dropdown. Absent = the agent's
+  // configured default (modelSettings.thinkingLevel or provider default).
+  thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -249,6 +252,7 @@ export class XyneAIControllerV2 {
       deep_research_enabled: deepResearchEnabledSC,
       instant,
       speed,
+      thinkingLevel,
       researchContext,
       research_context,
       attachments,
@@ -543,6 +547,7 @@ export class XyneAIControllerV2 {
           deepResearchEnabled,
           instant,
           ...(speed ? { speed } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
