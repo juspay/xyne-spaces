@@ -1,3 +1,11 @@
+## [1.214.0](https://github.com/juspay/xyne-spaces/compare/v1.213.3...v1.214.0) (2026-08-24)
+
+
+### Features
+
+* model and thinking menu in the Ask AI composer and sidebar ([#950](https://github.com/juspay/xyne-spaces/issues/950)) ([1926330](https://github.com/juspay/xyne-spaces/commit/192633050017859fdfebab11cdd71e39b6850466))
+* unify share logic ([#960](https://github.com/juspay/xyne-spaces/issues/960)) ([1236739](https://github.com/juspay/xyne-spaces/commit/1236739a7cd2228a32f998af7fda1a7791bffdb4))
+
 ## [1.213.3](https://github.com/juspay/xyne-spaces/compare/v1.213.2...v1.213.3) (2026-08-24)
 
 
