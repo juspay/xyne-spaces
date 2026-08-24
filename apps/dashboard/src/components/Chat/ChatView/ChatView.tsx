@@ -31,6 +31,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
+import { PaneSourceBar } from '../PaneSourceBar';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -279,16 +280,34 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
+  // Close the canvas pane — drop the `#canvas=` hash and return to the Canvas
+  // list tab. Preserves the current path + search (e.g. ?tab=canvas) so the
+  // channel shell and its tab strip stay exactly where they were.
+  const handleCloseCanvasPane = (): void => {
+    void navigate(`${location.pathname}${location.search}`);
+  };
+
   // Secondary panel content — defined once, reused for both overlay and
   // side-by-side layouts so there is no JSX duplication.
   const secondaryPanelContent = isExternalChatActive ? (
     <CallExternalChatPanel callExternalId={externalChatCallId} />
   ) : isCanvasActive ? (
-    <CanvasScreen
-      canvasId={canvasId}
-      isFullscreen={isCanvasFullscreen}
-      onToggleFullscreen={toggleCanvasFullscreen}
-    />
+    <div className='flex h-full flex-col'>
+      {!isCanvasFullscreen && (
+        <PaneSourceBar
+          channelName={channelDisplayName || channel?.['name'] || 'channel'}
+          tabLabel='Canvas'
+          onClose={handleCloseCanvasPane}
+        />
+      )}
+      <div className='flex-1 min-h-0'>
+        <CanvasScreen
+          canvasId={canvasId}
+          isFullscreen={isCanvasFullscreen}
+          onToggleFullscreen={toggleCanvasFullscreen}
+        />
+      </div>
+    </div>
   ) : isChannelSummaryActive ? (
     <ChannelSummary
       channelId={channelId ?? ''}
