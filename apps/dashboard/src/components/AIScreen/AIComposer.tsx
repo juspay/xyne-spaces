@@ -236,6 +236,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  // Provider fast mode (⚡). Only meaningful — and only rendered — when the
+  // selected agent has fast mode configured; buildContext forces it false
+  // otherwise so a stale toggle can't ride along after switching agents.
+  const [fastModeEnabled, setFastModeEnabled] = useState(() => seed.fastMode);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -254,6 +258,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [composerAgents, selectedAgentSlug],
   );
   const instant = selectedAgent?.instantAgent === true;
+  const fastModeConfigured = selectedAgent?.fastModeConfigured === true;
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -280,6 +285,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
       instant,
+      fastMode: fastModeConfigured ? fastModeEnabled : false,
     }),
     [
       selections,
@@ -289,6 +295,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchEnabled,
       createCanvasEnabled,
       instant,
+      fastModeConfigured,
+      fastModeEnabled,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -774,6 +782,20 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 disabled={!deepResearchAccessible}
                 trackName='TOGGLE_DEEP_RESEARCH'
               />
+              {/* Provider fast mode — same credentials, faster serving via the
+                  agent's fast-mode setup (Anthropic fast tier / fast profile,
+                  configured in the claw agent's Model & provider tab). Only
+                  rendered for agents that actually have it configured. */}
+              {fastModeConfigured && (
+                <ToolbarButton
+                  icon={<Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                  label={fastModeEnabled ? 'Fast mode enabled' : 'Enable fast mode'}
+                  onClick={() => setFastModeEnabled(v => !v)}
+                  active={fastModeEnabled}
+                  activeClass='bg-secondary text-status-pending'
+                  trackName='TOGGLE_FAST_MODE'
+                />
+              )}
               <ToolbarButton
                 icon={<FileIcon className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
                 label={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}

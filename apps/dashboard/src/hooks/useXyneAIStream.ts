@@ -28,6 +28,8 @@ export interface StreamOverrides {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-message provider fast mode (composer ⚡ toggle). Absent = agent default. */
+  speed?: 'standard' | 'fast';
   researchContext?: ResearchContext | null;
   ticketIds?: string[];
   canvasIds?: string[];
@@ -290,6 +292,7 @@ export const useXyneAIStream = ({
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
+      const eSpeed = ov?.speed;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
@@ -412,6 +415,7 @@ export const useXyneAIStream = ({
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
           instant: eInstant,
+          ...(eSpeed ? { speed: eSpeed } : {}),
           researchContext: eResearchContext,
           attachments,
           parentMessageId,

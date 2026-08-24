@@ -35,6 +35,10 @@ export interface ComposerContext {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant: boolean;
+  /** Provider fast mode (⚡ toggle) — same credentials, the agent's fast-mode
+   *  provider profile / run-setting overrides. Only offered when the selected
+   *  agent has fast mode configured; false otherwise. */
+  fastMode: boolean;
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -50,6 +54,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   deepResearchEnabled: false,
   createCanvasEnabled: false,
   instant: false,
+  fastMode: false,
 };
 
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
@@ -66,7 +71,8 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
     ctx.createCanvasEnabled ||
-    ctx.instant
+    ctx.instant ||
+    ctx.fastMode
   );
 }
 
@@ -95,6 +101,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
+    ...(ctx.fastMode ? { speed: 'fast' as const } : {}),
     researchContext: ctx.research,
   };
 }
