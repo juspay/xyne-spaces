@@ -276,6 +276,9 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
+      logger.info('[INCOMING-WEBHOOK] BODY', {
+        body: context.body,
+      });
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
