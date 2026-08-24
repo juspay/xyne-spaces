@@ -2995,6 +2995,9 @@ export async function sendChatMessage(
      *  and model, faster tier. Overrides the agent's modelSettings.speed for
      *  this run only. */
     speed?: "standard" | "fast";
+    /** Per-turn thinking level (composer model menu). Overrides the agent's
+     *  modelSettings.thinkingLevel for this run only. */
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -3042,6 +3045,7 @@ export async function sendChatMessage(
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
       ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
       ...(requestOptions?.speed ? { speed: requestOptions.speed } : {}),
+      ...(requestOptions?.thinkingLevel ? { thinkingLevel: requestOptions.thinkingLevel } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });
